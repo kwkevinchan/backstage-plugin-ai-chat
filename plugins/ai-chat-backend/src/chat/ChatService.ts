@@ -60,6 +60,7 @@ export interface ChatServiceOptions {
   config: AiChatConfig;
 }
 
+const MAX_TOOL_NAME_LENGTH = 64;
 const NEW_CONVERSATION_TITLE = 'New conversation';
 const MAX_TITLE_LENGTH = 60;
 const MAX_ERROR_LENGTH = 2000;
@@ -144,7 +145,7 @@ export class ChatService {
   ): Promise<void> {
     const conversation = await this.requireConversation(caller, conversationId);
     await this.withConversation(conversation.id, async () => {
-      await this.supersedeUndecidedCalls(caller, conversation.id);
+      await this.supersedeUndecidedCalls(caller, conversation.id, stream);
       const isFirst =
         (await this.store.listMessages(conversation.id)).length === 0;
       const message = await this.store.appendMessage({
@@ -327,6 +328,7 @@ export class ChatService {
   private async supersedeUndecidedCalls(
     caller: ChatCaller,
     conversationId: string,
+    stream: ChatStream,
   ) {
     for (const call of await this.store.listUnresolvedToolCalls(
       conversationId,
@@ -346,12 +348,28 @@ export class ChatService {
               decidedBy: caller.userEntityRef,
               error: 'superseded',
             });
-            if (changed) {
-              await this.store.appendMessage({
-                conversationId,
-                role: 'tool',
-                content: SUPERSEDED_TEXT,
-                llmCallId: call.llmCallId,
+            // Another request decided first (for example on another backend
+            // instance): treat it like a call that is still being handled.
+            if (!changed) {
+              throw new ConflictError(
+                'An action of this conversation was just decided',
+              );
+            }
+            await this.store.appendMessage({
+              conversationId,
+              role: 'tool',
+              content: SUPERSEDED_TEXT,
+              llmCallId: call.llmCallId,
+            });
+            const rejected = await this.store.getToolCall(
+              conversationId,
+              call.id,
+            );
+            // The card of the waiting call loses its buttons.
+            if (rejected) {
+              stream.emit({
+                type: 'tool_result',
+                toolCall: toApiToolCall(rejected),
               });
             }
           },
@@ -490,12 +508,14 @@ export class ChatService {
     const { caller, conversationId, requested, catalog, stream } = args;
     const action = catalog.resolve(requested.name);
     const parsed = parseArguments(requested.arguments);
+    // The model wrote the name; the columns are 255 characters wide.
+    const toolName = requested.name.slice(0, MAX_TOOL_NAME_LENGTH);
     const base = {
       conversationId,
       messageId: args.messageId,
       position: args.position,
       llmCallId: requested.id,
-      toolName: requested.name,
+      toolName,
     };
 
     if (!action || parsed.error !== undefined) {
@@ -504,8 +524,8 @@ export class ChatService {
         : parsed.error ?? '';
       const call = await this.store.insertToolCall({
         ...base,
-        actionId: action?.id ?? requested.name,
-        title: action?.title ?? requested.name,
+        actionId: action?.id ?? toolName,
+        title: action?.title ?? toolName,
         description: action?.description ?? '',
         input: parsed.input,
         attributes: action?.attributes ?? {
@@ -593,10 +613,11 @@ export class ChatService {
     }
 
     let toolText: string;
+    let changed: boolean;
     if (failure === undefined) {
       const limited = limitOutput(output!, this.config.maxToolOutputChars);
       toolText = limited.text;
-      await this.store.transitionToolCall({
+      changed = await this.store.transitionToolCall({
         conversationId: call.conversationId,
         id: call.id,
         from: 'running',
@@ -605,13 +626,21 @@ export class ChatService {
       });
     } else {
       toolText = `Error: ${failure}`;
-      await this.store.transitionToolCall({
+      changed = await this.store.transitionToolCall({
         conversationId: call.conversationId,
         id: call.id,
         from: 'running',
         to: 'failed',
         error: failure,
       });
+    }
+    if (!changed) {
+      // Someone else finished the call (for example another backend instance
+      // that marked it as interrupted): its result is already stored.
+      this.logger.warn(
+        `Action ${call.actionId} finished, but call ${call.id} was no longer running; the result is not stored`,
+      );
+      return { failure };
     }
     await this.store.appendMessage({
       conversationId: call.conversationId,

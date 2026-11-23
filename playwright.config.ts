@@ -25,7 +25,8 @@ import { defineConfig } from '@playwright/test';
  *   SMOKE_APP=app-next yarn test:e2e   # new frontend system
  *
  * Screenshots of every step go to SMOKE_SHOT_DIR (default
- * e2e-test-results/<app>). SMOKE_APP_URL and SMOKE_BACKEND_URL point at
+ * e2e-test-results/<app>); SMOKE_SHOT_SUFFIX is added to their names.
+ * SMOKE_APP_URL and SMOKE_BACKEND_URL point at
  * servers on other ports (start them yourself, with the same ports in the
  * app config).
  */
@@ -67,6 +68,8 @@ export default defineConfig({
   ],
   use: {
     baseURL: appUrl,
+    // SMOKE_COLOR_SCHEME=dark runs the app with the dark theme of the OS.
+    colorScheme: process.env.SMOKE_COLOR_SCHEME === 'dark' ? 'dark' : 'light',
     viewport: { width: 1440, height: 900 },
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',

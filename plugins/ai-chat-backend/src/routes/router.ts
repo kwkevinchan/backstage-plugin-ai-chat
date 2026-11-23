@@ -14,8 +14,11 @@
  * limitations under the License.
  */
 
-import type { HttpAuthService } from '@backstage/backend-plugin-api';
-import { InputError } from '@backstage/errors';
+import type {
+  HttpAuthService,
+  LoggerService,
+} from '@backstage/backend-plugin-api';
+import { ConflictError, InputError, NotFoundError } from '@backstage/errors';
 import express from 'express';
 import Router from 'express-promise-router';
 import { z } from 'zod';
@@ -26,10 +29,35 @@ import { SseResponse } from './sse';
 export interface RouterOptions {
   httpAuth: HttpAuthService;
   chat: ChatService;
+  logger: LoggerService;
+}
+
+const GENERIC_STREAM_ERROR =
+  'The chat failed. Try again; the administrator can find the details in the backend log.';
+
+/** What the browser may read: the message of an error that the user can act on. */
+function publicMessage(error: unknown): string {
+  if (
+    error instanceof ConflictError ||
+    error instanceof NotFoundError ||
+    error instanceof InputError
+  ) {
+    return error.message;
+  }
+  return GENERIC_STREAM_ERROR;
 }
 
 const messageBody = z.object({
-  content: z.string().trim().min(1).max(MAX_MESSAGE_LENGTH),
+  content: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MAX_MESSAGE_LENGTH)
+    // PostgreSQL cannot store a NUL character in a text column.
+    .refine(
+      text => !text.includes('\u0000'),
+      'must not contain a NUL character',
+    ),
 });
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
@@ -49,7 +77,7 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
  * user: a service token is refused, because a conversation belongs to a user.
  */
 export function createRouter(options: RouterOptions): express.Router {
-  const { httpAuth, chat } = options;
+  const { httpAuth, chat, logger } = options;
   const router = Router();
   router.use(express.json({ limit: '64kb' }));
 
@@ -73,7 +101,11 @@ export function createRouter(options: RouterOptions): express.Router {
     } catch (error) {
       // Before the first event the error handler of the backend answers.
       if (!sse.hasStarted) throw error;
-      sse.finish(error);
+      logger.error(
+        'A response stream failed after it started',
+        error instanceof Error ? error : new Error(String(error)),
+      );
+      sse.finish(publicMessage(error));
       return;
     }
     sse.finish();

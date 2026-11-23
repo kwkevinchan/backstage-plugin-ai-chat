@@ -126,6 +126,63 @@ describe('OpenAiCompatibleClient', () => {
     expect(result.toolCalls[0].id).toMatch(/^call_/);
   });
 
+  it('replaces a call ID that is too long, in a streamed and a whole answer', async () => {
+    const long = 'c'.repeat(300);
+    server = await startLlmServer((_body, index) =>
+      index === 0
+        ? {
+            body: sseBody([
+              chunk({
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: long,
+                    function: { name: 'x', arguments: '{}' },
+                  },
+                ],
+              }),
+            ]),
+          }
+        : {
+            type: 'application/json',
+            body: JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    tool_calls: [
+                      { id: long, function: { name: 'x', arguments: '{}' } },
+                    ],
+                  },
+                },
+              ],
+            }),
+          },
+    );
+    for (let i = 0; i < 2; i++) {
+      const result = await client().complete({ messages: [], tools: [] });
+      expect(result.toolCalls[0].id).toMatch(/^call_[0-9a-f-]{36}$/);
+    }
+  });
+
+  it('adds a piece without index and ID to the last call', async () => {
+    server = await startLlmServer(() => ({
+      body: sseBody([
+        chunk({
+          tool_calls: [{ id: 'a', function: { name: 'x', arguments: '{"n"' } }],
+        }),
+        chunk({ tool_calls: [{ function: { arguments: ':1}' } }] }),
+        chunk({
+          tool_calls: [{ id: 'b', function: { name: 'y', arguments: '{}' } }],
+        }),
+      ]),
+    }));
+    const result = await client().complete({ messages: [], tools: [] });
+    expect(result.toolCalls).toEqual([
+      { id: 'a', name: 'x', arguments: '{"n":1}' },
+      { id: 'b', name: 'y', arguments: '{}' },
+    ]);
+  });
+
   it('reads an answer that is not streamed', async () => {
     server = await startLlmServer(() => ({
       type: 'application/json',

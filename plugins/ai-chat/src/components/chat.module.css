@@ -309,6 +309,13 @@
 }
 
 /* Approval card */
+.chat-warning {
+  padding: var(--bui-space-2) var(--bui-space-3);
+  border: 1px solid var(--bui-border-warning);
+  border-radius: var(--bui-radius-2);
+  background: var(--bui-bg-warning);
+  color: var(--bui-fg-warning-on-bg);
+}
 .chat-approval {
   align-self: flex-start;
   display: flex;

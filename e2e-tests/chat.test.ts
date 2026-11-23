@@ -25,6 +25,7 @@ import { expect, Page, test } from '@playwright/test';
  * only the allowed action changed anything, and an action of the catalog.
  */
 const app = process.env.SMOKE_APP ?? 'app';
+const shotSuffix = process.env.SMOKE_SHOT_SUFFIX ?? '';
 const shotDir = process.env.SMOKE_SHOT_DIR ?? join('e2e-test-results', app);
 
 function isIgnoredConsoleError(text: string): boolean {
@@ -62,7 +63,7 @@ function watch(page: Page) {
       'false',
     );
     await page.screenshot({
-      path: join(shotDir, `${name}.png`),
+      path: join(shotDir, `${name}${shotSuffix}.png`),
       fullPage: true,
       animations: 'disabled',
     });
@@ -99,9 +100,15 @@ test('read-only call, approval, rejection', async ({ page }) => {
   await expect(
     page.getByText('Here is the result of the action'),
   ).toBeVisible();
+  // Input and output are folded until the row is opened.
+  await expect(row.getByText('"restarts": 0')).toBeHidden();
+  await shot('02-read-only-call');
   await row.locator('summary').click();
   await expect(row.getByText('"restarts": 0').first()).toBeVisible();
-  await shot('02-read-only-call');
+  await expect(
+    row.getByRole('link', { name: /example-payments/ }),
+  ).toBeVisible();
+  await shot('02b-read-only-call-expanded');
 
   // An action that changes something waits for the user.
   await say(page, 'restart payments');

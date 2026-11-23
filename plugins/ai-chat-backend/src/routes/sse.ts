@@ -58,13 +58,10 @@ export class SseResponse {
     this.res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
   }
 
-  /** Ends the stream; an error after the first event becomes an `error` event. */
-  finish(error?: unknown) {
-    if (error !== undefined && this.started) {
-      this.write({
-        type: 'error',
-        message: error instanceof Error ? error.message : 'The request failed',
-      });
+  /** Ends the stream; `errorMessage` after the first event becomes an `error` event. */
+  finish(errorMessage?: string) {
+    if (errorMessage !== undefined && this.started) {
+      this.write({ type: 'error', message: errorMessage });
     }
     if (!this.res.writableEnded) this.res.end();
   }

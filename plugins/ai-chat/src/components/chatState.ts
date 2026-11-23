@@ -41,7 +41,7 @@ export const emptyChatState: ChatState = {
 };
 
 export type ChatAction =
-  | { type: 'loaded'; detail: ChatConversationDetail }
+  | { type: 'loaded'; detail: ChatConversationDetail; error?: string }
   | { type: 'reset' }
   | { type: 'streamStarted' }
   | { type: 'streamEnded' }
@@ -61,6 +61,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...emptyChatState,
         messages: action.detail.messages,
         toolCalls: action.detail.toolCalls,
+        error: action.error,
       };
     case 'reset':
       return emptyChatState;

@@ -218,6 +218,11 @@ describe('aiChatPlugin', () => {
     await request(server)
       .post(url)
       .set('Authorization', alice)
+      .send({ content: 'a\u0000b' })
+      .expect(400);
+    await request(server)
+      .post(url)
+      .set('Authorization', alice)
       .send({ content: 'x'.repeat(9000) })
       .expect(400);
     const missing = await request(server)

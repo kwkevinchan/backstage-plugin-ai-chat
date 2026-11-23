@@ -76,7 +76,7 @@ export const aiChatPlugin = createBackendPlugin({
           logger,
           config: aiChat,
         });
-        httpRouter.use(createRouter({ httpAuth, chat }));
+        httpRouter.use(createRouter({ httpAuth, chat, logger }));
         logger.info(
           `AI chat uses the model ${aiChat.llm.model} at ${aiChat.llm.baseUrl}`,
         );

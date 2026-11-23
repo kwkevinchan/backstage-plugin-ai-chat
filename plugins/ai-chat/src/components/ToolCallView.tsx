@@ -40,8 +40,47 @@ export function StatusBadge({ status }: { status: ChatToolCallStatus }) {
   );
 }
 
-function formatJson(value: unknown): string {
-  return JSON.stringify(value, null, 2) ?? 'null';
+// Format characters (zero width, direction marks) and control characters are
+// invisible; a person who reads the card must see them.
+const INVISIBLE = /[\p{Cf}\p{Cc}]/u;
+const INVISIBLE_ALL = /[\p{Cf}\p{Cc}]/gu;
+
+function escapeInvisible(text: string): string {
+  return text.replace(INVISIBLE_ALL, char => {
+    if (char === '\n') return char;
+    const code = char.codePointAt(0)!;
+    return code > 0xffff
+      ? `\\u{${code.toString(16).toUpperCase()}}`
+      : `\\u${code.toString(16).toUpperCase().padStart(4, '0')}`;
+  });
+}
+
+/** JSON text for the card, with invisible characters written as \uXXXX. */
+export function formatJson(value: unknown): string {
+  return escapeInvisible(JSON.stringify(value, null, 2) ?? 'null');
+}
+
+/** Whether a key or a string in `value` has an invisible character. */
+export function hasInvisibleCharacters(value: unknown): boolean {
+  if (typeof value === 'string')
+    return INVISIBLE.test(value.replace(/\n/g, ''));
+  if (Array.isArray(value)) return value.some(hasInvisibleCharacters);
+  if (value && typeof value === 'object') {
+    return Object.entries(value).some(
+      ([key, item]) =>
+        hasInvisibleCharacters(key) || hasInvisibleCharacters(item),
+    );
+  }
+  return false;
+}
+
+function InvisibleWarning({ input }: { input: unknown }) {
+  if (!hasInvisibleCharacters(input)) return null;
+  return (
+    <div className={cx('chat-warning')} role="alert">
+      The input has invisible characters. They are shown as \uXXXX below.
+    </div>
+  );
 }
 
 function isCutOutput(
@@ -62,6 +101,7 @@ export function ToolCallDetails({ toolCall }: { toolCall: ChatToolCall }) {
     <>
       <div>
         <div className={cx('chat-tool-label')}>Input</div>
+        <InvisibleWarning input={toolCall.input} />
         <pre className={cx('chat-code')}>{formatJson(toolCall.input)}</pre>
       </div>
       {toolCall.error && toolCall.status === 'failed' && (
@@ -160,6 +200,7 @@ export function ApprovalCard(props: ApprovalCardProps) {
           <div className={cx('chat-tool-label')}>
             Input that will run, exactly as shown
           </div>
+          <InvisibleWarning input={toolCall.input} />
           <pre className={cx('chat-code')}>{formatJson(toolCall.input)}</pre>
         </div>
       ) : (

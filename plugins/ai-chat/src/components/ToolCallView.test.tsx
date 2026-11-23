@@ -17,7 +17,12 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { pendingCall, readCall } from '../testData';
-import { ApprovalCard, ToolCallRow } from './ToolCallView';
+import {
+  ApprovalCard,
+  formatJson,
+  hasInvisibleCharacters,
+  ToolCallRow,
+} from './ToolCallView';
 
 describe('ApprovalCard', () => {
   it('shows the action, its description, the badge and the exact input', () => {
@@ -145,9 +150,55 @@ describe('ApprovalCard', () => {
   });
 });
 
+describe('invisible characters in the input', () => {
+  const tricky = {
+    ...pendingCall,
+    input: { name: 'pay\u200Bments', note: 'a\u202Eb', tag: '\u{E0041}' },
+  };
+
+  it('are shown as escapes, with a warning line', () => {
+    render(
+      <ApprovalCard
+        toolCall={tricky}
+        onApprove={jest.fn()}
+        onReject={jest.fn()}
+      />,
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'The input has invisible characters',
+    );
+    const shown = screen.getByText(/"name": "pay/).textContent!;
+    expect(shown).toContain('pay\\u200Bments');
+    expect(shown).toContain('a\\u202Eb');
+    expect(shown).toContain('\\u{E0041}');
+    expect(shown).not.toContain('\u200B');
+    expect(shown).not.toContain('\u202E');
+  });
+
+  it('have no warning when the input is plain, also with a line break', () => {
+    render(
+      <ApprovalCard
+        toolCall={{ ...pendingCall, input: { text: 'a\nb' } }}
+        onApprove={jest.fn()}
+        onReject={jest.fn()}
+      />,
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('are found in keys and nested values, and escaped in the output too', () => {
+    expect(hasInvisibleCharacters({ a: [{ 'k\u200B': 1 }] })).toBe(true);
+    expect(hasInvisibleCharacters({ a: ['x\u0007'] })).toBe(true);
+    expect(hasInvisibleCharacters({ a: ['x'] })).toBe(false);
+    expect(formatJson({ a: 'x\u2066' })).toContain('x\\u2066');
+  });
+});
+
 describe('ToolCallRow', () => {
   it('is a compact row with the input and output folded, and clickable links', async () => {
-    render(<ToolCallRow toolCall={readCall} />);
+    const { container } = render(<ToolCallRow toolCall={readCall} />);
+    // Folded until the user opens it.
+    expect(container.querySelector('details')).not.toHaveAttribute('open');
     expect(screen.getByText('List services')).toBeInTheDocument();
     expect(screen.getByText('Done')).toBeInTheDocument();
     expect(

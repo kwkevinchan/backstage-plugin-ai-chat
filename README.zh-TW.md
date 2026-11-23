@@ -48,7 +48,7 @@ backend:
 - 核准時執行的是**後端存起來的輸入**；`approve` 不接受請求帶來的新輸入。
 - 一次決定只會被接受一次（資料庫裡的條件式更新），而且只有對話的擁有者能決定。
 - 不是唯讀的 action，沒有核准就絕不執行；唯讀與否看 actions service 的屬性，不看模型的說法。
-- 核准、拒絕、執行都會寫入 Backstage auditor。
+- 只有不是唯讀的 action 的核准、拒絕與執行會寫入 Backstage auditor；唯讀的 action 執行時不稽核。
 - 完整的安全說明、API 與試用方式見[英文 README](README.md)。
 
 ## 授權

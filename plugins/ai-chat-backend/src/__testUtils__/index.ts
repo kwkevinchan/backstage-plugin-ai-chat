@@ -36,14 +36,24 @@ import type {
   LlmResult,
 } from '../llm/OpenAiCompatibleClient';
 
-const databases = TestDatabases.create({ ids: ['SQLITE_3'] });
+/**
+ * The database of the tests: SQLite, or PostgreSQL 16 when its connection
+ * string is in the environment (CI starts a PostgreSQL service and sets it;
+ * see CONTRIBUTING.md). No container is started on its own.
+ */
+const POSTGRES_URL_VARIABLE =
+  'BACKSTAGE_TEST_DATABASE_POSTGRES16_CONNECTION_STRING';
+const databaseId = process.env[POSTGRES_URL_VARIABLE]
+  ? 'POSTGRES_16'
+  : 'SQLITE_3';
+const databases = TestDatabases.create({ ids: [databaseId] });
 
-/** An empty SQLite database. */
+/** An empty database of the kind that the tests run on. */
 export function createDb(): Promise<Knex> {
-  return databases.init('SQLITE_3');
+  return databases.init(databaseId);
 }
 
-/** A migrated SQLite database. */
+/** A migrated database. */
 export async function createMigratedDb(): Promise<Knex> {
   const db = await createDb();
   await db.migrate.latest({

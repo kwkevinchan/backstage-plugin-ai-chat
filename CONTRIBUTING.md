@@ -36,6 +36,15 @@ scripted model (`yarn test:e2e`, `yarn test:e2e:next`); it needs
 `yarn playwright install chromium` once. It writes a screenshot of each step to
 `e2e-test-results/<app>`.
 
+The tests of the backend plugin run on SQLite. To run them on PostgreSQL 16
+as CI does, start a server and set the connection string:
+
+```sh
+docker run -d --name ai-chat-pg -e POSTGRES_PASSWORD=postgres -p 127.0.0.1:55432:5432 postgres:16
+BACKSTAGE_TEST_DATABASE_POSTGRES16_CONNECTION_STRING=postgresql://postgres:postgres@127.0.0.1:55432 \
+  CI=true yarn workspace @kwkevinchan/backstage-plugin-ai-chat-backend test
+```
+
 ## Layout
 
 | Package           | Role                                                                     |

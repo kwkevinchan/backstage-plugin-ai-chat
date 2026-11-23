@@ -75,6 +75,18 @@ export class LlmError extends Error {
 }
 
 const MAX_ERROR_BODY = 300;
+const MAX_CALL_ID_LENGTH = 255;
+
+/**
+ * The ID of a tool call goes into a column of 255 characters. A missing or
+ * longer ID is replaced; the replacement is stored and sent back to the model
+ * in the assistant message and in the tool message, so the two match.
+ */
+function safeCallId(id: unknown): string {
+  return typeof id === 'string' && id && id.length <= MAX_CALL_ID_LENGTH
+    ? id
+    : `call_${randomUUID()}`;
+}
 
 /**
  * Calls `POST {baseUrl}/chat/completions` of an OpenAI-compatible server and
@@ -155,7 +167,7 @@ function readWholeAnswer(body: any, request: LlmRequest): LlmResult {
   if (content) request.onText?.(content);
   const toolCalls: LlmToolCall[] = (message.tool_calls ?? []).map(
     (call: any) => ({
-      id: call.id || `call_${randomUUID()}`,
+      id: safeCallId(call.id),
       name: call.function?.name ?? '',
       arguments: call.function?.arguments ?? '',
     }),
@@ -192,8 +204,11 @@ async function readStream(
       request.onText?.(delta.content);
     }
     for (const piece of delta.tool_calls ?? []) {
-      const index =
-        typeof piece.index === 'number' ? piece.index : calls.length;
+      // Without an index, a piece with an ID starts a call and a piece
+      // without one goes on with the last call.
+      let index = calls.length;
+      if (typeof piece.index === 'number') index = piece.index;
+      else if (!piece.id) index = Math.max(calls.length - 1, 0);
       const call = (calls[index] ??= { id: '', name: '', arguments: '' });
       if (piece.id) call.id = piece.id;
       if (piece.function?.name) call.name += piece.function.name;
@@ -219,7 +234,7 @@ async function readStream(
     content,
     toolCalls: calls
       .filter(Boolean)
-      .map(call => ({ ...call, id: call.id || `call_${randomUUID()}` })),
+      .map(call => ({ ...call, id: safeCallId(call.id) })),
   };
 }
 

@@ -703,6 +703,170 @@ describe('ChatService', () => {
     });
   });
 
+  describe('long values from the model', () => {
+    it('are cut before they are stored for an unknown tool', async () => {
+      const long = 'x'.repeat(400);
+      const { service } = setup([
+        { calls: [{ id: 'a', name: long, args: {} }] },
+        'done',
+      ]);
+      const id = await start(service);
+      await service.sendMessage(caller(), id, 'go', recordStream());
+      const { toolCalls } = await service.getConversation(caller(), id);
+      expect(toolCalls[0].actionId).toBe('x'.repeat(64));
+      expect(toolCalls[0].title).toBe('x'.repeat(64));
+      const row = await db('tool_calls').first();
+      expect(row.tool_name).toHaveLength(64);
+    });
+  });
+
+  describe('several calls in one answer', () => {
+    async function writeThenRead() {
+      const setupResult = setup([
+        {
+          calls: [
+            { id: 'w', name: 'demo_change-thing', args: { name: 'x' } },
+            { id: 'r', name: 'demo_list-things', args: {} },
+          ],
+        },
+        'All done.',
+      ]);
+      const alice = caller();
+      const id = await start(setupResult.service, alice);
+      const stream = recordStream();
+      await setupResult.service.sendMessage(alice, id, 'go', stream);
+      return { ...setupResult, alice, id, stream };
+    }
+
+    it('runs the read at once and keeps the write waiting', async () => {
+      const { actions, service, alice, id, stream, llm } =
+        await writeThenRead();
+      expect(actions.invocations.map(i => i.id)).toEqual(['demo:list-things']);
+      expect(llm.requests).toHaveLength(1);
+      expect(types(stream.events)).toEqual([
+        'user_message',
+        'assistant_message',
+        'approval_required',
+        'tool_call',
+        'tool_result',
+        'done',
+      ]);
+      const { toolCalls } = await service.getConversation(alice, id);
+      expect(toolCalls.map(c => c.status)).toEqual([
+        'pending_approval',
+        'succeeded',
+      ]);
+    });
+
+    it('sends the calls in position order, with the right IDs, after approve', async () => {
+      const { actions, service, alice, id, llm } = await writeThenRead();
+      const { toolCalls } = await service.getConversation(alice, id);
+      await service.approve(alice, id, toolCalls[0].id, recordStream());
+      expect(actions.invocations.map(i => i.id)).toEqual([
+        'demo:list-things',
+        'demo:change-thing',
+      ]);
+      const history = llm.requests[1].messages as any[];
+      const assistant = history.find(m => m.role === 'assistant');
+      expect(
+        assistant.tool_calls.map((c: any) => [c.id, c.function.name]),
+      ).toEqual([
+        ['w', 'demo_change-thing'],
+        ['r', 'demo_list-things'],
+      ]);
+      const toolMessages = history.filter(m => m.role === 'tool');
+      expect(toolMessages.map(m => m.tool_call_id).sort()).toEqual(['r', 'w']);
+      expect(toolMessages.find(m => m.tool_call_id === 'w').content).toBe(
+        '{"changed":"x"}',
+      );
+      expect(toolMessages.find(m => m.tool_call_id === 'r').content).toBe(
+        '{"things":["a","b"]}',
+      );
+    });
+
+    it('answers both IDs when the write is superseded', async () => {
+      const { actions, service, alice, id, llm } = await writeThenRead();
+      const stream = recordStream();
+      await service.sendMessage(alice, id, 'never mind', stream);
+      expect(actions.invocations.map(i => i.id)).toEqual(['demo:list-things']);
+      // The card of the waiting call gets its new state.
+      expect(
+        stream.events.find(
+          e => e.type === 'tool_result' && e.toolCall.error === 'superseded',
+        ),
+      ).toMatchObject({ toolCall: { status: 'rejected' } });
+      const history = llm.requests[1].messages as any[];
+      const assistant = history.find(m => m.role === 'assistant');
+      expect(assistant.tool_calls.map((c: any) => c.id)).toEqual(['w', 'r']);
+      const toolMessages = history.filter(m => m.role === 'tool');
+      expect(toolMessages.map(m => m.tool_call_id).sort()).toEqual(['r', 'w']);
+      expect(toolMessages.find(m => m.tool_call_id === 'w').content).toContain(
+        'did not run',
+      );
+      // Every tool message comes before the new user message.
+      expect(history.at(-1)).toMatchObject({
+        role: 'user',
+        content: 'never mind',
+      });
+    });
+  });
+
+  describe('when another instance changes a call at the same time', () => {
+    it('does not store a result for a call that is no longer running', async () => {
+      const logger = mockServices.logger.mock();
+      const actions = new FakeActions([
+        {
+          ...readOnlyAction,
+          run: async () => {
+            // Another instance marks the call as interrupted meanwhile.
+            await db('tool_calls').update({ status: 'failed' });
+            return { late: true };
+          },
+        },
+      ]);
+      const llm = new ScriptedLlm([
+        { calls: [{ name: 'demo_list-things', args: {} }] },
+        'unreachable',
+      ]);
+      const service = new ChatService({
+        store,
+        actions,
+        llm,
+        auditor,
+        logger,
+        config: baseConfig(),
+      });
+      const alice = caller();
+      const id = await start(service, alice);
+      const stream = recordStream();
+      await service.sendMessage(alice, id, 'list', stream);
+      expect(types(stream.events)).not.toContain('tool_result');
+      expect(
+        (await store.listMessages(id)).filter(m => m.role === 'tool'),
+      ).toEqual([]);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('was no longer running'),
+      );
+    });
+
+    it('refuses a new message when a waiting call was decided meanwhile', async () => {
+      const { service } = setup([
+        { calls: [{ name: 'demo_change-thing', args: { name: 'x' } }] },
+        'unreachable',
+      ]);
+      const alice = caller();
+      const id = await start(service, alice);
+      await service.sendMessage(alice, id, 'go', recordStream());
+      jest.spyOn(store, 'decideToolCall').mockResolvedValue(false);
+      await expect(
+        service.sendMessage(alice, id, 'again', recordStream()),
+      ).rejects.toBeInstanceOf(ConflictError);
+      expect(
+        (await store.listMessages(id)).filter(m => m.role === 'user'),
+      ).toHaveLength(1);
+    });
+  });
+
   describe('conversations', () => {
     it('are titled with the first message and deleted with their data', async () => {
       const { service } = setup(['hi']);
@@ -719,7 +883,9 @@ describe('ChatService', () => {
       ]);
       await service.deleteConversation(alice, id);
       expect(await service.listConversations(alice)).toEqual([]);
-      expect(await db('messages').count({ n: '*' }).first()).toEqual({ n: 0 });
+      const remaining = await db('messages').count({ n: '*' }).first();
+      // PostgreSQL returns a count as a string.
+      expect(Number(remaining?.n)).toBe(0);
     });
   });
 });

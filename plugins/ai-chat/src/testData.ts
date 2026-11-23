@@ -57,7 +57,7 @@ export function mockApi(
       createdAt: '2026-01-01T10:00:00.000Z',
       updatedAt: '2026-01-01T10:00:00.000Z',
     }),
-    getConversation: jest.fn(),
+    getConversation: jest.fn().mockRejectedValue(new Error('not found')),
     deleteConversation: jest.fn().mockResolvedValue(undefined),
     sendMessage: jest.fn(),
     approveToolCall: jest.fn(),

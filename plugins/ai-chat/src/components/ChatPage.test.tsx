@@ -246,6 +246,81 @@ describe('ChatPageContent', () => {
     );
   });
 
+  it('reads the conversation again after an error event, and keeps the error', async () => {
+    const api = mockApi({
+      getConversation: jest.fn().mockResolvedValue({
+        conversation: { id: 'c-1', title: 'x' },
+        messages: [userMessage, assistantMessage],
+        toolCalls: [
+          {
+            ...pendingCall,
+            status: 'rejected',
+            error: 'superseded',
+            decidedBy: 'user:default/guest',
+          },
+        ],
+      }),
+    });
+    api.sendMessage.mockReturnValue(
+      events([
+        { type: 'user_message', message: userMessage },
+        { type: 'error', message: 'The chat failed.' },
+        { type: 'done' },
+      ]),
+    );
+    await renderPage(api);
+    await userEvent.type(screen.getByLabelText('Message'), 'hi{Enter}');
+    await waitFor(() =>
+      expect(api.getConversation).toHaveBeenCalledWith('c-1'),
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The chat failed.',
+    );
+    // The stored state (a decision of another tab) is on the screen.
+    expect(
+      await screen.findByText(/Not decided: a new message/),
+    ).toBeInTheDocument();
+  });
+
+  it('reads the conversation again after a refused approval (409)', async () => {
+    const api = mockApi();
+    api.sendMessage.mockReturnValue(
+      events([
+        { type: 'user_message', message: userMessage },
+        { type: 'assistant_message', message: assistantMessage },
+        { type: 'approval_required', toolCall: pendingCall },
+        { type: 'done' },
+      ]),
+    );
+    // eslint-disable-next-line require-yield
+    api.approveToolCall.mockImplementation(async function* refused() {
+      throw Object.assign(new Error('Request failed with 409 Conflict'), {
+        cause: new Error('This call is not waiting for a decision'),
+      });
+    });
+    api.getConversation.mockResolvedValue({
+      conversation: { id: 'c-1', title: 'x' } as any,
+      messages: [userMessage, assistantMessage],
+      toolCalls: [
+        {
+          ...pendingCall,
+          status: 'succeeded',
+          decidedBy: 'user:default/guest',
+        },
+      ],
+    });
+    await renderPage(api);
+    await userEvent.type(screen.getByLabelText('Message'), 'restart{Enter}');
+    await userEvent.click(await screen.findByRole('button', { name: 'Allow' }));
+    expect(
+      await screen.findByText(/Allowed by user:default\/guest/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'This call is not waiting for a decision',
+    );
+    expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull();
+  });
+
   it('deletes a conversation', async () => {
     const api = mockApi({
       listConversations: jest

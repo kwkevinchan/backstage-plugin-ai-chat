@@ -73,28 +73,51 @@ export function useChat(api: AiChatApi) {
     };
   }, [api, conversationId]);
 
+  /**
+   * Reads the conversation again and keeps `message` on the screen. After an
+   * error, or a refused decision, the state on the screen may differ from the
+   * stored one (a decision from another tab, for example).
+   */
+  const reload = useCallback(
+    async (id: string, message: string) => {
+      try {
+        const detail = await api.getConversation(id);
+        dispatch({ type: 'loaded', detail, error: message });
+      } catch {
+        // The message of the first error stays.
+      }
+    },
+    [api],
+  );
+
   const consume = useCallback(
-    async (open: (signal: AbortSignal) => AsyncIterable<ChatEvent>) => {
+    async (
+      id: string,
+      open: (signal: AbortSignal) => AsyncIterable<ChatEvent>,
+    ) => {
       abort.current?.abort();
       const controller = new AbortController();
       abort.current = controller;
       dispatch({ type: 'streamStarted' });
+      let failure: string | undefined;
       try {
         for await (const event of open(controller.signal)) {
           dispatch({ type: 'event', event });
+          if (event.type === 'error') failure = event.message;
         }
         dispatch({ type: 'streamEnded' });
       } catch (error) {
         if (controller.signal.aborted) return;
-        dispatch({
-          type: 'failed',
-          message: describeError(error),
-        });
+        failure = describeError(error);
+        dispatch({ type: 'failed', message: failure });
       } finally {
         refreshList();
       }
+      if (failure !== undefined && !controller.signal.aborted) {
+        await reload(id, failure);
+      }
     },
-    [refreshList],
+    [refreshList, reload],
   );
 
   const send = useCallback(
@@ -115,7 +138,7 @@ export function useChat(api: AiChatApi) {
         }
       }
       const target = id;
-      await consume(signal => api.sendMessage(target, content, signal));
+      await consume(target, signal => api.sendMessage(target, content, signal));
     },
     [api, consume, conversationId],
   );
@@ -123,7 +146,7 @@ export function useChat(api: AiChatApi) {
   const decide = useCallback(
     async (call: ChatToolCall, decision: 'approve' | 'reject') => {
       if (!conversationId) return;
-      await consume(signal =>
+      await consume(conversationId, signal =>
         decision === 'approve'
           ? api.approveToolCall(conversationId, call.id, signal)
           : api.rejectToolCall(conversationId, call.id, signal),
