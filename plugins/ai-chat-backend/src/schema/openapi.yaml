@@ -1,0 +1,384 @@
+openapi: 3.1.0
+info:
+  title: ai-chat
+  version: '1'
+  description: |-
+    The HTTP API of the AI chat backend plugin for Backstage (`@kwkevinchan/backstage-plugin-ai-chat-backend`).
+
+    The paths are relative to the base URL of the plugin, `/api/ai-chat` in a default backend. Every route needs the Backstage credentials of a signed-in user (a user token from the identity API); a service token is refused with 403. A conversation belongs to the user who created it: another user gets 404 for it, as for a conversation that does not exist.
+
+    The routes that answer with `text/event-stream` send the events of `ChatEvent`: each event has the SSE event name of its `type` and the whole object as JSON in `data`. A request that is refused before anything happens (400, 404, 409) gets a normal JSON error; a failure after the first event arrives as an `error` event. The response ends after the `done` event, or after an `approval_required` event followed by `done`.
+
+    An action that is not read-only never runs without a decision of the owner: the call waits as `pending_approval` until `approve` or `reject`, and `approve` runs the input that was stored when the model asked for the call.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  contact: {}
+servers:
+  - url: /
+tags:
+  - name: Conversations
+    description: The conversations of the signed-in user.
+  - name: Responses
+    description: Routes that answer with a stream of events.
+security:
+  - JWT: []
+components:
+  securitySchemes:
+    JWT:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    conversationId:
+      name: id
+      in: path
+      required: true
+      description: ID of the conversation.
+      schema:
+        type: string
+    callId:
+      name: callId
+      in: path
+      required: true
+      description: ID of the tool call (`ChatToolCall.id`).
+      schema:
+        type: string
+  responses:
+    Error:
+      description: An error, with the body of the Backstage backend.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Stream:
+      description: 'A stream of `ChatEvent`s, `text/event-stream`. Each event has the line `event: <type>` and the line `data: <the event as JSON>`.'
+      content:
+        text/event-stream:
+          schema:
+            type: string
+          x-event-schema:
+            $ref: '#/components/schemas/ChatEvent'
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            name:
+              type: string
+            message:
+              type: string
+          required: [name, message]
+        request:
+          type: object
+          properties:
+            method:
+              type: string
+            url:
+              type: string
+        response:
+          type: object
+          properties:
+            statusCode:
+              type: integer
+      required: [error]
+    ChatConversation:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, title, createdAt, updatedAt]
+    ChatMessage:
+      type: object
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        createdAt:
+          type: string
+      required: [id, role, content, createdAt]
+    ChatActionAttributes:
+      type: object
+      description: The attributes of the action at the time of the call.
+      properties:
+        readOnly:
+          type: boolean
+        destructive:
+          type: boolean
+        idempotent:
+          type: boolean
+      required: [readOnly, destructive, idempotent]
+    ChatToolCall:
+      type: object
+      properties:
+        id:
+          type: string
+        messageId:
+          type: string
+          description: The assistant message that asked for the call.
+        actionId:
+          type: string
+          description: The action ID in the actions registry, for example `catalog:get-catalog-entity`.
+        title:
+          type: string
+        description:
+          type: string
+        input:
+          type: object
+          description: The exact input that runs when the call is allowed.
+          additionalProperties: true
+        attributes:
+          $ref: '#/components/schemas/ChatActionAttributes'
+        status:
+          type: string
+          enum:
+            [pending_approval, approved, rejected, running, succeeded, failed]
+        output:
+          description: 'The output of the action. When it was cut: an object with `truncated` (true), `originalLength` and the first part as `text`.'
+        error:
+          type: string
+          description: 'Why the call failed; `superseded` for a call that was rejected because the user sent a new message.'
+        decidedBy:
+          type: string
+        decidedAt:
+          type: string
+        createdAt:
+          type: string
+      required:
+        [
+          id,
+          messageId,
+          actionId,
+          title,
+          description,
+          input,
+          attributes,
+          status,
+          createdAt,
+        ]
+    ChatConversationDetail:
+      type: object
+      properties:
+        conversation:
+          $ref: '#/components/schemas/ChatConversation'
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        toolCalls:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatToolCall'
+      required: [conversation, messages, toolCalls]
+    ChatEvent:
+      description: One event of a response stream, discriminated by `type`.
+      oneOf:
+        - type: object
+          properties:
+            type:
+              const: user_message
+            message:
+              $ref: '#/components/schemas/ChatMessage'
+          required: [type, message]
+        - type: object
+          properties:
+            type:
+              const: text_delta
+            text:
+              type: string
+          required: [type, text]
+        - type: object
+          properties:
+            type:
+              const: assistant_message
+            message:
+              $ref: '#/components/schemas/ChatMessage'
+          required: [type, message]
+        - type: object
+          properties:
+            type:
+              const: tool_call
+            toolCall:
+              $ref: '#/components/schemas/ChatToolCall'
+          required: [type, toolCall]
+        - type: object
+          properties:
+            type:
+              const: tool_result
+            toolCall:
+              $ref: '#/components/schemas/ChatToolCall'
+          required: [type, toolCall]
+        - type: object
+          properties:
+            type:
+              const: approval_required
+            toolCall:
+              $ref: '#/components/schemas/ChatToolCall'
+          required: [type, toolCall]
+        - type: object
+          properties:
+            type:
+              const: notice
+            message:
+              type: string
+          required: [type, message]
+        - type: object
+          properties:
+            type:
+              const: error
+            message:
+              type: string
+          required: [type, message]
+        - type: object
+          properties:
+            type:
+              const: done
+          required: [type]
+paths:
+  /conversations:
+    get:
+      operationId: listConversations
+      tags: [Conversations]
+      summary: List the conversations of the user, the most recently changed first.
+      description: Only the conversations that the signed-in user owns.
+      responses:
+        '200':
+          description: The conversations.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChatConversation'
+                required: [items]
+        '403':
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: createConversation
+      tags: [Conversations]
+      summary: Create an empty conversation.
+      description: The conversation is titled with the first message that is sent to it.
+      responses:
+        '201':
+          description: The new conversation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatConversation'
+        '403':
+          $ref: '#/components/responses/Error'
+  /conversations/{id}:
+    parameters:
+      - $ref: '#/components/parameters/conversationId'
+    get:
+      operationId: getConversation
+      tags: [Conversations]
+      summary: Read a conversation with its messages and tool calls.
+      description: Messages are those of the roles `user` and `assistant`; the results of tool calls are in `toolCalls`.
+      responses:
+        '200':
+          description: The conversation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatConversationDetail'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+    delete:
+      operationId: deleteConversation
+      tags: [Conversations]
+      summary: Delete a conversation with its messages and tool calls.
+      description: 409 while a response of the conversation is in progress.
+      responses:
+        '204':
+          description: Deleted.
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+  /conversations/{id}/messages:
+    parameters:
+      - $ref: '#/components/parameters/conversationId'
+    post:
+      operationId: sendMessage
+      tags: [Responses]
+      summary: Send a message and stream the answer.
+      description: A call that waits for approval is rejected as `superseded`. 409 while another response of the conversation is in progress.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+                  minLength: 1
+                  maxLength: 8000
+              required: [content]
+      responses:
+        '200':
+          $ref: '#/components/responses/Stream'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+  /conversations/{id}/tool-calls/{callId}/approve:
+    parameters:
+      - $ref: '#/components/parameters/conversationId'
+      - $ref: '#/components/parameters/callId'
+    post:
+      operationId: approveToolCall
+      tags: [Responses]
+      summary: Allow a call that waits, and stream what follows.
+      description: Runs the stored input of the call, with the credentials of the request, and then continues the conversation when no other call waits. 409 when the call is not `pending_approval`, so a second request never runs the action again. Only the owner of the conversation can decide (404 for anyone else).
+      responses:
+        '200':
+          $ref: '#/components/responses/Stream'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+  /conversations/{id}/tool-calls/{callId}/reject:
+    parameters:
+      - $ref: '#/components/parameters/conversationId'
+      - $ref: '#/components/parameters/callId'
+    post:
+      operationId: rejectToolCall
+      tags: [Responses]
+      summary: Refuse a call that waits, and stream what follows.
+      description: The action does not run. The model is told that the user refused. Same rules as `approve`.
+      responses:
+        '200':
+          $ref: '#/components/responses/Stream'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'

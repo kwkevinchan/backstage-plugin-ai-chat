@@ -1,0 +1,86 @@
+/*
+ * Copyright 2026 The backstage-plugin-ai-chat Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import {
+  coreServices,
+  createBackendPlugin,
+  resolvePackagePath,
+} from '@backstage/backend-plugin-api';
+import { actionsServiceRef } from '@backstage/backend-plugin-api/alpha';
+import { ChatService } from './chat/ChatService';
+import { readAiChatConfig } from './config';
+import { ChatStore } from './database/ChatStore';
+import { OpenAiCompatibleClient } from './llm/OpenAiCompatibleClient';
+import { createRouter } from './routes/router';
+
+/**
+ * Backend plugin of the AI chat. Serves the routes under `/api/ai-chat`: the
+ * conversations of the signed-in user and the response streams. The model
+ * calls the actions of the actions registry as that user; an action that is
+ * not read-only runs only after the user allowed it in the chat. The
+ * decisions and the invocations of such actions are recorded with the
+ * auditor.
+ *
+ * @public
+ */
+export const aiChatPlugin = createBackendPlugin({
+  pluginId: 'ai-chat',
+  register(env) {
+    env.registerInit({
+      deps: {
+        logger: coreServices.logger,
+        config: coreServices.rootConfig,
+        auditor: coreServices.auditor,
+        httpAuth: coreServices.httpAuth,
+        httpRouter: coreServices.httpRouter,
+        database: coreServices.database,
+        actions: actionsServiceRef,
+      },
+      async init({
+        logger,
+        config,
+        auditor,
+        httpAuth,
+        httpRouter,
+        database,
+        actions,
+      }) {
+        const aiChat = readAiChatConfig(config);
+        const db = await database.getClient();
+        if (!database.migrations?.skip) {
+          await db.migrate.latest({
+            directory: resolvePackagePath(
+              '@kwkevinchan/backstage-plugin-ai-chat-backend',
+              'migrations',
+            ),
+          });
+        }
+        const chat = new ChatService({
+          store: new ChatStore(db),
+          actions,
+          llm: new OpenAiCompatibleClient(aiChat.llm),
+          auditor,
+          logger,
+          config: aiChat,
+        });
+        httpRouter.use(createRouter({ httpAuth, chat }));
+        logger.info(
+          `AI chat uses the model ${aiChat.llm.model} at ${aiChat.llm.baseUrl}`,
+        );
+      },
+    });
+  },
+});
