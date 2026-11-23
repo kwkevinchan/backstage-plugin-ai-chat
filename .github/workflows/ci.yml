@@ -1,0 +1,263 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  boundaries:
+    name: Boundaries and secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+
+      # The repository starts with a README, a license and this workflow. The
+      # scanner and the rest of the checks arrive with the first pull request.
+      - name: Boundary scanner self test
+        run: |
+          if [ -f scripts/check-boundaries.test.mjs ]; then
+            node scripts/check-boundaries.test.mjs
+          else
+            echo "No scanner yet"
+          fi
+
+      - name: Scan tracked files
+        env:
+          BOUNDARY_DENYLIST: ${{ secrets.BOUNDARY_DENYLIST }}
+        run: |
+          if [ -f scripts/check-boundaries.mjs ]; then
+            node scripts/check-boundaries.mjs --tracked
+          else
+            echo "No scanner yet"
+          fi
+
+      - name: Scan commits and diff
+        env:
+          BOUNDARY_DENYLIST: ${{ secrets.BOUNDARY_DENYLIST }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ ! -f scripts/check-boundaries.mjs ]; then
+            echo "No scanner yet"
+            exit 0
+          fi
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ] \
+            || ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            echo "No usable base commit; scanning the head commit only"
+            BASE_SHA="$(git rev-parse "$HEAD_SHA^" 2>/dev/null || git hash-object -t tree /dev/null)"
+          fi
+          node scripts/check-boundaries.mjs --range "$BASE_SHA..$HEAD_SHA"
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  verify:
+    name: Verify (Backstage ${{ matrix.backstage }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The main line pinned in backstage.json.
+        backstage: ['1.56']
+    env:
+      CI: true
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for a workspace
+        id: workspace
+        run: |
+          if [ -f package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "No workspace yet"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.workspace.outputs.present == 'true'
+        with:
+          node-version: 24.x
+
+      - name: Enable corepack
+        if: steps.workspace.outputs.present == 'true'
+        run: corepack enable
+
+      - name: Cache yarn
+        if: steps.workspace.outputs.present == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.yarn/berry/cache
+          key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
+          restore-keys: yarn-${{ runner.os }}-
+
+      - name: Install
+        if: steps.workspace.outputs.present == 'true'
+        run: yarn install --immutable
+        env:
+          HUSKY: 0
+
+      - name: Constraints
+        if: steps.workspace.outputs.present == 'true'
+        run: yarn constraints
+
+      - name: Backstage release pin
+        if: steps.workspace.outputs.present == 'true'
+        run: node scripts/pin-backstage-release.mjs --check
+
+      - name: Package metadata
+        if: steps.workspace.outputs.present == 'true'
+        run: yarn backstage-cli repo fix --check --publish
+
+      - name: Config schema
+        if: steps.workspace.outputs.present == 'true'
+        run: yarn backstage-cli config:check --lax
+
+      - name: Prettier
+        if: steps.workspace.outputs.present == 'true'
+        run: yarn prettier:check
+
+      # Lint and validate the OpenAPI spec of the backend plugin. The route
+      # tests check the requests and responses against it.
+      - name: OpenAPI spec
+        if: steps.workspace.outputs.present == 'true'
+        run: yarn lint:openapi
+
+      - name: Type check
+        if: steps.workspace.outputs.present == 'true'
+        run: yarn tsc:full
+
+      # The API reports (report*.api.md) of the published packages must match
+      # their exports. Reads the declarations the type check wrote to
+      # dist-types; run `yarn build:api-reports` and commit the changes.
+      - name: API reports
+        if: steps.workspace.outputs.present == 'true'
+        run: yarn build:api-reports:only --ci
+
+      - name: Lint
+        if: steps.workspace.outputs.present == 'true'
+        run: yarn backstage-cli repo lint
+
+      - name: Test
+        if: steps.workspace.outputs.present == 'true'
+        run: yarn backstage-cli repo test --maxWorkers=2
+
+      - name: Build
+        if: steps.workspace.outputs.present == 'true'
+        run: yarn backstage-cli repo build --all
+
+      - name: Clean working tree
+        if: steps.workspace.outputs.present == 'true'
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Working tree is not clean after Verify:" >&2
+            git status --short >&2
+            git diff >&2
+            exit 1
+          fi
+
+  e2e:
+    name: Smoke (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [app, app-next]
+    env:
+      CI: true
+      NODE_OPTIONS: --max-old-space-size=8192
+      SMOKE_APP: ${{ matrix.app }}
+      SMOKE_SHOT_DIR: e2e-test-results/${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for a workspace
+        id: workspace
+        run: |
+          if [ -f playwright.config.ts ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "No smoke test yet"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.workspace.outputs.present == 'true'
+        with:
+          node-version: 24.x
+
+      - name: Enable corepack
+        if: steps.workspace.outputs.present == 'true'
+        run: corepack enable
+
+      - name: Cache yarn
+        if: steps.workspace.outputs.present == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.yarn/berry/cache
+          key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
+          restore-keys: yarn-${{ runner.os }}-
+
+      - name: Install
+        if: steps.workspace.outputs.present == 'true'
+        run: yarn install --immutable
+        env:
+          HUSKY: 0
+
+      # The hosted runner sometimes cannot resolve the Ubuntu mirrors for
+      # minutes at a time, which fails the system packages part of this step.
+      # A later attempt usually works, so both parts are tried up to three
+      # times, each capped.
+      - name: Install Playwright browser
+        if: steps.workspace.outputs.present == 'true'
+        timeout-minutes: 25
+        run: |
+          for attempt in 1 2 3; do
+            if sudo env "PATH=$PATH" CI=true timeout --kill-after=30s 5m \
+                npx playwright install-deps chromium &&
+              timeout --kill-after=30s 2m npx playwright install chromium; then
+              exit 0
+            fi
+            echo "Playwright browser install failed (attempt $attempt of 3)"
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 15))
+              sudo dpkg --configure -a || true
+            fi
+          done
+          exit 1
+
+      # The development backend talks to a scripted LLM server
+      # (scripts/fake-llm.mjs, started by playwright.config.ts), so the job
+      # needs no API key.
+      - name: Smoke test
+        if: steps.workspace.outputs.present == 'true'
+        run: yarn test:e2e
+
+      - name: Upload screenshots and report
+        if: always() && steps.workspace.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ matrix.app }}
+          path: |
+            e2e-test-results/
+            e2e-test-report/
+          retention-days: 7
