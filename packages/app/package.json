@@ -1,0 +1,65 @@
+{
+  "name": "app",
+  "version": "0.0.0",
+  "private": true,
+  "bundled": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kwkevinchan/backstage-plugin-ai-chat",
+    "directory": "packages/app"
+  },
+  "backstage": {
+    "role": "frontend"
+  },
+  "scripts": {
+    "start": "backstage-cli package start",
+    "build": "backstage-cli package build",
+    "clean": "backstage-cli package clean",
+    "test": "backstage-cli package test",
+    "lint": "backstage-cli package lint"
+  },
+  "dependencies": {
+    "@backstage/app-defaults": "backstage:^",
+    "@backstage/cli": "backstage:^",
+    "@backstage/core-app-api": "backstage:^",
+    "@backstage/core-components": "backstage:^",
+    "@backstage/core-plugin-api": "backstage:^",
+    "@backstage/plugin-catalog": "backstage:^",
+    "@backstage/plugin-catalog-react": "backstage:^",
+    "@backstage/plugin-user-settings": "backstage:^",
+    "@backstage/theme": "backstage:^",
+    "@backstage/ui": "backstage:^",
+    "@kwkevinchan/backstage-plugin-ai-chat": "workspace:^",
+    "@material-ui/core": "^4.12.2",
+    "@material-ui/icons": "^4.9.1",
+    "react": "^18.0.2",
+    "react-dom": "^18.0.2",
+    "react-router": "^6.30.2",
+    "react-router-dom": "^6.30.2"
+  },
+  "devDependencies": {
+    "@backstage/test-utils": "backstage:^",
+    "@testing-library/dom": "^9.0.0",
+    "@testing-library/jest-dom": "^6.0.0",
+    "@testing-library/react": "^14.0.0",
+    "@testing-library/user-event": "^14.0.0",
+    "@types/react-dom": "*",
+    "cross-env": "^7.0.0"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "Apache-2.0"
+}
