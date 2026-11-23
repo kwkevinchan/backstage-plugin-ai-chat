@@ -1,0 +1,62 @@
+app:
+  title: AI chat development
+  baseUrl: http://localhost:3000
+  extensions:
+    # New frontend system app: show the catalog on the start page.
+    - page:catalog:
+        config:
+          path: /
+
+organization:
+  name: Example
+
+backend:
+  baseUrl: http://localhost:7007
+  listen:
+    port: 7007
+  csp:
+    connect-src: ["'self'", 'http:', 'https:']
+  cors:
+    origin: http://localhost:3000
+    methods: [GET, HEAD, PATCH, POST, PUT, DELETE]
+    credentials: true
+  # Local development only; app-config.production.yaml uses PostgreSQL.
+  database:
+    client: better-sqlite3
+    connection: ':memory:'
+  # The chat lists the actions of these plugins. `dev-actions` is the
+  # development-only plugin of packages/backend; add the plugins of your
+  # own action sources, for example `temporal`.
+  actions:
+    pluginSources:
+      - catalog
+      - dev-actions
+
+auth:
+  providers:
+    # Signs in as the catalog user in examples/org.yaml.
+    guest:
+      userEntityRef: user:default/guest
+
+catalog:
+  rules:
+    - allow: [Component, System, API, Resource, Location]
+  locations:
+    # File locations are relative to the backend process (packages/backend).
+    - type: file
+      target: ../../examples/entities.yaml
+    - type: file
+      target: ../../examples/org.yaml
+      rules:
+        - allow: [User, Group]
+
+# By default the chat talks to the scripted server of scripts/fake-llm.mjs
+# (`yarn start:fake-llm`), which needs no key. To use a real model, set
+# AI_CHAT_BASE_URL, AI_CHAT_MODEL and AI_CHAT_API_KEY, for example in
+# app-config.local.yaml.
+aiChat:
+  llm:
+    baseUrl: ${AI_CHAT_BASE_URL:-http://127.0.0.1:4010/v1}
+    model: ${AI_CHAT_MODEL:-fake-model}
+    apiKey: ${AI_CHAT_API_KEY}
+  maxTurns: 10

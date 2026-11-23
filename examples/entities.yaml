@@ -1,0 +1,31 @@
+---
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: examples
+spec:
+  owner: guests
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: example-payments
+  title: Example payments service
+  description: A service of the example system, to try the chat on.
+spec:
+  type: service
+  lifecycle: experimental
+  owner: guests
+  system: examples
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: example-search
+  title: Example search service
+  description: Another service of the example system.
+spec:
+  type: service
+  lifecycle: experimental
+  owner: guests
+  system: examples
