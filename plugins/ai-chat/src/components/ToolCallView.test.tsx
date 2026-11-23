@@ -186,6 +186,19 @@ describe('invisible characters in the input', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it.each([
+    ['\u2028', '\\u2028'],
+    ['\u2029', '\\u2029'],
+    ['\u3164', '\\u3164'],
+    ['\u115F', '\\u115F'],
+    ['\u1160', '\\u1160'],
+    ['\uFFA0', '\\uFFA0'],
+  ])('include the look-alike blank %j', (char, escaped) => {
+    expect(hasInvisibleCharacters({ name: `a${char}b` })).toBe(true);
+    expect(formatJson({ name: `a${char}b` })).toContain(`a${escaped}b`);
+    expect(formatJson({ name: `a${char}b` })).not.toContain(char);
+  });
+
   it('are found in keys and nested values, and escaped in the output too', () => {
     expect(hasInvisibleCharacters({ a: [{ 'k\u200B': 1 }] })).toBe(true);
     expect(hasInvisibleCharacters({ a: ['x\u0007'] })).toBe(true);

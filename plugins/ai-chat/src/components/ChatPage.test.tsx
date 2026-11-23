@@ -321,6 +321,108 @@ describe('ChatPageContent', () => {
     expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull();
   });
 
+  describe('when the conversation is read again after an error', () => {
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>(r => (resolve = r));
+      return { promise, resolve };
+    }
+    const stale = {
+      conversation: { id: 'c-1', title: 'x' } as any,
+      messages: [
+        { ...assistantMessage, id: 'm-stale', content: 'STALE ANSWER' },
+      ],
+      toolCalls: [],
+    };
+
+    it('drops the answer when the user switches the conversation meanwhile', async () => {
+      const wait = deferred<typeof stale>();
+      const api = mockApi({
+        listConversations: jest.fn().mockResolvedValue([]),
+        getConversation: jest.fn().mockReturnValue(wait.promise),
+      });
+      api.sendMessage.mockReturnValue(
+        events([
+          { type: 'user_message', message: userMessage },
+          { type: 'error', message: 'The chat failed.' },
+          { type: 'done' },
+        ]),
+      );
+      await renderPage(api);
+      await userEvent.type(screen.getByLabelText('Message'), 'hi{Enter}');
+      await waitFor(() => expect(api.getConversation).toHaveBeenCalled());
+      await userEvent.click(screen.getByRole('button', { name: 'New chat' }));
+      wait.resolve(stale);
+      await new Promise(r => setTimeout(r, 50));
+      expect(screen.queryByText('STALE ANSWER')).toBeNull();
+      expect(screen.queryByText('hi')).toBeNull();
+    });
+
+    it('drops the answer when a new message is sent meanwhile', async () => {
+      const wait = deferred<typeof stale>();
+      const api = mockApi({
+        getConversation: jest.fn().mockReturnValue(wait.promise),
+      });
+      api.sendMessage
+        .mockReturnValueOnce(
+          events([
+            { type: 'user_message', message: userMessage },
+            { type: 'error', message: 'The chat failed.' },
+            { type: 'done' },
+          ]),
+        )
+        .mockReturnValueOnce(
+          events([
+            {
+              type: 'user_message',
+              message: { ...userMessage, id: 'm-9', content: 'second' },
+            },
+            {
+              type: 'assistant_message',
+              message: {
+                ...assistantMessage,
+                id: 'm-10',
+                content: 'Second answer',
+              },
+            },
+            { type: 'done' },
+          ]),
+        );
+      await renderPage(api);
+      await userEvent.type(screen.getByLabelText('Message'), 'hi{Enter}');
+      await waitFor(() => expect(api.getConversation).toHaveBeenCalled());
+      await userEvent.type(screen.getByLabelText('Message'), 'second{Enter}');
+      expect(await screen.findByText('Second answer')).toBeInTheDocument();
+      wait.resolve(stale);
+      await new Promise(r => setTimeout(r, 50));
+      expect(screen.queryByText('STALE ANSWER')).toBeNull();
+      expect(screen.getByText('Second answer')).toBeInTheDocument();
+    });
+  });
+
+  it('puts the text back in the box when the message was refused', async () => {
+    const api = mockApi();
+    // eslint-disable-next-line require-yield
+    api.sendMessage.mockImplementation(async function* refused() {
+      throw Object.assign(new Error('Request failed with 409 Conflict'), {
+        cause: new Error(
+          'Your message was not sent: an action was just decided. Send it again.',
+        ),
+      });
+    });
+    await renderPage(api);
+    await userEvent.type(
+      screen.getByLabelText('Message'),
+      'please retry{Enter}',
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Your message was not sent: an action was just decided. Send it again.',
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText('Message')).toHaveValue('please retry'),
+    );
+  });
+
   it('deletes a conversation', async () => {
     const api = mockApi({
       listConversations: jest

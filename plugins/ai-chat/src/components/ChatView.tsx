@@ -25,7 +25,8 @@ import { ApprovalCard, ToolCallRow } from './ToolCallView';
 
 export interface ChatViewProps {
   state: ChatState;
-  onSend(content: string): void;
+  /** Resolves with `refused` when the message was not sent at all. */
+  onSend(content: string): Promise<'refused' | undefined> | void;
   onApprove(toolCall: ChatToolCall): void;
   onReject(toolCall: ChatToolCall): void;
 }
@@ -66,11 +67,13 @@ export function ChatView(props: ChatViewProps) {
   const callsOf = (messageId: string) =>
     state.toolCalls.filter(c => c.messageId === messageId);
 
-  const submit = () => {
+  const submit = async () => {
     const content = draft.trim();
     if (!content || state.streaming) return;
     setDraft('');
-    props.onSend(content);
+    const result = await props.onSend(content);
+    // A refused message goes back into the box, unless the user typed again.
+    if (result === 'refused') setDraft(current => current || content);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {

@@ -844,9 +844,47 @@ describe('ChatService', () => {
       expect(
         (await store.listMessages(id)).filter(m => m.role === 'tool'),
       ).toEqual([]);
+      // The other request goes on; this one does not call the model again.
+      expect(llm.requests).toHaveLength(1);
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('was no longer running'),
       );
+    });
+
+    it('does not go on after an approval when the call was finished by another instance', async () => {
+      const actions = new FakeActions([
+        {
+          ...writeAction,
+          run: async () => {
+            await db('tool_calls').update({ status: 'failed' });
+            return { late: true };
+          },
+        },
+      ]);
+      const llm = new ScriptedLlm([
+        { calls: [{ name: 'demo_change-thing', args: { name: 'x' } }] },
+        'unreachable',
+      ]);
+      const service = new ChatService({
+        store,
+        actions,
+        llm,
+        auditor,
+        logger: mockServices.logger.mock(),
+        config: baseConfig(),
+      });
+      const alice = caller();
+      const id = await start(service, alice);
+      await service.sendMessage(alice, id, 'go', recordStream());
+      const { toolCalls } = await service.getConversation(alice, id);
+      const stream = recordStream();
+      await service.approve(alice, id, toolCalls[0].id, stream);
+      expect(llm.requests).toHaveLength(1);
+      expect(types(stream.events)).not.toContain('tool_result');
+      expect(types(stream.events).at(-1)).toBe('done');
+      expect(
+        (await store.listMessages(id)).filter(m => m.role === 'tool'),
+      ).toEqual([]);
     });
 
     it('refuses a new message when a waiting call was decided meanwhile', async () => {

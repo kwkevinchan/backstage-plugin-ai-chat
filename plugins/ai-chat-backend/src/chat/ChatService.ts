@@ -211,13 +211,21 @@ export class ChatService {
           meta: auditMeta(approved),
         });
         try {
-          const { failure } = await this.invokeAndStore(
+          const { failure, superseded } = await this.invokeAndStore(
             caller,
             approved.id,
             conversation.id,
             stream,
             { kind: 'approved' },
           );
+          if (superseded) {
+            // Someone else finished the call; their request goes on.
+            await event.fail({
+              error: new Error('The call was no longer running'),
+            });
+            stream.emit({ type: 'done' });
+            return;
+          }
           if (failure === undefined) await event.success();
           else await event.fail({ error: new Error(failure) });
         } catch (error) {
@@ -352,7 +360,7 @@ export class ChatService {
             // instance): treat it like a call that is still being handled.
             if (!changed) {
               throw new ConflictError(
-                'An action of this conversation was just decided',
+                'Your message was not sent: an action was just decided. Send it again.',
               );
             }
             await this.store.appendMessage({
@@ -478,7 +486,7 @@ export class ChatService {
       if (result.toolCalls.length === 0) return;
 
       for (const [position, requested] of result.toolCalls.entries()) {
-        await this.handleRequestedCall({
+        const { superseded } = await this.handleRequestedCall({
           caller,
           conversationId,
           messageId: assistant.id,
@@ -487,6 +495,8 @@ export class ChatService {
           catalog,
           stream,
         });
+        // Another request changed the call: it goes on with the conversation.
+        if (superseded) return;
       }
       const unresolved = await this.store.listUnresolvedToolCalls(
         conversationId,
@@ -504,7 +514,7 @@ export class ChatService {
     requested: LlmToolCall;
     catalog: ToolCatalog;
     stream: ChatStream;
-  }) {
+  }): Promise<{ superseded?: boolean }> {
     const { caller, conversationId, requested, catalog, stream } = args;
     const action = catalog.resolve(requested.name);
     const parsed = parseArguments(requested.arguments);
@@ -543,7 +553,7 @@ export class ChatService {
         llmCallId: requested.id,
       });
       stream.emit({ type: 'tool_result', toolCall: toApiToolCall(call) });
-      return;
+      return {};
     }
 
     // Only the attributes from the actions service decide; never the model.
@@ -563,12 +573,17 @@ export class ChatService {
     });
     if (readOnly) {
       stream.emit({ type: 'tool_call', toolCall: toApiToolCall(call) });
-      await this.invokeAndStore(caller, call.id, conversationId, stream, {
-        kind: 'read-only',
-      });
-    } else {
-      stream.emit({ type: 'approval_required', toolCall: toApiToolCall(call) });
+      const { superseded } = await this.invokeAndStore(
+        caller,
+        call.id,
+        conversationId,
+        stream,
+        { kind: 'read-only' },
+      );
+      return { superseded };
     }
+    stream.emit({ type: 'approval_required', toolCall: toApiToolCall(call) });
+    return {};
   }
 
   /**
@@ -582,7 +597,7 @@ export class ChatService {
     conversationId: string,
     stream: ChatStream,
     authorization: Authorization,
-  ): Promise<{ failure?: string }> {
+  ): Promise<{ failure?: string; superseded?: boolean }> {
     const call = await this.store.getToolCall(conversationId, callId);
     if (!call || call.status !== 'running') {
       throw new ConflictError('This call is not running');
@@ -640,7 +655,7 @@ export class ChatService {
       this.logger.warn(
         `Action ${call.actionId} finished, but call ${call.id} was no longer running; the result is not stored`,
       );
-      return { failure };
+      return { failure, superseded: true };
     }
     await this.store.appendMessage({
       conversationId: call.conversationId,

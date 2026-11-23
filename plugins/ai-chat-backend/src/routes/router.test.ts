@@ -60,7 +60,7 @@ describe('a failure after the stream started', () => {
     const { server } = app(async (_caller, _id, _content, stream) => {
       stream.emit({ type: 'notice', message: 'started' });
       throw new ConflictError(
-        'An action of this conversation was just decided',
+        'Your message was not sent: an action was just decided. Send it again.',
       );
     });
     const res = await request(server)
@@ -68,7 +68,7 @@ describe('a failure after the stream started', () => {
       .set('Authorization', alice)
       .send({ content: 'hi' });
     expect(res.text).toContain(
-      'An action of this conversation was just decided',
+      'Your message was not sent: an action was just decided. Send it again.',
     );
   });
 });

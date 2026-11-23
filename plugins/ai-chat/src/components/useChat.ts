@@ -79,10 +79,14 @@ export function useChat(api: AiChatApi) {
    * stored one (a decision from another tab, for example).
    */
   const reload = useCallback(
-    async (id: string, message: string) => {
+    async (id: string, message: string, controller: AbortController) => {
       try {
         const detail = await api.getConversation(id);
-        dispatch({ type: 'loaded', detail, error: message });
+        // The user may have switched the conversation or sent a new message
+        // while the conversation was read; then this answer is stale.
+        if (abort.current === controller && !controller.signal.aborted) {
+          dispatch({ type: 'loaded', detail, error: message });
+        }
       } catch {
         // The message of the first error stays.
       }
@@ -100,28 +104,34 @@ export function useChat(api: AiChatApi) {
       abort.current = controller;
       dispatch({ type: 'streamStarted' });
       let failure: string | undefined;
+      let received = 0;
+      let refused = false;
       try {
         for await (const event of open(controller.signal)) {
+          received += 1;
           dispatch({ type: 'event', event });
           if (event.type === 'error') failure = event.message;
         }
         dispatch({ type: 'streamEnded' });
       } catch (error) {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted) return undefined;
         failure = describeError(error);
+        // Refused before anything happened (for example 409): nothing was sent.
+        refused = received === 0;
         dispatch({ type: 'failed', message: failure });
       } finally {
         refreshList();
       }
       if (failure !== undefined && !controller.signal.aborted) {
-        await reload(id, failure);
+        await reload(id, failure, controller);
       }
+      return refused ? ('refused' as const) : undefined;
     },
     [refreshList, reload],
   );
 
   const send = useCallback(
-    async (content: string) => {
+    async (content: string): Promise<'refused' | undefined> => {
       let id = conversationId;
       if (!id) {
         try {
@@ -134,11 +144,13 @@ export function useChat(api: AiChatApi) {
             type: 'failed',
             message: describeError(error),
           });
-          return;
+          return 'refused';
         }
       }
       const target = id;
-      await consume(target, signal => api.sendMessage(target, content, signal));
+      return consume(target, signal =>
+        api.sendMessage(target, content, signal),
+      );
     },
     [api, consume, conversationId],
   );

@@ -40,10 +40,11 @@ export function StatusBadge({ status }: { status: ChatToolCallStatus }) {
   );
 }
 
-// Format characters (zero width, direction marks) and control characters are
-// invisible; a person who reads the card must see them.
-const INVISIBLE = /[\p{Cf}\p{Cc}]/u;
-const INVISIBLE_ALL = /[\p{Cf}\p{Cc}]/gu;
+// Format characters (zero width, direction marks), control characters, the
+// line and paragraph separators and the Hangul filler characters look like
+// nothing or like a space; a person who reads the card must see them.
+const INVISIBLE = /[\p{Cf}\p{Cc}\u2028\u2029\u115F\u1160\u3164\uFFA0]/u;
+const INVISIBLE_ALL = /[\p{Cf}\p{Cc}\u2028\u2029\u115F\u1160\u3164\uFFA0]/gu;
 
 function escapeInvisible(text: string): string {
   return text.replace(INVISIBLE_ALL, char => {
