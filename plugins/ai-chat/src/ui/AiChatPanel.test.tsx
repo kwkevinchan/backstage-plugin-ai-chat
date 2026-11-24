@@ -1,0 +1,288 @@
+/*
+ * Copyright 2026 The backstage-plugin-ai-chat Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import { ReactNode } from 'react';
+import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { renderInTestApp, TestApiProvider } from '@backstage/test-utils';
+import {
+  AiChatLauncher,
+  AiChatPanelProvider,
+  createAiChatPanelStore,
+} from '@kwkevinchan/backstage-plugin-ai-chat-react';
+import { aiChatApiRef } from '../api';
+import { mockApi, streamResponse } from '../testData';
+import { AiChatPanel } from './AiChatPanel';
+
+function Navigation() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  return (
+    <>
+      <button type="button" onClick={() => navigate('/catalog')}>
+        Catalog
+      </button>
+      <button type="button" onClick={() => navigate('/settings')}>
+        Settings
+      </button>
+      <div data-testid="where">{`${location.pathname}${location.search}`}</div>
+    </>
+  );
+}
+
+function answer(text: string) {
+  return streamResponse([
+    { type: 'start', messageId: 'run_r-1' },
+    { type: 'start-step' },
+    { type: 'text-start', id: 't' },
+    { type: 'text-delta', id: 't', delta: text },
+    { type: 'text-end', id: 't' },
+    { type: 'finish-step' },
+    { type: 'finish', finishReason: 'stop' },
+  ]);
+}
+
+async function renderPanel(
+  api: ReturnType<typeof mockApi>,
+  options: { entry?: string; launcher?: ReactNode } = {},
+) {
+  const store = createAiChatPanelStore();
+  const view = await renderInTestApp(
+    <TestApiProvider apis={[[aiChatApiRef, api]]}>
+      <AiChatPanelProvider store={store}>
+        <Navigation />
+        <Routes>
+          <Route path="/catalog" element={<div>Catalog page</div>} />
+          <Route path="/settings" element={<div>Settings page</div>} />
+        </Routes>
+        <AiChatPanel />
+        {options.launcher}
+      </AiChatPanelProvider>
+    </TestApiProvider>,
+    { routeEntries: [options.entry ?? '/catalog'] },
+  );
+  return { store, ...view };
+}
+
+describe('AiChatPanel', () => {
+  it('keeps the open conversation mounted when the route changes', async () => {
+    const api = mockApi();
+    api.sendMessage.mockResolvedValue(answer('Hello from the model'));
+    await renderPanel(api);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Open AI chat' }));
+    await userEvent.type(screen.getByLabelText('Message'), 'hi{Enter}');
+
+    expect(await screen.findByText('hi')).toBeInTheDocument();
+    expect(await screen.findByText('Hello from the model')).toBeInTheDocument();
+    const gets = api.getSession.mock.calls.length;
+    const sends = api.sendMessage.mock.calls.length;
+    expect(gets).toBeGreaterThan(0);
+    expect(sends).toBe(1);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    expect(screen.getByTestId('where')).toHaveTextContent('/settings');
+    expect(screen.queryByText('Catalog page')).not.toBeInTheDocument();
+    expect(screen.getByText('Settings page')).toBeInTheDocument();
+    expect(screen.getByText('hi')).toBeInTheDocument();
+    expect(screen.getByText('Hello from the model')).toBeInTheDocument();
+    expect(api.getSession).toHaveBeenCalledTimes(gets);
+    expect(api.sendMessage).toHaveBeenCalledTimes(sends);
+    expect(api.createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens a conversation from the launcher and sends the prompt with the entity', async () => {
+    const api = mockApi();
+    api.sendMessage.mockResolvedValue(answer('On the catalog page'));
+    await renderPanel(api, {
+      launcher: (
+        <AiChatLauncher
+          prompt="where is this"
+          entityRef="component:default/example.com"
+        >
+          Ask about example.com
+        </AiChatLauncher>
+      ),
+    });
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Ask about example.com' }),
+    );
+
+    expect(await screen.findByText('where is this')).toBeInTheDocument();
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(api.createSession).toHaveBeenCalledTimes(1);
+    expect(api.sendMessage).toHaveBeenCalledWith(
+      's-1',
+      {
+        text: 'where is this',
+        page: {
+          path: '/catalog',
+          entityRef: 'component:default/example.com',
+        },
+      },
+      expect.anything(),
+    );
+  });
+
+  it('sends the message without an entity that is not an entity reference', async () => {
+    const api = mockApi();
+    api.sendMessage.mockResolvedValue(answer('Still here'));
+    await renderPanel(api, {
+      launcher: (
+        <AiChatLauncher prompt="where is this" entityRef="a b">
+          Bad entity
+        </AiChatLauncher>
+      ),
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Bad entity' }));
+
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(api.sendMessage).toHaveBeenCalledWith(
+      's-1',
+      { text: 'where is this', page: { path: '/catalog' } },
+      expect.anything(),
+    );
+  });
+
+  it('keeps the entity for the next message when the launcher has no prompt', async () => {
+    const api = mockApi();
+    api.sendMessage.mockResolvedValue(answer('About the component'));
+    await renderPanel(api, {
+      launcher: (
+        <AiChatLauncher entityRef="component:default/example.com">
+          Entity only
+        </AiChatLauncher>
+      ),
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Entity only' }));
+    expect(api.createSession).not.toHaveBeenCalled();
+
+    await userEvent.type(screen.getByLabelText('Message'), 'hi{Enter}');
+
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(api.createSession).toHaveBeenCalledTimes(1);
+    expect(api.sendMessage).toHaveBeenCalledWith(
+      's-1',
+      {
+        text: 'hi',
+        page: {
+          path: '/catalog',
+          entityRef: 'component:default/example.com',
+        },
+      },
+      expect.anything(),
+    );
+  });
+
+  it('starts a conversation from the panel itself', async () => {
+    const api = mockApi();
+    api.sendMessage.mockResolvedValue(answer('Hello from the model'));
+    await renderPanel(api);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Open AI chat' }));
+    await userEvent.type(screen.getByLabelText('Message'), 'hi{Enter}');
+
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(api.createSession).toHaveBeenCalledTimes(1);
+    expect(api.sendMessage).toHaveBeenCalledWith(
+      's-1',
+      { text: 'hi', page: { path: '/catalog' } },
+      expect.anything(),
+    );
+  });
+
+  it('keeps the conversation when the panel is closed and opened again', async () => {
+    const api = mockApi();
+    api.sendMessage.mockResolvedValue(answer('Hello from the model'));
+    await renderPanel(api);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Open AI chat' }));
+    await userEvent.type(screen.getByLabelText('Message'), 'hi{Enter}');
+    expect(await screen.findByText('Hello from the model')).toBeInTheDocument();
+    const gets = api.getSession.mock.calls.length;
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Close AI chat' }),
+    );
+
+    // The conversation stays in the document. The frame is hidden, which the
+    // panel style removes from view; jsdom does not apply that stylesheet.
+    const frame = document.querySelector('aside');
+    expect(frame).toHaveAttribute('hidden');
+    expect(frame).toHaveTextContent('hi');
+    expect(frame).toHaveTextContent('Hello from the model');
+    expect(
+      screen.getByRole('button', { name: 'Open AI chat' }),
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Open AI chat' }));
+
+    expect(frame).not.toHaveAttribute('hidden');
+    expect(screen.getByText('hi')).toBeInTheDocument();
+    expect(screen.getByText('Hello from the model')).toBeInTheDocument();
+    expect(api.getSession).toHaveBeenCalledTimes(gets);
+    expect(api.createSession).toHaveBeenCalledTimes(1);
+    expect(api.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let the entity on the query string replace the launched entity', async () => {
+    const api = mockApi();
+    api.sendMessage.mockResolvedValue(answer('On the catalog page'));
+    await renderPanel(api, {
+      entry: '/catalog?entityRef=component:default/other',
+      launcher: (
+        <AiChatLauncher
+          prompt="where is this"
+          entityRef="component:default/example.com"
+        >
+          Ask about example.com
+        </AiChatLauncher>
+      ),
+    });
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Ask about example.com' }),
+    );
+    expect(await screen.findByText('where is this')).toBeInTheDocument();
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(api.sendMessage.mock.calls[0][1]).toEqual({
+      text: 'where is this',
+      page: {
+        path: '/catalog',
+        entityRef: 'component:default/example.com',
+      },
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await userEvent.type(screen.getByLabelText('Message'), 'again{Enter}');
+
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(2));
+    expect(api.sendMessage.mock.calls[1][1]).toEqual({
+      text: 'again',
+      page: {
+        path: '/settings',
+        entityRef: 'component:default/example.com',
+      },
+    });
+    expect(api.createSession).toHaveBeenCalledTimes(1);
+    expect(api.getSession.mock.calls.length).toBeGreaterThan(0);
+  });
+});

@@ -47,20 +47,24 @@ BACKSTAGE_TEST_DATABASE_POSTGRES16_CONNECTION_STRING=postgresql://postgres:postg
 
 ## Layout
 
-| Package                         | Role                                                                             |
-| ------------------------------- | -------------------------------------------------------------------------------- |
-| `ai-chat-backend`               | Backend plugin `ai-chat`; depends only on `ai-chat-harness` and `ai-chat-common` |
-| `ai-chat`                       | Frontend plugin; depends on no other package of this repository                  |
-| `app`, `app-next`               | Development apps (legacy and new frontend system); private                       |
-| `backend`                       | Development backend; private                                                     |
-| `ai-chat-harness` (`packages/`) | Core of the agent loop; published, depends on no `@backstage/*` package          |
-| `ai-chat-common`                | Types shared by the frontend and the backend; published                          |
+| Package                         | Role                                                                                 |
+| ------------------------------- | ------------------------------------------------------------------------------------ |
+| `ai-chat-backend`               | Backend plugin `ai-chat`; depends only on `ai-chat-harness` and `ai-chat-common`     |
+| `ai-chat`                       | Frontend plugin; depends on `ai-chat-common` and `ai-chat-react`                     |
+| `ai-chat-react`                 | Web library other frontend plugins use to open the chat; depends on `ai-chat-common` |
+| `app`, `app-next`               | Development apps (legacy and new frontend system); private                           |
+| `backend`                       | Development backend; private                                                         |
+| `ai-chat-harness` (`packages/`) | Core of the agent loop; published, depends on no `@backstage/*` package              |
+| `ai-chat-common`                | Types shared by the frontend and the backend; published                              |
 
 `yarn constraints` (`yarn.config.cjs`) checks the directions: frontend
 packages never depend on backend packages or Node-only packages, and the other
 way round, and a published package never on a private one. The backend
 depends on the core (its adapters implement the ports of the core); the core
-depends on no other package of this repository. The core
+depends on no other package of this repository. The frontend plugin
+depends on `ai-chat-common` and `ai-chat-react`. `ai-chat-react` depends on
+`ai-chat-common`. Another frontend package depends only on `ai-chat-react`,
+not on the host plugin. The core
 (`packages/ai-chat-harness`) lists no `@backstage/*` package as a runtime
 dependency, and its lint rules (`packages/ai-chat-harness/.eslintrc.js`, tested in
 `src/lintRules.test.ts`) keep `domain/` from importing `application/`, and

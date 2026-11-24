@@ -18,5 +18,12 @@ opens the chat for an entity: every message carries the entity to the backend.
   the page is on `/ai-chat`.
 - Legacy frontend system: `AiChatPage` and `aiChatPlugin` from the package;
   mount the page with `path="/ai-chat/*"` (`FlatRoutes` adds the `/*`).
+  Render `AiChatPanel` once inside the router and outside the routes. The
+  panel keeps the open conversation when the page changes.
+
+Another plugin opens that panel with `AiChatLauncher` and `useAiChatPanel`
+from `@kwkevinchan/backstage-plugin-ai-chat-react`. A prompt starts a new
+conversation and is sent at once. An entity reference is sent with the
+messages. The new frontend system mounts the panel with this plugin.
 
 More in the [README of the repository](https://github.com/kwkevinchan/backstage-plugin-ai-chat#readme).

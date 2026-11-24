@@ -38,6 +38,17 @@ const _default: OverridableFrontendPlugin<
         params: ApiFactory<TApi, TImpl, TDeps>,
       ) => ExtensionBlueprintParams<AnyApiFactory>;
     }>;
+    'app-root-element:ai-chat/panel': OverridableExtensionDefinition<{
+      kind: 'app-root-element';
+      name: 'panel';
+      config: {};
+      configInput: {};
+      output: ExtensionDataRef<JSX_2.Element, 'core.reactElement', {}>;
+      inputs: {};
+      params: {
+        element: JSX.Element;
+      };
+    }>;
     'page:ai-chat': OverridableExtensionDefinition<{
       kind: 'page';
       name: undefined;

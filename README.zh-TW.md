@@ -32,6 +32,11 @@ backend.add(import('@kwkevinchan/backstage-plugin-ai-chat-backend'));
 前端（新前端系統）：`import aiChatPlugin from '@kwkevinchan/backstage-plugin-ai-chat/alpha'`，
 頁面在 `/ai-chat`，每一段對話有自己的網址 `/ai-chat/<session id>`。
 `/ai-chat?entityRef=component:default/my-service` 會以那個 entity 開啟對話。
+別的 frontend plugin 用 `@kwkevinchan/backstage-plugin-ai-chat-react` 的
+`<AiChatLauncher prompt="…" entityRef="…" />` 或 `useAiChatPanel()` 開啟側邊面板，
+並帶入 prompt 和 entity。有 prompt 會開始一段新的對話並立刻送出；只有 entity 時，
+下一則從面板送出的訊息帶著它。面板掛在路由外面，換頁不會卸下進行中的對話。
+舊前端系統要在 router 裡、路由外面掛一次 `<AiChatPanel>`；新前端系統註冊 plugin 就有這塊面板。
 舊前端系統的接法見[英文 README](README.md#frontend-legacy-frontend-system)。
 
 後端用自己的資料庫存狀態（`sessions`、`runs`、`items` 三張表），啟動時自己跑 migration。SQLite 只允許一條連線（連線池的上限必須是 1，這是 Knex 對 SQLite 的預設，除非設定改過）。需要多條連線時用 PostgreSQL。

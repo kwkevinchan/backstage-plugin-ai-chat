@@ -22,5 +22,6 @@
  */
 
 export { aiChatPlugin, AiChatPage } from './plugin';
+export { AiChatPanel } from './ui/AiChatPanel';
 export { aiChatApiRef } from './api';
 export type { AiChatApi } from './api';

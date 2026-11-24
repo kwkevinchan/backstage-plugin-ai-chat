@@ -36,6 +36,13 @@ describe('ai-chat (new frontend system)', () => {
     expect(aiChatPlugin.getExtension('api:ai-chat')).toBeDefined();
   });
 
+  it('mounts the side panel at the app root', () => {
+    const tester = createExtensionTester(
+      aiChatPlugin.getExtension('app-root-element:ai-chat/panel'),
+    );
+    expect(tester.get(coreExtensionData.reactElement)).toBeTruthy();
+  });
+
   it('lets an app override the page path', () => {
     const overridden = aiChatPlugin.withOverrides({
       extensions: [

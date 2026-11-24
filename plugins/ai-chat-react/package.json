@@ -1,0 +1,74 @@
+{
+  "name": "@kwkevinchan/backstage-plugin-ai-chat-react",
+  "version": "0.0.0",
+  "description": "React entry points that open the AI chat for Backstage from another plugin: a launcher and a hook for the side panel",
+  "license": "Apache-2.0",
+  "keywords": [
+    "backstage",
+    "backstage-plugin",
+    "ai",
+    "chat",
+    "llm"
+  ],
+  "homepage": "https://github.com/kwkevinchan/backstage-plugin-ai-chat/tree/main/plugins/ai-chat-react",
+  "bugs": {
+    "url": "https://github.com/kwkevinchan/backstage-plugin-ai-chat/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kwkevinchan/backstage-plugin-ai-chat",
+    "directory": "plugins/ai-chat-react"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "typesVersions": {
+    "*": {
+      "package.json": [
+        "package.json"
+      ]
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "backstage": {
+    "role": "web-library",
+    "pluginId": "ai-chat",
+    "pluginPackages": [
+      "@kwkevinchan/backstage-plugin-ai-chat",
+      "@kwkevinchan/backstage-plugin-ai-chat-backend",
+      "@kwkevinchan/backstage-plugin-ai-chat-common",
+      "@kwkevinchan/backstage-plugin-ai-chat-react"
+    ]
+  },
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "backstage-cli package build",
+    "lint": "backstage-cli package lint",
+    "test": "backstage-cli package test",
+    "clean": "backstage-cli package clean",
+    "prepack": "backstage-cli package prepack",
+    "postpack": "backstage-cli package postpack"
+  },
+  "dependencies": {
+    "@kwkevinchan/backstage-plugin-ai-chat-common": "workspace:^"
+  },
+  "devDependencies": {
+    "@backstage/cli": "backstage:^",
+    "@testing-library/jest-dom": "^6.0.0",
+    "@testing-library/react": "^14.0.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  }
+}

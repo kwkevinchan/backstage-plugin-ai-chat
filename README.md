@@ -120,7 +120,29 @@ function AskAboutThis() {
 }
 ```
 
-The side panel that opens the chat on every page (P2) will replace this link.
+Another plugin opens the same chat in a side panel, without linking to the
+page. The panel stays mounted when the page changes. A prompt starts a new
+conversation and is sent at once. An entity reference is sent with the
+messages of that conversation.
+
+```tsx
+import { AiChatLauncher } from '@kwkevinchan/backstage-plugin-ai-chat-react';
+
+<AiChatLauncher
+  prompt="where is this component?"
+  entityRef="component:default/example.com"
+>
+  Ask about example.com
+</AiChatLauncher>;
+```
+
+`useAiChatPanel()` from the same package opens and closes that panel from
+code. `open()` with no prompt and no entity reference does not replace the
+conversation. `close()` hides the panel and leaves the conversation mounted.
+
+On the legacy frontend system, render `<AiChatPanel>` once inside the router
+and outside the routes. The new frontend system mounts the same panel with
+the plugin, so the app does not render it again.
 
 ### Frontend: legacy frontend system
 
@@ -128,6 +150,7 @@ The side panel that opens the chat on every page (P2) will replace this link.
 // packages/app/src/App.tsx
 import {
   AiChatPage,
+  AiChatPanel,
   aiChatPlugin,
 } from '@kwkevinchan/backstage-plugin-ai-chat';
 
@@ -135,6 +158,8 @@ const app = createApp({ plugins: [aiChatPlugin /* … */] });
 // in the routes: the page needs the `/*`, because each session has its own
 // URL (`/ai-chat/<session id>`); `FlatRoutes` adds it itself.
 <Route path="/ai-chat/*" element={<AiChatPage />} />;
+// once, inside the router and outside the routes:
+<AiChatPanel />;
 ```
 
 ## Configure

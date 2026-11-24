@@ -15,6 +15,7 @@ import type { ChatToolset } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { CreateChatSessionRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { DecideToolCallRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { InsertChatMessageRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import { JSX as JSX_2 } from 'react';
 import type { QueueChatMessageRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ReorderQueueRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ResumeChatRunRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
@@ -86,6 +87,9 @@ export const aiChatApiRef: ApiRef<AiChatApi>;
 
 // @public
 export const AiChatPage: () => JSX.Element;
+
+// @public
+export function AiChatPanel(): JSX_2.Element;
 
 // @public
 export const aiChatPlugin: BackstagePlugin<

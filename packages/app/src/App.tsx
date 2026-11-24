@@ -26,6 +26,7 @@ import { createApp } from '@backstage/app-defaults';
 import { AppRouter, FlatRoutes } from '@backstage/core-app-api';
 import {
   AiChatPage,
+  AiChatPanel,
   aiChatPlugin,
 } from '@kwkevinchan/backstage-plugin-ai-chat';
 import { Root } from './components/Root';
@@ -51,6 +52,8 @@ export default app.createRoot(
     <AlertDisplay />
     <OAuthRequestDialog />
     <AppRouter>
+      {/* Outside the routes: the conversation stays mounted when the page changes. */}
+      <AiChatPanel />
       <Root>{routes}</Root>
     </AppRouter>
   </>,
