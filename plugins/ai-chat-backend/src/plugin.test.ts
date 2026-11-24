@@ -145,6 +145,58 @@ describe('aiChatPlugin', () => {
     }
   });
 
+  it('schedules session retention every hour, and a retention of 0 deletes nothing', async () => {
+    const scheduler = mockServices.scheduler.mock();
+    const db = await createDb();
+    try {
+      await startTestBackend({
+        features: [
+          aiChatPlugin,
+          mockServices.rootConfig.factory({
+            data: {
+              aiChat: {
+                llm: { baseUrl: 'http://127.0.0.1:9', model: 'test-model' },
+                retention: { days: 0 },
+              },
+            },
+          }),
+          mockServices.database.factory({ knex: db }),
+          mockServices.auditor.mock().factory,
+          mockServices.httpAuth.factory({
+            defaultCredentials: mockCredentials.none(),
+          }),
+          scheduler.factory,
+          createServiceFactory({
+            service: actionsServiceRef,
+            deps: {},
+            factory: () => new FakeActions([]),
+          }),
+        ],
+      });
+      const task = scheduler.scheduleTask.mock.calls
+        .map(scheduled => scheduled[0])
+        .find(options => options.id === 'ai-chat-purge-expired-sessions');
+      expect(task).toMatchObject({
+        frequency: { hours: 1 },
+        timeout: { minutes: 5 },
+      });
+      if (!task) throw new Error('retention task was not scheduled');
+      await db('sessions').insert({
+        id: 'old-session',
+        owner_ref: 'user:default/alice',
+        agent_id: 'default',
+        enabled_toolsets: '[]',
+        pinned: false,
+        created_at: '2020-01-01T00:00:00.000Z',
+        updated_at: '2020-01-01T00:00:00.000Z',
+      });
+      await task.fn(new AbortController().signal);
+      expect(await db('sessions').where({ id: 'old-session' })).toHaveLength(1);
+    } finally {
+      await db.destroy();
+    }
+  });
+
   it('refuses a request without credentials (401) and a service token (403)', async () => {
     const server = await startBackend();
     const none = await request(server).get('/api/ai-chat/sessions');

@@ -38,4 +38,13 @@ export interface SessionRepository {
 
   /** Deletes the session with its runs and items. Throws `SessionNotFound` when there is none. */
   delete(sessionId: string): Promise<void>;
+
+  /**
+   * Deletes sessions whose last change is strictly before `olderThan`, except
+   * a session with a run that has not ended. Returns how many were deleted.
+   * On PostgreSQL, a row another transaction holds is skipped, so two calls
+   * at the same time do not delete one session twice and do not wait on each
+   * other.
+   */
+  purgeExpired(olderThan: Date): Promise<number>;
 }

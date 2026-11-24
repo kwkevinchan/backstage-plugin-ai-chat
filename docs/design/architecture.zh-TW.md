@@ -543,7 +543,7 @@ plugins/ai-chat-backend/
       visibility.ts                    visibleItems()：某個檢視者看得到哪些 Item
       fork.ts                          forkItems()：複製時帶走哪些 Item
       toolset.ts                       Toolset、enabledTools()
-      retention.ts
+      retention.ts                     保存期限：updated_at 早於現在減 days 天（SE-05）
       errors.ts                        SessionNotFound、RunNotFound、RunAlreadyActive（P1-05）；NotSessionOwner、ToolCallNotFound、ToolCallNotWaiting、RunNotWaiting、AgentNotFound、UnknownToolset、ShuttingDown（P1-08）
     application/                       第 2 圈
       ports/
@@ -734,6 +734,7 @@ export class SendMessage {
 - **`DeleteSession`**：有進行中的 Run 就丟 `RunAlreadyActive`（鎖的順序見規劃的 P1-08）。檢查和刪除之間仍有一個很短的空隙：這時新開的 Run 會在刪除時被連帶刪掉，它的迴圈下一次寫入得到 `LeaseLost` 而結束。
 - **`CreateSession`**：一定把 Toolset 存進 `enabled_toolsets`：沒給就用 `default: true` 的組，也可能是空陣列；不認得的 id 丟 `UnknownToolset`。`UpdateSession` 同樣檢查。
 - **`ExpireStaleRuns`**：`plugin.ts` 每 30 秒排一次。
+- **`PurgeExpiredSessions`**（SE-05）：`plugin.ts` 每小時排一次（`ai-chat-purge-expired-sessions`，timeout 5 分鐘，跟清沒用到的附件一樣）。期限是 `aiChat.retention.days`：沒設定是 90，`0` 不刪任何 Session，負數或不是整數則 backend 啟動失敗。到期看 `sessions.updated_at` 是否**早於**「現在減 `days` 個整天（每個 24 小時）」；剛好在界線上的留下。`updated_at` 在建立、修改 Session（改名、釘選、封存、開關 Toolset）和寫入 Item 時更新；只排隊或只上傳附件不更新，所以不會因此延後刪除。進行中的 Run（`runs.active_session_id` 還在，也就是 `running` 或 `waiting_approval`）不刪，和 `DeleteSession` 拒絕刪除一樣；Run 結束後，下一次才刪。釘選和封存沒有例外。刪除沿用外鍵的連帶刪除（runs、items、queued messages、attachments）。稽核在 Backstage auditor，不在這些表裡，這項不讀也不寫它。PostgreSQL 上每個 Session 一個 transaction：先依 `id` 對它的 runs 取 `FOR UPDATE SKIP LOCKED`，確認沒有進行中的 Run，再對 session 列取 `FOR UPDATE SKIP LOCKED`（並且 `updated_at` 仍早於期限），然後刪除。別的 transaction 已經鎖住的 run 或 session 直接跳過，不等，所以兩台同時跑不會刪到同一段，也不會和寫入互等而死結。鎖的順序仍是先 runs 再 session（第 13.8 節）。SQLite 沒有列鎖，交易一個接一個。排程用 Backstage scheduler 的預設 global scope（同一時間只有一台執行這項工作）；列鎖是兩次執行重疊時的第二層。
 
 ### 5.4 `RunSupervisor`
 
@@ -1664,19 +1665,20 @@ controller 依序做（`controllers/attachments.ts`；`route()` 先取出身分�
 - `queued_messages` 的索引：`(session_id, position)`，外鍵 `session_id` 連帶刪除。
 - **取鎖順序。** 每個 transaction 照下表的順序碰資料表：要碰 `runs` 的先碰它，再取 `sessions` 的列鎖；`sessions` 之後的表（`items`、`queued_messages`、`attachments`）由 `sessions` 的列鎖排成一個接一個，同一段 Session 的 transaction 不會互等。不碰 `runs` 的（排隊的 `update`、`remove`、`reorder`、上傳）從 `sessions` 開始；`startNext` 用 INSERT 建立自己的 `runs` 列（新列沒有別人在等），再取 `sessions`。碰 `runs` 時一開始就取需要的最強的鎖，不先取 `FOR SHARE` 再升級：兩個都持有共享鎖的 transaction 同時要升級，會互等。
 
-| 寫入                                                   | 順序                                                                                                                                                                                     |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 模型輸出的 `append`（有 `agent_message`、`tool_call`） | `runs`（`FOR NO KEY UPDATE`）、更新 `runs.read_up_to_seq`、`sessions`、`items`                                                                                                           |
-| 其他核心的寫入（`tool_started`、`tool_result`）        | `runs`（`FOR SHARE`）、`sessions`、`items`                                                                                                                                               |
-| 直接送出的 `user_message`、`approval`                  | `runs`（`FOR SHARE`）、`sessions`、`items`、`attachments`（`FOR UPDATE`）                                                                                                                |
-| 插入                                                   | `runs`（`FOR SHARE`）、`sessions`、`items`、`attachments`（`FOR UPDATE`）                                                                                                                |
-| Run 正常結束的 `transition`                            | `runs`（`FOR UPDATE`），之後只讀 `items`                                                                                                                                                 |
-| 排隊的 `add`                                           | `runs`（`FOR SHARE`）、`sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`attachments`                                                                                               |
-| `startNext`                                            | `runs`（INSERT）、`sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`attachments`（`FOR UPDATE`，讀出附件的中繼資料）、`items`、`attachments`（標記 `used_seq`、重算 `reserved_by`） |
-| 排隊的 `update`、`remove`、`reorder`                   | `sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`attachments`                                                                                                                      |
-| 上傳（`put`）                                          | `sessions`（`FOR NO KEY UPDATE`）、`attachments`                                                                                                                                         |
-| 刪除 Session                                           | `runs`（`FOR UPDATE`，依 `id` 一列一列取）、`sessions`（`FOR UPDATE`），然後刪除 `sessions`（連帶刪除 `items`、`queued_messages`、`attachments`）                                        |
-| `PurgeUnusedAttachments`                               | 只有 `attachments`（`FOR UPDATE SKIP LOCKED` 選出，再刪除）                                                                                                                              |
+| 寫入                                                   | 順序                                                                                                                                                                                                                                            |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 模型輸出的 `append`（有 `agent_message`、`tool_call`） | `runs`（`FOR NO KEY UPDATE`）、更新 `runs.read_up_to_seq`、`sessions`、`items`                                                                                                                                                                  |
+| 其他核心的寫入（`tool_started`、`tool_result`）        | `runs`（`FOR SHARE`）、`sessions`、`items`                                                                                                                                                                                                      |
+| 直接送出的 `user_message`、`approval`                  | `runs`（`FOR SHARE`）、`sessions`、`items`、`attachments`（`FOR UPDATE`）                                                                                                                                                                       |
+| 插入                                                   | `runs`（`FOR SHARE`）、`sessions`、`items`、`attachments`（`FOR UPDATE`）                                                                                                                                                                       |
+| Run 正常結束的 `transition`                            | `runs`（`FOR UPDATE`），之後只讀 `items`                                                                                                                                                                                                        |
+| 排隊的 `add`                                           | `runs`（`FOR SHARE`）、`sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`attachments`                                                                                                                                                      |
+| `startNext`                                            | `runs`（INSERT）、`sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`attachments`（`FOR UPDATE`，讀出附件的中繼資料）、`items`、`attachments`（標記 `used_seq`、重算 `reserved_by`）                                                        |
+| 排隊的 `update`、`remove`、`reorder`                   | `sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`attachments`                                                                                                                                                                             |
+| 上傳（`put`）                                          | `sessions`（`FOR NO KEY UPDATE`）、`attachments`                                                                                                                                                                                                |
+| 刪除 Session                                           | `runs`（`FOR UPDATE`，依 `id` 一列一列取）、`sessions`（`FOR UPDATE`），然後刪除 `sessions`（連帶刪除 `items`、`queued_messages`、`attachments`）                                                                                               |
+| `PurgeExpiredSessions`                                 | 每個過期的 Session 各自一個 transaction：`runs`（`FOR UPDATE SKIP LOCKED`，依 `id`）、確認沒有 `active_session_id`、`sessions`（`FOR UPDATE SKIP LOCKED`，且 `updated_at` 仍早於期限），然後刪除 `sessions`（連帶刪除）。別人鎖住的列跳過，不等 |
+| `PurgeUnusedAttachments`                               | 只有 `attachments`（`FOR UPDATE SKIP LOCKED` 選出，再刪除）                                                                                                                                                                                     |
 
 - 一個 transaction 要鎖多列 `attachments` 時，依 `id` 排序上鎖。刪除 Session 要鎖多列 `runs` 時也一樣，一列一列取，然後才取 `sessions`。直接 `DELETE` `sessions` 會先鎖 session 那一列，連帶刪除才去鎖 `runs`，和先鎖 run 再鎖 session 的寫入相反，PostgreSQL 會判死結。取到 `sessions` 之後若多了新的 `runs` 列，這次就放棄重來，不拿著 `sessions` 再去等那一列。
 - `startNext` 的實際順序：先鎖附件（為了把中繼資料寫進 `user_message`），再取序號、寫 `items`，最後標記附件。不會死結：同一段 Session 的寫入都先排在 `sessions` 的列鎖後面，所以不會有兩個 transaction 同時持有同一段 Session 的 `attachments` 鎖；`PurgeUnusedAttachments` 不碰 `sessions`，只持有 `attachments` 的鎖，而且用 `SKIP LOCKED` 不等任何鎖。

@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { IMAGES } from '../../__testUtils__/images';
 import { SessionNotFound } from '../../domain';
 import { NEW_SESSION, createPersistence } from './__testUtils__';
 
@@ -129,5 +130,115 @@ describe('KnexSessionRepository', () => {
       SessionNotFound,
     );
     expect(await p.knex('runs').where({ session_id: created.id })).toEqual([]);
+  });
+
+  describe('purgeExpired (SE-05)', () => {
+    const age = (id: string, updatedAt: string) =>
+      p.knex('sessions').where({ id }).update({ updated_at: updatedAt });
+
+    it('deletes a session last changed before the cutoff and keeps one changed at the cutoff', async () => {
+      const cutoff = new Date('2026-04-01T00:00:00.000Z');
+      const before = await p.sessions.create(NEW_SESSION);
+      const at = await p.sessions.create(NEW_SESSION);
+      const after = await p.sessions.create(NEW_SESSION);
+      await age(before.id, '2026-03-31T23:59:59.999Z');
+      await age(at.id, '2026-04-01T00:00:00.000Z');
+      await age(after.id, '2026-04-01T00:00:00.001Z');
+
+      expect(await p.sessions.purgeExpired(cutoff)).toBe(1);
+      await expect(p.sessions.get(before.id)).rejects.toBeInstanceOf(
+        SessionNotFound,
+      );
+      await expect(p.sessions.get(at.id)).resolves.toBeDefined();
+      await expect(p.sessions.get(after.id)).resolves.toBeDefined();
+    });
+
+    it('keeps a session while its run has not ended, and deletes it once the run has ended', async () => {
+      const running = await p.sessions.create(NEW_SESSION);
+      await p.runs.start(running.id);
+      await age(running.id, '2020-01-01T00:00:00.000Z');
+
+      const waiting = await p.sessions.create(NEW_SESSION);
+      const waitingRun = await p.runs.start(waiting.id);
+      await p.runs.transition(waitingRun.id, 'waiting_approval', {
+        leaseOwner: waitingRun.fence.leaseOwner,
+      });
+      await age(waiting.id, '2020-01-01T00:00:00.000Z');
+
+      const ended = await p.sessions.create(NEW_SESSION);
+      const endedRun = await p.runs.start(ended.id);
+      await p.runs.transition(endedRun.id, 'completed', {
+        leaseOwner: endedRun.fence.leaseOwner,
+      });
+      await age(ended.id, '2020-01-01T00:00:00.000Z');
+
+      expect(await p.sessions.purgeExpired(p.clock.now())).toBe(1);
+      await expect(p.sessions.get(running.id)).resolves.toBeDefined();
+      await expect(p.sessions.get(waiting.id)).resolves.toBeDefined();
+      await expect(p.sessions.get(ended.id)).rejects.toBeInstanceOf(
+        SessionNotFound,
+      );
+    });
+
+    it('deletes a pinned or archived session past the cutoff, and keeps one pinned more recently than the cutoff', async () => {
+      const pinnedOld = await p.sessions.create(NEW_SESSION);
+      await p.sessions.update(pinnedOld.id, { pinned: true });
+      await age(pinnedOld.id, '2020-01-01T00:00:00.000Z');
+
+      const archivedOld = await p.sessions.create(NEW_SESSION);
+      await p.sessions.update(archivedOld.id, { archived: true });
+      await age(archivedOld.id, '2020-01-01T00:00:00.000Z');
+
+      const pinnedFresh = await p.sessions.create(NEW_SESSION);
+      await p.sessions.update(pinnedFresh.id, { pinned: true });
+
+      expect(await p.sessions.purgeExpired(p.clock.now())).toBe(2);
+      await expect(p.sessions.get(pinnedOld.id)).rejects.toBeInstanceOf(
+        SessionNotFound,
+      );
+      await expect(p.sessions.get(archivedOld.id)).rejects.toBeInstanceOf(
+        SessionNotFound,
+      );
+      await expect(p.sessions.get(pinnedFresh.id)).resolves.toMatchObject({
+        pinned: true,
+      });
+    });
+
+    it('deletes the runs, items, queued messages and images with the session, and leaves a newer session', async () => {
+      const session = await p.sessions.create(NEW_SESSION);
+      const run = await p.runs.start(session.id);
+      await p.items.append(
+        session.id,
+        [{ kind: 'user_message', text: 'hi' }],
+        run.fence,
+      );
+      await p.queue.add(session.id, { text: 'later' }, { max: 5 });
+      const image = await p.attachments.put({
+        sessionId: session.id,
+        ownerRef: NEW_SESSION.ownerRef,
+        mediaType: 'image/png',
+        name: 'a.png',
+        bytes: IMAGES['image/png'],
+        maxPending: 12,
+      });
+      await p.runs.transition(run.id, 'completed', {
+        leaseOwner: run.fence.leaseOwner,
+      });
+      await age(session.id, '2020-01-01T00:00:00.000Z');
+      const fresh = await p.sessions.create(NEW_SESSION);
+
+      expect(await p.sessions.purgeExpired(p.clock.now())).toBe(1);
+      expect(await p.knex('runs').where({ session_id: session.id })).toEqual(
+        [],
+      );
+      expect(await p.knex('items').where({ session_id: session.id })).toEqual(
+        [],
+      );
+      expect(
+        await p.knex('queued_messages').where({ session_id: session.id }),
+      ).toEqual([]);
+      expect(await p.knex('attachments').where({ id: image.id })).toEqual([]);
+      await expect(p.sessions.get(fresh.id)).resolves.toBeDefined();
+    });
   });
 });

@@ -179,5 +179,23 @@ export interface Config {
      * backend at startup). Defaults to 20000.
      */
     maxToolOutputChars?: number;
+    /**
+     * How long a session is kept. A task runs every hour and deletes a
+     * session whose last change is older than `days`, with its runs,
+     * messages, queued messages and images. The audit log is not part of the
+     * session and is left as it is. A session with a run that has not ended
+     * is kept until that run ends. Pinning or archiving a session does not
+     * keep it past `days`; those changes do count as a change, so the time
+     * starts again from then. Defaults to 90. Set `days` to 0 to keep every
+     * session.
+     */
+    retention?: {
+      /**
+       * Days after the last change of a session. One day is 24 hours. A
+       * session changed exactly this long ago is kept. 0 keeps every session.
+       * Defaults to 90.
+       */
+      days?: number;
+    };
   };
 }
