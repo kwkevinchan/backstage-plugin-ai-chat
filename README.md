@@ -81,7 +81,11 @@ export default createApp({ features: [/* … */ aiChatPlugin] });
 ```
 
 The page is on `/ai-chat`, and the app lists it in the sidebar. Move it with
-`app.extensions` (`page:ai-chat: { config: { path: /assistant } }`).
+`app.extensions` (`page:ai-chat: { config: { path: /assistant } }`). Each
+session has its own URL, `/ai-chat/<session id>`. A link to
+`/ai-chat?entityRef=component:default/my-service` opens the chat for that
+entity: every message of it carries the entity (and the path of the page) to
+the backend.
 
 ### Frontend: legacy frontend system
 
@@ -93,8 +97,9 @@ import {
 } from '@kwkevinchan/backstage-plugin-ai-chat';
 
 const app = createApp({ plugins: [aiChatPlugin /* … */] });
-// in the routes:
-<Route path="/ai-chat" element={<AiChatPage />} />;
+// in the routes: the page needs the `/*`, because each session has its own
+// URL (`/ai-chat/<session id>`); `FlatRoutes` adds it itself.
+<Route path="/ai-chat/*" element={<AiChatPage />} />;
 ```
 
 ## Configure

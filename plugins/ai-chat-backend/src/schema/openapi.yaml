@@ -59,7 +59,7 @@ components:
       name: afterSeq
       in: query
       required: false
-      description: Leave out the items up to this `seq`.
+      description: 'Leave out the items up to this `seq`. On `GET /sessions/{id}/stream`, a client that uses `useChat` of the AI SDK must not send it: the SDK finds a tool part only when the stream carries the whole run, so a stream that leaves items out loses the tool parts.'
       allowReserved: true
       schema:
         type: integer

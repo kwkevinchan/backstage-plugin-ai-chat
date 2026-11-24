@@ -22,7 +22,6 @@
   "exports": {
     ".": "./src/index.ts",
     "./alpha": "./src/alpha.tsx",
-    "./common": "./src/common/index.ts",
     "./package.json": "./package.json"
   },
   "main": "src/index.ts",
@@ -31,9 +30,6 @@
     "*": {
       "alpha": [
         "src/alpha.tsx"
-      ],
-      "common": [
-        "src/common/index.ts"
       ],
       "package.json": [
         "package.json"
@@ -65,14 +61,17 @@
     "postpack": "backstage-cli package postpack"
   },
   "dependencies": {
+    "@ai-sdk/react": "4.0.170",
     "@backstage/core-compat-api": "backstage:^",
     "@backstage/core-components": "backstage:^",
     "@backstage/core-plugin-api": "backstage:^",
     "@backstage/errors": "backstage:^",
     "@backstage/frontend-plugin-api": "backstage:^",
-    "@backstage/types": "backstage:^",
     "@backstage/ui": "backstage:^",
-    "@remixicon/react": ">=4.6.0 <4.9.0"
+    "@kwkevinchan/backstage-plugin-ai-chat-common": "workspace:^",
+    "@remixicon/react": ">=4.6.0 <4.9.0",
+    "ai": "7.0.166",
+    "zod": "^4.2.0"
   },
   "devDependencies": {
     "@backstage/cli": "backstage:^",

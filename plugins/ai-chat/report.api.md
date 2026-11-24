@@ -5,37 +5,51 @@
 ```ts
 import { ApiRef } from '@backstage/frontend-plugin-api';
 import { BackstagePlugin } from '@backstage/core-plugin-api';
-import type { JsonObject } from '@backstage/types';
-import type { JsonValue } from '@backstage/types';
+import type { ChatSession } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { ChatSessionDetail } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { ChatToolset } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { CreateChatSessionRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { DecideToolCallRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { ResumeChatRunRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import { RouteRef } from '@backstage/core-plugin-api';
+import type { SendChatMessageRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { UpdateChatSessionRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 
 // @public
 export interface AiChatApi {
-  approveToolCall(
+  cancelRun(id: string, runId: string): Promise<void>;
+  // (undocumented)
+  createSession(request?: CreateChatSessionRequest): Promise<ChatSession>;
+  decide(
     id: string,
     callId: string,
+    request: DecideToolCallRequest,
     signal?: AbortSignal,
-  ): AsyncIterable<ChatEvent>;
+  ): Promise<Response>;
   // (undocumented)
-  createConversation(): Promise<ChatConversation>;
+  deleteSession(id: string): Promise<void>;
+  follow(id: string, signal?: AbortSignal): Promise<Response | undefined>;
   // (undocumented)
-  deleteConversation(id: string): Promise<void>;
+  getSession(id: string): Promise<ChatSessionDetail>;
   // (undocumented)
-  getConversation(id: string): Promise<ChatConversationDetail>;
+  listSessions(): Promise<ChatSession[]>;
   // (undocumented)
-  listConversations(): Promise<ChatConversation[]>;
-  // (undocumented)
-  rejectToolCall(
+  listToolsets(): Promise<ChatToolset[]>;
+  resume(
     id: string,
-    callId: string,
+    request: ResumeChatRunRequest,
     signal?: AbortSignal,
-  ): AsyncIterable<ChatEvent>;
-  // (undocumented)
+  ): Promise<Response | undefined>;
   sendMessage(
     id: string,
-    content: string,
+    request: SendChatMessageRequest,
     signal?: AbortSignal,
-  ): AsyncIterable<ChatEvent>;
+  ): Promise<Response>;
+  // (undocumented)
+  updateSession(
+    id: string,
+    request: UpdateChatSessionRequest,
+  ): Promise<ChatSession>;
 }
 
 // @public
@@ -52,133 +66,4 @@ export const aiChatPlugin: BackstagePlugin<
   {},
   {}
 >;
-
-// @public
-export interface ChatActionAttributes {
-  // (undocumented)
-  destructive: boolean;
-  // (undocumented)
-  idempotent: boolean;
-  // (undocumented)
-  readOnly: boolean;
-}
-
-// @public (undocumented)
-export interface ChatConversation {
-  // (undocumented)
-  createdAt: string;
-  // (undocumented)
-  id: string;
-  // (undocumented)
-  title: string;
-  // (undocumented)
-  updatedAt: string;
-}
-
-// @public (undocumented)
-export interface ChatConversationDetail {
-  // (undocumented)
-  conversation: ChatConversation;
-  // (undocumented)
-  messages: ChatMessage[];
-  // (undocumented)
-  toolCalls: ChatToolCall[];
-}
-
-// @public
-export interface ChatCutOutput {
-  // (undocumented)
-  originalLength: number;
-  // (undocumented)
-  text: string;
-  // (undocumented)
-  truncated: true;
-}
-
-// @public
-export type ChatEvent =
-  | {
-      type: 'user_message';
-      message: ChatMessage;
-    }
-  | {
-      type: 'text_delta';
-      text: string;
-    }
-  | {
-      type: 'assistant_message';
-      message: ChatMessage;
-    }
-  | {
-      type: 'tool_call';
-      toolCall: ChatToolCall;
-    }
-  | {
-      type: 'tool_result';
-      toolCall: ChatToolCall;
-    }
-  | {
-      type: 'approval_required';
-      toolCall: ChatToolCall;
-    }
-  | {
-      type: 'notice';
-      message: string;
-    }
-  | {
-      type: 'error';
-      message: string;
-    }
-  | {
-      type: 'done';
-    };
-
-// @public (undocumented)
-export interface ChatMessage {
-  // (undocumented)
-  content: string;
-  // (undocumented)
-  createdAt: string;
-  // (undocumented)
-  id: string;
-  // (undocumented)
-  role: ChatRole;
-}
-
-// @public
-export type ChatRole = 'user' | 'assistant';
-
-// @public (undocumented)
-export interface ChatToolCall {
-  actionId: string;
-  // (undocumented)
-  attributes: ChatActionAttributes;
-  // (undocumented)
-  createdAt: string;
-  // (undocumented)
-  decidedAt?: string;
-  decidedBy?: string;
-  // (undocumented)
-  description: string;
-  // (undocumented)
-  error?: string;
-  // (undocumented)
-  id: string;
-  input: JsonObject;
-  messageId: string;
-  // (undocumented)
-  output?: JsonValue | ChatCutOutput;
-  // (undocumented)
-  status: ChatToolCallStatus;
-  title: string;
-}
-
-// @public
-export type ChatToolCallStatus =
-  | 'pending_approval'
-  | 'approved'
-  | 'rejected'
-  | 'running'
-  | 'succeeded'
-  | 'failed';
 ```

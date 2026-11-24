@@ -351,3 +351,19 @@
 .chat-approval-decision {
   color: var(--bui-fg-secondary);
 }
+
+.chat-toolsets {
+  font-size: 0.875rem;
+  color: var(--bui-fg-secondary, inherit);
+}
+
+.chat-toolsets > summary {
+  cursor: pointer;
+}
+
+.chat-toolsets-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding-top: 4px;
+}

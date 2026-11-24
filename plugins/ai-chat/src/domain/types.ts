@@ -14,13 +14,17 @@
  * limitations under the License.
  */
 
-/**
- * The types and the paths of the first version of the API, which the screen
- * still uses. The sessions API of the backend has its types in
- * `@kwkevinchan/backstage-plugin-ai-chat-common`.
- *
- * @packageDocumentation
- */
+import type { UIMessage } from 'ai';
+import type { ChatDataParts } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 
-export * from './types';
-export * from './paths';
+/** The data parts of the stream, in the shape that `UIMessage` takes. */
+export type ChatUiDataParts = { [K in keyof ChatDataParts]: ChatDataParts[K] };
+
+/** A message of the screen: a message of the AI SDK with the data parts of the chat. */
+export type ChatUiMessage = UIMessage<unknown, ChatUiDataParts>;
+
+/** The part of a message that shows a tool call. */
+export type ToolPart = Extract<
+  ChatUiMessage['parts'][number],
+  { toolCallId: string }
+>;

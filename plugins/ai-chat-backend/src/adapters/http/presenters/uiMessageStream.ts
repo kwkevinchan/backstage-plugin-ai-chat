@@ -98,6 +98,7 @@ export class UiMessageStreamPresenter {
         if (event.step <= this.replayedStep) return [];
         return [...this.closeStep(), ...this.openStep()];
       case 'step.ended':
+        if (event.step <= this.replayedStep) return [];
         return this.closeStep();
       case 'item.started':
         if (event.kind !== 'agent_message' || this.options.typing === false) {

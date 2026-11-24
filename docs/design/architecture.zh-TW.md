@@ -1048,28 +1048,64 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 ```
 plugins/ai-chat/src/
   domain/
-    itemsToMessages.ts      把 GET /sessions/:id 的 Item 轉成 UIMessage（純函式）
-    approval.ts             哪些卡片還在等、能不能送新訊息（讀 UIMessage 的 part，純函式）
-  application/              React hooks，每個對應一個使用情境。包 useChat
-    useSession.ts           useChat 加 resume、onData（記住最後的序號）
-    useSendMessage.ts
-    useApproval.ts          addToolApprovalResponse
-    useSessionList.ts
-    usePageContext.ts       B-01
+    types.ts                ChatUiMessage（UIMessage 加上 data-run、data-item、data-notice、data-plan）
+    itemsToMessages.ts      把 GET /sessions/:id 的 Item 轉成 UIMessage；lastRunInterrupted、lastUserText（純函式）
+    approval.ts             還在等的呼叫、是不是最後一個要決定的呼叫（讀 UIMessage 的 part，純函式）
+    toolView.ts             呼叫的狀態（等核准、已允許、完成、失敗、拒絕、結果不明、沒有執行）和標題
+  api/                      aiChatApiRef 和 AiChatApi（port）
   adapters/
-    AiChatClient.ts         實作 aiChatApiRef
-    AiChatTransport.ts      實作 ai 的 ChatTransport：送訊息、決定、接回串流
+    AiChatClient.ts         實作 AiChatApi；串流的路由直接回傳 Response
+    AiChatTransport.ts      實作 ai 的 ChatTransport：送訊息、決定、接續、接回串流
+    describeError.ts
+  application/              React hooks，包 useChat
+    useSessionChat.ts       一個 Session 的 useChat：還原、決定、接續、停止、重新讀取
+    useSessionList.ts       Session 列表
+    useToolsets.ts          GET /toolsets
+    usePageContext.ts       B-01：路徑和 entityRef
   ui/
-    ChatPage.tsx  SessionList.tsx  MessageList.tsx
-    ToolCallCard.tsx  ApprovalCard.tsx
+    ChatPage.tsx            路由（SE-01）、Session 列表、新對話
+    SessionView.tsx         一個 Session：Toolset、訊息、輸入框
+    MessageList.tsx  Composer.tsx  ToolsetPanel.tsx
+    ToolCallCard.tsx        ApprovalCard、ToolCallRow
     ShareDialog.tsx（P2）  SharedBanner.tsx（P2）  PlanPanel.tsx（P3）
   alpha.tsx                 新 frontend system 的 extension
   plugin.ts                 舊 frontend system
 ```
 
-前端用 `@ai-sdk/react` 的 `useChat`，加我們的 `ChatTransport`。`AiChatTransport` 只送最後一則使用者文字，不送整段歷史。核准由畫面明確指定：處理函式設 `pendingDecision = { callId, approved }`，呼叫 `addToolApprovalResponse({ id, approved, options: { body: pendingDecision } })`；`sendAutomaticallyWhen` 要求 `pendingDecision != null`；`sendMessages` 只讀 `body.callId`，打 `decision` 端點，用完清空。不是最後一個要決定的呼叫，處理函式先直接打 `decision` 端點存下。`reconnectToStream` 打 `GET /sessions/:id/stream`，`resumeStreamIsReplay` 設成 `true`；回 204 時 transport 回 `null`。做法和實測在 [protocol-check.zh-TW.md](protocol-check.zh-TW.md) 第 5 節。在 Backstage CLI 的 jest 裡可以 import `ai` 和 `@ai-sdk/react`，也能處理串流，已用探針確認（那份文件的 5.3 節）。
+前端用 `@ai-sdk/react` 的 `useChat`，加我們的 `ChatTransport`。型別、路徑、`messageIdOfRun` 來自 `ai-chat-common`，前端沒有自己的一份。
 
-PR #1 的 `chatState.ts` 的 Item 轉換搬到 `domain/itemsToMessages.ts`，`useChat.ts` 拆進 `application/`，`api/` 搬到 `adapters/`。
+**網址（SE-01）**。頁面掛在 `<path>/*` 底下：`<path>` 是新對話，`<path>/<sessionId>` 是那一段 Session，直接打開網址會載入它。第一則訊息先 `POST /sessions`，再導向新 Session 的網址（訊息放在 location state），該頁載入之後送出它，並把 state 清掉。
+
+**一個 Session 一個 `useChat`**。`SessionView` 以 Session id 當 key，載入 `GET /sessions/:id` 之後才建立；`useChat` 的 `messages` 是 `itemsToMessages` 還原的結果。
+
+**從紀錄還原**（`itemsToMessages`）：
+
+- `user_message` 是使用者訊息（id `item_<seq>`）。同一個 Run 的其他 Item 是一則助理訊息，id 用 `messageIdOfRun`，和串流的 `start.messageId` 相同，所以接續的串流接在這一則上。`summary`、`note`、`tool_started` 不顯示成訊息；`plan_update` 取同一個 Run 最後一個，放成 `data-plan`。
+- 每次工具結果、決定之後的下一個文字或呼叫前面放 `step-start`，`lastAssistantMessageIsCompleteWithApprovalResponses` 看最後一個 `step-start` 之後的呼叫。
+- 呼叫的狀態：有 `tool_result` 看它的 `status`（`ok` 完成、`denied` 被拒絕、`unknown` 結果不明、其他失敗）。沒有結果時：在進行中的 Run（`detail.run`）裡，`awaitingDecision` 有它是 `approval-requested`，有 `approval` Item 是 `approval-responded`，都沒有是 `input-available`；`approval-requested` 和 `approval-responded` 都帶 `approval.id` 等於 `callId`，不然 decision 串流的 `tool-approval-response` 會讓 SDK 丟 `No tool invocation found`。其他 Run（都已結束）：有 `tool_started` 是「結果不明」，沒有是「沒有執行」。
+- 「已過期可重送」：沒有進行中的 Run，而且紀錄不是以 agent 的訊息結尾（Run 過期、被取消或失敗），畫面顯示「上一次執行在給出答案前停了」和「再送一次」，按下去重送最後一則使用者訊息。
+
+**決定**。每次按 Allow 或 Reject 立刻存下。`useSessionChat.decide` 先看它是不是最後一個要決定的呼叫（`approval.ts`，看最後一步的 `approval-requested`）：
+
+- 不是最後一個：直接呼叫 `decision` 端點，成功後呼叫 `addToolApprovalResponse` 讓那張卡片更新；`pendingDecision` 不設，所以 `sendAutomaticallyWhen` 為假，不送請求。回應如果是 SSE（別的分頁已經決定了其他呼叫，這一個才是最後），關掉它的 body，改用 `resumeStream()`（`GET /stream`）接。
+- 是最後一個：設 `pendingDecision`，呼叫 `addToolApprovalResponse({ id, approved, options: { body: { callId, approved } } })`。`sendAutomaticallyWhen` 要求 `pendingDecision != null` 和全部有回應。`AiChatTransport.sendMessages` 讀 `body.callId`、`body.approved`，清空 `pendingDecision`，打 `decision` 端點：`text/event-stream` 就是 Run 的串流，接在同一則訊息上；JSON 就是別的請求搶到接續，transport 回傳沒有事件的串流，並通知畫面，畫面在請求結束後用 `resumeStream()` 接 `GET /stream`，接完再讀一次 `GET /sessions/:id`。
+- 有決定在處理時，所有核准卡片的按鈕停用。
+
+**接續**。開啟 Session 時（只有這個時機）`resumable` 為真，送 `sendMessage(undefined, { body: { resume: true } })`，transport 打 `POST /sessions/:id/resume`。串流不重送前面的內容，要帶著還原的訊息（核准是 `approval-requested` 或 `approval-responded`）。自己剛送出決定之後不看 `resumable`：那個決定的回應自己會接續。
+
+**接回**。`useChat({ resume })` 在載入時 Run 是 `running` 才為真，`reconnectToStream` 打 `GET /sessions/:id/stream`（204 回 `null`），不帶 `afterSeq`（帶了 SDK 找不到前面的 tool part）；`resumeStreamIsReplay` 為真，SDK 在第一個 `start` 把訊息重置，所以重送不會讓文字重複。
+
+**停止**。畫面有進行中的 Run（載入時的 `run`，之後由 `data-run` 更新）就顯示 Stop，也包含停在等核准的 Run（新訊息要等 Run 結束）。Stop 呼叫 `POST …/runs/:runId/cancel`（409 忽略），不呼叫 `useChat.stop()`：後端結束 Run 時串流自己以 `abort` 結束。沒有串流開著（Run 在等核准）時，畫面自己重新讀取。`data-run` 是 `failed`、`cancelled`、`expired`，或串流出錯時，結束後重新讀取 `GET /sessions/:id`，畫面以紀錄為準。
+
+**`data-notice`**。畫面用 `code` 查表顯示英文（`summarizing`、`context_trimmed`）；`text` 不用。`summary` Item 不顯示。
+
+**頁面上下文（B-01）**。`usePageContext` 從 router 讀路徑，從查詢參數 `entityRef` 讀 entity（entity 頁面連到 `…/ai-chat?entityRef=component:default/x`），每則訊息、決定、接續的請求都帶 `page`。`entityRef` 在導向 Session 網址時保留。
+
+**Toolset（T-11）**。`useToolsets` 讀 `GET /toolsets`；新對話用 `default` 的 Toolset 建立 Session，Session 裡的開關呼叫 `PATCH /sessions/:id`，失敗時還原。進行中的 Run 不能改。
+
+**工具的標題**。串流和紀錄只有 `toolId`（例如 `dev-actions:restart-service`），畫面把最後一段轉成標題（「Restart service」）。核准卡片因此沒有 action 的描述、`destructive` 標記和「誰、何時決定」；要的話，要由後端在 `tool-input-available` 帶 `title`，或加端點。
+
+做法和實測在 [protocol-check.zh-TW.md](protocol-check.zh-TW.md) 第 5 節。在 Backstage CLI 的 jest 裡可以 import `ai` 和 `@ai-sdk/react`，也能處理串流（那份文件的 5.3 節）。
 
 ## 10. 測試
 

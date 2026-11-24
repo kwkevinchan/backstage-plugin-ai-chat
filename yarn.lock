@@ -32,6 +32,20 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@ai-sdk/mcp@npm:2.0.93":
+  version: 2.0.93
+  resolution: "@ai-sdk/mcp@npm:2.0.93"
+  dependencies:
+    "@ai-sdk/provider": "npm:4.0.37"
+    "@ai-sdk/provider-utils": "npm:5.0.76"
+    cross-spawn: "npm:^7.0.6"
+    pkce-challenge: "npm:^5.0.1"
+  peerDependencies:
+    zod: ^3.25.76 || ^4.1.8
+  checksum: 10c0/e86025da3b72b62195532eaecd2cf3abab8d13f43021fe7e32ca499ff4465f2671866996716d49de21d51aba08790086c270a2f606d4e0d502c42db98f340268
+  languageName: node
+  linkType: hard
+
 "@ai-sdk/provider-utils@npm:5.0.76":
   version: 5.0.76
   resolution: "@ai-sdk/provider-utils@npm:5.0.76"
@@ -53,6 +67,22 @@ __metadata:
   dependencies:
     json-schema: "npm:^0.4.0"
   checksum: 10c0/22f8a0478fbd987f68fb7698363386c9683efb4078c01f9b72dd63183fe45db3bbac84d15e4bfe052ab5bd237a33f74ec674dd14f0daba5375c336030539ec1b
+  languageName: node
+  linkType: hard
+
+"@ai-sdk/react@npm:4.0.170":
+  version: 4.0.170
+  resolution: "@ai-sdk/react@npm:4.0.170"
+  dependencies:
+    "@ai-sdk/mcp": "npm:2.0.93"
+    "@ai-sdk/provider": "npm:4.0.37"
+    "@ai-sdk/provider-utils": "npm:5.0.76"
+    ai: "npm:7.0.166"
+    swr: "npm:^2.4.1"
+    throttleit: "npm:2.1.0"
+  peerDependencies:
+    react: ^18 || ~19.0.1 || ~19.1.2 || ^19.2.1
+  checksum: 10c0/d9849f3f40c51338d663d1444c7c25ed0dfc9ba7863a9246fdd66e94db15838f8a8557e50f855f07c2df0a4780f95e55ce04c71f71f5920a35f0754840a8d4fc
   languageName: node
   linkType: hard
 
@@ -5104,6 +5134,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@kwkevinchan/backstage-plugin-ai-chat@workspace:plugins/ai-chat"
   dependencies:
+    "@ai-sdk/react": "npm:4.0.170"
     "@backstage/cli": "backstage:^"
     "@backstage/core-app-api": "backstage:^"
     "@backstage/core-compat-api": "backstage:^"
@@ -5115,15 +5146,17 @@ __metadata:
     "@backstage/frontend-test-utils": "backstage:^"
     "@backstage/test-utils": "backstage:^"
     "@backstage/theme": "backstage:^"
-    "@backstage/types": "backstage:^"
     "@backstage/ui": "backstage:^"
+    "@kwkevinchan/backstage-plugin-ai-chat-common": "workspace:^"
     "@remixicon/react": "npm:>=4.6.0 <4.9.0"
     "@testing-library/jest-dom": "npm:^6.0.0"
     "@testing-library/react": "npm:^14.0.0"
     "@testing-library/user-event": "npm:^14.0.0"
+    ai: "npm:7.0.166"
     react: "npm:^18.0.0"
     react-dom: "npm:^18.0.0"
     react-router-dom: "npm:^6.0.0"
+    zod: "npm:^4.2.0"
   peerDependencies:
     react: ^18.0.0
     react-dom: ^18.0.0
@@ -21587,6 +21620,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"pkce-challenge@npm:^5.0.1":
+  version: 5.0.2
+  resolution: "pkce-challenge@npm:5.0.2"
+  checksum: 10c0/d34c349220fa4205c256c0160d91a7983bbda6ff31a469f59fccfd759010955fc9f43a26736da84066ee705b7c8d9ba0e3616f1c3d5e2451b8aa03b849f9f86b
+  languageName: node
+  linkType: hard
+
 "pkg-dir@npm:^4.2.0":
   version: 4.2.0
   resolution: "pkg-dir@npm:4.2.0"
@@ -25129,7 +25169,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"swr@npm:^2.0.0":
+"swr@npm:^2.0.0, swr@npm:^2.4.1":
   version: 2.5.1
   resolution: "swr@npm:2.5.1"
   dependencies:
@@ -25427,6 +25467,13 @@ __metadata:
   version: 3.0.1
   resolution: "throttle-debounce@npm:3.0.1"
   checksum: 10c0/c8e558479463b7ed8bac30d6b10cc87abd1c9fc64edfce2db4109be1a04acaef5d2d0557f49c1a3845ea07d9f79e6e0389b1b60db0a77c44e5b7a1216596f285
+  languageName: node
+  linkType: hard
+
+"throttleit@npm:2.1.0":
+  version: 2.1.0
+  resolution: "throttleit@npm:2.1.0"
+  checksum: 10c0/1696ae849522cea6ba4f4f3beac1f6655d335e51b42d99215e196a718adced0069e48deaaf77f7e89f526ab31de5b5c91016027da182438e6f9280be2f3d5265
   languageName: node
   linkType: hard
 

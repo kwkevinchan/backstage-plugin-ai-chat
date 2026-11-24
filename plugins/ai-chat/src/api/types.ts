@@ -16,39 +16,59 @@
 
 import { createApiRef } from '@backstage/core-plugin-api';
 import type {
-  ChatConversation,
-  ChatConversationDetail,
-  ChatEvent,
-} from '../common';
+  ChatSession,
+  ChatSessionDetail,
+  ChatToolset,
+  CreateChatSessionRequest,
+  DecideToolCallRequest,
+  ResumeChatRunRequest,
+  SendChatMessageRequest,
+  UpdateChatSessionRequest,
+} from '@kwkevinchan/backstage-plugin-ai-chat-common';
 
 /**
- * The API of the chat backend. The methods that answer with a stream return
- * the events as they arrive; the stream ends with a `done` event, or when
- * `signal` aborts.
+ * The API of the chat backend. A method that answers with a stream of a run
+ * returns the response as it is, so the caller reads the body while it
+ * arrives; a failed request throws.
  *
  * @public
  */
 export interface AiChatApi {
-  listConversations(): Promise<ChatConversation[]>;
-  createConversation(): Promise<ChatConversation>;
-  getConversation(id: string): Promise<ChatConversationDetail>;
-  deleteConversation(id: string): Promise<void>;
+  listSessions(): Promise<ChatSession[]>;
+  createSession(request?: CreateChatSessionRequest): Promise<ChatSession>;
+  getSession(id: string): Promise<ChatSessionDetail>;
+  updateSession(
+    id: string,
+    request: UpdateChatSessionRequest,
+  ): Promise<ChatSession>;
+  deleteSession(id: string): Promise<void>;
+  listToolsets(): Promise<ChatToolset[]>;
+  /** Starts a run: the response is its stream. */
   sendMessage(
     id: string,
-    content: string,
+    request: SendChatMessageRequest,
     signal?: AbortSignal,
-  ): AsyncIterable<ChatEvent>;
-  /** Allows a call that waits: the backend runs the stored input. */
-  approveToolCall(
+  ): Promise<Response>;
+  /**
+   * Stores a decision. The response is JSON while other calls wait for a
+   * decision, and the stream of the run when this was the last one.
+   */
+  decide(
     id: string,
     callId: string,
+    request: DecideToolCallRequest,
     signal?: AbortSignal,
-  ): AsyncIterable<ChatEvent>;
-  rejectToolCall(
+  ): Promise<Response>;
+  /** Carries on a run whose decisions are all stored; `undefined` when there is nothing to carry on. */
+  resume(
     id: string,
-    callId: string,
+    request: ResumeChatRunRequest,
     signal?: AbortSignal,
-  ): AsyncIterable<ChatEvent>;
+  ): Promise<Response | undefined>;
+  /** Follows the run that goes on; `undefined` when none does. */
+  follow(id: string, signal?: AbortSignal): Promise<Response | undefined>;
+  /** Asks the run to stop. A run that has ended is not an error. */
+  cancelRun(id: string, runId: string): Promise<void>;
 }
 
 /**
