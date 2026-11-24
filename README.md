@@ -109,7 +109,7 @@ aiChat:
   maxTurns: 10 # model calls for one user message; default 10
   systemPrompt: | # optional, added to the built-in rules
     You help the platform team of Example Corp.
-  actions:
+  actions: # deprecated, use toolsets (below); the backend logs a warning
     include: ['catalog:*', 'temporal:*'] # optional; * matches any characters
     exclude: ['*:unregister-*'] # optional; wins over include
   maxToolOutputChars: 20000 # output stored and sent to the model; default 20000
@@ -128,6 +128,37 @@ sees only the actions that the actions service lists for the user. The
 `backend.actions.filter` rules of Backstage apply first, then `include` and
 `exclude` of the chat. An action that declares `secrets` is not offered: a chat
 cannot supply them.
+
+### Toolsets and policy
+
+`aiChat.toolsets` and `aiChat.policy` replace `actions.include` and
+`actions.exclude`, which stay for one more release and are ignored once
+`toolsets` is set. The backend reads and checks both at startup, and a wrong
+value stops it. The chat of this release still uses `include` and `exclude`;
+the new settings take effect when the agent loop replaces the current chat
+service.
+
+```yaml
+aiChat:
+  toolsets:
+    catalog:
+      actions: ['catalog:*'] # * matches any characters
+      default: true # on in a new session; default false
+    web:
+      actions: ['web:*']
+      egress: true # sends data out of the organization: always asks
+  policy:
+    'catalog:get-entity': allow # allow, ask or deny, by action ID
+    'temporal:terminate-workflow': deny
+```
+
+- A session offers the actions of the toolsets that are switched on for it. An
+  action in no toolset is never offered.
+- `deny` never runs an action and never offers it. `allow` takes effect only
+  for an action that has `readOnly: true` and is not in an `egress` toolset;
+  any other action asks for approval, and the backend logs a warning when the
+  policy sets such an action to `allow`.
+- An action without the `readOnly` attribute counts as not read-only.
 
 Any OpenAI-compatible server works, for example a local server: set `baseUrl`
 to `http://localhost:11434/v1` and leave out `apiKey`.

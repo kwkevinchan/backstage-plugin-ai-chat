@@ -251,11 +251,13 @@ P4 開始之前要重新評估：先看 P3-07 的平行唯讀呼叫在實際使�
 | 編號 | 要驗證的事                                                                   | 影響                          | 在哪裡處理                                                    |
 | ---- | ---------------------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------- |
 | V-01 | AI SDK 的 UI message stream 怎麼表示「等核准」和自訂資料，以及事件的確切名稱 | presenter 和前端的 adapter    | P1-01（已驗證，見 [protocol-check](protocol-check.zh-TW.md)） |
-| V-02 | `actionsServiceRef` 還在 alpha。下一版 Backstage 的介面有沒有變              | `ActionsToolGateway` 一個檔案 | P1-06。每次升級 Backstage 時檢查                              |
+| V-02 | `actionsServiceRef` 還在 alpha。下一版 Backstage 的介面有沒有變              | `ActionsToolGateway` 一個檔案 | P1-06 已確認（見下）。每次升級 Backstage 時檢查               |
 | V-03 | SQLite 和 PostgreSQL 對「唯一索引裡的空值」的行為是否一致                    | H-03、T-07 的做法             | P1-05 的測試                                                  |
 | V-04 | 模型的 token 計算。OpenAI 相容的端點不一定回傳用量                           | 上下文預算的準確度            | P1-07。沒有用量時用字數估計                                   |
 | V-05 | Backstage 有沒有官方的 search 或 TechDocs action                             | P3-06 的範圍                  | P3-06 開始前                                                  |
 | V-06 | 使用者 token 的有效期在各種登入方式下是多少                                  | `runTimeoutSeconds` 的上限    | P1-08                                                         |
+
+V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `ActionsService` 有 `list({ credentials })`，回傳 `{ actions }`；和 `invoke({ id, input?, secrets?, credentials })`，回傳 `{ output }`，沒有 signal 參數。`ActionsServiceAction` 有 `id`、`title`、`description`、`schema.input`、`schema.secrets?` 和 `attributes.readOnly`、`destructive`、`idempotent`。`ActionsToolGateway` 只用這些。
 
 ## 7. 風險
 
@@ -287,3 +289,4 @@ P4 開始之前要重新評估：先看 P3-07 的平行唯讀呼叫在實際使�
 | 2026-11-24 | 1.0  | P1-01 審查後修正：核准改由畫面指定 `pendingDecision`（P1-10 驗收補一句）；失敗的順序改成 `data-run` 在前、`error` 在後；接回要先送 `start` 並補送 `text-start`（P2-06 驗收補一句）                                                                                                                                                                                                                                                      |
 | 2026-11-24 | 1.0  | P1-03 審查後補充：P1-04 驗收加七項約定（`callId` 由 `IdGenerator` 產生、`policy` 一律由 `decidePolicy` 算、同一步一次 `append`、工具呼叫數上限、`executeTools` 只在 `allow` 時執行、`needsApproval`、`InMemoryItemLog` 的 dedupe 和 contract）；P1-05 加已用時間欄位和 `dedupeKeyOf`；P1-06 加 `policy` 設定的轉換；P1-08 加 `user_message` 的寫入時機、`needsApproval`、放寬 `yarn.config.cjs`；P1-09 加拿掉 `scripts/sync-common.mjs` |
 | 2026-11-24 | 1.0  | P1-04 審查後：架構第 4 節照程式更新（ports、`AdvanceRun` 的 request、`RunOutcome`、事件、停止、截止時間、步驟編號）；第 8 節核准改由 `pending` 決定；`runs` 表加已用時間欄位；P1-08 加單一迴圈、port 例外、UUID；P1-09 加忽略 `item.started`、失敗只顯示固定文字                                                                                                                                                                        |
+| 2026-11-24 | 1.0  | P1-06 完成：`ActionsToolGateway`、`ConfigAgentCatalog`、設定檔 `toolsets` 和 `policy`；`include`、`exclude` 標成淘汰。V-02 確認 Backstage 1.56.2 的介面。政策警告改成第一次列出工具時記（啟動時沒有憑證，列不出 action）。新設定要等 P1-08 接上迴圈才生效。backend 依賴 `ai-chat-harness`，`yarn.config.cjs` 先放寬這個方向（P1-08 的放寬項目已完成）                                                                                   |

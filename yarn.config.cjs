@@ -131,7 +131,8 @@ module.exports = defineConfig({
       }
 
       // Published packages: no private workspaces; the core packages
-      // (backend, frontend, harness, common) depend on no other workspace; a module only on the core of its side.
+      // (frontend, harness, common) depend on no other workspace, and the backend
+      // only on the harness and common; a module only on the core of its side.
       if (isPublished && target && dep.type !== 'devDependencies') {
         // The harness and the common package are foundations too.
         const isCore = [BACKEND_CORE, FRONTEND_CORE, HARNESS, COMMON].includes(
@@ -141,6 +142,11 @@ module.exports = defineConfig({
           dep.error(
             `Published packages must not depend on the private package ${dep.ident}`,
           );
+        } else if (
+          workspace.ident === BACKEND_CORE &&
+          (dep.ident === HARNESS || dep.ident === COMMON)
+        ) {
+          // The backend plugin is built on the harness and the common types.
         } else if (isCore) {
           dep.error(
             `${workspace.ident} must not depend on other packages of this repository (${dep.ident})`,
