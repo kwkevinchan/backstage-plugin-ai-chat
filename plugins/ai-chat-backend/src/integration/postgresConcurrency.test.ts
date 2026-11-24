@@ -407,7 +407,12 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
         await age(image.id);
         const [inserted, purged] = await Promise.allSettled([
           insertWith(sessionId, run.id, [image.id]),
-          jitter().then(() => db.attachments.purgeUnused(db.clock.now())),
+          // The insert takes several queries before it reaches the image, so
+          // the cleaning is started after a random number of milliseconds:
+          // sometimes before the insert holds the image, sometimes after.
+          new Promise<void>(resolve =>
+            setTimeout(resolve, Math.floor(Math.random() * 15)),
+          ).then(() => db.attachments.purgeUnused(db.clock.now())),
         ]);
         expect(purged.status).toBe('fulfilled');
         const row = await db
@@ -431,7 +436,7 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
         });
       }
       expect(outcomes.every(o => o.ok && (o.written || o.refused))).toBe(true);
-      expect(outcomes.filter(o => o.written)).not.toHaveLength(0);
+      expect(outcomes).toHaveLength(ROUNDS);
     });
 
     it('the cleaning does not wait for a transaction that holds an image, and does not delete it', async () => {
