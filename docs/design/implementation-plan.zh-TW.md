@@ -58,7 +58,7 @@ flowchart LR
 | P1-08 | 宿主的 use case 和 RunSupervisor | L    | H-01、H-04、H-06、H-07、H-08、H-11、A-06、O-02       | #14        | 完成 |
 | P1-09 | HTTP 和新的串流協定              | M    | D-19、H-10、SE-01                                    | #15        | 完成 |
 | P1-10 | 前端                             | M    | SE-01、B-01、T-11、S-02                              | #16        | 完成 |
-| P1-11 | 收尾                             | S    | 整體驗收                                             | 這個 PR    | 完成 |
+| P1-11 | 收尾                             | S    | 整體驗收                                             | #17        | 完成 |
 
 ### P1-01 驗證協定
 
@@ -206,9 +206,9 @@ flowchart LR
 - **範圍**：兩台 backend 的整合測試。README、`config.d.ts`、設定的說明。把這三份設計文件裡 P1 的需求標成完成。
 - **驗收**：規格裡所有標 P1 的需求，都對得到一個測試。對照表放在這個 PR 的說明裡。
 - **完成時的補充**：
-  - 對照表在 [p1-coverage.zh-TW.md](p1-coverage.zh-TW.md)：35 條 P1 需求都有測試。新增的測試補 H-08（串流的結果和存下的相同）、S-01（核心的 lint 規則擋掉 `fs`、`child_process`、`vm`、`worker_threads`、`cluster`、`eval`、`new Function`）、S-02（不載入圖片）。
+  - 對照表在 [p1-coverage.zh-TW.md](p1-coverage.zh-TW.md)：35 條 P1 需求都有測試。新增的測試補 H-08（串流的結果和存下的相同）、S-01（核心的 lint 規則擋掉執行程式碼、檔案系統、網路的 import，`eval`、`new Function`，以及 `require`、`process`、`globalThis`、動態 `import()` 等繞過 import 的寫法）、S-02（不載入圖片）。
   - 兩台 backend 的整合測試是 `integration/twoBackends.test.ts`：另一台決定、兩台同時決定、關機只結束自己的 Run、沒關機就當掉由另一台標成過期、不是跑 Run 的那台的 `GET /stream` 回 204。
-  - README 的設定範例由 `config.test.ts` 檢查（後端接受它），也用 `config:check --strict` 驗過。
+  - README 的設定範例由 `config.test.ts` 檢查（後端接受它），也用 `yarn backstage-cli config:check --lax --strict --package backend --config app-config.yaml --config <範例>` 驗過（值改錯會失敗）。
   - P1-10 留下的限制已修：presenter 判斷「已重送的 Step」時，除了 `tool_call` 的 `step`，也算重送時開了幾個 Step，所以只有 `agent_message` 的 Step 的事件也會略過，不多送空的 Step。不用改 Item 的形狀或 port。
   - 用途說明頁（`usage.zh-TW.html`）改成實際的畫面：Allow 和 Deny、可展開的 Toolsets、核准卡片的內容、P1 的列表沒有自動標題；拿掉外部字型，頁面不載入任何外部資源。
   - 已知限制（P2 處理）：`GET /sessions/:id/stream` 只接這一台 backend 跑的 Run（P2-06）；對話列表沒有自動標題（P2-01）。

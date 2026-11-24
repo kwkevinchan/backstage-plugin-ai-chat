@@ -26,10 +26,14 @@
 //    `src/testing`, is refused. Test files may also import `src/testing`.
 // 3. `domain/` and `application/` also never import `express` or `knex`, and
 //    do not use `fetch`.
-// 4. `domain/` and `application/` cannot run code, start a process or touch
-//    the file system (S-01): no `fs`, `child_process`, `vm`, `worker_threads`
-//    or `cluster`, and no `eval` or `new Function`. The only way out of the
-//    core is a port.
+// 4. `domain/` and `application/` cannot run code, start a process, touch the
+//    file system or open a network (S-01): no import of `fs`, `child_process`,
+//    `vm`, `worker_threads`, `cluster`, `module`, `net`, `http`, `https` or
+//    `dgram` (with or without `node:`), and no `eval` or `new Function`. The
+//    other ways to get a module are closed too: no `require`, `process`,
+//    `globalThis`, `global` or `module` (outside test files), no dynamic
+//    `import()` and no `import x = require()`. The only way out of the core
+//    is a port.
 // 5. `domain/` has no `async` function, no `await`, no `Promise`, and imports
 //    no Node.js built-in module (`fs`, `path`, `crypto`, `node:*` and so on).
 //
@@ -53,7 +57,8 @@ const noFrameworkPatterns = ['express/*', 'knex/*'];
 const noNodePaths = builtinModules;
 const noNodePatterns = ['node:*', ...builtinModules.map(name => `${name}/*`)];
 
-// What would let the core run code or reach the file system (S-01).
+// What would let the core run code, reach the file system or open a network
+// (S-01).
 const noExecutionPaths = [
   'fs',
   'fs/promises',
@@ -61,10 +66,35 @@ const noExecutionPaths = [
   'vm',
   'worker_threads',
   'cluster',
+  // `createRequire` opens every other door; the others open a network.
+  'module',
+  'net',
+  'http',
+  'https',
+  'dgram',
 ];
 const noExecutionAll = [
   ...noExecutionPaths,
   ...noExecutionPaths.map(name => `node:${name}`),
+];
+
+const fetchGlobal = { name: 'fetch', message: 'Use a port instead of fetch.' };
+const noGlobals = [
+  fetchGlobal,
+  ...['require', 'process', 'globalThis', 'global', 'module'].map(name => ({
+    name,
+    message: `The core has no ${name}: it reaches the outside through a port.`,
+  })),
+];
+const noModuleSyntax = [
+  {
+    selector: 'ImportExpression',
+    message: 'The core has no dynamic import.',
+  },
+  {
+    selector: 'TSExternalModuleReference',
+    message: 'The core has no import x = require().',
+  },
 ];
 
 // The test files of the shared configuration (@backstage/cli, eslint-factory).
@@ -138,13 +168,20 @@ module.exports = require('@backstage/cli/config/eslint-factory')(__dirname, {
             ],
           },
         ],
-        'no-restricted-globals': [
-          'error',
-          { name: 'fetch', message: 'Use a port instead of fetch.' },
-        ],
+        'no-restricted-globals': ['error', fetchGlobal],
         'no-eval': 'error',
         'no-implied-eval': 'error',
         'no-new-func': 'error',
+      },
+    },
+    {
+      // The ways round an `import` statement (S-01). Test files may use the
+      // globals of the test runner.
+      files: ['src/domain/**', 'src/application/**'],
+      excludedFiles: ['**/*.test.*'],
+      rules: {
+        'no-restricted-globals': ['error', ...noGlobals],
+        'no-restricted-syntax': ['error', ...noModuleSyntax],
       },
     },
     {
@@ -165,6 +202,7 @@ module.exports = require('@backstage/cli/config/eslint-factory')(__dirname, {
         ],
         'no-restricted-syntax': [
           'error',
+          ...noModuleSyntax,
           {
             selector: ':function[async=true]',
             message: 'The domain circle has no async function.',

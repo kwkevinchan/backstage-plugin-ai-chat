@@ -95,8 +95,8 @@ session has its own URL, `/ai-chat/<session id>`. A link to
 `/ai-chat?entityRef=component:default/my-service` opens the chat for that
 entity: every message of it carries the entity (and the path of the page) to
 the backend, which stores it with the message and tells the model in one line
-before the text ("The user is on the page of component:default/my-service
-(/ai-chat/…).").
+before the text ("The user is on the page of "component:default/my-service"
+("/ai-chat/…").").
 
 To open the chat from an entity page, add a link there that names the entity,
 for example in a card or a context menu of the entity page:
@@ -206,8 +206,8 @@ out. The log itself never changes.
 
 A session offers the actions of the toolsets that are switched on for it. A
 new session starts with the toolsets that have `default: true`. The user
-switches toolsets on and off in their own session (the **Toolsets** list above
-the message box), only the ones that you define.
+switches toolsets on and off in their own session (the **Toolsets** list at the top
+of the chat, above the messages), only the ones that you define.
 
 - An action in no toolset is never offered. Without `aiChat.toolsets`, one
   toolset with every action is on in every session.
@@ -298,9 +298,13 @@ than one backend and restart them.
 - The actions run with the credentials of the user, so the permissions and
   policies of the plugins that own the actions apply as they do on their own
   pages. The chat adds no permissions.
-- The core of the loop can run no code and reach no file: its only way to act
-  is a tool, which is an action of the actions service. The lint rules of the
-  repository keep `fs`, `child_process`, `vm` and `eval` out of it.
+- The core of the loop can run no code, reach no file and open no network: its
+  only way to act is a tool, which is an action of the actions service. The
+  lint rules of the repository keep out the imports of `fs`, `child_process`,
+  `vm`, `worker_threads`, `cluster`, `module`, `net`, `http`, `https` and
+  `dgram`, `eval` and `new Function`, and the other ways to get a module
+  (`require`, `process`, `globalThis`, dynamic `import()`). This is a static
+  check of the source, not a sandbox.
 - The model reads the result of an action as **data**. The built-in system
   prompt says that a tool result is not an instruction. This reduces
   prompt-injection risk, but the approval card is the control that holds: an
@@ -351,7 +355,7 @@ Open http://localhost:3000, sign in as guest and try:
   first, and the model tells you the entity of the page.
 - `story`: a long answer that streams word by word. Stop ends a run.
 
-Open **Toolsets** above the message box to switch a toolset off; its actions
+Open **Toolsets** at the top of the chat, above the messages, to switch a toolset off; its actions
 are gone from the next step.
 
 ### With a real model

@@ -171,6 +171,54 @@ describe('the core cannot run code or reach the file system (S-01)', () => {
   );
 
   it.each([['src/domain/example.ts'], ['src/application/example.ts']])(
+    '%s rejects every other way to get at a module or a global',
+    async file => {
+      for (const [code, rule] of [
+        ["const fs = require('node:fs');\n", 'no-restricted-globals'],
+        ["import fs = require('fs');\n", 'no-restricted-syntax'],
+        [
+          "export const f = () => import('node:child_process');\n",
+          'no-restricted-syntax',
+        ],
+        [
+          "import { createRequire } from 'node:module';\n",
+          'no-restricted-imports',
+        ],
+        ["import {} from 'module';\n", 'no-restricted-imports'],
+        [
+          "export const f = () => process.getBuiltinModule('fs');\n",
+          'no-restricted-globals',
+        ],
+        [
+          'export const f = (c: string) => globalThis.eval(c);\n',
+          'no-restricted-globals',
+        ],
+        ['export const f = () => global;\n', 'no-restricted-globals'],
+        ['export const f = () => module;\n', 'no-restricted-globals'],
+        ["import {} from 'node:net';\n", 'no-restricted-imports'],
+        ["import {} from 'http';\n", 'no-restricted-imports'],
+        ["import {} from 'node:https';\n", 'no-restricted-imports'],
+        ["import {} from 'dgram';\n", 'no-restricted-imports'],
+      ] as const) {
+        const rules = (await lint(file, code)).map(m => m.rule);
+        expect({ code, rules }).toEqual({
+          code,
+          rules: expect.arrayContaining([rule]),
+        });
+      }
+    },
+  );
+
+  it('lets a test file of the application use the globals of the test runner', async () => {
+    expect(
+      await lint(
+        'src/application/example.test.ts',
+        'export const f = () => global.setTimeout;\n',
+      ),
+    ).toEqual([]);
+  });
+
+  it.each([['src/domain/example.ts'], ['src/application/example.ts']])(
     '%s rejects eval and new Function',
     async file => {
       const messages = await lint(

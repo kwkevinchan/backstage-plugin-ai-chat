@@ -64,8 +64,12 @@ depends on no other package of this repository. The core
 (`packages/ai-chat-harness`) lists no `@backstage/*` package as a runtime
 dependency, and its lint rules (`packages/ai-chat-harness/.eslintrc.js`, tested in
 `src/lintRules.test.ts`) keep `domain/` from importing `application/`, and
-keep both circles from running code or reaching the file system (`fs`,
-`child_process`, `vm`, `eval`).
+keep both circles from running code, reaching the file system or opening a
+network: no import of `fs`, `child_process`, `vm`, `worker_threads`,
+`cluster`, `module`, `net`, `http`, `https` or `dgram`, no `eval` or
+`new Function`, and none of the other ways to get a module (`require`,
+`process`, `globalThis`, dynamic `import()`; test files may use the globals of
+the test runner).
 The backend has the same rules for its `domain/` and `application/` folders
 (`plugins/ai-chat-backend/.eslintrc.js`, tested in `src/lintRules.test.ts`):
 they import no `@backstage/*`, `express`, `knex` or Node.js module, and

@@ -665,6 +665,9 @@
         color: var(--muted);
         border: 1px solid var(--line);
       }
+      .mock.mock-one {
+        grid-template-columns: minmax(0, 1fr);
+      }
       .mock-note {
         font-size: 12.5px;
         color: var(--muted);
@@ -1179,12 +1182,39 @@
           一段對話裡，查詢和改動看起來不一樣。查詢顯示成一行紀錄，可以點開看。改動顯示成一張卡片，停在那裡等你。
         </p>
         <div
-          class="mock"
+          class="mock mock-one"
           role="img"
-          aria-label="示意畫面：左邊是對話。使用者問部署為什麼失敗，Agent 直接執行兩個唯讀查詢並回答。使用者要求重跑，畫面出現核准卡片，寫著工具標題、說明、為什麼要核准、以 JSON 顯示的輸入，以及 Allow 和 Deny 兩個按鈕。按過 Allow 的卡片收成一行，寫著誰在什麼時候決定。右邊是可以展開的工具組清單，每一組有一個核取方塊"
+          aria-label="示意畫面：最上面是可以展開的工具組清單，每一組有一個核取方塊，下面是對話。使用者問部署為什麼失敗，Agent 直接執行兩個唯讀查詢並回答。使用者要求重跑，畫面出現核准卡片，寫著工具標題、說明、為什麼要核准、以 JSON 顯示的輸入，以及 Allow 和 Deny 兩個按鈕。按過 Allow 的卡片收成一行，寫著誰在什麼時候決定"
         >
           <div class="mock-main">
             <div class="mock-h">對話</div>
+            <details class="toolsets" open>
+              <summary>Toolsets (3 of 4 on)</summary>
+              <label
+                ><input type="checkbox" checked disabled /><span class="mono"
+                  >catalog</span
+                ></label
+              >
+              <label
+                ><input type="checkbox" checked disabled /><span class="mono"
+                  >techdocs</span
+                ></label
+              >
+              <label
+                ><input type="checkbox" checked disabled /><span class="mono"
+                  >temporal</span
+                ></label
+              >
+              <label
+                ><input type="checkbox" disabled /><span class="mono">web</span
+                ><span class="egress">sends data out</span></label
+              >
+            </details>
+            <div class="side-note">
+              沒開的工具組，Agent 完全看不到。能開哪些由管理員決定。標了
+              <code>sends data out</code>
+              的工具組會把資料送到組織外，即使只讀取也要你核准。
+            </div>
             <div class="msg me">payments-api 昨天的部署為什麼失敗？</div>
             <div class="group">
               <div class="gh">查詢 · 直接執行 · 點開看輸入和輸出</div>
@@ -1237,36 +1267,6 @@
               <p class="decision">
                 Allowed by user:default/jane at 11/24/2026, 3:04:12 PM.
               </p>
-            </div>
-          </div>
-          <div class="mock-side">
-            <div class="mock-h">這段對話的工具組</div>
-            <details class="toolsets" open>
-              <summary>Toolsets (3 of 4 on)</summary>
-              <label
-                ><input type="checkbox" checked disabled /><span class="mono"
-                  >catalog</span
-                ></label
-              >
-              <label
-                ><input type="checkbox" checked disabled /><span class="mono"
-                  >techdocs</span
-                ></label
-              >
-              <label
-                ><input type="checkbox" checked disabled /><span class="mono"
-                  >temporal</span
-                ></label
-              >
-              <label
-                ><input type="checkbox" disabled /><span class="mono">web</span
-                ><span class="egress">sends data out</span></label
-              >
-            </details>
-            <div class="side-note">
-              沒開的工具組，Agent 完全看不到。能開哪些由管理員決定。標了
-              <code>sends data out</code>
-              的工具組會把資料送到組織外，即使只讀取也要你核准。
             </div>
           </div>
         </div>

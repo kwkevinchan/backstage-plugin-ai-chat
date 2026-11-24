@@ -1157,7 +1157,7 @@ plugins/ai-chat/src/
    ]}],
    ```
 
-3. **`no-restricted-imports`** 在 `src/domain` 和 `src/application` 禁止 `@backstage/*`、`express`、`knex` 和全域的 `fetch`。宿主的這兩圈還禁止所有 Node.js 內建模組（含 `node:*`）。核心的 `src/domain` 禁止所有 Node.js 內建模組，`src/application` 禁止能執行程式碼或碰檔案系統的那幾個（`fs`、`child_process`、`vm`、`worker_threads`、`cluster`）和 `eval`、`new Function`（S-01：核心唯一的作用管道是工具）。`src/domain` 另外禁止 `async`、`await` 和 `Promise`。
+3. **`no-restricted-imports`** 在 `src/domain` 和 `src/application` 禁止 `@backstage/*`、`express`、`knex` 和全域的 `fetch`。宿主的這兩圈還禁止所有 Node.js 內建模組（含 `node:*`）。核心的 `src/domain` 禁止所有 Node.js 內建模組，`src/application` 禁止能執行程式碼、碰檔案系統或開網路的那幾個（`fs`、`child_process`、`vm`、`worker_threads`、`cluster`、`module`、`net`、`http`、`https`、`dgram`）和 `eval`、`new Function`；兩圈（測試檔除外）還用 `no-restricted-globals` 和 `no-restricted-syntax` 擋 `require`、`process`、`globalThis`、`global`、`module`、動態 `import()`、`import x = require()`（S-01：核心唯一的作用管道是工具；這是原始碼的靜態檢查，不是沙箱）。`src/domain` 另外禁止 `async`、`await` 和 `Promise`。
 
 實際的設定在 `plugins/ai-chat-backend/.eslintrc.js`，和核心一樣，`import/no-restricted-paths` 是白名單：`domain` 只能 import `domain`，`application` 只能 import `domain` 和 `application`（`src/index.ts`、`plugin.ts`、`config.ts` 都不行）。測試在 `src/lintRules.test.ts`。`adapters/http` 和 `adapters/persistence` 互不 import 的那兩條，測試在同一個檔案：兩邊互相 import 會被擋，兩邊 import `domain`、`application` 或 `adapters/backstage` 不會。
 

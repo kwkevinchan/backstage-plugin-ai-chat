@@ -13,7 +13,7 @@
 - P1-11 新增的測試補了這幾條：H-08（串流的結果和存下的相同）、S-01（核心不能執行程式碼或碰檔案系統）、S-02（不載入圖片）；H-04、H-11、T-07、A-06 補了兩台 backend 的情形。
 - 純文件的需求沒有。有兩條要說明測試的範圍：
   - **A-09** 的測試證明規則會擋（`lintRules.test.ts`），「CI 會擋」本身是 CI 設定（`.github/workflows/ci.yml` 跑 `yarn lint:all`），不是測試能證明的。
-  - **S-01** 用靜態檢查：lint 規則擋掉 `fs`、`child_process`、`vm`、`worker_threads`、`cluster`、`eval`、`new Function`。核心沒有別的執行路徑，所以沒有執行期的測試。
+  - **S-01** 用靜態檢查：lint 規則（核心的 `domain/` 和 `application/`）擋掉：`fs`、`child_process`、`vm`、`worker_threads`、`cluster`、`module`、`net`、`http`、`https`、`dgram`（含 `node:` 前綴）的 import；`eval`、`new Function`；其他取得模組的寫法（`require`、`process`、`globalThis`、`global`、`module`、動態 `import()`、`import x = require()`；測試檔可用測試工具的全域）。這是原始碼的靜態檢查，不是沙箱，所以沒有執行期的測試。
 - **A-10** 的意思：每個有「記憶體版和資料庫版」兩種實作的 port，兩種都通過同一組測試。P1 只有 `ItemLog` 是這樣（`InMemoryItemLog`、`KnexItemLog`），共用測試是 `itemLogContract`。其他 port 在 P1 只有一種實作，由各自的 adapter 測試負責。
 
 ## 縮寫

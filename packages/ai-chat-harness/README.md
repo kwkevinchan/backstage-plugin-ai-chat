@@ -15,8 +15,11 @@ The code has two circles, and the dependencies point inward:
 `yarn lint` enforces this (see `.eslintrc.js` and `src/lintRules.test.ts`):
 `domain` does not import `application`, neither imports `@backstage/*`,
 `express` or `knex`, and the whole package never imports `@backstage/*`.
-Neither circle can run code or reach the file system: no `fs`,
-`child_process`, `vm`, `worker_threads`, `cluster`, `eval` or `new Function`.
+Neither circle can run code, reach the file system or open a network: no
+import of `fs`, `child_process`, `vm`, `worker_threads`, `cluster`, `module`,
+`net`, `http`, `https` or `dgram`, no `eval` or `new Function`, and no
+`require`, `process`, `globalThis`, `global` or dynamic `import()` in the
+source (test files may use the globals of the test runner).
 The only way to act is a tool, behind the `ToolGateway` port.
 
 Part of the unofficial
