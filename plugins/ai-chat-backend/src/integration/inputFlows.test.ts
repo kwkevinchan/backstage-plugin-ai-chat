@@ -588,8 +588,13 @@ describe('inserted messages and the queue on a database', () => {
         events.findIndex(e => e.type === 'run.ended'),
       );
       const next = state.nextRunId!;
-      await until(async () => (await runRow(next)).status === 'completed');
+      // Both queued messages are sent, one run each. Between the end of the
+      // second run and the start of the third no run is `running`, so "no run
+      // is running" alone does not say the chain is over: wait for the third
+      // run to exist, then for it to end.
+      await until(async () => (await world.runCount()) === 3);
       await until(async () => (await world.runningRows()).length === 0);
+      expect((await runRow(next)).status).toBe('completed');
 
       const log = await world.items.read(session.id);
       const queued = log.find(
@@ -838,8 +843,11 @@ describe('inserted messages and the queue on a database', () => {
     });
 
     it('starts one run and sends one message when two backends are asked at the same time', async () => {
-      const a = backend([waitForAbort, [say('answer')]]);
-      const b = backend([[say('answer')]]);
+      // The run that starts stays active until it is stopped: a run that ended
+      // quickly would let the queue send its next message to the slower of the
+      // two requests, which is right but not what this test is about.
+      const a = backend([waitForAbort, waitForAbort]);
+      const b = backend([waitForAbort]);
       const session = await pausedQueue(a);
       const results = await Promise.all(
         [a, b].map(host =>
@@ -851,11 +859,22 @@ describe('inserted messages and the queue on a database', () => {
       );
       const handles = results.filter(Boolean);
       expect(handles).toHaveLength(1);
-      await drain(handles[0]!);
       const queued = (await world.items.read(session.id)).filter(
         i => i.kind === 'user_message' && i.delivery === 'queued',
       );
       expect(queued).toHaveLength(1);
+      expect((await view(a, session.id)).queue.items.map(m => m.text)).toEqual([
+        'second',
+      ]);
+      // Whichever backend runs it stops it.
+      for (const host of [a, b]) {
+        await host.useCases.cancelRun.execute({
+          principal: jane,
+          sessionId: session.id,
+          runId: handles[0]!.runId,
+        });
+      }
+      await drain(handles[0]!);
     });
   });
 });
