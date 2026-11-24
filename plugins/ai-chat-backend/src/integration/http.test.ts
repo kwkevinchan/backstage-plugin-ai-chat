@@ -333,6 +333,28 @@ describe('the HTTP routes', () => {
       });
     });
 
+    it('streams the result of a tool as it is stored, also when it was cut (H-08)', async () => {
+      // More than the limit of the gateway (20000 characters).
+      (world.actions.actions[0] as any).output = { text: 'a'.repeat(30000) };
+      const b = backend([
+        [callTool('m1', 'demo:read', { name: 'x' })],
+        [say('Done.')],
+      ]);
+      const id = await newSession(b);
+      const res = await send(b, id).expect(200);
+      const chunks = await parseSse(res.text);
+      const streamed = chunks.find(c => c.type === 'tool-output-available') as {
+        output: unknown;
+      };
+      const stored = (await world.items.read(id)).find(
+        item => item.kind === 'tool_result',
+      ) as { output: unknown; truncated?: boolean };
+
+      expect(stored.truncated).toBe(true);
+      expect(JSON.stringify(stored.output).length).toBeLessThanOrEqual(20000);
+      expect(streamed.output).toEqual(stored.output);
+    });
+
     it('stops at a tool that is not read-only: asks for the approval, runs nothing, finishes with tool-calls', async () => {
       const b = backend([[say('I will change it.'), write()]]);
       const id = await newSession(b);

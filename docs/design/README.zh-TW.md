@@ -9,6 +9,7 @@ AI Chat Harness 的設計。從上往下讀。
 | [architecture.zh-TW.md](architecture.zh-TW.md)               | 程式架構：Clean Architecture 的四圈、套件、介面、資料庫、HTTP | 要寫程式或審查的人           |
 | [implementation-plan.zh-TW.md](implementation-plan.zh-TW.md) | 實作規劃：四期拆成哪些 PR、怎麼驗收、要驗證的事、風險         | 要排工作的人                 |
 | [protocol-check.zh-TW.md](protocol-check.zh-TW.md)           | 協定驗證：AI SDK 的事件對照、核准的表示法、前端用 `useChat`   | 要寫串流和前端的人           |
+| [p1-coverage.zh-TW.md](p1-coverage.zh-TW.md)                 | P1 對照表：每一條 P1 需求對到哪個測試                         | 要驗收或接手 P1 的人         |
 
 規則：
 

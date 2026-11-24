@@ -148,6 +148,42 @@ describe('the circles are an allow list', () => {
   );
 });
 
+describe('the core cannot run code or reach the file system (S-01)', () => {
+  it.each([['src/domain/example.ts'], ['src/application/example.ts']])(
+    '%s rejects fs, child_process, vm, worker_threads and cluster',
+    async file => {
+      for (const source of [
+        'fs',
+        'fs/promises',
+        'node:fs',
+        'node:fs/promises',
+        'child_process',
+        'node:child_process',
+        'vm',
+        'node:vm',
+        'worker_threads',
+        'cluster',
+      ]) {
+        const messages = await lint(file, `import {} from '${source}';\n`);
+        expect(messages.map(m => m.rule)).toContain('no-restricted-imports');
+      }
+    },
+  );
+
+  it.each([['src/domain/example.ts'], ['src/application/example.ts']])(
+    '%s rejects eval and new Function',
+    async file => {
+      const messages = await lint(
+        file,
+        'export const f = (code: string) => [eval(code), new Function(code)];\n',
+      );
+      const rules = messages.map(m => m.rule);
+      expect(rules).toContain('no-eval');
+      expect(rules).toContain('no-new-func');
+    },
+  );
+});
+
 describe('the domain circle is pure', () => {
   it.each([
     [

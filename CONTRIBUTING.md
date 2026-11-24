@@ -63,7 +63,9 @@ depends on the core (its adapters implement the ports of the core); the core
 depends on no other package of this repository. The core
 (`packages/ai-chat-harness`) lists no `@backstage/*` package as a runtime
 dependency, and its lint rules (`packages/ai-chat-harness/.eslintrc.js`, tested in
-`src/lintRules.test.ts`) keep `domain/` from importing `application/`.
+`src/lintRules.test.ts`) keep `domain/` from importing `application/`, and
+keep both circles from running code or reaching the file system (`fs`,
+`child_process`, `vm`, `eval`).
 The backend has the same rules for its `domain/` and `application/` folders
 (`plugins/ai-chat-backend/.eslintrc.js`, tested in `src/lintRules.test.ts`):
 they import no `@backstage/*`, `express`, `knex` or Node.js module, and
@@ -90,14 +92,17 @@ streams read back with the parser of the AI SDK, nothing of the system prompt
 or of an error of the model server in a response, a user reads only their own
 sessions) and `integration/hostFlows.test.ts` (approval runs the stored input,
 once, from the owner only; nothing that is not read-only runs without
-approval).
+approval). `integration/twoBackends.test.ts` runs two backends on one
+database: a decision that the other backend receives, a shutdown that ends
+only its own runs, a backend that stops without a shutdown. The table of the
+requirements of P1 and their tests is in
+`docs/design/p1-coverage.zh-TW.md`.
 
 ## Shared definitions
 
 `plugins/ai-chat-common` (`@kwkevinchan/backstage-plugin-ai-chat-common`) has
 the types of the API and of the response stream, the paths of the routes and
-the id of the assistant message of a run. The backend imports it (and the
-frontend, once it uses the sessions API). Backstage does not let a frontend
+the id of the assistant message of a run. The backend and the frontend import it. Backstage does not let a frontend
 plugin import a backend plugin, so anything both sides need goes there.
 
 ## HTTP API spec

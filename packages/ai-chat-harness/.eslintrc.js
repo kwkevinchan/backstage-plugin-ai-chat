@@ -26,7 +26,11 @@
 //    `src/testing`, is refused. Test files may also import `src/testing`.
 // 3. `domain/` and `application/` also never import `express` or `knex`, and
 //    do not use `fetch`.
-// 4. `domain/` has no `async` function, no `await`, no `Promise`, and imports
+// 4. `domain/` and `application/` cannot run code, start a process or touch
+//    the file system (S-01): no `fs`, `child_process`, `vm`, `worker_threads`
+//    or `cluster`, and no `eval` or `new Function`. The only way out of the
+//    core is a port.
+// 5. `domain/` has no `async` function, no `await`, no `Promise`, and imports
 //    no Node.js built-in module (`fs`, `path`, `crypto`, `node:*` and so on).
 //
 // `src/lintRules.test.ts` lints sample files against this configuration.
@@ -48,6 +52,20 @@ const noFrameworkPatterns = ['express/*', 'knex/*'];
 // Every Node.js built-in module, with and without the `node:` prefix.
 const noNodePaths = builtinModules;
 const noNodePatterns = ['node:*', ...builtinModules.map(name => `${name}/*`)];
+
+// What would let the core run code or reach the file system (S-01).
+const noExecutionPaths = [
+  'fs',
+  'fs/promises',
+  'child_process',
+  'vm',
+  'worker_threads',
+  'cluster',
+];
+const noExecutionAll = [
+  ...noExecutionPaths,
+  ...noExecutionPaths.map(name => `node:${name}`),
+];
 
 // The test files of the shared configuration (@backstage/cli, eslint-factory).
 const testFiles = [
@@ -112,7 +130,7 @@ module.exports = require('@backstage/cli/config/eslint-factory')(__dirname, {
         'no-restricted-imports': [
           'error',
           {
-            paths: noFrameworkPaths,
+            paths: [...noFrameworkPaths, ...noExecutionAll],
             patterns: [
               ...baseRestrictedPatterns,
               noBackstage,
@@ -124,6 +142,9 @@ module.exports = require('@backstage/cli/config/eslint-factory')(__dirname, {
           'error',
           { name: 'fetch', message: 'Use a port instead of fetch.' },
         ],
+        'no-eval': 'error',
+        'no-implied-eval': 'error',
+        'no-new-func': 'error',
       },
     },
     {

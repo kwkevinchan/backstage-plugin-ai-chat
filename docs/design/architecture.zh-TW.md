@@ -2,7 +2,7 @@
 
 | 欄位     | 內容                                                                                                   |
 | -------- | ------------------------------------------------------------------------------------------------------ |
-| 狀態     | 已定案，進入實作                                                                                       |
+| 狀態     | 已定案，P1 完成（P1-01 到 P1-11）                                                                      |
 | 版本     | 1.0（2026-11-24）                                                                                      |
 | 對應規格 | [harness-spec.zh-TW.md](harness-spec.zh-TW.md) 1.0，主要是 D-15 到 D-19、D-23、D-25，以及需求 4.9（A） |
 | 下一份   | [implementation-plan.zh-TW.md](implementation-plan.zh-TW.md)                                           |
@@ -1050,7 +1050,7 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 
 「停在核准上」用協定原生的 `tool-approval-request`。核准是另一個請求（`decision`），它的回應用同一個 `messageId`，從 `tool-approval-response` 開始，接在同一則訊息上。不用 `signature`：歷史在伺服器的紀錄裡，用戶端不送歷史。
 
-重新整理後接回（A-07，`GET /sessions/:id/stream`）：重送的 `approval` Item 前面先補一個 `tool-approval-request`（`approvalId` 等於 `callId`），不然 SDK 找不到那個決定的 part 而丟錯；佇列裡屬於已重送的 Step 的 `step.started`、`step.ended` 略過，不多送空的 Step。先訂閱 Run 的事件，再讀紀錄，所以兩者之間寫入的 Item 不會漏；紀錄裡已有的 Item 再來一次時，presenter 用 `seq` 略過。回應先送 `start`（同一個 `messageId`）和 `data-run`，從目前 Run 的第一個 Item（包含它的 `user_message`）重送，再接著送新的事件。接回的串流不送逐字片段：每則 `agent_message` 在完成時整段送（`text-start`、一個 `text-delta`、`text-end`），不送缺開頭的 `text-delta`（`useChat` 會報錯）。只送缺的 Item 時，`useChat` 會蓋掉已載入的部分訊息。`afterSeq` 給不用 `useChat` 的用戶端當下限（略過的 Item 的事件也不會再來）。Run 是 `running` 而且在這一台跑時才串流；`waiting_approval`、已結束、沒有 Run、或 Run 在別台 backend 時回 204（停在核准上的 Session 開著串流，`useChat` 會停在 `streaming`，按核准不會自動送出；跨 backend 接回要等 P2）。客戶端離開只取消訂閱，Run 照跑（A-06）。
+重新整理後接回（A-07，`GET /sessions/:id/stream`）：重送的 `approval` Item 前面先補一個 `tool-approval-request`（`approvalId` 等於 `callId`），不然 SDK 找不到那個決定的 part 而丟錯；佇列裡屬於已重送的 Step 的 `step.started`、`step.ended` 略過，不多送空的 Step。Step 的編號取重送的 `tool_call` 的 `step` 和重送時開的 Step 數兩者的較大者，所以只有 `agent_message` 的 Step 也算已重送（`agent_message` 本身沒有 `step` 欄位）。先訂閱 Run 的事件，再讀紀錄，所以兩者之間寫入的 Item 不會漏；紀錄裡已有的 Item 再來一次時，presenter 用 `seq` 略過。回應先送 `start`（同一個 `messageId`）和 `data-run`，從目前 Run 的第一個 Item（包含它的 `user_message`）重送，再接著送新的事件。接回的串流不送逐字片段：每則 `agent_message` 在完成時整段送（`text-start`、一個 `text-delta`、`text-end`），不送缺開頭的 `text-delta`（`useChat` 會報錯）。只送缺的 Item 時，`useChat` 會蓋掉已載入的部分訊息。`afterSeq` 給不用 `useChat` 的用戶端當下限（略過的 Item 的事件也不會再來）。Run 是 `running` 而且在這一台跑時才串流；`waiting_approval`、已結束、沒有 Run、或 Run 在別台 backend 時回 204（停在核准上的 Session 開著串流，`useChat` 會停在 `streaming`，按核准不會自動送出；跨 backend 接回要等 P2）。客戶端離開只取消訂閱，Run 照跑（A-06）。
 
 `data-plan` 的「後送的取代先送的」只在同一則訊息裡成立。前一個 Run 的計畫留在舊訊息，畫面取最新的。
 
@@ -1126,16 +1126,16 @@ plugins/ai-chat/src/
 
 ## 10. 測試
 
-| 圈                    | 測什麼                                                                             | 怎麼測                                                   | 需要什麼                        |
-| --------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------- |
-| domain                | `decidePolicy`、`decideNextAction`、`buildModelInput`、`visibleItems`、`forkItems` | 表格式的單元測試。每條規則至少一列                       | 什麼都不用                      |
-| application（核心）   | 迴圈：一般回答、工具、核准後繼續、拒絕、上限、停止、當掉後接手                     | 用 `ScriptedModel`、`InMemoryItemLog`、`FakeToolGateway` | 什麼都不用                      |
-| application（宿主）   | 每個 use case 的權限和流程                                                         | 記憶體版的 port                                          | 什麼都不用                      |
-| adapters：persistence | 每個 `Knex*`                                                                       | 跑 A-10 的共用測試。SQLite 和 PostgreSQL 都跑            | `TestDatabases`                 |
-| adapters：backstage   | `ActionsToolGateway` 的屬性對應和 schema 驗證                                      | 假的 ActionsService                                      | `@backstage/backend-test-utils` |
-| adapters：http        | 路由、狀態碼、SSE 的內容                                                           | `startTestBackend` 加 supertest                          | 同上                            |
-| 整體                  | 兩台 backend 共用一個資料庫：一台送訊息，另一台核准                                | 整合測試                                                 | PostgreSQL                      |
-| 端對端                | 送訊息、核准、停止、重新整理                                                       | Playwright（PR #1 已有）                                 | 假的模型伺服器                  |
+| 圈                    | 測什麼                                                                                                  | 怎麼測                                                             | 需要什麼                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------- |
+| domain                | `decidePolicy`、`decideNextAction`、`buildModelInput`、`visibleItems`、`forkItems`                      | 表格式的單元測試。每條規則至少一列                                 | 什麼都不用                      |
+| application（核心）   | 迴圈：一般回答、工具、核准後繼續、拒絕、上限、停止、當掉後接手                                          | 用 `ScriptedModel`、`InMemoryItemLog`、`FakeToolGateway`           | 什麼都不用                      |
+| application（宿主）   | 每個 use case 的權限和流程                                                                              | 記憶體版的 port                                                    | 什麼都不用                      |
+| adapters：persistence | 每個 `Knex*`                                                                                            | 跑 A-10 的共用測試。SQLite 和 PostgreSQL 都跑                      | `TestDatabases`                 |
+| adapters：backstage   | `ActionsToolGateway` 的屬性對應和 schema 驗證                                                           | 假的 ActionsService                                                | `@backstage/backend-test-utils` |
+| adapters：http        | 路由、狀態碼、SSE 的內容                                                                                | `startTestBackend` 加 supertest                                    | 同上                            |
+| 整體                  | 兩台 backend 共用一個資料庫：一台送訊息，另一台核准；關機只結束自己的 Run；沒關機就當掉由另一台標成過期 | 整合測試（`integration/twoBackends.test.ts`、`hostFlows.test.ts`） | SQLite；CI 加跑 PostgreSQL      |
+| 端對端                | 送訊息、核准、停止、重新整理                                                                            | Playwright（PR #1 已有）                                           | 假的模型伺服器                  |
 
 目標：裡面兩圈的測試不啟動 Backstage，全部在幾秒內跑完。
 
@@ -1157,7 +1157,7 @@ plugins/ai-chat/src/
    ]}],
    ```
 
-3. **`no-restricted-imports`** 在 `src/domain` 和 `src/application` 禁止 `@backstage/*`、`express`、`knex` 和所有 Node.js 內建模組（含 `node:*`），並禁止全域的 `fetch`。`src/domain` 另外禁止 `async`、`await` 和 `Promise`。
+3. **`no-restricted-imports`** 在 `src/domain` 和 `src/application` 禁止 `@backstage/*`、`express`、`knex` 和全域的 `fetch`。宿主的這兩圈還禁止所有 Node.js 內建模組（含 `node:*`）。核心的 `src/domain` 禁止所有 Node.js 內建模組，`src/application` 禁止能執行程式碼或碰檔案系統的那幾個（`fs`、`child_process`、`vm`、`worker_threads`、`cluster`）和 `eval`、`new Function`（S-01：核心唯一的作用管道是工具）。`src/domain` 另外禁止 `async`、`await` 和 `Promise`。
 
 實際的設定在 `plugins/ai-chat-backend/.eslintrc.js`，和核心一樣，`import/no-restricted-paths` 是白名單：`domain` 只能 import `domain`，`application` 只能 import `domain` 和 `application`（`src/index.ts`、`plugin.ts`、`config.ts` 都不行）。測試在 `src/lintRules.test.ts`。`adapters/http` 和 `adapters/persistence` 互不 import 的那兩條，測試在同一個檔案：兩邊互相 import 會被擋，兩邊 import `domain`、`application` 或 `adapters/backstage` 不會。
 

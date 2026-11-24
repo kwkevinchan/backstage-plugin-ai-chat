@@ -650,6 +650,35 @@ describe('UiMessageStreamPresenter', () => {
       expect(head.filter(c => c.type === 'finish-step')).toHaveLength(1);
     });
 
+    it('does not open another step for the step events of a step that has only an answer', () => {
+      const presenter = new UiMessageStreamPresenter({
+        runId: RUN,
+        typing: false,
+      });
+      // Step 1 wrote text and no call, so the log has no step number for it.
+      const head = presenter.replay(
+        'running',
+        [
+          { ...base(1), kind: 'user_message', text: 'hi' },
+          agentMessage(2, 'The answer.'),
+        ] as Item[],
+        2,
+      );
+      expect(head.filter(c => c.type === 'start-step')).toHaveLength(1);
+
+      const live = [
+        { type: 'step.started', step: 1 },
+        { type: 'step.ended', step: 1 },
+      ].flatMap(e => presenter.present(e as HarnessEvent));
+      expect(live).toEqual([]);
+      // The next step closes the open one and opens its own.
+      expect(
+        presenter
+          .present({ type: 'step.started', step: 2 } as HarnessEvent)
+          .map(c => c.type),
+      ).toEqual(['finish-step', 'start-step']);
+    });
+
     it('skips the end of a replayed step that is still open, and closes it with the next step', () => {
       const presenter = new UiMessageStreamPresenter({
         runId: RUN,
