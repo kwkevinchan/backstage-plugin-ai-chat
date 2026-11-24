@@ -60,7 +60,10 @@ export type RunOutcome =
  *   loop leave old content out of the model input: `earlier` is the part before
  *   the newest user message, `steps` the steps of the current answer. It is
  *   also sent after `summary.failed`, and when no summary was made because it
- *   would not have helped. The screen may show one notice for it.
+ *   would not have helped. Inside one call of the loop it is sent only when
+ *   `parts` differ from the last one sent, so it is not repeated at every step;
+ *   a call that continues after an approval may send it again. The screen may
+ *   show one notice for it.
  *
  * @public
  */

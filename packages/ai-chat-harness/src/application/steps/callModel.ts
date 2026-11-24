@@ -41,6 +41,12 @@ export type CallModelResult = {
   outcome?: RunOutcome;
   /** The summary failed: the loop does not try again in this call. */
   summaryFailed?: true;
+  /**
+   * What the model input left out, as a key (`earlier`, `steps`, both joined
+   * with a comma, or empty). The loop passes it back as `trimmed` of the next
+   * call, so the same notice is not sent at every step.
+   */
+  trimmed?: string;
   /** The call ended while it made the summary, before a step began. */
   noStep?: true;
 };
@@ -81,7 +87,7 @@ export async function* callModel(
   req: AdvanceRunRequest,
   items: readonly Item[],
   usage: RunUsage,
-  opts: { summarize: boolean },
+  opts: { summarize: boolean; trimmed?: string },
 ): AsyncGenerator<HarnessEvent, CallModelResult> {
   // `usage.stepsUsed` already counts the steps the log shows for this run.
   const step = usage.stepsUsed + 1;
@@ -125,14 +131,15 @@ export async function* callModel(
   }
   const input = buildModelInput(current, req.agent, extra, req.budget);
   const trimmed = trimmedPartsOf(current, req.agent, extra, req.budget);
-  if (trimmed.earlier || trimmed.steps) {
-    yield {
-      type: 'context.trimmed',
-      parts: [
-        ...(trimmed.earlier ? (['earlier'] as const) : []),
-        ...(trimmed.steps ? (['steps'] as const) : []),
-      ],
-    };
+  const parts = [
+    ...(trimmed.earlier ? (['earlier'] as const) : []),
+    ...(trimmed.steps ? (['steps'] as const) : []),
+  ];
+  const trimmedKey = parts.join(',');
+  // Only a change is reported: the same parts at every step would repeat the
+  // notice on the screen.
+  if (parts.length > 0 && trimmedKey !== (opts.trimmed ?? '')) {
+    yield { type: 'context.trimmed', parts };
   }
 
   yield { type: 'step.started', step };
@@ -249,6 +256,7 @@ export async function* callModel(
   yield { type: 'step.ended', step };
   return {
     toolCallsRequested: requested.length,
+    trimmed: trimmedKey,
     ...(summaryFailed ? { summaryFailed: true as const } : {}),
   };
 }
