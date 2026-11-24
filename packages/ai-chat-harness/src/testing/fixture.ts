@@ -26,6 +26,7 @@ import {
   type RunOutcome,
 } from '../application';
 import type {
+  ContextBudget,
   Item,
   ItemBody,
   Limits,
@@ -51,6 +52,7 @@ export async function kit(options: {
   tools?: FakeTool[];
   limits?: Partial<Limits>;
   policy?: PolicySettings;
+  budget?: ContextBudget;
   /** The log before the run: the first item is normally a user message. */
   log?: ItemBody[];
 }) {
@@ -89,7 +91,7 @@ export async function kit(options: {
   ): AdvanceRunRequest => ({
     agent: { id: 'default', systemPrompt: 'You are a helpful agent.' },
     limits,
-    budget: { tokenBudget: 24000, keepRecentSteps: 6 },
+    budget: options.budget ?? { tokenBudget: 24000, keepRecentSteps: 6 },
     policy: options.policy ?? {},
     fence: runFence,
     ctx: { sessionId, runId: runFence.runId, principal: { user: 'user:a' } },
@@ -128,6 +130,7 @@ export async function kit(options: {
     append,
     execute,
     request,
+    lastUsage,
     read: () => items.read(sessionId),
     kinds: async () => (await items.read(sessionId)).map(item => item.kind),
   };

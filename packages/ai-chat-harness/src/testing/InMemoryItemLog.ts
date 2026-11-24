@@ -62,10 +62,17 @@ export class InMemoryItemLog implements ItemLog {
 
   async read(
     sessionId: string,
-    opts: { afterSeq?: number } = {},
+    opts: { afterSeq?: number; fromLatestSummary?: boolean } = {},
   ): Promise<Item[]> {
-    const afterSeq = opts.afterSeq ?? 0;
-    return (this.sessions.get(sessionId) ?? [])
+    const items = this.sessions.get(sessionId) ?? [];
+    let afterSeq = opts.afterSeq ?? 0;
+    if (opts.fromLatestSummary) {
+      const newest = [...items].reverse().find(item => item.kind === 'summary');
+      if (newest?.kind === 'summary') {
+        afterSeq = Math.max(afterSeq, newest.coversUpToSeq);
+      }
+    }
+    return items
       .filter(item => item.seq > afterSeq)
       .map(item => structuredClone(item));
   }
