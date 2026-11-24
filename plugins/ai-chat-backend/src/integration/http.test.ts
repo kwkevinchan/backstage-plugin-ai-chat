@@ -23,6 +23,7 @@ import {
 } from '@kwkevinchan/ai-chat-harness/testing';
 import type { UIMessage } from 'ai';
 import express from 'express';
+import compression from 'compression';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import request from 'supertest';
@@ -65,18 +66,25 @@ describe('the HTTP routes', () => {
     await world.cleanup();
   });
 
-  function app(host: Backend) {
+  function app(
+    host: Backend,
+    options: { compression?: boolean; keepAliveMs?: number } = {},
+  ) {
     const logger = mockServices.rootLogger();
     const httpAuth = mockServices.httpAuth();
     const userInfo = mockServices.userInfo();
     const auth = mockServices.auth();
-    return express()
+    const application = express();
+    if (options.compression)
+      application.use(compression() as unknown as express.RequestHandler);
+    return application
       .use(
         createRouter({
           principal: req =>
             principalFromRequest(req, { httpAuth, userInfo, auth }),
           useCases: host.useCases,
           logger: host.logger,
+          keepAliveMs: options.keepAliveMs,
         }),
       )
       .use(
@@ -94,8 +102,8 @@ describe('the HTTP routes', () => {
   }
 
   /** Listens on a port, for responses that are read while they are written. */
-  async function listen(b: Backend & { app: express.Express }) {
-    const server = createServer(b.app);
+  async function listen(application: express.Express) {
+    const server = createServer(application);
     servers.push(server);
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -249,7 +257,7 @@ describe('the HTTP routes', () => {
       const id = await newSession(b);
       const res = await send(b, id, 'hi').expect(200);
       expect(res.headers['content-type']).toMatch(/^text\/event-stream/);
-      expect(res.headers['cache-control']).toBe('no-cache');
+      expect(res.headers['cache-control']).toBe('no-cache, no-transform');
       expect(res.headers['x-vercel-ai-ui-message-stream']).toBe('v1');
       expect(res.headers['x-accel-buffering']).toBe('no');
 
@@ -749,7 +757,7 @@ describe('the HTTP routes', () => {
         [say('Working'), callTool('m1', 'demo:read', { name: 'x' })],
         waitForAbort,
       ]);
-      const base = await listen(b2);
+      const base = await listen(b2.app);
       const id = await newSession(b2);
       const response = await fetch(`${base}/sessions/${id}/runs`, {
         method: 'POST',
@@ -849,7 +857,7 @@ describe('the HTTP routes', () => {
         [say('Let me check.'), callTool('m1', 'demo:read', { name: 'x' })],
         waitForAbort,
       ]);
-      const base = await listen(b);
+      const base = await listen(b.app);
       const id = await newSession(b);
 
       // The first client starts the run, sees the start of it and goes away.
@@ -926,7 +934,7 @@ describe('the HTTP routes', () => {
         [say('Let me check.'), callTool('m1', 'demo:read', { name: 'x' })],
         waitForAbort,
       ]);
-      const base = await listen(b);
+      const base = await listen(b.app);
       const id = await newSession(b);
       const handle = await b.useCases.sendMessage.execute({
         principal: await principal(JANE),
@@ -947,6 +955,140 @@ describe('the HTTP routes', () => {
           .filter(c => c.type === 'data-item')
           .map(c => (c as any).data.seq),
       ).toEqual([4]);
+    });
+  });
+
+  describe('the stream on the wire', () => {
+    const blocked = () =>
+      backend([
+        [say('Working'), callTool('m1', 'demo:read', { name: 'x' })],
+        waitForAbort,
+      ]);
+
+    /** Starts a run over HTTP and reads the body as it arrives. */
+    async function startRun(
+      b: ReturnType<typeof backend>,
+      base: string,
+      headers: Record<string, string> = {},
+    ) {
+      const id = await newSession(b);
+      const response = await fetch(`${base}/sessions/${id}/runs`, {
+        method: 'POST',
+        headers: {
+          Authorization: JANE,
+          'Content-Type': 'application/json',
+          ...headers,
+        },
+        body: JSON.stringify({ text: 'go' }),
+      });
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let text = '';
+      return {
+        id,
+        response,
+        get text() {
+          return text;
+        },
+        async readUntil(mark: string) {
+          while (!text.includes(mark)) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            text += decoder.decode(value, { stream: true });
+          }
+        },
+      };
+    }
+
+    it('is not compressed or held back by the compression of the backend: the first events arrive while the run is still going', async () => {
+      const b = blocked();
+      const base = await listen(app(b, { compression: true }));
+      const run = await startRun(b, base, {
+        'Accept-Encoding': 'gzip, deflate',
+      });
+      expect(run.response.headers.get('content-encoding')).toBeNull();
+      expect(run.response.headers.get('cache-control')).toBe(
+        'no-cache, no-transform',
+      );
+      // The run is stuck in its second step, so this arrives before the end.
+      await run.readUntil('tool-output-available');
+      expect(run.text).not.toContain('[DONE]');
+      const row = await world.knex('runs').first();
+      await as(
+        JANE,
+        request(b.app).post(`/sessions/${run.id}/runs/${row.id}/cancel`),
+      ).expect(202);
+      await run.readUntil('[DONE]');
+      expect((await parseSse(run.text)).map(c => c.type)).toContain('abort');
+    });
+
+    it('writes a comment line while the stream is idle, and the parser of the SDK skips it', async () => {
+      const b = blocked();
+      const base = await listen(app(b, { keepAliveMs: 20 }));
+      const run = await startRun(b, base);
+      await run.readUntil(': keep-alive\n\n');
+      expect(run.text).toContain(': keep-alive\n\n');
+      const row = await world.knex('runs').first();
+      await as(
+        JANE,
+        request(b.app).post(`/sessions/${run.id}/runs/${row.id}/cancel`),
+      ).expect(202);
+      await run.readUntil('[DONE]');
+      const chunks = await parseSse(run.text);
+      expect(chunks.every(c => typeof c.type === 'string')).toBe(true);
+      expect(chunks[chunks.length - 1]).toMatchObject({ type: 'abort' });
+    });
+
+    it('stops the timer when the stream ends', async () => {
+      const created: unknown[] = [];
+      const cleared: unknown[] = [];
+      const set = jest.spyOn(global, 'setInterval');
+      const clear = jest.spyOn(global, 'clearInterval');
+      try {
+        const b = backend([[say('Hi')]]);
+        const id = await newSession(b);
+        const res = await send(b, id).expect(200);
+        await parseSse(res.text);
+        created.push(...set.mock.results.map(r => r.value));
+        cleared.push(...clear.mock.calls.map(c => c[0]));
+      } finally {
+        set.mockRestore();
+        clear.mockRestore();
+      }
+      // The keep-alive timer and the one of the supervisor: none is left.
+      expect(created.length).toBeGreaterThanOrEqual(2);
+      for (const timer of created) expect(cleared).toContain(timer);
+    });
+  });
+
+  describe('an unexpected error', () => {
+    it('is logged and answered with a fixed text, not with the message of the error', async () => {
+      const b = backend([]);
+      const failing = {
+        ...b.useCases,
+        getSession: {
+          execute: async () => {
+            throw new Error(
+              'insert into "sessions" (id) values (?) failed: SQLITE_BUSY',
+            );
+          },
+        },
+      };
+      const application = app({
+        ...b,
+        useCases: failing,
+      } as unknown as Backend);
+      const res = await as(JANE, request(application).get('/sessions/s1'));
+      expect(res.status).toBe(500);
+      expect(res.text).not.toContain('insert into');
+      expect(res.text).not.toContain('SQLITE');
+      expect(res.body.error.message).toBe('The request failed.');
+      expect(b.logger.error).toHaveBeenCalledWith(
+        'A request failed',
+        expect.objectContaining({
+          error: expect.stringContaining('SQLITE_BUSY'),
+        }),
+      );
     });
   });
 

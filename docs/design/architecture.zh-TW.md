@@ -982,15 +982,16 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 
 **狀態碼和錯誤**。use case 丟的 domain 錯誤由 `errorMapping.ts` 轉成 Backstage 的錯誤，Backstage 的錯誤處理接手，回應是 JSON：
 
-| 情形                                                                                                                      | 狀態碼            |
-| ------------------------------------------------------------------------------------------------------------------------- | ----------------- |
-| 沒有登入；服務 token                                                                                                      | 401；403          |
-| Session、Run、呼叫不存在；Session 不是這個使用者的（文字和「不存在」相同，不洩漏存在）                                    | 404               |
-| 請求內容不合格；請求指名的 Toolset 或 Agent 不存在                                                                        | 400               |
-| 已有進行中的 Run（也包含停在等核准的 Run）；刪除有進行中 Run 的 Session；呼叫不在等決定、Run 不在等核准；取消已結束的 Run | 409               |
-| 這一台正在關機（送訊息、最後一個決定、接續）                                                                              | 503               |
-| `resume` 沒有東西可接續；`stream` 沒有東西可接                                                                            | 204               |
-| 其他錯誤                                                                                                                  | 500，不含錯誤原文 |
+| 情形                                                                                                                      | 狀態碼                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| 沒有登入；服務 token                                                                                                      | 401；403                                                                                                                                     |
+| Session、Run、呼叫不存在；Session 不是這個使用者的（文字和「不存在」相同，不洩漏存在）                                    | 404                                                                                                                                          |
+| 請求內容不合格；請求指名的 Toolset 或 Agent 不存在                                                                        | 400                                                                                                                                          |
+| 已有進行中的 Run（也包含停在等核准的 Run）；刪除有進行中 Run 的 Session；呼叫不在等決定、Run 不在等核准；取消已結束的 Run | 409                                                                                                                                          |
+| 這一台正在關機（送訊息、最後一個決定、接續）                                                                              | 503                                                                                                                                          |
+| `resume` 沒有東西可接續；`stream` 沒有東西可接                                                                            | 204                                                                                                                                          |
+| 在你讀取的空檔，Run 被別人接手或結束（`LeaseLost`、`InvalidRunTransition`）                                               | 409                                                                                                                                          |
+| 其他沒預期的錯誤                                                                                                          | 500，文字固定為 `The request failed.`；原文只記 log（Backstage 的錯誤處理會把非 Backstage 錯誤的名稱和訊息送給用戶端，例如資料庫錯誤帶 SQL） |
 
 串流開始之後不能再改狀態碼：錯誤不應該發生；真的發生時記 log，送一個固定文字的 `error` 加 `[DONE]`。
 
@@ -998,7 +999,7 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 
 **訊息的 id**：每個 Run 一個，`run_<runId>`（`ai-chat-common` 的 `messageIdOfRun`）。第一個串流、核准後的串流、接回的串流都用同一個，畫面從紀錄還原助理訊息時也用同一個。
 
-**SSE 的格式**是 AI SDK 的 UI message stream（鎖定 `ai@7.0.166`）。`uiMessageStream.ts` 把 `HarnessEvent` 轉過去。回應的 header：`content-type: text/event-stream`、`cache-control: no-cache`、`x-vercel-ai-ui-message-stream: v1`、`x-accel-buffering: no`。每個事件一行 `data: <JSON>`，結尾 `data: [DONE]`。
+**SSE 的格式**是 AI SDK 的 UI message stream（鎖定 `ai@7.0.166`）。`uiMessageStream.ts` 把 `HarnessEvent` 轉過去。回應的 header：`content-type: text/event-stream`、`cache-control: no-cache, no-transform`、`x-vercel-ai-ui-message-stream: v1`、`x-accel-buffering: no`。每個事件一行 `data: <JSON>`，結尾 `data: [DONE]`。`no-transform` 讓 Backstage root router 的 `compression()` 不壓縮這個回應（壓縮會把串流累積到結尾才送）；每次寫入後也 flush。串流閒置時每 15 秒寫一行 `: keep-alive` 註解（SSE 的註解行，解析器略過），避免 proxy 關掉閒置的連線，串流結束時清掉計時器。
 
 | HarnessEvent                                                    | UI message stream                                                                        |
 | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
@@ -1034,7 +1035,7 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 
 「停在核准上」用協定原生的 `tool-approval-request`。核准是另一個請求（`decision`），它的回應用同一個 `messageId`，從 `tool-approval-response` 開始，接在同一則訊息上。不用 `signature`：歷史在伺服器的紀錄裡，用戶端不送歷史。
 
-重新整理後接回（A-07，`GET /sessions/:id/stream`）：先訂閱 Run 的事件，再讀紀錄，所以兩者之間寫入的 Item 不會漏；紀錄裡已有的 Item 再來一次時，presenter 用 `seq` 略過。回應先送 `start`（同一個 `messageId`）和 `data-run`，從目前 Run 的第一個 Item（包含它的 `user_message`）重送，再接著送新的事件。接回的串流不送逐字片段：每則 `agent_message` 在完成時整段送（`text-start`、一個 `text-delta`、`text-end`），不送缺開頭的 `text-delta`（`useChat` 會報錯）。只送缺的 Item 時，`useChat` 會蓋掉已載入的部分訊息。`afterSeq` 給不用 `useChat` 的用戶端當下限（略過的 Item 的事件也不會再來）。Run 是 `running` 而且在這一台跑時才串流；`waiting_approval`、已結束、沒有 Run、或 Run 在別台 backend 時回 204（停在核准上的 Session 開著串流，`useChat` 會停在 `streaming`，按核准不會自動送出；跨 backend 接回要等 P2）。客戶端離開只取消訂閱，Run 照跑（A-06）。
+重新整理後接回（A-07，`GET /sessions/:id/stream`）：重送的 `approval` Item 前面先補一個 `tool-approval-request`（`approvalId` 等於 `callId`），不然 SDK 找不到那個決定的 part 而丟錯；佇列裡屬於已重送的 Step 的 `step.started`、`step.ended` 略過，不多送空的 Step。先訂閱 Run 的事件，再讀紀錄，所以兩者之間寫入的 Item 不會漏；紀錄裡已有的 Item 再來一次時，presenter 用 `seq` 略過。回應先送 `start`（同一個 `messageId`）和 `data-run`，從目前 Run 的第一個 Item（包含它的 `user_message`）重送，再接著送新的事件。接回的串流不送逐字片段：每則 `agent_message` 在完成時整段送（`text-start`、一個 `text-delta`、`text-end`），不送缺開頭的 `text-delta`（`useChat` 會報錯）。只送缺的 Item 時，`useChat` 會蓋掉已載入的部分訊息。`afterSeq` 給不用 `useChat` 的用戶端當下限（略過的 Item 的事件也不會再來）。Run 是 `running` 而且在這一台跑時才串流；`waiting_approval`、已結束、沒有 Run、或 Run 在別台 backend 時回 204（停在核准上的 Session 開著串流，`useChat` 會停在 `streaming`，按核准不會自動送出；跨 backend 接回要等 P2）。客戶端離開只取消訂閱，Run 照跑（A-06）。
 
 `data-plan` 的「後送的取代先送的」只在同一則訊息裡成立。前一個 Run 的計畫留在舊訊息，畫面取最新的。
 

@@ -5071,6 +5071,7 @@ __metadata:
     "@backstage/types": "backstage:^"
     "@kwkevinchan/ai-chat-harness": "workspace:^"
     "@kwkevinchan/backstage-plugin-ai-chat-common": "workspace:^"
+    "@types/compression": "npm:^1.7.5"
     "@types/eslint": "npm:^8.56.0"
     "@types/express": "npm:^4.17.6"
     "@types/json-schema": "npm:^7.0.15"
@@ -5078,6 +5079,7 @@ __metadata:
     ai: "npm:7.0.166"
     ajv: "npm:^8.20.0"
     better-sqlite3: "npm:^12.0.0"
+    compression: "npm:^1.8.1"
     eslint: "npm:^8.57.0"
     express: "npm:^4.22.0"
     express-promise-router: "npm:^4.1.0"
@@ -8192,6 +8194,16 @@ __metadata:
   version: 0.12.5
   resolution: "@types/caseless@npm:0.12.5"
   checksum: 10c0/b1f8b8a38ce747b643115d37a40ea824c658bd7050e4b69427a10e9d12d1606ed17a0f6018241c08291cd59f70aeb3c1f3754ad61e45f8dbba708ec72dde7ec8
+  languageName: node
+  linkType: hard
+
+"@types/compression@npm:^1.7.5":
+  version: 1.8.1
+  resolution: "@types/compression@npm:1.8.1"
+  dependencies:
+    "@types/express": "npm:*"
+    "@types/node": "npm:*"
+  checksum: 10c0/3b958b1c9b7cdf9852cd8fbd85fb9067196656fb771aaed950b1ae6ebab5e87d2f7b75260160c772038919a12c8ca8bee42aaa3fdb989b0646163979d75fe8b2
   languageName: node
   linkType: hard
 

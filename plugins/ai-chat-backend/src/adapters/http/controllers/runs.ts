@@ -55,6 +55,7 @@ export class RunsController {
   constructor(
     private readonly useCases: RunUseCases,
     private readonly logger: Logger,
+    private readonly keepAliveMs?: number,
   ) {}
 
   /** `POST /sessions/:id/runs` */
@@ -167,6 +168,7 @@ export class RunsController {
         ),
       },
       this.logger,
+      this.keepAliveMs,
     );
     return true;
   }
@@ -188,6 +190,7 @@ export class RunsController {
         }),
       },
       this.logger,
+      this.keepAliveMs,
     );
   }
 }

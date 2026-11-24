@@ -56,6 +56,8 @@ type Loop = {
   request: LaunchRequest;
   controller: AbortController;
   subscribers: Set<EventChannel<HarnessEvent>>;
+  /** Set when `run.ended` went to the subscribers: a new subscriber would not get it. */
+  ended: boolean;
   /** Set when the shutdown takes the run over; the loop then leaves its status alone. */
   shuttingDown: boolean;
   done: Promise<void>;
@@ -114,6 +116,7 @@ export class RunSupervisor {
       request,
       controller: new AbortController(),
       subscribers: new Set(),
+      ended: false,
       shuttingDown: false,
       done: Promise.resolve(),
     };
@@ -126,12 +129,13 @@ export class RunSupervisor {
 
   /**
    * A new subscriber of a run that this process runs; it gets the events from
-   * now on. `undefined` when the run is not running here.
+   * now on. `undefined` when the run is not running here, and when its
+   * `run.ended` went out already: the new subscriber would never get it.
    */
   subscribe(runId: string): AsyncIterable<HarnessEvent> | undefined {
     const fence = this.fences.get(runId);
     const loop = fence && this.loops.get(fence.leaseOwner);
-    return loop ? this.addSubscriber(loop) : undefined;
+    return loop && !loop.ended ? this.addSubscriber(loop) : undefined;
   }
 
   /** Stops the loop of the run if this process runs it. Returns whether it did. */
@@ -201,6 +205,7 @@ export class RunSupervisor {
   }
 
   private publish(loop: Loop, event: HarnessEvent): void {
+    if (event.type === 'run.ended') loop.ended = true;
     for (const subscriber of loop.subscribers) subscriber.push(event);
   }
 

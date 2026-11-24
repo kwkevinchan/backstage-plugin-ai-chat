@@ -584,6 +584,69 @@ describe('UiMessageStreamPresenter', () => {
       ).toEqual([1, 2, 3, 4, 5, 6]);
     });
 
+    it('asks for the approval of a call before its decision, so the SDK finds the part (a run that was approved and goes on)', async () => {
+      const write = toolCall(3, 'w');
+      const log: Item[] = [
+        { ...base(1), kind: 'user_message', text: 'change it' },
+        agentMessage(2, 'Changing.'),
+        write,
+        {
+          ...base(4),
+          kind: 'approval',
+          callId: 'w',
+          decision: 'allow',
+          decidedBy: 'user:default/jane',
+        } as Item,
+        { ...base(5), kind: 'tool_started', callId: 'w' } as Item,
+        toolResult(6, 'w'),
+      ];
+      const presenter = new UiMessageStreamPresenter({
+        runId: RUN,
+        typing: false,
+      });
+      const chunks = [
+        ...presenter.replay('running', log, 6),
+        ...[
+          { type: 'step.ended', step: 1 },
+          { type: 'run.ended', outcome: { status: 'completed' } },
+        ].flatMap(e => presenter.present(e as HarnessEvent)),
+        ...presenter.close(),
+      ];
+      const chunkTypes = chunks.map(c => c.type);
+      expect(chunkTypes.indexOf('tool-approval-request')).toBeGreaterThan(-1);
+      expect(chunkTypes.indexOf('tool-approval-request')).toBeLessThan(
+        chunkTypes.indexOf('tool-approval-response'),
+      );
+      // The SDK throws when a decision has no request before it.
+      const message = await readMessage(await throughSdk(chunks));
+      expect(
+        message.parts.find(p => p.type === 'tool-demo:write'),
+      ).toMatchObject({
+        state: 'output-available',
+        approval: { id: 'w', approved: true },
+        output: { done: true },
+      });
+    });
+
+    it('does not send an empty step for the step events of a step that was replayed', async () => {
+      const presenter = new UiMessageStreamPresenter({
+        runId: RUN,
+        typing: false,
+      });
+      const head = presenter.replay('running', items, 5);
+      const live = [
+        // The queue holds the events of step 1, which the replay covered.
+        { type: 'step.started', step: 1 },
+        { type: 'step.ended', step: 1 },
+        { type: 'step.started', step: 2 },
+        { type: 'step.ended', step: 2 },
+      ].flatMap(e => presenter.present(e as HarnessEvent));
+      expect(head.filter(c => c.type === 'start-step')).toHaveLength(1);
+      // Only step 2 is new; it is empty, so it opens and closes once.
+      expect(live.map(c => c.type)).toEqual(['start-step', 'finish-step']);
+      expect(head.filter(c => c.type === 'finish-step')).toHaveLength(1);
+    });
+
     it('skips the events of items the log had when it was read, also those left out by afterSeq', () => {
       const presenter = new UiMessageStreamPresenter({
         runId: RUN,

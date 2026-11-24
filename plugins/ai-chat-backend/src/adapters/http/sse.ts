@@ -22,9 +22,24 @@ import type { UiMessageStreamPresenter } from './presenters/uiMessageStream';
 
 const STREAM_FAILED_TEXT = 'The run stopped.';
 
-function write(res: Response, chunk: UiMessageChunk | '[DONE]'): void {
+export const DEFAULT_KEEP_ALIVE_MS = 15_000;
+
+/**
+ * Writes one line of the stream and pushes it out: a compression layer of the
+ * backend (the root router of Backstage has one) holds the data back until it
+ * is flushed.
+ */
+function writeRaw(res: Response, text: string): void {
   if (res.writableEnded || res.destroyed) return;
-  res.write(`data: ${chunk === '[DONE]' ? chunk : JSON.stringify(chunk)}\n\n`);
+  res.write(text);
+  (res as unknown as { flush?: () => void }).flush?.();
+}
+
+function write(res: Response, chunk: UiMessageChunk | '[DONE]'): void {
+  writeRaw(
+    res,
+    `data: ${chunk === '[DONE]' ? chunk : JSON.stringify(chunk)}\n\n`,
+  );
 }
 
 /**
@@ -34,7 +49,10 @@ function write(res: Response, chunk: UiMessageChunk | '[DONE]'): void {
  * subscription; the run goes on (A-06).
  *
  * The headers are the ones of the SDK, except `connection`, which HTTP/2
- * does not allow.
+ * does not allow, and `cache-control` also says `no-transform`, so a proxy
+ * does not compress or buffer the stream. Every `keepAliveMs` without a chunk
+ * a comment line goes out, so an idle connection (a long model call or tool)
+ * is not closed by a proxy. A comment line is not an event.
  */
 export async function sendUiMessageStream(
   res: Response,
@@ -44,6 +62,7 @@ export async function sendUiMessageStream(
     head?: UiMessageChunk[];
   },
   logger: Logger,
+  keepAliveMs: number = DEFAULT_KEEP_ALIVE_MS,
 ): Promise<void> {
   const iterator = stream.events[Symbol.asyncIterator]();
   let gone = false;
@@ -54,10 +73,14 @@ export async function sendUiMessageStream(
   });
   res.status(200);
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('X-Vercel-AI-UI-Message-Stream', 'v1');
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
+  const keepAlive = setInterval(
+    () => writeRaw(res, ': keep-alive\n\n'),
+    keepAliveMs,
+  );
 
   try {
     for (const chunk of stream.head ?? []) write(res, chunk);
@@ -81,6 +104,7 @@ export async function sendUiMessageStream(
     write(res, '[DONE]');
     void iterator.return?.();
   } finally {
+    clearInterval(keepAlive);
     if (!res.writableEnded) res.end();
   }
 }

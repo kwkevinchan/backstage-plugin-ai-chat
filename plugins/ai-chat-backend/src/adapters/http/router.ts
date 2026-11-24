@@ -30,6 +30,8 @@ export type RouterOptions = {
   principal(req: express.Request): Promise<Principal>;
   useCases: SessionUseCases & RunUseCases;
   logger: Logger;
+  /** The time between the comment lines that keep an idle stream open; 15 seconds by default. */
+  keepAliveMs?: number;
 };
 
 /**
@@ -38,9 +40,9 @@ export type RouterOptions = {
  * error of Backstage that the backend answers with (`toHttpError`).
  */
 export function createRouter(options: RouterOptions): express.Router {
-  const { principal, useCases, logger } = options;
+  const { principal, useCases, logger, keepAliveMs } = options;
   const sessions = new SessionsController(useCases);
-  const runs = new RunsController(useCases, logger);
+  const runs = new RunsController(useCases, logger, keepAliveMs);
   const router = Router();
   router.use(express.json({ limit: '64kb' }));
 
@@ -60,7 +62,16 @@ export function createRouter(options: RouterOptions): express.Router {
       } catch (error) {
         // After the first byte the response is a stream and cannot change.
         if (res.headersSent) throw error;
-        throw toHttpError(error);
+        throw toHttpError(error, unexpected =>
+          logger.error('A request failed', {
+            method: req.method,
+            path: req.path,
+            error:
+              unexpected instanceof Error
+                ? unexpected.message
+                : String(unexpected),
+          }),
+        );
       }
     };
 

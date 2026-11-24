@@ -66,6 +66,10 @@ export class UiMessageStreamPresenter {
   private trimmedSent = false;
   private ended = false;
   private replaying = false;
+  /** The calls shown so far, to ask for the approval of one before its decision. */
+  private readonly calls = new Map<string, ToolCallItem>();
+  /** The steps up to this number were replayed: their step events are skipped. */
+  private replayedStep = 0;
 
   /**
    * `afterStart` goes out right after `start`: the decisions of the request
@@ -91,6 +95,7 @@ export class UiMessageStreamPresenter {
           this.run('running'),
         ];
       case 'step.started':
+        if (event.step <= this.replayedStep) return [];
         return [...this.closeStep(), ...this.openStep()];
       case 'step.ended':
         return this.closeStep();
@@ -138,6 +143,10 @@ export class UiMessageStreamPresenter {
     for (const item of items) chunks.push(...this.item(item));
     this.replaying = false;
     this.lastSeq = Math.max(this.lastSeq, upToSeq);
+    this.replayedStep = [...this.calls.values()].reduce(
+      (max, call) => Math.max(max, call.step),
+      0,
+    );
     return chunks;
   }
 
@@ -206,6 +215,7 @@ export class UiMessageStreamPresenter {
       case 'agent_message':
         return [...this.openStep(), ...this.text(item.seq, item.text, draftId)];
       case 'tool_call':
+        this.calls.set(item.callId, item);
         return [
           ...this.openStep(),
           {
@@ -215,15 +225,20 @@ export class UiMessageStreamPresenter {
             input: item.input,
           },
         ];
-      case 'approval':
+      case 'approval': {
+        // The SDK finds the part of a decision by the request of the approval,
+        // so a stream that did not carry the request (a replay) sends it first.
+        const call = this.calls.get(item.callId);
         return [
           ...this.stepEnd(),
+          ...(call ? [approvalRequest(call)] : []),
           {
             type: 'tool-approval-response',
             approvalId: item.callId,
             approved: item.decision === 'allow',
           },
         ];
+      }
       case 'tool_started':
         return this.stepEnd();
       case 'tool_result':

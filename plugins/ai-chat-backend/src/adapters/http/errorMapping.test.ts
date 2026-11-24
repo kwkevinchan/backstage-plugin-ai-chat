@@ -20,6 +20,7 @@ import {
   NotFoundError,
   ServiceUnavailableError,
 } from '@backstage/errors';
+import { InvalidRunTransition, LeaseLost } from '@kwkevinchan/ai-chat-harness';
 import {
   AgentNotFound,
   NotSessionOwner,
@@ -34,6 +35,8 @@ import {
 } from '../../domain';
 import { toHttpError } from './errorMapping';
 
+const noop = () => {};
+
 describe('toHttpError', () => {
   it.each([
     [new SessionNotFound('s1'), NotFoundError],
@@ -46,19 +49,37 @@ describe('toHttpError', () => {
     [new UnknownToolset('t1'), InputError],
     [new AgentNotFound('a1'), InputError],
     [new ShuttingDown(), ServiceUnavailableError],
+    [new LeaseLost('r1'), ConflictError],
+    [new InvalidRunTransition('completed', 'running'), ConflictError],
   ])('maps %p to %p', (error, expected) => {
-    expect(toHttpError(error)).toBeInstanceOf(expected);
+    expect(toHttpError(error, noop)).toBeInstanceOf(expected);
   });
 
   it('answers a session of another user like a session that does not exist', () => {
-    const notOwner = toHttpError(new NotSessionOwner('s1')) as Error;
-    const missing = toHttpError(new SessionNotFound('s1')) as Error;
+    const notOwner = toHttpError(new NotSessionOwner('s1'), noop) as Error;
+    const missing = toHttpError(new SessionNotFound('s1'), noop) as Error;
     expect(notOwner.message).toBe(missing.message);
     expect(notOwner.message).not.toContain('owner');
   });
 
-  it('leaves any other error as it is', () => {
+  it('keeps an error of Backstage as it is', () => {
+    const error = new InputError('bad body');
+    expect(toHttpError(error, noop)).toBe(error);
+  });
+
+  it('answers an unexpected error with a fixed text, and hands the error to the log', () => {
+    const seen: unknown[] = [];
     const error = new Error('insert into "items" failed');
-    expect(toHttpError(error)).toBe(error);
+    const answer = toHttpError(error, e => seen.push(e));
+    expect(answer).not.toBe(error);
+    expect(answer.message).toBe('The request failed.');
+    expect(answer.message).not.toContain('insert');
+    expect(seen).toEqual([error]);
+  });
+
+  it('does not log the errors it maps', () => {
+    const seen: unknown[] = [];
+    toHttpError(new SessionNotFound('s1'), e => seen.push(e));
+    expect(seen).toEqual([]);
   });
 });

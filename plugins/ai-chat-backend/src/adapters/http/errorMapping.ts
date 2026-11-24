@@ -16,10 +16,12 @@
 
 import {
   ConflictError,
+  CustomErrorBase,
   InputError,
   NotFoundError,
   ServiceUnavailableError,
 } from '@backstage/errors';
+import { InvalidRunTransition, LeaseLost } from '@kwkevinchan/ai-chat-harness';
 import {
   AgentNotFound,
   NotSessionOwner,
@@ -33,6 +35,8 @@ import {
   UnknownToolset,
 } from '../../domain';
 
+const UNEXPECTED_TEXT = 'The request failed.';
+
 /**
  * The error of a use case as the error that Backstage answers with.
  *
@@ -42,11 +46,18 @@ import {
  *   409.
  * - A toolset or an agent that the request names and does not exist: 400.
  * - The backend is shutting down: 503.
- *
- * Any other error is returned as it is, and the error handler of the backend
- * answers 500 without its text.
+ * - The run was taken over or ended by someone else in the meantime
+ *   (`LeaseLost`, `InvalidRunTransition`): 409.
+ * - An error of Backstage (such as the 400 of a bad body) stays as it is.
+ * - Any other error is unexpected. The error handler of Backstage sends the
+ *   name and the message of such an error to the client (the message of a
+ *   database error can have the SQL), so `onUnexpected` gets the error for the
+ *   log, and the answer is a 500 with a fixed text.
  */
-export function toHttpError(error: unknown): unknown {
+export function toHttpError(
+  error: unknown,
+  onUnexpected: (error: unknown) => void,
+): Error {
   if (error instanceof NotSessionOwner) {
     return new NotFoundError(new SessionNotFound(error.sessionId).message);
   }
@@ -70,5 +81,10 @@ export function toHttpError(error: unknown): unknown {
   if (error instanceof ShuttingDown) {
     return new ServiceUnavailableError(error.message);
   }
-  return error;
+  if (error instanceof LeaseLost || error instanceof InvalidRunTransition) {
+    return new ConflictError('The run changed in the meantime. Try again.');
+  }
+  if (error instanceof CustomErrorBase) return error;
+  onUnexpected(error);
+  return new Error(UNEXPECTED_TEXT);
 }
