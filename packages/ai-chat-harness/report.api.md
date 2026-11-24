@@ -10,7 +10,7 @@ export type AgentDefinition = {
   systemPrompt: string;
 };
 
-// @public (undocumented)
+// @public
 export type AgentMessageBody = {
   kind: 'agent_message';
   text: string;

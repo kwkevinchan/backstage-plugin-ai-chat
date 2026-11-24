@@ -22,6 +22,7 @@ import {
   agentSays,
   approve,
   call,
+  inRun,
   limits,
   log,
   note,
@@ -376,6 +377,135 @@ describe('decideNextAction', () => {
       expect(
         decide([user()], { elapsedSeconds: 5 }, { runTimeoutSeconds: 5 }),
       ).toEqual({ type: 'stop', reason: 'timeout' });
+    });
+  });
+
+  describe('the record decides, and the log is read by position', () => {
+    it.each<Row>([
+      [
+        'rule 3: the record says allow but the tool is not read-only: wait (D-06)',
+        [user(), call('c1', { policy: 'allow', readOnly: false })],
+        {},
+        { type: 'wait_approval', pending: ['c1'] },
+      ],
+      [
+        'rule 4: the same call runs once it is approved',
+        [
+          user(),
+          call('c1', { policy: 'allow', readOnly: false }),
+          approve('c1'),
+        ],
+        {},
+        { type: 'execute_tools', calls: ['c1'], interrupted: [] },
+      ],
+      [
+        'rule 4: a read-only call with policy allow needs no approval',
+        [user(), call('c1', { policy: 'allow', readOnly: true })],
+        {},
+        { type: 'execute_tools', calls: ['c1'], interrupted: [] },
+      ],
+      [
+        'rule 1: text of the model before an open call that asks is not complete',
+        [user(), agentSays('Let me'), call('c1', { policy: 'ask' })],
+        {},
+        { type: 'wait_approval', pending: ['c1'] },
+      ],
+      [
+        'rule 4: text of the model before a call that runs at once is not complete',
+        [user(), agentSays('Let me'), call('c1')],
+        {},
+        { type: 'execute_tools', calls: ['c1'], interrupted: [] },
+      ],
+      [
+        'rule 1: text written after an open call does not hide the call',
+        [user(), call('c1', { policy: 'ask' }), agentSays('I need approval')],
+        {},
+        { type: 'wait_approval', pending: ['c1'] },
+      ],
+      [
+        'rule 1: text after a call that has its result is complete',
+        [user(), call('c1'), result('c1'), agentSays('done')],
+        {},
+        { type: 'complete' },
+      ],
+      [
+        'rule 1: a late approval after the answer does not change it',
+        [
+          user(),
+          call('c1', { policy: 'ask' }),
+          result('c1', 'invalid'),
+          agentSays('done'),
+          approve('c1'),
+        ],
+        {},
+        { type: 'complete' },
+      ],
+      [
+        'rule 1: a plan update after the answer does not change it',
+        [
+          user(),
+          agentSays('done'),
+          { kind: 'plan_update', plan: { items: [] } },
+        ],
+        {},
+        { type: 'complete' },
+      ],
+      [
+        'rule 5: a plan update after the results does not hide them',
+        [
+          user(),
+          call('c1'),
+          result('c1'),
+          { kind: 'plan_update', plan: { items: [] } },
+        ],
+        {},
+        { type: 'call_model' },
+      ],
+    ])('%s', (_name, bodies, used, expected) => {
+      expect(decide(bodies, used)).toEqual(expected);
+    });
+
+    it('rule 4: after a run that expired, the calls of the newest run are the last step', () => {
+      // Step numbers start again in each run, and a resend writes no new
+      // message of the user.
+      const bodies = [
+        user(),
+        ...inRun('run-1', call('c1', { step: 2, policy: 'ask' })),
+        ...inRun('run-2', call('c2', { step: 1 })),
+      ];
+      expect(decide(bodies)).toEqual({
+        type: 'execute_tools',
+        calls: ['c2'],
+        interrupted: [],
+      });
+    });
+
+    it('rule 4: calls of the same step number in different runs are not one step', () => {
+      const bodies = [
+        user(),
+        ...inRun('run-1', call('c1', { step: 1 })),
+        ...inRun('run-2', call('c2', { step: 1 })),
+      ];
+      expect(decide(bodies)).toEqual({
+        type: 'execute_tools',
+        calls: ['c2'],
+        interrupted: [],
+      });
+    });
+
+    it('the first decision of a call counts when there are two', () => {
+      const bodies = [
+        user(),
+        call('c1', { policy: 'ask' }),
+        approve('c1', 'allow'),
+        approve('c1', 'deny'),
+      ];
+      expect(decisionOf(log(...bodies), 'c1')).toBe('allow');
+      expect(decide(bodies)).toEqual({
+        type: 'execute_tools',
+        calls: ['c1'],
+        interrupted: [],
+      });
     });
   });
 

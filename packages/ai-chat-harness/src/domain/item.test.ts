@@ -33,11 +33,17 @@ describe('dedupeKeyOf (T-07, D-25)', () => {
     ['tool_started', started('c1'), 'tool_started:c1'],
     ['tool_result', result('c1'), 'tool_result:c1'],
     ['user_message', user(), undefined],
-    ['tool_call', call('c1'), undefined],
+    ['tool_call', call('c1'), 'tool_call:c1'],
     ['note', note(), undefined],
     ['summary', summary(3), undefined],
   ])('%s', (_kind, body, expected) => {
     expect(dedupeKeyOf(body)).toBe(expected);
+  });
+
+  it('is the same for two calls with the same id, so the log refuses the second', () => {
+    expect(dedupeKeyOf(call('c1', { toolId: 'a:one' }))).toBe(
+      dedupeKeyOf(call('c1', { toolId: 'a:two', policy: 'ask' })),
+    );
   });
 
   it('differs between the kinds and between the calls', () => {

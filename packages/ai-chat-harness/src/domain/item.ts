@@ -51,12 +51,25 @@ export type ToolResultStatus =
 /** @public */
 export type UserMessageBody = { kind: 'user_message'; text: string };
 
-/** @public */
+/**
+ * The text of the model in one step. It is written in the same append as the
+ * `tool_call` items of that step, text first, so an `agent_message` that is
+ * the last conversation item has no call after it.
+ *
+ * @public
+ */
 export type AgentMessageBody = { kind: 'agent_message'; text: string };
 
 /**
  * A request of the model to run a tool. `step` is the number of the step of
- * the run that produced it, `position` the order inside that step.
+ * the run that produced it, `position` the order inside that step. The items
+ * of one step are written in one append, after the `agent_message` of that
+ * step if there is one.
+ *
+ * `callId` is unique in the session. The host generates it (IdGenerator); it
+ * is not the id the model gave, which the model adapter maps to it. The log
+ * refuses a second call with the same id (see {@link dedupeKeyOf}), so an
+ * approval or a result always belongs to exactly one call.
  *
  * @public
  */
@@ -161,12 +174,14 @@ export type ToolResultItem = Item & ToolResultBody;
 /**
  * The key that makes a write happen once: the kind plus the call id, for the
  * items that may be written only once per call (T-07, D-25). The log rejects a
- * second item with the same key. Other items have no key.
+ * second item with the same key, so a call id is never reused. Other items
+ * have no key.
  *
  * @public
  */
 export function dedupeKeyOf(body: ItemBody): string | undefined {
   switch (body.kind) {
+    case 'tool_call':
     case 'approval':
     case 'tool_started':
     case 'tool_result':

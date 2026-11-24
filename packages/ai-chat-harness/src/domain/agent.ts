@@ -29,7 +29,13 @@ export type AgentDefinition = {
 export type Limits = {
   /** Model calls. */
   maxSteps: number;
-  /** Tool calls the model requested, over the whole run. */
+  /**
+   * Tool calls the model requested, over the whole run. The next-step rules
+   * only stop a new model call once the count is reached. They cannot cut the
+   * calls of one step, so `callModel` enforces the limit when it writes the
+   * calls: a call beyond the remaining count is written with a `denied`
+   * result (message "tool call limit") and never runs.
+   */
   maxToolCallsPerRun: number;
   /** Seconds of working time, shorter than the lifetime of the user token. */
   runTimeoutSeconds: number;

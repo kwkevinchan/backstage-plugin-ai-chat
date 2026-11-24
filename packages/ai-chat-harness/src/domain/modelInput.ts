@@ -103,13 +103,14 @@ export function buildModelInput(
   _budget: ContextBudget,
 ): ModelInput {
   const results = new Map<string, ToolResultBody>();
-  const denied = new Set<string>();
+  // The first decision of a call counts, as in `decisionOf`.
+  const decisions = new Map<string, 'allow' | 'deny'>();
   const started = new Set<string>();
   for (const item of items) {
     if (item.kind === 'tool_result' && !results.has(item.callId)) {
       results.set(item.callId, item);
-    } else if (item.kind === 'approval' && item.decision === 'deny') {
-      denied.add(item.callId);
+    } else if (item.kind === 'approval' && !decisions.has(item.callId)) {
+      decisions.set(item.callId, item.decision);
     } else if (item.kind === 'tool_started') {
       started.add(item.callId);
     }
@@ -140,7 +141,7 @@ export function buildModelInput(
         callId: call.callId,
         content: toolContent(
           results.get(call.callId),
-          denied.has(call.callId),
+          decisions.get(call.callId) === 'deny',
           started.has(call.callId),
         ),
       });

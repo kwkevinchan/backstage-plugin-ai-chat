@@ -30,11 +30,15 @@ export function log(...bodies: ItemBody[]): Item[] {
         ...body,
         sessionId: 'session-1',
         seq: index + 1,
-        runId: 'run-1',
+        runId: (body as { runId?: string }).runId ?? 'run-1',
         createdAt: '2026-01-01T00:00:00.000Z',
       } as Item),
   );
 }
+
+/** Marks bodies as written by another run than the default `run-1`. */
+export const inRun = (runId: string, ...bodies: ItemBody[]): ItemBody[] =>
+  bodies.map(body => ({ ...body, runId } as unknown as ItemBody));
 
 export const user = (text = 'question'): ItemBody => ({
   kind: 'user_message',

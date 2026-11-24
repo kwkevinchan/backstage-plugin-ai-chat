@@ -48,12 +48,13 @@ export type NextAction =
  * Works out the next step from the log alone (D-18), so any backend can
  * continue a run. The rules, first match wins:
  *
- * 1. The last item is an `agent_message` (the model answered without a tool
- *    call): `complete`.
+ * 1. The last conversation item is an `agent_message` and no call of the last
+ *    step is open: `complete`.
  * 2. The working time is used up: `stop`.
- * 3. A call of the last step needs approval and has no decision, and has no
- *    result: `wait_approval`. Nothing of that step runs before every call has
- *    a decision (P-04).
+ * 3. A call of the last step needs approval, has no decision and has no
+ *    result: `wait_approval`. A call needs approval when its policy is `ask`,
+ *    or when it is not read-only whatever its policy says (D-06). Nothing of
+ *    that step runs before every such call has a decision (P-04).
  * 4. A call of the last step has no result: `execute_tools`. A call with a
  *    `tool_started` item and no result goes to `interrupted` (D-25, A-08).
  * 5. Anything else (the last item is the user's message, or every result is
@@ -70,13 +71,6 @@ export function decideNextAction(
   run: RunUsage,
   limits: Limits,
 ): NextAction {
-  if (lastFlowItem(items)?.kind === 'agent_message') {
-    return { type: 'complete' };
-  }
-  if (run.elapsedSeconds >= limits.runTimeoutSeconds) {
-    return { type: 'stop', reason: 'timeout' };
-  }
-
   const calls = callsOfLastStep(items);
   const withResult = new Set<string>();
   const decided = new Set<string>();
@@ -86,10 +80,19 @@ export function decideNextAction(
     else if (item.kind === 'approval') decided.add(item.callId);
     else if (item.kind === 'tool_started') started.add(item.callId);
   }
-
   const open = calls.filter(call => !withResult.has(call.callId));
+
+  if (lastFlowItem(items)?.kind === 'agent_message' && open.length === 0) {
+    return { type: 'complete' };
+  }
+  if (run.elapsedSeconds >= limits.runTimeoutSeconds) {
+    return { type: 'stop', reason: 'timeout' };
+  }
+
   const pending = open.filter(
-    call => call.policy === 'ask' && !decided.has(call.callId),
+    call =>
+      (call.policy === 'ask' || call.readOnly !== true) &&
+      !decided.has(call.callId),
   );
   if (pending.length > 0) {
     return { type: 'wait_approval', pending };
@@ -129,13 +132,19 @@ export function decisionOf(
 }
 
 /**
- * The last item that is part of the conversation. Notes and summaries are
- * written beside it and do not change what comes next.
+ * The last item of the conversation: a message of the user or the model, a
+ * tool call or a tool result. Approvals, starts, plans, notes and summaries
+ * are written beside the conversation and do not change what comes next.
  */
 function lastFlowItem(items: readonly Item[]): Item | undefined {
   for (let i = items.length - 1; i >= 0; i--) {
     const kind = items[i].kind;
-    if (kind !== 'note' && kind !== 'summary') {
+    if (
+      kind === 'user_message' ||
+      kind === 'agent_message' ||
+      kind === 'tool_call' ||
+      kind === 'tool_result'
+    ) {
       return items[i];
     }
   }
@@ -144,8 +153,11 @@ function lastFlowItem(items: readonly Item[]): Item | undefined {
 
 /**
  * The calls of the newest step since the last message of the user, in the
- * order of their position. Calls of older steps have their results or are
- * closed when the model input is built.
+ * order of their position. The newest step is the one of the last `tool_call`
+ * in the log, in its run: two runs can follow one message of the user (for
+ * example a run that expired and a resend), and step numbers start again in
+ * each run. Calls of older steps have their results or are closed when the
+ * model input is built.
  */
 function callsOfLastStep(items: readonly Item[]): ToolCallItem[] {
   let start = 0;
@@ -160,9 +172,9 @@ function callsOfLastStep(items: readonly Item[]): ToolCallItem[] {
     const item = items[i];
     if (item.kind === 'tool_call') calls.push(item);
   }
-  if (calls.length === 0) return calls;
-  const newest = Math.max(...calls.map(call => call.step));
+  const last = calls[calls.length - 1];
+  if (!last) return calls;
   return calls
-    .filter(call => call.step === newest)
+    .filter(call => call.step === last.step && call.runId === last.runId)
     .sort((a, b) => a.position - b.position);
 }

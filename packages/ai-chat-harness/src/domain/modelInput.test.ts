@@ -303,6 +303,27 @@ describe('buildModelInput', () => {
       expect(content(messages[2])).toMatchObject(expected);
     });
 
+    it('counts the first decision of a call, as decisionOf does', () => {
+      const allowFirst = build([
+        user(),
+        call('c1', { policy: 'ask' }),
+        approve('c1', 'allow'),
+        approve('c1', 'deny'),
+      ]);
+      expect(content(allowFirst.messages[2])).toMatchObject({
+        status: 'not_run',
+      });
+      const denyFirst = build([
+        user(),
+        call('c1', { policy: 'ask' }),
+        approve('c1', 'deny'),
+        approve('c1', 'allow'),
+      ]);
+      expect(content(denyFirst.messages[2])).toMatchObject({
+        status: 'denied',
+      });
+    });
+
     it('answers calls that never ran before the next message of the user', () => {
       const { messages } = build([
         user('first'),
