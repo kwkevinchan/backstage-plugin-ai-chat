@@ -107,8 +107,11 @@ export interface Config {
          */
         maxPendingPerSession?: number;
         /**
-         * What an image counts in the context budget, in tokens. It is a
-         * setting, not a measure. Defaults to 1600.
+         * What one image counts in the context budget, in tokens. It is an
+         * estimate, and it has not been measured against a real model. Too
+         * low, and the input can pass the context limit of the model; too
+         * high, and older images are left out sooner. Set it for the model
+         * you use. Defaults to 1600.
          */
         tokensPerImage?: number;
       };
