@@ -419,4 +419,22 @@ describe('a message that the run did not read', () => {
       ),
     );
   });
+
+  it('has no button of its own while a run goes on', async () => {
+    const api = mockApi();
+    await open(
+      api,
+      detail({
+        run: run('running', 'r-2'),
+        items: items(
+          user('first'),
+          answer('the answer', 1),
+          inserted('too late', 'unread'),
+        ),
+      }),
+    );
+
+    expect(screen.getByText(UNREAD_TEXT)).toBeInTheDocument();
+    expect(unreadButtons()).toHaveLength(0);
+  });
 });

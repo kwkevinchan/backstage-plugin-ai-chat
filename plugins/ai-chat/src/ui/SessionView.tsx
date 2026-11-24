@@ -114,7 +114,7 @@ export function SessionView(props: SessionViewProps) {
         interrupted={chat.interrupted && chat.canResend}
         onDecide={chat.decide}
         onSendAgain={chat.sendAgain}
-        onSendTextAgain={chat.sendTextAgain}
+        onSendTextAgain={running || chat.busy ? undefined : chat.sendTextAgain}
       />
       <QueuePanel
         items={chat.queue}
@@ -124,6 +124,7 @@ export function SessionView(props: SessionViewProps) {
         onContinue={chat.continueQueue}
         onEdit={chat.editQueued}
         onRemove={chat.removeQueued}
+        moving={chat.queueMoving}
         onMove={chat.moveQueued}
       />
       <PendingInserts items={chat.pending} />

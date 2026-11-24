@@ -135,11 +135,19 @@ export function useSessionChat(options: UseSessionChatOptions) {
   /** The inserted messages that the stream said the model read. */
   const readSeqs = useRef(new Set<number>());
   const [queue, setQueue] = useState<QueueState>(initial.detail.queue);
+  const queueRef = useRef(queue);
+  queueRef.current = queue;
+  const movingRef = useRef(false);
+  const [moving, setMoving] = useState(false);
   const [queueNotice, setQueueNotice] = useState<string>();
   /** The run that the queue started and this page is about to follow. */
   const [followingNext, setFollowingNext] = useState<string>();
   const followingNextRef = useRef<string>();
-  followingNextRef.current = followingNext;
+  /** Sets both at once: the stream says it several times before a render. */
+  const following = useCallback((runId: string | undefined) => {
+    followingNextRef.current = runId;
+    setFollowingNext(runId);
+  }, []);
   /** The run that ended had messages that were not read: read the session again. */
   const reloadAfterEnd = useRef(false);
   const [notice, setNotice] = useState<ChatNoticeData['code']>();
@@ -161,12 +169,15 @@ export function useSessionChat(options: UseSessionChatOptions) {
   }, []);
 
   const applyQueue = useCallback(
-    (next: ChatQueue) =>
+    (next: ChatQueue, keepReason = false) =>
       setQueue(current => ({
         items: next.items,
         paused: next.paused,
-        // A read does not know the reason; the stream did.
-        ...(next.paused &&
+        // A read does not know the reason; only the stream of this page
+        // does. Another tab may have changed the queue since, so a read that
+        // is not part of this page's own flow drops it.
+        ...(keepReason &&
+          next.paused &&
           current.pausedReason && { pausedReason: current.pausedReason }),
       })),
     [],
@@ -225,7 +236,7 @@ export function useSessionChat(options: UseSessionChatOptions) {
         lastRunStatus.current = status;
         if (runId === followingNextRef.current) {
           nextRunSeen.current = true;
-          setFollowingNext(undefined);
+          following(undefined);
         }
         if (
           status === 'running' &&
@@ -266,7 +277,7 @@ export function useSessionChat(options: UseSessionChatOptions) {
         setQueueNotice(undefined);
         if (nextRunId) {
           nextRun.current = nextRunId;
-          setFollowingNext(nextRunId);
+          following(nextRunId);
         }
       }
     },
@@ -297,7 +308,7 @@ export function useSessionChat(options: UseSessionChatOptions) {
         if (!mounted.current) return;
         chatRef.current.setMessages(itemsToMessages(detail));
         setActiveRun(detail.run);
-        applyQueue(detail.queue);
+        applyQueue(detail.queue, true);
         setPending(pendingInserts(detail));
         setInterrupted(lastRunInterrupted(detail));
         setResendText(lastUserText(detail.items));
@@ -319,13 +330,16 @@ export function useSessionChat(options: UseSessionChatOptions) {
    * has its message and the queue without it, and follow the run from its
    * first item. The stream of the run before has ended.
    */
-  const followNextRun = async () => {
+  const followNextRun = async (runId: string) => {
     nextRunSeen.current = false;
     try {
       await reload();
       await chatRef.current.resumeStream();
     } finally {
-      if (mounted.current) setFollowingNext(undefined);
+      // The stream of this run may have named the next one: keep that.
+      if (mounted.current && followingNextRef.current === runId) {
+        following(undefined);
+      }
     }
     // Nothing streamed (the run was over already): show what is stored.
     if (!nextRunSeen.current && !nextRun.current) await reload();
@@ -359,8 +373,9 @@ export function useSessionChat(options: UseSessionChatOptions) {
     }
     if (nextRun.current) {
       // The queue started a run: show its message, and follow it.
+      const runId = nextRun.current;
       nextRun.current = undefined;
-      followNextRun();
+      followNextRun(runId);
     } else if (followAfter.current) {
       followAfter.current = false;
       chatRef.current.resumeStream().then(
@@ -420,6 +435,13 @@ export function useSessionChat(options: UseSessionChatOptions) {
       return true;
     },
     [waitUntilIdle],
+  );
+
+  /** Sends a message that was not read again; not while a run goes on. */
+  const sendTextAgain = useCallback(
+    async (text: string): Promise<boolean> =>
+      activeRunRef.current ? false : sendDirect(text),
+    [sendDirect],
   );
 
   /** Queues the text. A queue that cannot take it leaves the text with the user (`false`). */
@@ -583,19 +605,26 @@ export function useSessionChat(options: UseSessionChatOptions) {
 
   const moveQueued = useCallback(
     async (id: string, direction: -1 | 1) => {
+      // One move at a time: the next one starts from the order this one made.
+      if (movingRef.current) return;
       setQueueNotice(undefined);
-      const ids = queue.items.map(m => m.id);
+      const ids = queueRef.current.items.map(m => m.id);
       const from = ids.indexOf(id);
       const to = from + direction;
       if (from < 0 || to < 0 || to >= ids.length) return;
       [ids[from], ids[to]] = [ids[to], ids[from]];
+      movingRef.current = true;
+      setMoving(true);
       try {
-        applyQueue(await api.reorderQueue(sessionId, { ids }));
+        applyQueue(await api.reorderQueue(sessionId, { ids }), true);
       } catch (error) {
         await queueChangeFailed(error);
+      } finally {
+        movingRef.current = false;
+        if (mounted.current) setMoving(false);
       }
     },
-    [api, applyQueue, queue.items, queueChangeFailed, sessionId],
+    [api, applyQueue, queueChangeFailed, sessionId],
   );
 
   /** Sends the first queued message as a new run (the queue is paused). */
@@ -700,7 +729,8 @@ export function useSessionChat(options: UseSessionChatOptions) {
     send,
     queueMessage,
     sendAgain,
-    sendTextAgain: sendDirect,
+    sendTextAgain,
+    queueMoving: moving,
     editQueued,
     removeQueued,
     moveQueued,

@@ -440,6 +440,85 @@ describe('useSessionChat: the queue after a run', () => {
     expect(seen).not.toContain(true);
   });
 
+  it('keeps following when the run it follows names the next one: no gap in which the box sends directly', async () => {
+    const api = mockApi();
+    const first = openStream();
+    api.sendMessage.mockResolvedValue(first.response);
+    const seen: boolean[] = [];
+    const { result } = renderHook(() => {
+      const chat = useSessionChat({ api, page, detail: detail() });
+      seen.push(chat.followingNext);
+      return chat;
+    });
+    const second = openStream();
+    api.follow.mockResolvedValueOnce(second.response);
+    let releaseThird!: () => void;
+    api.getSession.mockImplementation(async () => {
+      const id = api.follow.mock.calls.length === 0 ? 'r-2' : 'r-3';
+      if (id === 'r-3') {
+        await new Promise<void>(resolve => {
+          releaseThird = resolve;
+        });
+      }
+      return detail({
+        run: run('running', id),
+        items: items(user('first'), {
+          ...user(id),
+          runId: id,
+          delivery: 'queued',
+        } as never),
+      });
+    });
+    const queueTo = (id: string) => ({
+      type: 'data-queue',
+      data: { items: [], paused: false, nextRunId: id },
+      transient: true,
+    });
+
+    act(() => {
+      result.current.send('first');
+    });
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalled());
+    first.push(
+      { type: 'start', messageId: 'run_r-1' },
+      runChunks('running'),
+      queueTo('r-2'),
+      runChunks('completed'),
+      { type: 'finish', finishReason: 'stop' },
+    );
+    first.end();
+    await waitFor(() => expect(api.follow).toHaveBeenCalledTimes(1));
+    second.push(
+      { type: 'start', messageId: 'run_r-2' },
+      runChunks('running', 'r-2'),
+      queueTo('r-3'),
+      runChunks('completed', 'r-2'),
+      { type: 'finish', finishReason: 'stop' },
+    );
+    second.end();
+
+    // The second run has ended; the session is being read for the third.
+    await waitFor(() => expect(releaseThird).toBeDefined());
+    expect(result.current.followingNext).toBe(true);
+    api.follow.mockResolvedValueOnce(
+      streamResponse([
+        { type: 'start', messageId: 'run_r-3' },
+        runChunks('running', 'r-3'),
+        runChunks('completed', 'r-3'),
+        { type: 'finish', finishReason: 'stop' },
+      ]),
+    );
+    releaseThird();
+    await waitFor(() => expect(api.follow).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.followingNext).toBe(false));
+    // From the first data-queue to the third run's own data-run it never dropped.
+    const first1 = seen.indexOf(true);
+    const dropped = seen.slice(first1).indexOf(false);
+    expect(dropped).toBeGreaterThan(0);
+    expect(seen.slice(first1, first1 + dropped).length).toBeGreaterThan(0);
+    expect(api.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
   it('shows the queue as paused, with the reason, when the run did not end normally', async () => {
     const { api, first } = twoRuns();
     api.getSession.mockResolvedValue(
@@ -726,6 +805,90 @@ describe('useSessionChat: changes to the queue', () => {
 
     expect(result.current.queueNotice).toBe(QUEUE_CHANGED_TEXT);
     expect(result.current.queue.map(m => m.text)).toEqual(['a', 'c']);
+  });
+
+  it('moves one at a time, from the order the last move made', async () => {
+    const api = mockApi();
+    let finish!: (q: object) => void;
+    api.reorderQueue.mockReturnValueOnce(
+      new Promise(resolve => {
+        finish = resolve;
+      }) as never,
+    );
+    const { result } = render(api);
+
+    act(() => {
+      result.current.moveQueued('q1', 1);
+    });
+    expect(result.current.queueMoving).toBe(true);
+    await act(() => result.current.moveQueued('q2', 1));
+    expect(api.reorderQueue).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      finish({
+        items: [
+          queued('q2', 'b', 1),
+          queued('q1', 'a', 2),
+          queued('q3', 'c', 3),
+        ],
+        paused: false,
+      });
+    });
+    await waitFor(() => expect(result.current.queueMoving).toBe(false));
+    api.reorderQueue.mockResolvedValueOnce(queueOf('b', 'c', 'a'));
+    await act(() => result.current.moveQueued('q1', 1));
+    expect(api.reorderQueue).toHaveBeenLastCalledWith('s-1', {
+      ids: ['q2', 'q3', 'q1'],
+    });
+  });
+
+  it('does not keep the reason of a pause when the queue is read again after a focus change', async () => {
+    const api = mockApi();
+    const stream = openStream();
+    api.sendMessage.mockResolvedValue(stream.response);
+    api.getSession.mockResolvedValue(
+      detail({
+        items: items(user('go')),
+        queue: { items: [queued('q1', 'a')], paused: true },
+      }),
+    );
+    const { result } = renderHook(() =>
+      useSessionChat({ api, page, detail: detail() }),
+    );
+    act(() => {
+      result.current.send('go');
+    });
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalled());
+    stream.push({ type: 'start', messageId: 'run_r-1' }, runChunks('running'));
+    await waitFor(() => expect(result.current.busy).toBe(true));
+    stream.push(
+      {
+        type: 'data-queue',
+        data: {
+          items: [queued('q1', 'a')],
+          paused: true,
+          pausedReason: 'credentials',
+        },
+        transient: true,
+      },
+      runChunks('failed'),
+      { type: 'error', errorText: 'x' },
+    );
+    stream.end();
+    await waitFor(() =>
+      expect(result.current.queuePausedReason).toBe('credentials'),
+    );
+
+    api.getQueue.mockResolvedValue({
+      items: [queued('q1', 'a')],
+      paused: true,
+    });
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await waitFor(() =>
+      expect(result.current.queuePausedReason).toBeUndefined(),
+    );
+    expect(result.current.queuePaused).toBe(true);
   });
 
   it('reads the queue again when the window gets the focus back', async () => {

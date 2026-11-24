@@ -1697,7 +1697,7 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 | 佇列暫停（沒有進行中的 Run，佇列不是空的） | 送出，馬上開新的 Run。輸入框提示「送出後，這次結束時會接著送佇列」 | 同 Enter；不顯示「排隊」按鈕       |
 
 - Run 進行中輸入框不再停用。Stop 按鈕照舊。
-- Run 結束到自動送出新 Run 之間有一小段空檔：Run 已經結束、新的還沒開，這時 `GET /sessions/:id` 會短暫回 `paused: true`。畫面不要在這個空檔顯示「排隊已暫停」。串流裡 `data-queue` 在這個 Run 的結束 `data-run` 之前，所以畫面以它為準：有 `nextRunId` 就記下「正在接新的 Run」（`useSessionChat` 的 `followingNext`，到那個 Run 的第一個 `data-run` 為止，不顯示暫停，輸入框也暫時停用），串流結束後讀取 Session（畫面上就有那則排隊的訊息）再用 `GET /sessions/:id/stream` 接上；`paused` 為真才顯示暫停。只有重新讀取（沒有串流可等）時才用 `GET` 的 `paused`。重新讀取不知道 `pausedReason`，所以保留串流給的那一個。
+- Run 結束到自動送出新 Run 之間有一小段空檔：Run 已經結束、新的還沒開，這時 `GET /sessions/:id` 會短暫回 `paused: true`。畫面不要在這個空檔顯示「排隊已暫停」。串流裡 `data-queue` 在這個 Run 的結束 `data-run` 之前，所以畫面以它為準：有 `nextRunId` 就記下「正在接新的 Run」（`useSessionChat` 的 `followingNext`，到那個 Run 的第一個 `data-run` 為止，不顯示暫停，輸入框也暫時停用），串流結束後讀取 Session（畫面上就有那則排隊的訊息）再用 `GET /sessions/:id/stream` 接上；`paused` 為真才顯示暫停。只有重新讀取（沒有串流可等）時才用 `GET` 的 `paused`。重新讀取不知道 `pausedReason`：這一頁自己的流程（Run 結束後的讀取、自己改佇列的回應）保留串流給的那一個；取得焦點、被別的操作的 404 或 409 觸發的重新讀取不保留，因為別的分頁可能已經改過，這時顯示通用文字。連續自動送出時，`followingNext` 只由接那個 Run 的流程清除，串流裡新的 `nextRunId` 不會被上一輪清掉。每一輪的「按鈕」規則：Run 進行中（`activeRun` 或串流開著）時，沒讀到訊息的單則「再送一次」不顯示；排隊的上下移一次只送一個請求，進行中停用。
 - 插入得到 409 時，畫面重新讀取 Session，依結果分三種處理，文字留在輸入框直到成功（現有的 `sent === false` 做法）：
   1. 錯誤是 `InsertLimitReached`，或 Run 是 `waiting_approval`：改成排隊（排隊也得到 409 時，顯示原因，文字保留）。
   2. Run 是 `running`，但 `runId` 和送出時的不同（原來的 Run 結束、自動送出開了新的 Run）：對新的 `runId` 再插入一次。

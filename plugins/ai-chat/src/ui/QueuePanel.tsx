@@ -44,6 +44,8 @@ export interface QueuePanelProps {
   /** Resolves with `false` when the change was not stored. */
   onEdit(id: string, text: string): Promise<boolean>;
   onRemove(id: string): void;
+  /** A move is on its way: the arrows wait for it. */
+  moving?: boolean;
   onMove(id: string, direction: -1 | 1): void;
 }
 
@@ -51,6 +53,7 @@ function QueueRow(props: {
   item: ChatQueuedMessage;
   first: boolean;
   last: boolean;
+  moving?: boolean;
   onEdit(id: string, text: string): Promise<boolean>;
   onRemove(id: string): void;
   onMove(id: string, direction: -1 | 1): void;
@@ -96,7 +99,7 @@ function QueueRow(props: {
         <button
           type="button"
           aria-label="Move up"
-          disabled={props.first}
+          disabled={props.first || props.moving}
           onClick={() => props.onMove(item.id, -1)}
         >
           Up
@@ -104,7 +107,7 @@ function QueueRow(props: {
         <button
           type="button"
           aria-label="Move down"
-          disabled={props.last}
+          disabled={props.last || props.moving}
           onClick={() => props.onMove(item.id, 1)}
         >
           Down
@@ -163,6 +166,7 @@ export function QueuePanel(props: QueuePanelProps) {
             item={item}
             first={index === 0}
             last={index === items.length - 1}
+            moving={props.moving}
             onEdit={props.onEdit}
             onRemove={props.onRemove}
             onMove={props.onMove}
