@@ -8,6 +8,7 @@ AI Chat Harness 的設計。從上往下讀。
 | [harness-spec.zh-TW.md](harness-spec.zh-TW.md)               | 規格：設計決策（D）和有編號的需求                             | 要知道「做什麼、為什麼」的人 |
 | [architecture.zh-TW.md](architecture.zh-TW.md)               | 程式架構：Clean Architecture 的四圈、套件、介面、資料庫、HTTP | 要寫程式或審查的人           |
 | [implementation-plan.zh-TW.md](implementation-plan.zh-TW.md) | 實作規劃：四期拆成哪些 PR、怎麼驗收、要驗證的事、風險         | 要排工作的人                 |
+| [protocol-check.zh-TW.md](protocol-check.zh-TW.md)           | 協定驗證：AI SDK 的事件對照、核准的表示法、前端用 `useChat`   | 要寫串流和前端的人           |
 
 規則：
 

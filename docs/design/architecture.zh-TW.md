@@ -741,21 +741,33 @@ shares                                           P2
 
 Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use case、把結果交給 presenter。
 
-**SSE 的格式**是 AI SDK 的 UI message stream。`uiMessageStream.ts` 把 `HarnessEvent` 轉過去：
+**SSE 的格式**是 AI SDK 的 UI message stream（鎖定 `ai@7.0.166`）。`uiMessageStream.ts` 把 `HarnessEvent` 轉過去。回應的 header：`content-type: text/event-stream`、`cache-control: no-cache`、`x-vercel-ai-ui-message-stream: v1`、`x-accel-buffering: no`。每個事件一行 `data: <JSON>`，結尾 `data: [DONE]`。
 
-| HarnessEvent                                                    | UI message stream                                   |
-| --------------------------------------------------------------- | --------------------------------------------------- |
-| `run.started`                                                   | `start`，加上自訂資料 `data-run`（Run 的 id）       |
-| `step.started`、`step.ended`                                    | `start-step`、`finish-step`                         |
-| `item.started`（agent_message）、`item.delta`、`item.completed` | `text-start`、`text-delta`、`text-end`              |
-| `item.completed`（tool_call）                                   | `tool-input-available`                              |
-| `item.completed`（tool_call，政策是 ask）                       | 再加自訂資料 `data-approval-request`                |
-| `item.completed`（tool_result）                                 | `tool-output-available` 或 `tool-output-error`      |
-| `item.completed`（plan_update）                                 | 自訂資料 `data-plan`                                |
-| 每一筆完成的 Item                                               | 自訂資料 `data-item`（序號和 kind），給 A-07 接回用 |
-| `run.ended`                                                     | 自訂資料 `data-run`（狀態），然後 `finish`          |
+| HarnessEvent                                                    | UI message stream                                                                    |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `run.started`                                                   | `start`（`messageId` 每個 Run 一個），加 `data-run`（`transient`，Run 的 id 和狀態） |
+| `step.started`、`step.ended`                                    | `start-step`、`finish-step`                                                          |
+| `item.started`（agent_message）、`item.delta`、`item.completed` | `text-start`、`text-delta`、`text-end`                                               |
+| `item.completed`（tool_call）                                   | `tool-input-available`                                                               |
+| `item.completed`（tool_call，政策是 ask）                       | 再加 `tool-approval-request`（`approvalId` 等於 `toolCallId`）                       |
+| `approval` Item                                                 | `tool-approval-response`（`approved`），放在核准後接續串流的開頭                     |
+| `item.completed`（tool_result，成功）                           | `tool-output-available`                                                              |
+| `item.completed`（tool_result，失敗）                           | `tool-output-error`                                                                  |
+| `item.completed`（tool_result，被拒絕）                         | `tool-output-denied`                                                                 |
+| `item.completed`（plan_update）                                 | `data-plan`（固定 `id`，後送的取代先送的）                                           |
+| 每一筆完成的 Item                                               | `data-item`（`transient`，序號和 kind），給 A-07 接回用                              |
+| `run.ended`（等核准）                                           | `data-run`（`transient`），然後 `finish`（`finishReason: 'tool-calls'`）             |
+| `run.ended`（完成）                                             | `data-run`（`transient`），然後 `finish`（`finishReason: 'stop'`）                   |
+| `run.ended`（失敗）                                             | `error`，然後 `data-run`（`transient`）和 `finish`                                   |
+| `run.ended`（取消）                                             | `data-run`（`transient`），然後 `abort`                                              |
 
-上表的事件名稱以鎖定的 AI SDK 版本為準。實作規劃的 P1-01 會先對照協定文件確認，尤其是核准那一列。協定只出現在這一個檔案；要換協定，改這個檔案和前端對應的 adapter。
+`data-*` 事件標 `transient: true` 時不進訊息，只送給用戶端的 `onData`。
+
+「停在核准上」用協定原生的 `tool-approval-request`。核准是另一個請求（`decision`），它的回應用同一個 `messageId`，從 `tool-approval-response` 開始，接在同一則訊息上。不用 `signature`：歷史在伺服器的紀錄裡，用戶端不送歷史。
+
+重新整理後接回（A-07）：伺服器從目前 Run 的第一個 Item 重送，再接著送新的。只送缺的 Item 時，`useChat` 會蓋掉已載入的部分訊息。
+
+每一列都用 `ai@7.0.166` 的解析器和 `useChat` 實測過。細節在 [protocol-check.zh-TW.md](protocol-check.zh-TW.md)。協定只出現在這一個檔案；要換協定，改這個檔案和前端對應的 adapter。
 
 ## 9. 前端：`ai-chat`
 
@@ -764,17 +776,17 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 ```
 plugins/ai-chat/src/
   domain/
-    sessionView.ts          把 Item 和串流事件合成畫面要的訊息串（純函式）
-    approval.ts             哪些卡片還在等、能不能送新訊息
-  application/              React hooks，每個對應一個使用情境
-    useSession.ts
+    itemsToMessages.ts      把 GET /sessions/:id 的 Item 轉成 UIMessage（純函式）
+    approval.ts             哪些卡片還在等、能不能送新訊息（讀 UIMessage 的 part，純函式）
+  application/              React hooks，每個對應一個使用情境。包 useChat
+    useSession.ts           useChat 加 resume、onData（記住最後的序號）
     useSendMessage.ts
-    useApproval.ts
+    useApproval.ts          addToolApprovalResponse
     useSessionList.ts
     usePageContext.ts       B-01
   adapters/
     AiChatClient.ts         實作 aiChatApiRef
-    uiMessageStream.ts      解析 SSE
+    AiChatTransport.ts      實作 ai 的 ChatTransport：送訊息、決定、接回串流
   ui/
     ChatPage.tsx  SessionList.tsx  MessageList.tsx
     ToolCallCard.tsx  ApprovalCard.tsx
@@ -783,7 +795,9 @@ plugins/ai-chat/src/
   plugin.ts                 舊 frontend system
 ```
 
-PR #1 的 `chatState.ts` 搬到 `domain/sessionView.ts`，`useChat.ts` 拆進 `application/`，`api/` 搬到 `adapters/`。
+前端用 `@ai-sdk/react` 的 `useChat`，加我們的 `ChatTransport`。`AiChatTransport` 只送最後一則使用者文字，不送整段歷史；`sendMessages` 看到有 `approval-responded` 的 part 時，改打 `decision` 端點；`reconnectToStream` 打 `GET /sessions/:id/stream`，`resumeStreamIsReplay` 設成 `true`。判斷依據在 [protocol-check.zh-TW.md](protocol-check.zh-TW.md) 第 5 節。在 Backstage CLI 的 jest 裡能不能 import `ai`，那份文件的 5.3 節有探針；探針沒過之前，這個分層是預期，不是定案。
+
+PR #1 的 `chatState.ts` 的 Item 轉換搬到 `domain/itemsToMessages.ts`，`useChat.ts` 拆進 `application/`，`api/` 搬到 `adapters/`。
 
 ## 10. 測試
 
