@@ -250,7 +250,7 @@ flowchart LR
 
 - **範圍**：
   - Item：`user_message` 加 `delivery`，`agent_message` 和 `tool_call` 加 `readUpToSeq`；`callModel` 寫入它們。
-  - domain：`unreadInserted`、`insertStatesOf`；`decideNextAction` 的兩處改動；`buildModelInput` 的 Run 的使用者訊息規則（`pinned` 和 `boundarySeq`）。
+  - domain：`unreadInserted`、`insertStatesOf`；`decideNextAction` 的兩處改動；`buildModelInput` 的 Run 的使用者訊息規則（`pinned` 和 `boundarySeq`），並且不放已結束 Run 的 `unread` 插入訊息。`readUpToSeq` 是這一輪開始讀紀錄時的最大序號，不含這一步自己寫的摘要。
   - 事件 `message.read`。
   - `RunUsage`、port 不變。`InMemoryItemLog` 接受新欄位，`itemLogContract` 補測試。
 - **依賴**：PI-01。
@@ -264,24 +264,27 @@ flowchart LR
   - 在很小的預算下，Run 的第一則訊息和所有插入的訊息都原文留下；摘要的 `coversUpToSeq` 小於第一則的序號。
   - `message.read` 在 `step.started` 之前、每則訊息只送一次（第二次模型呼叫不再送）。
   - 沒有 `readUpToSeq` 的舊 Item（P1 的紀錄）：行為跟 P1 相同，P1 的測試不改。
+  - 插入發生在「讀紀錄」和「寫 `summary`」之間（在 `ScriptedModel` 的摘要呼叫裡插入）：模型輸出的 `readUpToSeq` 是讀紀錄時的最大序號，小於插入的序號，所以那則訊息是未讀，下一輪才被讀到；摘要的序號不會把它算成已讀。
+  - 已結束的 Run 留下的 `unread` 插入訊息：之後的 Run 的模型輸入不含它；同一個 Run 裡還沒讀的插入訊息照常放進輸入。
   - `itemLogContract` 通過：新欄位原樣存取。
 
 ### PI-03 宿主：插入和排隊
 
 - **範圍**：
   - migration：`runs.read_up_to_seq`、`queued_messages`。
-  - `KnexItemLog.append`：插入的寫入規則（要求 `running`、租約沒過期、上限）；模型輸出的批次更新 `runs.read_up_to_seq`。
+  - `KnexItemLog.append`：插入的寫入規則（要求 `running`、租約沒過期；上限在 `UPDATE sessions` 之後檢查；附件用 `FOR UPDATE` 確認）；模型輸出的批次在 `checkFence` 取 `FOR NO KEY UPDATE`，第一步更新 `runs.read_up_to_seq`，再碰 `sessions`。每種寫入的取鎖順序照架構 13.8 的表。
   - `KnexRunRepository.transition` 的 `requireAllRead`；`UnreadMessages`。
   - `RunSupervisor`：被拒絕時重跑迴圈、`afterRun`、`queue.state` 事件。
   - port `QueuedMessageRepository` 和 `KnexQueuedMessageRepository`（`startNext` 的 transaction）。
   - use case：`InsertMessage`、`QueueMessage`、`UpdateQueuedMessage`、`DeleteQueuedMessage`、`ReorderQueue`、`ListQueue`、`StartNextQueued`、`ResumeQueue`；`GetSession` 回傳佇列和 `insertState`。
-  - 路由、zod、錯誤對應、OpenAPI、presenter（`data-inserted`、`data-queue`）、設定（`input.insert`、`input.queue`）。
+  - 路由、zod、錯誤對應、OpenAPI、presenter（`data-inserted`、`data-queue`；`message.read` 不走 `seq` 去重，改用已送過的插入序號集合）、設定（`input.insert`、`input.queue`）。
   - 稽核：自動送出寫 `queued-message-send`。
 - **依賴**：PI-02。V-07、V-10 要在開始前確認。
 - **驗收**（SQLite 和 PostgreSQL 都跑）：
   - **插入先於結束**：用同步點讓插入的 transaction 在迴圈的 `complete` 判斷之後、`transition` 之前 commit。`transition` 丟 `UnreadMessages`，Run 維持 `running`；supervisor 再跑一次迴圈，模型讀到訊息，之後 `completed`；訂閱者只收到一個 `run.ended`、一個 `run.started`。
   - **結束先於插入**：`transition` 先 commit；之後的插入得到 409，紀錄裡沒有那則訊息。
   - **真正同時**（PostgreSQL，兩個連線）：反覆跑兩者同時開始。每一輪的不變式：回 201 的插入，不是 `seq <= runs.read_up_to_seq`，就是它的 Run 以非正常方式結束；Run 以正常方式結束時，沒有 `seq > read_up_to_seq` 的 `user_message`。
+  - **不死結**（PostgreSQL，兩個連線，各反覆一百輪）：插入對模型輸出的 `append`；排隊的 `add` 對模型輸出的 `append`。兩邊都完成，沒有 `deadlock detected`，`runs.read_up_to_seq` 只增不減。
   - 插入在 `waiting_approval`、`completed`、租約已過期、別的 Run 的 id：409，沒有寫入。插入第 6 則：409（`InsertLimitReached`）。
   - 插入先 commit、Run 才轉成 `waiting_approval`：核准後模型讀到它。
   - Stop 時有未讀的插入訊息：`GetSession` 的 `insertState` 是 `unread`；佇列暫停。
@@ -294,6 +297,8 @@ flowchart LR
   - 兩台 backend（`integration/twoBackends.test.ts`）：A 啟動 Run、B 做最後的核准；Run 結束後自動送出的 Run，用的是 B 的身分。
   - 「繼續」：佇列有東西、沒有進行中的 Run：開新的 Run，回傳 SSE；佇列是空的或有進行中的 Run：204。
   - 路由：每條新路由的狀態碼（沒登入 401、不是擁有者 404、錯誤的內容 400）；SSE 的 `data-inserted`、`data-queue` 用 AI SDK 的解析器讀回。
+  - presenter：模型呼叫期間插入一則訊息，下一步的串流收到 `data-inserted`（沒有被 `seq` 去重吞掉）；接回（A-07）時重送階段已補送的插入訊息，之後的即時事件不再重送。
+  - `afterRun`：`outcome` 是 `waiting_approval` 時回 `paused: false`，不送出，佇列不變；之後 Run 正常結束才送。
   - 稽核：自動送出有一筆事件（V-07 的結論決定怎麼寫）。
   - OpenAPI 的測試通過。
 
@@ -303,17 +308,18 @@ flowchart LR
   - `Composer`：Run 進行中可以用；送出方式（Enter、Ctrl 或 Cmd 加 Enter、「排隊」按鈕）；等核准時只能排隊。
   - 「等待讀取」區、`data-inserted` 的顯示、`unread` 的標示和「再送一次」。
   - 排隊清單：顯示、修改、刪除、上下移；暫停的提示和「繼續」；Run 結束後接上自動送出的新 Run。
-  - `itemsToMessages`：`data-inserted` 的位置、`unread`；`useSessionChat`：插入、排隊的狀態；`AiChatApi` 和 `AiChatClient` 加對應的呼叫。
+  - `itemsToMessages`：`data-inserted` 的位置、`unread`；`lastRunInterrupted` 和 `lastUserText` 以這個 Run 的第一則訊息為準（略過插入的訊息，架構 13.9 的「再送一次」）；`useSessionChat`：插入、排隊的狀態；`AiChatApi` 和 `AiChatClient` 加對應的呼叫。
 - **依賴**：PI-03。
 - **驗收**：
-  - 元件測試：Run 進行中輸入框可用，三種狀態的 Enter 和 Ctrl 加 Enter 各送到正確的呼叫；插入得到 409 後，沒有進行中的 Run 就直接送出，有（`waiting_approval`）就排隊；失敗時文字還在輸入框。
-  - `itemsToMessages`：`read` 的插入訊息在對應 Step 之前；`pending` 不在對話裡；`unread` 是使用者訊息加標示。
+  - 元件測試：Run 進行中輸入框可用，各種狀態（含暫停）的 Enter 和 Ctrl 加 Enter 各送到正確的呼叫；失敗時文字還在輸入框。插入得到 409 的三種處理：`InsertLimitReached` 或 Run 是 `waiting_approval`，改排隊；Run 是 `running` 但 `runId` 不同，對新的 `runId` 再插入；沒有進行中的 Run，直接送出。
+  - `itemsToMessages`：`read` 的插入訊息在對應 Step 之前；`pending` 不在對話裡；`unread` 是使用者訊息加標示。Run 以 agent 的回答結束、後面有一則沒讀到的插入訊息：不當成中斷，只有那則訊息有自己的「再送一次」。Run 沒有答案就停下來：只有一個「再送一次」，重送第一則訊息，沒讀到的插入訊息沒有按鈕。任何情形都不出現兩個重送按鈕。
   - 端對端（Playwright，假的模型伺服器）：
     - Run 進行中按 Enter：訊息先顯示在輸入框上方，下一步開始時出現在對話裡，模型的下一個回答用到它。
     - 工具要核准時：Enter 變成排隊，提示說明原因；決定之後 Run 結束，排隊的訊息自動送出，答案出現，不用重新整理。
     - 排隊清單：修改、刪除、上下移，重新整理後仍在。
     - 失敗的 Run：清單顯示暫停，不自動送；按「繼續」才送。
-    - Stop 時有未讀的插入訊息：顯示「Agent 沒有讀到」，按「再送一次」會送出同樣的文字。
+    - Stop 時有未讀的插入訊息：顯示「Agent 沒有讀到」；Run 沒有答案時只有一個「再送一次」，重送第一則訊息；重送之後模型的輸入沒有那則沒讀到的訊息。
+    - 佇列暫停：輸入框提示「送出後，這次結束時會接著送佇列」，清單標明「新訊息先送，佇列接在後面」；直接送出新訊息後，新 Run 先跑，它正常結束時佇列才接著送。
     - 兩個分頁：A 刪掉一則，B 改它：B 看到說明並更新清單。
   - S-02 的測試不變。
 
@@ -321,7 +327,7 @@ flowchart LR
 
 - **範圍**：
   - 核心：`UserMessageBody.attachments`、`ModelMessage.images`、`ModelClient.capabilities.images`、`ContextBudget.tokensPerImage`；`buildModelInput` 的圖片規則；`buildSummaryInput` 的 `[image: …]`。
-  - 宿主：migration `attachments`；`AttachmentStore` 和 `KnexAttachmentStore`；`UploadAttachment`、`ReadAttachment`、`PurgeUnusedAttachments`；上傳和讀取的路由、raw body 的中介層、`checkImage`；`KnexItemLog.append` 標記 `used_seq`；排隊的保留和釋放；`SendMessage`、`InsertMessage`、`QueueMessage` 接受 `attachmentIds`；`OpenAiCompatibleModelClient` 讀位元組轉成 `image_url`；`GET /input-config`；設定（`aiChat.llm.images`、`input.images`）。現在的單一模型設定是 `aiChat.llm`，`images` 加在那裡；`models` 區塊是 P3。
+  - 宿主：migration `attachments`；`AttachmentStore` 和 `KnexAttachmentStore`；`UploadAttachment`、`ReadAttachment`、`PurgeUnusedAttachments`；上傳和讀取的路由、raw body 的中介層、`checkImage`；`KnexItemLog.append` 標記 `used_seq`；排隊的保留和釋放；`SendMessage`、`InsertMessage`、`QueueMessage` 接受 `attachmentIds`；`OpenAiCompatibleModelClient` 讀位元組轉成 `image_url`；`GET /input-config`；設定（`aiChat.llm.images`、`input.images`，含 `maxBytesPerInput`；載入時要求它不小於 `maxPerMessage` 乘 `maxBytes`）。`ModelClient.stream` 的 `opts` 加 `sessionId`，adapter 用它讀附件。讀取回應的 `Cache-Control` 是 `private, no-cache`，加 `ETag`。複製的支援（`AttachmentStore.copy`）在 P2-05 用，這裡先加 port 和 `KnexAttachmentStore` 的實作與測試。現在的單一模型設定是 `aiChat.llm`，`images` 加在那裡；`models` 區塊是 P3。
 - **依賴**：PI-03。V-08、V-09 要在開始前確認。
 - **驗收**：
   - 上傳：四種型別各一個通過（201，回傳 `id`、`mediaType`、`name`、`size`）。`image/svg+xml` 回 415。`Content-Type` 是 PNG 但內容是 JPEG 回 400。空內容回 400。
@@ -332,6 +338,8 @@ flowchart LR
   - 標記：送出之後附件的 `used_seq` 是那則訊息的序號；寫入失敗時附件沒有被標記；排隊保留（`reserved_by`），刪除排隊列後釋放，自動送出後 `used_seq` 有值。「再送一次」用同樣的附件 id 成功。
   - 清理（用假時鐘）：沒用到、超過 24 小時的被刪；有 `used_seq` 的、被保留的、不到 24 小時的留下；刪除 Session 時全部連帶刪除。
   - 模型轉接：送給假的 LLM 伺服器的請求，`user` 訊息的 `content` 是陣列，第一項是文字，後面是 `image_url`，data URL 解碼後的位元組和上傳的相同；沒有圖片的訊息仍是字串。附件讀不到時換成 `[image: …, not available]`，呼叫成功。`capabilities.images` 是 `false` 時請求裡沒有 `image_url`，有 `not sent` 的說明。
+  - 位元組上限：輸入裡的圖片位元組加起來超過 `maxBytesPerInput` 時，舊訊息的圖片換成 `[image: <name>, left out]`，即使 token 預算夠；這個 Run 的使用者訊息的圖片不換。這個 Run 的圖片加上新插入的訊息超過上限：`InsertMessage` 回 400（`TooManyImageBytes`），沒有寫入。`maxBytesPerInput` 小於 `maxPerMessage` 乘 `maxBytes`：backend 啟動失敗。
+  - 讀取附件的回應標頭是 `private, no-cache` 加 `ETag`；`If-None-Match` 相符回 304，但附件被刪除之後回 404。
   - 預算：每張圖片算 `tokensPerImage`；超過預算時，舊訊息的圖片先換成 `[image: <name>, left out]`，這個 Run 的使用者訊息的圖片不動；摘要的輸入只有 `[image: <name>]`。
   - 核心的測試不啟動 Backstage，PI-02 的測試不改。
 
@@ -372,7 +380,7 @@ flowchart LR
 
 - 被分享的人直接呼叫 API 讀取序號超過 `up_to_seq` 的 Item：讀不到。
 - 被分享的人讀取序號超過 `outputs_up_to_seq` 的工具輸出：只有狀態，沒有內容。
-- 被分享的人讀取 `used_seq` 超過 `up_to_seq` 的附件：讀不到（IN-19）。複製出來的 Session 沒有附件，有一筆說明圖片沒有複製的 `note`。
+- 被分享的人讀取 `used_seq` 超過 `up_to_seq` 的附件：讀不到（IN-19）。複製出來的 Session：範圍內的訊息的圖片都在，是新的附件（新的 id、擁有者是複製的人），位元組和原來的相同；範圍以外的訊息的圖片不在；原 Session 的附件 id 讀不到複製出來的內容的權限（互不影響）。複製寫進 Auditor。
 - 取消分享後，原本的網址立刻不能讀。
 - 群組分享：不在群組裡的人讀不到；離開群組後讀不到。
 - 持續更新的分享，被分享的人用接回的端點（P2-06）也只收到他能看的內容。
@@ -422,18 +430,18 @@ P4 開始之前要重新評估：先看 P3-07 的平行唯讀呼叫在實際使�
 
 這些是我設計時沒有親自驗證的地方。每一項都排在用到它的 PR 之前。
 
-| 編號 | 要驗證的事                                                                                                                                                                | 影響                          | 在哪裡處理                                                    |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------- |
-| V-01 | AI SDK 的 UI message stream 怎麼表示「等核准」和自訂資料，以及事件的確切名稱                                                                                              | presenter 和前端的 adapter    | P1-01（已驗證，見 [protocol-check](protocol-check.zh-TW.md)） |
-| V-02 | `actionsServiceRef` 還在 alpha。下一版 Backstage 的介面有沒有變                                                                                                           | `ActionsToolGateway` 一個檔案 | P1-06 已確認（見下）。每次升級 Backstage 時檢查               |
-| V-03 | SQLite 和 PostgreSQL 對「唯一索引裡的空值」的行為是否一致                                                                                                                 | H-03、T-07 的做法             | P1-05 的測試。已驗證：一致，空值不算重複                      |
-| V-04 | 模型的 token 計算。OpenAI 相容的端點不一定回傳用量                                                                                                                        | 上下文預算的準確度            | P1-07。沒有用量時用字數估計                                   |
-| V-05 | Backstage 有沒有官方的 search 或 TechDocs action                                                                                                                          | P3-06 的範圍                  | P3-06 開始前                                                  |
-| V-06 | 使用者 token 的有效期在各種登入方式下是多少                                                                                                                               | `runTimeoutSeconds` 的上限    | P1-08 已確認（見下）                                          |
-| V-07 | `auditor` 在沒有 HTTP 請求時（自動送出排隊的訊息）能不能記事件，要帶什麼身分                                                                                              | 自動送出的稽核寫法            | PI-03 開始前                                                  |
-| V-08 | OpenAI 相容的端點是否接受 `image_url` 的 data URL；各家對圖片大小和型別的限制                                                                                             | 模型 adapter 的圖片格式       | PI-05 開始前                                                  |
-| V-09 | `express.raw` 的 `limit` 在沒有 `Content-Length` 時是否讀到上限就停；Backstage 的錯誤處理怎麼處理 body 太大的錯誤（要轉成 413）                                           | 上傳的大小檢查                | PI-05 開始前                                                  |
-| V-10 | 插入和 Run 結束的 transaction 同時進行時的結果：PostgreSQL 的 `FOR SHARE` 和 `FOR UPDATE` 排序，SQLite 兩個連線同時寫入的行為（要「插入先」或「結束先」，不能是錯的結果） | 插入和結束的競爭（IN-11）     | PI-03 的測試                                                  |
+| 編號 | 要驗證的事                                                                                                                                                                                                                                              | 影響                          | 在哪裡處理                                                    |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------- |
+| V-01 | AI SDK 的 UI message stream 怎麼表示「等核准」和自訂資料，以及事件的確切名稱                                                                                                                                                                            | presenter 和前端的 adapter    | P1-01（已驗證，見 [protocol-check](protocol-check.zh-TW.md)） |
+| V-02 | `actionsServiceRef` 還在 alpha。下一版 Backstage 的介面有沒有變                                                                                                                                                                                         | `ActionsToolGateway` 一個檔案 | P1-06 已確認（見下）。每次升級 Backstage 時檢查               |
+| V-03 | SQLite 和 PostgreSQL 對「唯一索引裡的空值」的行為是否一致                                                                                                                                                                                               | H-03、T-07 的做法             | P1-05 的測試。已驗證：一致，空值不算重複                      |
+| V-04 | 模型的 token 計算。OpenAI 相容的端點不一定回傳用量                                                                                                                                                                                                      | 上下文預算的準確度            | P1-07。沒有用量時用字數估計                                   |
+| V-05 | Backstage 有沒有官方的 search 或 TechDocs action                                                                                                                                                                                                        | P3-06 的範圍                  | P3-06 開始前                                                  |
+| V-06 | 使用者 token 的有效期在各種登入方式下是多少                                                                                                                                                                                                             | `runTimeoutSeconds` 的上限    | P1-08 已確認（見下）                                          |
+| V-07 | `auditor` 在沒有 HTTP 請求時（自動送出排隊的訊息）能不能記事件，要帶什麼身分                                                                                                                                                                            | 自動送出的稽核寫法            | PI-03 開始前                                                  |
+| V-08 | OpenAI 相容的端點是否接受 `image_url` 的 data URL；各家對圖片大小和型別的限制                                                                                                                                                                           | 模型 adapter 的圖片格式       | PI-05 開始前                                                  |
+| V-09 | `express.raw` 的 `limit` 在沒有 `Content-Length` 時是否讀到上限就停；Backstage 的錯誤處理怎麼處理 body 太大的錯誤（要轉成 413）                                                                                                                         | 上傳的大小檢查                | PI-05 開始前                                                  |
+| V-10 | 插入和 Run 結束的 transaction 同時進行時的結果：PostgreSQL 的 `FOR SHARE`、`FOR NO KEY UPDATE`、`FOR UPDATE` 的排序和不死結；SQLite 靠連線池只有一條連線排隊（knex 把鎖編成空字串），連線池開到多條時的行為（要「插入先」或「結束先」，不能是錯的結果） | 插入和結束的競爭（IN-11）     | PI-03 的測試                                                  |
 
 V-06 的確認結果（P1-08，Backstage 1.56.2，讀 `plugin-auth-backend` 0.30.2 和 `backend-defaults` 的程式）：
 
@@ -497,3 +505,4 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-24 | 1.0  | P1-10 審查後：B-01 改成宿主把 `page` 存進 `user_message`（`UserMessageBody.page`），`buildModelInput` 在該則訊息前加一行，不在 system prompt；新增 `GET /sessions/:id/tools`（`ListSessionTools`，`ToolDescriptor.title`），核准卡片顯示標題、說明、為什麼要核准、誰何時決定，按鈕改成 Allow / Deny；README 加上從 entity 頁面連到聊天的寫法                                                                                                                                                                                                                                                                                                                                                         |
 | 2026-11-24 | 1.0  | P1-11 完成，P1 全部完成：對照表（[p1-coverage.zh-TW.md](p1-coverage.zh-TW.md)）、兩台 backend 的整合測試、README 和設定說明照新的 API 更新、用途說明頁照實際畫面更新。三份設計文件裡 P1 的需求和 PR 標成完成。補 H-08、S-01、S-02 的測試；presenter 把只有 `agent_message` 的 Step 也視為已重送                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 2026-11-24 | 1.1  | 新增 PI 輸入（第 4 節）：PI-01 到 PI-07，每項有範圍、依賴和驗收情境；P2 以後的節號順延一號；新增 V-07 到 V-10 和五條風險；P2-04、P2-05 加 IN-19（分享時圖片的讀取和複製）。PI-01 只改文件                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 2026-11-24 | 1.1  | PI 審查後：暫停時直接送出的順序寫進 IN-15、IN-18；複製帶走圖片（IN-19，P2-05 驗收）；模型輸出的 `append` 取 `FOR NO KEY UPDATE`、取鎖順序表；`readUpToSeq` 定義為這一輪開始讀紀錄時的最大序號；`afterRun` 對 `waiting_approval` 不送出；已結束 Run 的 `unread` 插入訊息不再送給模型；`message.read` 不走 `seq` 去重；插入 409 的三種處理；圖片位元組上限 `maxBytesPerInput`；`Cache-Control` 改 `private, no-cache`；`ModelClient.stream` 帶 `sessionId`；設定統一用 `aiChat.llm.images`；SQLite 的理由改寫                                                                                                                                                                                          |
