@@ -25,6 +25,12 @@ export interface AiChatConfig {
     timeoutMs: number;
   };
   maxTurns: number;
+  /** Most tool calls the model requests in one run. */
+  maxToolCallsPerRun: number;
+  /** Seconds of working time of one run, without the wait for approvals. */
+  runTimeoutSeconds: number;
+  /** How much the model gets of a long session (H-09). */
+  context: { tokenBudget: number; keepRecentSteps: number };
   systemPrompt?: string;
   actions: {
     include: string[];
@@ -35,6 +41,16 @@ export interface AiChatConfig {
 
 const DEFAULT_MAX_TURNS = 10;
 const DEFAULT_TIMEOUT_SECONDS = 120;
+const DEFAULT_CONTEXT_TOKEN_BUDGET = 100_000;
+const DEFAULT_KEEP_RECENT_STEPS = 6;
+const DEFAULT_MAX_TOOL_CALLS_PER_RUN = 30;
+const DEFAULT_RUN_TIMEOUT_SECONDS = 300;
+/**
+ * The shortest life that `auth.backstageTokenExpiration` allows for the token
+ * of a user. A run works with the token of the request that started it or
+ * continued it after an approval, so it stays within this (V-06).
+ */
+const MAX_RUN_TIMEOUT_SECONDS = 600;
 const DEFAULT_MAX_TOOL_OUTPUT_CHARS = 20000;
 /** A cut output keeps a wrapper of about 30 characters, so a smaller limit keeps no text. */
 const MIN_MAX_TOOL_OUTPUT_CHARS = 100;
@@ -44,6 +60,7 @@ function positiveInt(
   key: string,
   fallback: number,
   min = 1,
+  max = Number.MAX_SAFE_INTEGER,
 ): number {
   const value = config.getOptionalNumber(key) ?? fallback;
   if (!Number.isInteger(value) || value < min) {
@@ -52,6 +69,9 @@ function positiveInt(
         ? `${key} must be a positive integer, got ${value}`
         : `${key} must be an integer of at least ${min}, got ${value}`,
     );
+  }
+  if (value > max) {
+    throw new InputError(`${key} must be at most ${max}, got ${value}`);
   }
   return value;
 }
@@ -76,6 +96,30 @@ export function readAiChatConfig(root: Config): AiChatConfig {
         1000,
     },
     maxTurns: positiveInt(config, 'maxTurns', DEFAULT_MAX_TURNS),
+    maxToolCallsPerRun: positiveInt(
+      config,
+      'maxToolCallsPerRun',
+      DEFAULT_MAX_TOOL_CALLS_PER_RUN,
+    ),
+    context: {
+      tokenBudget: positiveInt(
+        config,
+        'context.tokenBudget',
+        DEFAULT_CONTEXT_TOKEN_BUDGET,
+      ),
+      keepRecentSteps: positiveInt(
+        config,
+        'context.keepRecentSteps',
+        DEFAULT_KEEP_RECENT_STEPS,
+      ),
+    },
+    runTimeoutSeconds: positiveInt(
+      config,
+      'runTimeoutSeconds',
+      DEFAULT_RUN_TIMEOUT_SECONDS,
+      1,
+      MAX_RUN_TIMEOUT_SECONDS,
+    ),
     systemPrompt: config.getOptionalString('systemPrompt'),
     actions: {
       include: config.getOptionalStringArray('actions.include') ?? [],

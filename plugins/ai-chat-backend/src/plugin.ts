@@ -20,12 +20,25 @@ import {
   resolvePackagePath,
 } from '@backstage/backend-plugin-api';
 import { actionsServiceRef } from '@backstage/backend-plugin-api/alpha';
+import { ActionsToolGateway } from './adapters/backstage/ActionsToolGateway';
+import { AuditorAuditLog } from './adapters/backstage/AuditorAuditLog';
 import { ConfigAgentCatalog } from './adapters/backstage/ConfigAgentCatalog';
+import { OpenAiCompatibleModelClient } from './adapters/model/OpenAiCompatibleModelClient';
+import {
+  KnexItemLog,
+  KnexRunRepository,
+  KnexSessionRepository,
+} from './adapters/persistence';
+import { SystemClock, UuidGenerator } from './adapters/system';
 import { ChatService } from './chat/ChatService';
 import { readAiChatConfig } from './config';
 import { ChatStore } from './database/ChatStore';
+import { createHost } from './host';
 import { OpenAiCompatibleClient } from './llm/OpenAiCompatibleClient';
 import { createRouter } from './routes/router';
+
+/** How often the runs whose lease expired are marked `expired`. */
+const EXPIRE_STALE_RUNS_EVERY = { seconds: 30 };
 
 /**
  * Backend plugin of the AI chat. Serves the routes under `/api/ai-chat`: the
@@ -48,6 +61,8 @@ export const aiChatPlugin = createBackendPlugin({
         httpAuth: coreServices.httpAuth,
         httpRouter: coreServices.httpRouter,
         database: coreServices.database,
+        lifecycle: coreServices.lifecycle,
+        scheduler: coreServices.scheduler,
         actions: actionsServiceRef,
       },
       async init({
@@ -57,6 +72,8 @@ export const aiChatPlugin = createBackendPlugin({
         httpAuth,
         httpRouter,
         database,
+        lifecycle,
+        scheduler,
         actions,
       }) {
         const aiChat = readAiChatConfig(config);
@@ -76,6 +93,54 @@ export const aiChatPlugin = createBackendPlugin({
             ),
           });
         }
+
+        // The runs of the new agent loop. No route uses them yet; the routes
+        // still go to ChatService. The shutdown and the sweep of expired
+        // leases already run.
+        const clock = new SystemClock();
+        const ids = new UuidGenerator();
+        const items = new KnexItemLog(db, clock);
+        const sessions = new KnexSessionRepository(db, clock, ids);
+        const host = createHost({
+          items,
+          sessions,
+          runs: new KnexRunRepository(db, clock, ids),
+          agents: catalog,
+          tools: new ActionsToolGateway({
+            actions,
+            catalog,
+            logger,
+            // A session always stores its toolsets (CreateSession).
+            enabledToolsets: async ctx =>
+              (await sessions.get(ctx.sessionId)).enabledToolsets,
+            maxOutputChars: aiChat.maxToolOutputChars,
+          }),
+          model: new OpenAiCompatibleModelClient(
+            new OpenAiCompatibleClient(aiChat.llm),
+          ),
+          audit: new AuditorAuditLog(auditor),
+          clock,
+          ids,
+          logger,
+          settings: {
+            limits: {
+              maxSteps: aiChat.maxTurns,
+              maxToolCallsPerRun: aiChat.maxToolCallsPerRun,
+              runTimeoutSeconds: aiChat.runTimeoutSeconds,
+            },
+            budget: aiChat.context,
+          },
+        });
+        lifecycle.addShutdownHook(() => host.supervisor.shutdown());
+        await scheduler.scheduleTask({
+          id: 'ai-chat-expire-stale-runs',
+          frequency: EXPIRE_STALE_RUNS_EVERY,
+          timeout: { seconds: 30 },
+          fn: async () => {
+            await host.useCases.expireStaleRuns.execute();
+          },
+        });
+
         const chat = new ChatService({
           store: new ChatStore(db),
           actions,

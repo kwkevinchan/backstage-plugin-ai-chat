@@ -107,7 +107,7 @@ function setup(options: {
   };
   const actions = new FakeActionsService();
   const logger = mockServices.logger.mock();
-  const catalog: AgentCatalog = {
+  const catalog: Pick<AgentCatalog, 'toolsets' | 'policy'> = {
     toolsets: async () =>
       state.toolsets ?? [toolset('catalog', { default: true })],
     policy: async () => state.policy ?? {},

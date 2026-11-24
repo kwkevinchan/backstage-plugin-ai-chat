@@ -32,6 +32,9 @@ describe('readAiChatConfig', () => {
         timeoutMs: 120000,
       },
       maxTurns: 10,
+      maxToolCallsPerRun: 30,
+      runTimeoutSeconds: 300,
+      context: { tokenBudget: 100000, keepRecentSteps: 6 },
       systemPrompt: undefined,
       actions: { include: [], exclude: [] },
       maxToolOutputChars: 20000,
@@ -45,6 +48,8 @@ describe('readAiChatConfig', () => {
           aiChat: {
             llm: { ...llm, apiKey: 'k', timeoutSeconds: 5 },
             maxTurns: 3,
+            maxToolCallsPerRun: 7,
+            runTimeoutSeconds: 600,
             systemPrompt: 'Be brief.',
             actions: { include: ['a:*'], exclude: ['a:b'] },
             maxToolOutputChars: 150,
@@ -55,6 +60,8 @@ describe('readAiChatConfig', () => {
     expect(config).toMatchObject({
       llm: { apiKey: 'k', timeoutMs: 5000 },
       maxTurns: 3,
+      maxToolCallsPerRun: 7,
+      runTimeoutSeconds: 600,
       systemPrompt: 'Be brief.',
       actions: { include: ['a:*'], exclude: ['a:b'] },
       maxToolOutputChars: 150,
@@ -84,5 +91,19 @@ describe('readAiChatConfig', () => {
         }),
       ),
     ).toThrow(/maxToolOutputChars must be an integer of at least 100/);
+
+    for (const [key, value] of [
+      ['runTimeoutSeconds', 601],
+      ['runTimeoutSeconds', 0],
+      ['maxToolCallsPerRun', 0],
+    ] as const) {
+      expect(() =>
+        readAiChatConfig(
+          mockServices.rootConfig({
+            data: { aiChat: { llm, [key]: value } },
+          }),
+        ),
+      ).toThrow(new RegExp(key));
+    }
   });
 });

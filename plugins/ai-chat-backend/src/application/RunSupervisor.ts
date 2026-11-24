@@ -1,0 +1,375 @@
+/*
+ * Copyright 2026 The backstage-plugin-ai-chat Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import {
+  LeaseLost,
+  InvalidRunTransition,
+  type AdvanceRun,
+  type AdvanceRunRequest,
+  type HarnessEvent,
+  type RunFence,
+  type RunOutcome,
+} from '@kwkevinchan/ai-chat-harness';
+import { ShuttingDown, type LeasedRun, type Run } from '../domain';
+import { EventChannel } from './EventChannel';
+import type { Logger, RunRepository, RunTransitionTarget } from './ports';
+
+/** What `launch` needs besides the run: the request of the loop without what the supervisor adds. */
+export type LaunchRequest = Omit<AdvanceRunRequest, 'fence' | 'signal'>;
+
+/**
+ * A run that is going on in this process. `events` is the first subscriber:
+ * it gets every event of the run from the start. Read it to the end or call
+ * `return()` on its iterator (`break` in a `for await` does); an unread
+ * subscriber keeps its events in memory until the run ends. `done` settles
+ * when the loop has ended and the run is up to date.
+ */
+export type RunHandle = {
+  runId: string;
+  events: AsyncIterable<HarnessEvent>;
+  done: Promise<void>;
+};
+
+export type RunSupervisorDeps = {
+  advance: Pick<AdvanceRun, 'execute'>;
+  runs: RunRepository;
+  logger: Logger;
+  /** How often the lease is renewed while a model call takes long. 10 seconds by default. */
+  heartbeatMs?: number;
+};
+
+type Loop = {
+  run: LeasedRun;
+  request: LaunchRequest;
+  controller: AbortController;
+  subscribers: Set<EventChannel<HarnessEvent>>;
+  /** Set when the shutdown takes the run over; the loop then leaves its status alone. */
+  shuttingDown: boolean;
+  done: Promise<void>;
+};
+
+const DEFAULT_HEARTBEAT_MS = 10_000;
+const DEFAULT_GRACE_MS = 20_000;
+const ABORT_WAIT_MS = 2_000;
+
+/**
+ * The runs of this backend (D-16, H-04, H-07, H-11).
+ *
+ * - `launch` starts the loop of a run that the caller holds the lease of and
+ *   reads its events in the background. A subscriber that goes away does not
+ *   stop the run (A-06): the loop does not depend on any reader.
+ * - It renews the lease with a timer too, so a model call that takes long
+ *   does not lose it, and it stops the loop when the lease is lost or the user
+ *   asked to stop.
+ * - It writes the status of the run before it tells the subscribers that the
+ *   run ended, so a client that answers the end of the stream finds the run in
+ *   the new status. A port that throws (such as `LeaseLost`) ends the loop
+ *   without `run.ended`; the supervisor then ends the run itself, or leaves it
+ *   to whoever holds the lease now.
+ * - `fences` has the fence of every run this process is running. A run that is
+ *   carried on after an approval has a new fence, and replaces the old one;
+ *   the entry goes when the loop ends, also on an error.
+ * - `shutdown` takes no new runs, waits for the running ones, then stops the
+ *   rest and marks each `expired` with the fence it holds, never without it:
+ *   a run another backend took over is not ours to end.
+ *
+ * The loop keeps the process alive (it awaits I/O of its own); the deadline
+ * timer of the loop is `unref`ed, so this class runs every loop until its
+ * generator ends.
+ */
+export class RunSupervisor {
+  private readonly fences = new Map<string, RunFence>();
+  private readonly loops = new Map<string, Loop>();
+  private closed = false;
+
+  constructor(private readonly deps: RunSupervisorDeps) {}
+
+  /** Whether this supervisor takes new runs; false once `shutdown` began. */
+  get accepting(): boolean {
+    return !this.closed;
+  }
+
+  /**
+   * Starts the loop of `run`, which the caller holds the lease of. Throws
+   * `ShuttingDown` after `shutdown` began; the caller still holds the lease
+   * then and must end the run.
+   */
+  launch(run: LeasedRun, request: LaunchRequest): RunHandle {
+    if (this.closed) throw new ShuttingDown();
+    const loop: Loop = {
+      run,
+      request,
+      controller: new AbortController(),
+      subscribers: new Set(),
+      shuttingDown: false,
+      done: Promise.resolve(),
+    };
+    const events = this.addSubscriber(loop);
+    this.fences.set(run.id, run.fence);
+    this.loops.set(run.fence.leaseOwner, loop);
+    loop.done = this.runLoop(loop);
+    return { runId: run.id, events, done: loop.done };
+  }
+
+  /**
+   * A new subscriber of a run that this process runs; it gets the events from
+   * now on. `undefined` when the run is not running here.
+   */
+  subscribe(runId: string): AsyncIterable<HarnessEvent> | undefined {
+    const fence = this.fences.get(runId);
+    const loop = fence && this.loops.get(fence.leaseOwner);
+    return loop ? this.addSubscriber(loop) : undefined;
+  }
+
+  /** Stops the loop of the run if this process runs it. Returns whether it did. */
+  cancel(runId: string): boolean {
+    const fence = this.fences.get(runId);
+    const loop = fence && this.loops.get(fence.leaseOwner);
+    if (!loop) return false;
+    loop.controller.abort();
+    return true;
+  }
+
+  /** The ids of the runs this process runs. */
+  activeRunIds(): string[] {
+    return [...this.fences.keys()];
+  }
+
+  /**
+   * H-11. Takes no new runs, waits up to `graceMs` for the running ones, then
+   * aborts what is left and marks each of those runs `expired`.
+   */
+  async shutdown(graceMs: number = DEFAULT_GRACE_MS): Promise<void> {
+    this.closed = true;
+    await this.settled(graceMs);
+    for (const [runId, fence] of [...this.fences]) {
+      const loop = this.loops.get(fence.leaseOwner);
+      if (loop) {
+        loop.shuttingDown = true;
+        loop.controller.abort();
+      }
+      try {
+        await this.deps.runs.transition(runId, 'expired', {
+          leaseOwner: fence.leaseOwner,
+          endReason: 'shutdown',
+        });
+      } catch (error) {
+        if (!(error instanceof LeaseLost || isInvalidTransition(error))) {
+          this.deps.logger.error('Could not mark a run expired at shutdown', {
+            runId,
+            error: describe(error),
+          });
+        }
+      }
+    }
+    await this.settled(ABORT_WAIT_MS);
+  }
+
+  private async settled(ms: number): Promise<void> {
+    const all = [...this.loops.values()].map(loop => loop.done);
+    if (all.length === 0) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<void>(resolve => {
+      timer = setTimeout(resolve, ms);
+    });
+    try {
+      await Promise.race([Promise.allSettled(all), timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private addSubscriber(loop: Loop): EventChannel<HarnessEvent> {
+    const channel: EventChannel<HarnessEvent> = new EventChannel(() =>
+      loop.subscribers.delete(channel),
+    );
+    loop.subscribers.add(channel);
+    return channel;
+  }
+
+  private publish(loop: Loop, event: HarnessEvent): void {
+    for (const subscriber of loop.subscribers) subscriber.push(event);
+  }
+
+  private async runLoop(loop: Loop): Promise<void> {
+    const { run } = loop;
+    const timer = setInterval(
+      () => void this.renew(loop),
+      this.deps.heartbeatMs ?? DEFAULT_HEARTBEAT_MS,
+    );
+    const generator = this.deps.advance.execute({
+      ...loop.request,
+      fence: run.fence,
+      signal: loop.controller.signal,
+    });
+    let ended = false;
+    try {
+      for (;;) {
+        const next = await generator.next();
+        if (next.done) break;
+        if (next.value.type === 'run.ended') {
+          await this.settle(loop, next.value.outcome);
+          ended = true;
+        }
+        if (next.value.type === 'summary.failed') {
+          // The cause is the original error: it goes to the log only.
+          this.deps.logger.warn('A summary could not be made', {
+            runId: run.id,
+            cause: describe(next.value.cause),
+          });
+        }
+        this.publish(loop, forSubscribers(next.value));
+      }
+    } catch (error) {
+      if (!ended) await this.settleError(loop, error);
+    } finally {
+      clearInterval(timer);
+      await generator.return(undefined as never).catch(() => undefined);
+      if (this.fences.get(run.id) === run.fence) this.fences.delete(run.id);
+      this.loops.delete(run.fence.leaseOwner);
+      for (const subscriber of loop.subscribers) subscriber.end();
+      loop.subscribers.clear();
+    }
+  }
+
+  /** Renews the lease between the rounds of the loop; stops the loop when it must stop. */
+  private async renew(loop: Loop): Promise<void> {
+    try {
+      const { cancelRequested } = await this.deps.runs.heartbeat(
+        loop.run.fence,
+      );
+      if (cancelRequested) loop.controller.abort();
+    } catch (error) {
+      if (error instanceof LeaseLost) {
+        loop.controller.abort();
+        return;
+      }
+      // A failed attempt (the database is slow, say) is not a lost lease: the
+      // lease lasts longer than one interval, and the loop renews it too.
+      this.deps.logger.warn('Could not renew the lease of a run', {
+        runId: loop.run.id,
+        error: describe(error),
+      });
+    }
+  }
+
+  /** Writes the status the outcome gives the run. */
+  private async settle(loop: Loop, outcome: RunOutcome): Promise<void> {
+    if (loop.shuttingDown) return;
+    if (outcome.status === 'failed') {
+      this.deps.logger.error('A run failed', {
+        runId: loop.run.id,
+        cause: describe(outcome.cause),
+      });
+    }
+    const [to, endReason] = statusOf(outcome);
+    const run = await this.end(loop, to, endReason);
+    // A stop request that was stored after the last heartbeat of the loop:
+    // the loop did not see it, and the run must not wait for an approval that
+    // the user no longer wants.
+    if (to === 'waiting_approval' && run?.cancelRequested) {
+      await this.end(loop, 'cancelled', 'user', false);
+    }
+  }
+
+  /** The loop ended with an error of a port, so there is no `run.ended` yet. */
+  private async settleError(loop: Loop, error: unknown): Promise<void> {
+    const lost = error instanceof LeaseLost;
+    if (!lost) {
+      this.deps.logger.error('A run stopped with an error', {
+        runId: loop.run.id,
+        error: describe(error),
+      });
+    }
+    if (!loop.shuttingDown && !lost) {
+      try {
+        await this.end(loop, 'failed', 'error');
+      } catch (inner) {
+        this.deps.logger.error('Could not mark a run failed', {
+          runId: loop.run.id,
+          error: describe(inner),
+        });
+      }
+    }
+    this.publish(loop, {
+      type: 'run.ended',
+      outcome: { status: 'failed', message: 'The run stopped.' },
+    });
+  }
+
+  /**
+   * Changes the status of the run. `withLease` is false once the loop gave up
+   * the lease (a run that waits for an approval has none). Returns the run, or
+   * `undefined` when it is not ours any more.
+   */
+  private async end(
+    loop: Loop,
+    to: RunTransitionTarget,
+    endReason?: string,
+    withLease = true,
+  ): Promise<Run | undefined> {
+    try {
+      return await this.deps.runs.transition(loop.run.id, to, {
+        ...(withLease && { leaseOwner: loop.run.fence.leaseOwner }),
+        ...(endReason !== undefined && { endReason }),
+      });
+    } catch (error) {
+      // Someone else holds or has ended the run: its status is not ours.
+      if (!(error instanceof LeaseLost || isInvalidTransition(error))) {
+        throw error;
+      }
+      return undefined;
+    }
+  }
+}
+
+/**
+ * What the subscribers get: the original error of a failure or of a failed
+ * summary stays out (it can hold text of the provider); the log has it.
+ */
+function forSubscribers(event: HarnessEvent): HarnessEvent {
+  if (event.type === 'summary.failed') return { type: 'summary.failed' };
+  if (event.type === 'run.ended' && event.outcome.status === 'failed') {
+    return {
+      type: 'run.ended',
+      outcome: { status: 'failed', message: event.outcome.message },
+    };
+  }
+  return event;
+}
+
+function statusOf(outcome: RunOutcome): [RunTransitionTarget, string?] {
+  switch (outcome.status) {
+    case 'completed':
+      return ['completed', outcome.endReason];
+    case 'waiting_approval':
+      return ['waiting_approval'];
+    case 'cancelled':
+      return ['cancelled', 'user'];
+    case 'failed':
+      return ['failed', 'error'];
+    default:
+      return outcome satisfies never;
+  }
+}
+
+function isInvalidTransition(error: unknown): boolean {
+  return error instanceof InvalidRunTransition;
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

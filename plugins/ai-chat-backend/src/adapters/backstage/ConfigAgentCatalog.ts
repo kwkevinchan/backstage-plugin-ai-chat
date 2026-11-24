@@ -17,16 +17,24 @@
 import type { Config } from '@backstage/config';
 import { InputError } from '@backstage/errors';
 import type { LoggerService } from '@backstage/backend-plugin-api';
-import type { PolicyName, PolicySettings } from '@kwkevinchan/ai-chat-harness';
+import type {
+  AgentDefinition,
+  PolicyName,
+  PolicySettings,
+} from '@kwkevinchan/ai-chat-harness';
 import type { AgentCatalog } from '../../application/ports/AgentCatalog';
+import { AgentNotFound } from '../../domain/errors';
+import { buildSystemPrompt } from '../../domain/systemPrompt';
 import type { Toolset } from '../../domain/toolset';
 
 const TOOLSET_ID = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/i;
+const DEFAULT_AGENT_ID = 'default';
 const POLICY_NAMES: readonly string[] = ['allow', 'ask', 'deny'];
 
 /**
- * The toolsets and the policy from the `aiChat` section of the configuration.
- * It reads and checks them when it is created, so a mistake stops the backend
+ * The toolsets and the policy from the `aiChat` section of the configuration,
+ * and the one agent, `default`: the built-in system prompt plus
+ * `aiChat.systemPrompt`. It reads and checks them when it is created, so a mistake stops the backend
  * at startup.
  *
  * Without `aiChat.toolsets` it builds one toolset, `default`, switched on for
@@ -37,6 +45,7 @@ const POLICY_NAMES: readonly string[] = ['allow', 'ask', 'deny'];
 export class ConfigAgentCatalog implements AgentCatalog {
   private readonly toolsetList: readonly Toolset[];
   private readonly policySettings: PolicySettings;
+  private readonly defaultAgent: AgentDefinition;
 
   constructor(root: Config, logger: LoggerService) {
     const config = root.getOptionalConfig('aiChat');
@@ -64,6 +73,21 @@ export class ConfigAgentCatalog implements AgentCatalog {
           },
         ];
     this.policySettings = readPolicy(config?.getOptional('policy'));
+    this.defaultAgent = {
+      id: DEFAULT_AGENT_ID,
+      systemPrompt: buildSystemPrompt(
+        config?.getOptionalString('systemPrompt'),
+      ),
+    };
+  }
+
+  defaultAgentId(): string {
+    return DEFAULT_AGENT_ID;
+  }
+
+  async agent(agentId: string): Promise<AgentDefinition> {
+    if (agentId !== DEFAULT_AGENT_ID) throw new AgentNotFound(agentId);
+    return this.defaultAgent;
   }
 
   async toolsets(): Promise<readonly Toolset[]> {

@@ -51,7 +51,7 @@ import {
 /** @internal */
 export type ActionsToolGatewayDeps = {
   actions: ActionsService;
-  catalog: AgentCatalog;
+  catalog: Pick<AgentCatalog, 'toolsets' | 'policy'>;
   logger: LoggerService;
   /**
    * The toolsets the session of the call has switched on; `undefined` when it

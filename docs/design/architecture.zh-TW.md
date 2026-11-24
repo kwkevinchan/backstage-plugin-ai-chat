@@ -522,23 +522,27 @@ plugins/ai-chat-backend/
     domain/                            第 1 圈
       session.ts                       Session、NewSession、SessionPatch（可以改哪些欄位）
       run.ts                           Run、LeasedRun（Run 加上 fence）
-      principal.ts                     Principal { userRef, ownershipRefs, credentials: unknown }
+      principal.ts                     Principal { userRef, ownershipRefs, credentials: unknown, credentialsExpireAt? }
+      approval.ts                      callsAwaitingDecision()：哪些呼叫在等決定（用核心的 needsApproval）
+      runLimits.ts                     runLimits()：Run 的工作時間不超過憑證的有效期（V-06）
+      systemPrompt.ts                  buildSystemPrompt()
       share.ts                         Share、ShareMode、到期的處理
       visibility.ts                    visibleItems()：某個檢視者看得到哪些 Item
       fork.ts                          forkItems()：複製時帶走哪些 Item
       toolset.ts                       Toolset、enabledTools()
       retention.ts
-      errors.ts                        SessionNotFound、RunNotFound、RunAlreadyActive（P1-05）；NotSessionOwner…（P1-08）
+      errors.ts                        SessionNotFound、RunNotFound、RunAlreadyActive（P1-05）；NotSessionOwner、ToolCallNotFound、ToolCallNotWaiting、RunNotWaiting、AgentNotFound、UnknownToolset、ShuttingDown（P1-08）
     application/                       第 2 圈
       ports/
         SessionRepository.ts           create、get、listByOwner、update、delete
         RunRepository.ts               start、acquireLease、transition、requestCancel、expireStale。也實作核心的 RunControl（heartbeat、recordUsage）
         ShareRepository.ts             P2
-        AccessControl.ts               能不能讀這段 Session、能不能用這個 Toolset
-        AuditLog.ts
+        AccessControl.ts               P2：能不能讀這段 Session、能不能用這個 Toolset。P1 只檢查擁有者（domain 的 assertOwner）
+        AuditLog.ts                    begin() 回傳 AuditSpan（success、fail）
+        Logger.ts
         Notifier.ts                    P2：通知畫面「狀態變了」
-        AgentCatalog.ts                有哪些 Agent、Toolset
-        Scheduler.ts                   定期工作
+        AgentCatalog.ts                agent()、defaultAgentId()、toolsets()、policy()
+        Scheduler.ts                   P2：定期工作。P1 的 `plugin.ts` 直接用 `coreServices.scheduler` 排 ExpireStaleRuns
       usecases/
         CreateSession.ts
         GetSession.ts                  回傳 Session 和檢視者看得到的 Item
@@ -547,6 +551,7 @@ plugins/ai-chat-backend/
         DeleteSession.ts
         SendMessage.ts
         DecideApproval.ts
+        ResumeRun.ts                   全部已決定但迴圈沒有啟動時接續（不帶新的決定）
         CancelRun.ts
         FollowSession.ts               P2：接回（從目前 Run 的第一個 Item 重送）
         ShareSession.ts                P2
@@ -555,6 +560,10 @@ plugins/ai-chat-backend/
         ExpireStaleRuns.ts
         PurgeExpiredSessions.ts        P2
       RunSupervisor.ts                 這一台正在跑的 Run：啟動、續租、訂閱、關機
+      resumeIfDecided.ts               DecideApproval 和 ResumeRun 共用：全部已決定就 acquireLease 並啟動迴圈
+      EventChannel.ts                  給一個訂閱者的事件佇列
+      AuditedToolGateway.ts            包住 ToolGateway：不是唯讀的工具執行時寫稽核（O-02）
+      buildRunRequest.ts               組出 AdvanceRun 的 request（agent、政策、限制、用量）
     adapters/                          第 3 圈
       http/
         router.ts
@@ -573,13 +582,14 @@ plugins/ai-chat-backend/
         AuditorAuditLog.ts
         SignalsNotifier.ts
         ConfigAgentCatalog.ts
-        principalFromRequest.ts        httpAuth、userInfo 轉成 Principal
+        principalFromRequest.ts        httpAuth、userInfo、auth（getLimitedUserToken 取 token 的到期時間）轉成 Principal
         BackstageScheduler.ts
       model/
-        OpenAiCompatibleModelClient.ts
+        OpenAiCompatibleModelClient.ts 包住 `llm/` 的 OpenAI 相容 client（P1-09 把 `llm/` 搬進來）
       system/
         SystemClock.ts
         UuidGenerator.ts
+    host.ts                            第 4 圈：createHost() 把核心迴圈、RunSupervisor 和 use case 接在 port 上（plugin.ts 和測試共用）
     plugin.ts                          第 4 圈：組裝
     index.ts
 ```
@@ -620,21 +630,22 @@ export function enabledTools(
 
 每個 use case 一個類別，只有一個 `execute` 方法。
 
-| Use case                      | 做什麼                                            | 用到的 port                                                | 規格                   |
-| ----------------------------- | ------------------------------------------------- | ---------------------------------------------------------- | ---------------------- |
-| `CreateSession`               | 建立 Session，套用 Toolset 的預設值               | SessionRepository、AgentCatalog                            | SE-01、T-01            |
-| `GetSession`                  | 檢查權限，回傳 Session、Run 的狀態、看得到的 Item | SessionRepository、ItemLog、AccessControl、ShareRepository | SH-02、SH-05           |
-| `UpdateSession`               | 改名、釘選、封存、開關 Toolset                    | SessionRepository、AgentCatalog                            | SE-03、T-11            |
-| `SendMessage`                 | 建立 Run、寫入使用者訊息、啟動迴圈、回傳事件串流  | RunRepository、ItemLog、RunSupervisor、AccessControl       | H-01、H-03、B-01       |
-| `DecideApproval`              | 寫入 `approval`。全部決定後重新啟動迴圈           | ItemLog、RunRepository、RunSupervisor、AuditLog            | D-05、T-06、T-07、P-04 |
-| `CancelRun`                   | 設定停止要求。Run 在這一台就直接中止              | RunRepository、RunSupervisor                               | H-06                   |
-| `FollowSession`               | 從目前 Run 的第一個 Item 重送，再接上即時事件     | ItemLog、RunSupervisor、AccessControl                      | A-07                   |
-| `ShareSession`、`UpdateShare` | 建立和修改分享                                    | ShareRepository、ItemLog、AuditLog、Notifier               | SH-01、SH-06 到 SH-11  |
-| `ForkSession`                 | 複製成自己的 Session                              | SessionRepository、ItemLog、AccessControl、AuditLog        | SH-04                  |
-| `ExpireStaleRuns`             | 租約過期的 Run 標成 `expired`                     | RunRepository                                              | H-04                   |
-| `PurgeExpiredSessions`        | 刪除超過保存期限的 Session                        | SessionRepository                                          | SE-05                  |
+| Use case                      | 做什麼                                              | 用到的 port                                                                                 | 規格                   |
+| ----------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------- |
+| `CreateSession`               | 建立 Session，套用 Toolset 的預設值                 | SessionRepository、AgentCatalog                                                             | SE-01、T-01            |
+| `GetSession`                  | 檢查權限，回傳 Session、進行中的 Run、看得到的 Item | SessionRepository、RunRepository、ItemLog、（P2：AccessControl、ShareRepository）           | SH-02、SH-05           |
+| `UpdateSession`               | 改名、釘選、封存、開關 Toolset                      | SessionRepository、AgentCatalog                                                             | SE-03、T-11            |
+| `SendMessage`                 | 建立 Run、寫入使用者訊息、啟動迴圈、回傳事件串流    | SessionRepository、RunRepository、ItemLog、RunSupervisor、AgentCatalog（P2：AccessControl） | H-01、H-03、B-01       |
+| `DecideApproval`              | 寫入 `approval`。全部決定後重新啟動迴圈             | SessionRepository、ItemLog、RunRepository、RunSupervisor、AgentCatalog、AuditLog            | D-05、T-06、T-07、P-04 |
+| `ResumeRun`                   | 全部已決定但 Run 還在等核准時接續，不帶新的決定     | SessionRepository、RunRepository、ItemLog、RunSupervisor、AgentCatalog                      | P-04                   |
+| `CancelRun`                   | 設定停止要求。Run 在這一台就直接中止                | RunRepository、RunSupervisor                                                                | H-06                   |
+| `FollowSession`               | 從目前 Run 的第一個 Item 重送，再接上即時事件       | ItemLog、RunSupervisor、AccessControl                                                       | A-07                   |
+| `ShareSession`、`UpdateShare` | 建立和修改分享                                      | ShareRepository、ItemLog、AuditLog、Notifier                                                | SH-01、SH-06 到 SH-11  |
+| `ForkSession`                 | 複製成自己的 Session                                | SessionRepository、ItemLog、AccessControl、AuditLog                                         | SH-04                  |
+| `ExpireStaleRuns`             | 租約過期的 Run 標成 `expired`                       | RunRepository                                                                               | H-04                   |
+| `PurgeExpiredSessions`        | 刪除超過保存期限的 Session                          | SessionRepository                                                                           | SE-05                  |
 
-`SendMessage` 的樣子：
+`SendMessage` 的樣子（P1 沒有 `AccessControl`，擁有者檢查是 domain 的 `assertOwner`）：
 
 ```ts
 export class SendMessage {
@@ -643,9 +654,10 @@ export class SendMessage {
       sessions: SessionRepository;
       runs: RunRepository;
       items: ItemLog;
-      access: AccessControl;
       supervisor: RunSupervisor;
       agents: AgentCatalog;
+      clock: Clock;
+      settings: RunSettings; // limits、budget
     },
   ) {}
 
@@ -654,38 +666,52 @@ export class SendMessage {
     sessionId: string;
     text: string;
     page?: { path: string; entityRef?: string };
-  }): Promise<RunSubscription> {
+  }): Promise<RunHandle> {
     const session = await this.deps.sessions.get(input.sessionId);
     assertOwner(session, input.principal); // 丟 NotSessionOwner
+    if (!this.deps.supervisor.accepting) throw new ShuttingDown();
 
     const run = await this.deps.runs.start(session.id); // 丟 RunAlreadyActive
-    await this.deps.items.append(
-      session.id,
-      [{ kind: 'user_message', text: input.text }],
-      run.fence,
-    );
-    return this.deps.supervisor.launch(run, {
-      agent: await this.deps.agents.get(session.agentId),
-      ctx: {
-        sessionId: session.id,
-        runId: run.id,
-        principal: input.principal,
-        page: input.page,
-      },
-    });
+    try {
+      const request = await buildRunRequest(/* agent、政策、限制、用量 */);
+      await this.deps.items.append(
+        session.id,
+        [{ kind: 'user_message', text: input.text }],
+        run.fence,
+      );
+      return this.deps.supervisor.launch(run, request);
+    } catch (error) {
+      await this.abandon(run); // transition(run, 'failed', { leaseOwner })，Session 不會卡住
+      throw error;
+    }
   }
 }
 ```
+
+各個 use case 的規則：
+
+- **`SendMessage`**：先建立 Run（`start` 擋下第二個進行中的 Run），成功之後才寫 `user_message`，所以被拒絕的訊息不會留在紀錄裡。`buildRunRequest` 在寫入之前，找不到 Agent 這類錯誤不會留下訊息。啟動迴圈之前任何一步失敗，Run 以 `failed`（`end_reason` 是 `not_started`）結束，Session 可以再開新的 Run。
+- **`DecideApproval`**：先讀紀錄。呼叫不存在丟 `ToolCallNotFound`；已經有決定就回傳那個決定（T-07，不再寫稽核）；沒有決定時，呼叫要 `needsApproval`（核心的規則）、沒有結果、而且 Run 是這個呼叫所屬、狀態是 `waiting_approval`，否則丟 `ToolCallNotWaiting` 或 `RunNotWaiting`。決定寫入的前後記稽核（`tool-call-approve` 或 `tool-call-deny`）；寫入時不需要租約（Run 在等核准，沒有人持有）；兩個請求同時決定同一個呼叫時，輸的那個得到先寫入的決定。寫完之後重讀紀錄：`callsAwaitingDecision` 還有呼叫就回傳（P-04，其他的仍在等）；沒有了就交給 `resumeIfDecided`：這一台不接新的 Run（關機中）就丟 `ShuttingDown`，決定已存下，Run 維持 `waiting_approval`，由別台接手；否則 `acquireLease`，只有拿到租約的那個請求啟動迴圈，其他請求（同一台或別台）得到沒有 `run` 的結果。啟動迴圈時丟 `ShuttingDown`（競爭）就用 `leaseOwner` 把 Run 放回 `waiting_approval`，其他錯誤才轉 `failed`。接手用這個請求的 `principal`（工具用這個請求的憑證）。
+- **`ResumeRun`**：「全部已決定但迴圈沒有啟動」（決定的請求存下決定後當掉）的接續，不帶新的決定。做擁有者檢查，然後同樣交給 `resumeIfDecided`（含關機中的 `ShuttingDown`）：還有呼叫在等、沒有進行中的 Run、或別的請求先接手，都回傳 `undefined`。接手用這個請求的 `principal`。
+- **`GetSession`**：除了 Item，還回傳 `awaitingDecision`（還在等決定的 `callId`，用 `callsAwaitingDecision`，不受 `afterSeq` 影響，另外讀整段紀錄）和 `resumable`（Run 是 `waiting_approval` 而且沒有呼叫要決定，表示要送接續請求）。P1-09 的路由 `POST /sessions/:id/resume` 對應 `ResumeRun`（SSE，沒有東西可接續時 204）；P1-10 的畫面開啟 Session 看到 `resumable` 時自動送接續請求。
+- **`CancelRun`**：`requestCancel` 存下停止要求；這一台有迴圈就 `abort`；然後一律再查一次狀態，是 `waiting_approval`（沒有迴圈）就直接 `transition` 成 `cancelled`（`end_reason` 是 `user`）；別台的迴圈在下一次續租看到停止要求。停止要求在迴圈最後一次 `heartbeat` 之後才存進來、迴圈照樣寫成 `waiting_approval` 的情形，由 `RunSupervisor` 收尾時處理（見 5.4）。
+- **`DeleteSession`**：有進行中的 Run 就丟 `RunAlreadyActive`（鎖的順序見規劃的 P1-08）。檢查和刪除之間仍有一個很短的空隙：這時新開的 Run 會在刪除時被連帶刪掉，它的迴圈下一次寫入得到 `LeaseLost` 而結束。
+- **`CreateSession`**：一定把 Toolset 存進 `enabled_toolsets`：沒給就用 `default: true` 的組，也可能是空陣列；不認得的 id 丟 `UnknownToolset`。`UpdateSession` 同樣檢查。
+- **`ExpireStaleRuns`**：`plugin.ts` 每 30 秒排一次。
 
 ### 5.4 `RunSupervisor`
 
 它管理「這一台 backend 正在跑的 Run」。它在 application 那一圈，只用 port。
 
-- **啟動**：呼叫核心的 `AdvanceRun.execute()`，在背景消費事件。HTTP 的回應只是其中一個訂閱者。
-- **訂閱**：每個 Run 可以有多個訂閱者。訂閱者斷線不影響 Run（H-07、A-06）。
-- **續租**：核心每一輪呼叫一次 `heartbeat`；執行不是唯讀的工具之前也會呼叫，讓停止要求在兩個寫入工具之間生效。模型呼叫很久時，另外有計時器每 10 秒續租一次。租約長度 30 秒。
-- **結束**：依照 `RunOutcome` 更新 Run 的狀態，清掉 `active_session_id`，通知 Notifier。
-- **關機**：停止接新的 Run。等進行中的 Run 最多 20 秒。沒跑完的中止並標成 `expired`（H-11）。
+- **啟動**：`launch(run, request)` 用 `start` 或 `acquireLease` 拿到的 fence 呼叫核心的 `AdvanceRun.execute()`，在背景消費事件，回傳 `RunHandle { runId, events, done }`。`events` 是第一個訂閱者，從頭收到所有事件；要讀到最後，或對它的 iterator 呼叫 `return()`（`for await` 裡 `break` 就會），不然它的事件會留在記憶體直到 Run 結束。HTTP 的回應只是其中一個訂閱者。`done` 在迴圈結束、Run 的狀態更新之後完成。supervisor 一定把 generator 跑完或 `return()`：核心的截止計時器已 `unref`，宿主要自己讓程序活著，直到 generator 結束。
+- **fence 表**：`Map<runId, fence>` 記這個程序正在跑的 Run 和它持有的 fence。核准後重新接手時 fence 會換，Map 跟著換。迴圈結束（包括丟出 `LeaseLost`）時只在 Map 裡還是自己的 fence 時移除，所以舊迴圈的收尾不會移掉新迴圈的項目。
+- **訂閱**：每個 Run 可以有多個訂閱者（`subscribe(runId)` 從現在起收事件，`FollowSession` 在 P2 用它）。訂閱者斷線不影響 Run（H-07、A-06）。
+- **續租**：核心每一輪呼叫一次 `heartbeat`；執行不是唯讀的工具之前也會呼叫，讓停止要求在兩個寫入工具之間生效。模型呼叫很久時，另外有計時器每 10 秒續租一次；續租得到 `LeaseLost` 或停止要求時中止迴圈。其他錯誤（資料庫暫時很慢）只記 warn，不中止：一次失敗不代表租約丟了，下一次續租或核心自己的 `heartbeat` 會再試。租約長度 30 秒。
+- **結束**：依照 `RunOutcome` 用 `transition(runId, to, { leaseOwner })` 更新 Run 的狀態（`completed` 的 `end_reason` 是 `endReason`，`failed` 是 `error`，使用者取消是 `user`），清掉 `active_session_id`。先更新狀態，再把 `run.ended` 交給訂閱者：收到串流結束的用戶端馬上送決定時，Run 已經是 `waiting_approval`。`transition` 得到 `LeaseLost` 或 `InvalidRunTransition`（Run 已被別人結束或接手）就略過。`failed` 的 `cause` 和 `summary.failed` 的 `cause` 只記 log，交給訂閱者的事件是拿掉 `cause` 的副本。寫成 `waiting_approval` 之後如果回傳的 Run 帶著 `cancelRequested`（停止要求在迴圈最後一次 `heartbeat` 之後才存進來），再 `transition` 成 `cancelled`（`end_reason` 是 `user`），Run 不會卡在等核准。其餘事件（`summary.started`、`context.trimmed` 等）只交給訂閱者，不影響 Run 的狀態。
+- **port 丟例外**：核心的 port 丟例外（例如 `LeaseLost`）時迴圈沒有 `run.ended`。supervisor 自己處理：`LeaseLost` 表示租約已在別人手上，Run 的狀態不動；其他例外用 `leaseOwner` 把 Run 標成 `failed`（`end_reason` 是 `error`）並記 log。兩種情形都給訂閱者一個 `run.ended`（`failed`，固定文字 `The run stopped.`，沒有 `cause`）。
+- **已用時間**：等核准的時間不算。核心每次呼叫只算這次呼叫內經過的時間，加上 request 帶入的 `usage.elapsedSeconds`；宿主接手時帶入存在 Run 裡的用量（`acquireLease` 回傳的 Run），不用現在時間減 `started_at`。
+- **關機**（H-11）：`shutdown(graceMs = 20 秒)` 先停止接新的 Run（`launch` 丟 `ShuttingDown`，`SendMessage` 在 `start` 之前就檢查），等進行中的 Run 最多 `graceMs`。沒跑完的，只對 Map 裡的 Run 中止迴圈並呼叫 `transition(runId, 'expired', { leaseOwner: fence.leaseOwner })`；得到 `LeaseLost` 表示已被別台接手，略過。不用沒帶 `leaseOwner` 的 `transition` 結束 Run：那會結束別台接手的 Run。
+- **當掉的 backend**：靠 `ExpireStaleRuns`（H-04）。
 
 租約在 `KnexRunRepository` 裡的規則。同時進來的呼叫由資料庫決定：`start` 靠唯一索引，`heartbeat`、`recordUsage`、`acquireLease`、`requestCancel`、`expireStale` 各是一個帶條件的 UPDATE，`transition` 在 transaction 裡先 `SELECT … FOR UPDATE` 再 UPDATE：
 
@@ -703,14 +729,14 @@ export class SendMessage {
 | ------------------------------------------------------------------ | ------------------------------ | --------------------------------------------------------------------------------- |
 | `ItemLog`、`SessionRepository`、`RunRepository`、`ShareRepository` | `Knex*`                        | `coreServices.database`                                                           |
 | `ToolGateway`                                                      | `ActionsToolGateway`           | `actionsServiceRef`（`@backstage/backend-plugin-api/alpha`）的 `list` 和 `invoke` |
-| `ModelClient`                                                      | `OpenAiCompatibleModelClient`  | 沒有。用 `fetch`                                                                  |
-| `AccessControl`                                                    | `PermissionAccessControl`      | `coreServices.permissions`（P2 之前只檢查擁有者）                                 |
+| `ModelClient`                                                      | `OpenAiCompatibleModelClient`  | 沒有。包住 `llm/` 裡用 `fetch` 的 client                                          |
+| `AccessControl`                                                    | `PermissionAccessControl`      | `coreServices.permissions`（P2。P1 只檢查擁有者，是 domain 的 `assertOwner`）     |
 | `AuditLog`                                                         | `AuditorAuditLog`              | `coreServices.auditor`                                                            |
 | `Notifier`                                                         | `SignalsNotifier`              | `signalsServiceRef`。沒有安裝時用不做事的版本                                     |
 | `AgentCatalog`                                                     | `ConfigAgentCatalog`           | `coreServices.rootConfig`，加上擴充點註冊的內容                                   |
 | `Scheduler`                                                        | `BackstageScheduler`           | `coreServices.scheduler`                                                          |
 | `Clock`、`IdGenerator`                                             | `SystemClock`、`UuidGenerator` | 沒有                                                                              |
-| （HTTP 的身分）                                                    | `principalFromRequest`         | `coreServices.httpAuth`、`coreServices.userInfo`                                  |
+| （HTTP 的身分）                                                    | `principalFromRequest`         | `coreServices.httpAuth`、`userInfo`、`auth`                                       |
 
 `ActionsToolGateway` 負責的轉換。它是 adapter 裡唯一用到 `actionsServiceRef` 的檔案（V-02）。`plugin.ts` 的組裝，以及舊的 `ChatService`、`ToolCatalog` 是例外，P1-08、P1-09 會刪掉它們：
 
@@ -720,7 +746,7 @@ export class SendMessage {
 - `execute`：先用現在的 action 和政策檢查這筆存下來的呼叫（T-06）。政策在提出呼叫時和執行前各檢查一次。工具已經不在清單裡、呼叫存成唯讀但 action 現在不是唯讀、`schemaHash` 變了而存下的輸入不符合新 schema、現在的政策是 `deny`、或存下時不需核准而現在政策要 `ask`（例如事後改成 `egress`），都不執行，回傳 `error` 結果。存下時要核准的呼叫，核准之後現在的政策仍是 `ask` 就照常執行。通過就把 `CallContext.principal` 的 `credentials` 交給 `actions.invoke`。`invoke` 沒有 signal 參數，所以 signal 中止時不再等它並丟出例外（核心看到 signal 已中止就不寫結果）；action 本身可能仍會跑完。action 丟出的例外轉成 `error` 結果。回傳值一律整理成 `ToolOutput` 物件：沒有值是 `{ status: 'ok' }`，字串、數字、`null`、陣列放進 `output`；序列化後超過 `maxOutputChars` 的，`output` 換成 `{ text, originalLength }`（序列化後不超過 `maxOutputChars`），`truncated: true`。
 - 政策的警告：政策把不是唯讀或屬於 `egress` Toolset 的 action 設成 `allow` 時，第一次在 `list` 看到它就記一筆警告，同一個工具只記一次。執行時 `decidePolicy` 仍然算出 `ask`。Actions Registry 要用憑證才能列出 action，所以啟動時沒有清單可查。
 
-`ConfigAgentCatalog` 在建構時讀取並檢查 `aiChat.toolsets` 和 `aiChat.policy`，值不對就丟 `InputError`，後端啟動失敗。它只實作 `AgentCatalog { toolsets(); policy() }`，Agent 留到 P3。
+`ConfigAgentCatalog` 在建構時讀取並檢查 `aiChat.toolsets` 和 `aiChat.policy`，值不對就丟 `InputError`，後端啟動失敗。它實作 `AgentCatalog { agent(); defaultAgentId(); toolsets(); policy() }`：現在只有 `default` 這一個 Agent（內建的系統提示加 `aiChat.systemPrompt`），設定檔裡的 Agent 留到 P3。
 
 - Toolset 的欄位：`actions`（樣式，不可為空）、`exclude`（不屬於這組的樣式）、`title`、`default`（預設 `false`）、`egress`（預設 `false`）。id 以字母開頭，只能是字母、數字，以及夾在中間的 `-`、`_`。`policy` 的鍵只接受完整的 action id，含 `*` 會丟 `InputError`。
 - `policy` 在設定檔是平的 `{ toolId: allow|ask|deny }`，轉成 domain 的 `PolicySettings { byTool }`。
@@ -728,56 +754,78 @@ export class SendMessage {
 
 ### 5.6 組裝
 
-`plugin.ts` 是唯一知道所有具體類別的地方。
+`plugin.ts` 是唯一 `new` 出 adapter 的地方。它把 adapter 交給 `host.ts` 的 `createHost()`，後者組出核心的 `AdvanceRun`、`RunSupervisor` 和所有 use case（測試用同一個函式接真的資料庫和假的模型）。`createHost()` 把 `ToolGateway` 包上 `AuditedToolGateway`，所以每一個不是唯讀的工具執行都有稽核（O-02）。
 
 ```ts
 export const aiChatPlugin = createBackendPlugin({
   pluginId: 'ai-chat',
   register(env) {
-    const extensions = new ExtensionRegistry();
-    env.registerExtensionPoint(aiChatHarnessExtensionPoint, extensions);   // P3
-
     env.registerInit({
-      deps: { /* logger、rootConfig、database、httpAuth、userInfo、httpRouter、
-                 auditor、permissions、scheduler、lifecycle、actions */ },
+      deps: {
+        /* logger、rootConfig、database、httpAuth、userInfo、auth、httpRouter、
+                 auditor、scheduler、lifecycle、actions */
+      },
       async init(d) {
-        const knex = await d.database.getClient();
+        const db = await d.database.getClient();
         const clock = new SystemClock();
         const ids = new UuidGenerator();
 
         // 第 3 圈
-        const items = new KnexItemLog(knex, clock);
-        const sessions = new KnexSessionRepository(knex, clock, ids);
-        const runs = new KnexRunRepository(knex, clock, ids);
-        const agents = new ConfigAgentCatalog(d.rootConfig, d.logger); // P3 再加 extensions
-        const tools = new ActionsToolGateway({
-          actions: d.actions,
-          catalog: agents,
+        const catalog = new ConfigAgentCatalog(d.rootConfig, d.logger); // P3 再加 extensions
+        const sessions = new KnexSessionRepository(db, clock, ids);
+        const host = createHost({
+          items: new KnexItemLog(db, clock),
+          sessions,
+          runs: new KnexRunRepository(db, clock, ids),
+          agents: catalog,
+          tools: new ActionsToolGateway({
+            actions: d.actions,
+            catalog,
+            logger: d.logger,
+            enabledToolsets: async ctx =>
+              (await sessions.get(ctx.sessionId)).enabledToolsets,
+            maxOutputChars: config.maxToolOutputChars,
+          }),
+          model: new OpenAiCompatibleModelClient(
+            new OpenAiCompatibleClient(config.llm),
+          ),
+          audit: new AuditorAuditLog(d.auditor),
+          clock,
+          ids,
           logger: d.logger,
-          enabledToolsets: ctx => sessions.enabledToolsets(ctx.sessionId),
-          maxOutputChars: readToolOutputLimit(d.rootConfig),
+          settings: {
+            limits: { maxSteps, maxToolCallsPerRun, runTimeoutSeconds },
+            budget: config.context,
+          },
         });
-        const model = new OpenAiCompatibleModelClient(readModelConfig(d.rootConfig));
-        const access = new PermissionAccessControl(d.permissions);
-        const audit = new AuditorAuditLog(d.auditor);
 
-        // 第 2 圈
-        const advanceRun = new AdvanceRun({ items, model, tools, run: runs, clock, ids, extensions });
-        const supervisor = new RunSupervisor({ advanceRun, runs, clock });
-        const useCases = {
-          sendMessage: new SendMessage({ sessions, runs, items, access, supervisor, agents }),
-          decideApproval: new DecideApproval({ sessions, runs, items, supervisor, audit, tools }),
-          /* 其餘 use case */
-        };
+        d.lifecycle.addShutdownHook(() => host.supervisor.shutdown());
+        await d.scheduler.scheduleTask({
+          id: 'ai-chat-expire-stale-runs' /* 每 30 秒 */,
+          fn: () => host.useCases.expireStaleRuns.execute(),
+        });
 
-        // 第 3 圈：HTTP
-        d.httpRouter.use(createRouter({ useCases, principalFromRequest: /* … */ }));
-        d.lifecycle.addShutdownHook(() => supervisor.shutdown());
+        // 第 3 圈：HTTP（P1-09）
+        d.httpRouter.use(
+          createRouter({
+            useCases: host.useCases,
+            principalFromRequest: req => principalFromRequest(req, d),
+          }),
+        );
       },
     });
   },
 });
 ```
+
+P1-08 結束時，舊的 `ChatService` 還在服務路由；新的 `createHost()`、關機和排程已經在跑，還沒有路由用 `host.useCases`。
+
+**憑證和 Run 的時間上限（V-06）**：
+
+- 工具用「啟動或接續這個迴圈的那個請求」的憑證執行：`SendMessage` 的請求，或最後一個 `decision` 的請求。`principalFromRequest` 只收使用者（`allow: ['user']`），並用 `auth.getLimitedUserToken` 取得 token 的到期時間，放進 `Principal.credentialsExpireAt`。Actions Registry 每次 `invoke` 都用這份憑證發一個新的 plugin token，它的到期時間不會晚於使用者 token 的到期時間，所以 token 過期後工具呼叫會失敗。
+- 因此 Run 不在 token 過期之後繼續工作：`runLimits` 把工作時間限制在「設定的剩餘時間」和「距離 token 到期減 30 秒」之中較短的一個。到期時間不明（取不到）就只用設定值。
+- 設定的 `aiChat.runTimeoutSeconds` 預設 300，上限 600：Backstage 的 `auth.backstageTokenExpiration` 預設 1 小時，最短 10 分鐘，所以 600 秒內不會超過任何合法設定的 token 壽命。
+- 等核准時 token 可以過期：核准的請求帶著新的憑證，迴圈用它接續，用量（已用時間）只含工作的時間。
 
 ## 6. 擴充點
 
@@ -1024,7 +1072,9 @@ PR #1 的 `chatState.ts` 的 Item 轉換搬到 `domain/itemsToMessages.ts`，`us
    ]}],
    ```
 
-3. **`no-restricted-imports`** 在 `src/domain` 和 `src/application` 禁止 `@backstage/*`、`express`、`knex`。
+3. **`no-restricted-imports`** 在 `src/domain` 和 `src/application` 禁止 `@backstage/*`、`express`、`knex` 和所有 Node.js 內建模組（含 `node:*`），並禁止全域的 `fetch`。`src/domain` 另外禁止 `async`、`await` 和 `Promise`。
+
+實際的設定在 `plugins/ai-chat-backend/.eslintrc.js`，和核心一樣，`import/no-restricted-paths` 是白名單：`domain` 只能 import `domain`，`application` 只能 import `domain` 和 `application`（`src/index.ts`、`plugin.ts`、`config.ts` 都不行）。測試在 `src/lintRules.test.ts`。舊的 `chat/`、`routes/`、`database/`、`llm/` 不在規則內，P1-09 刪掉。`adapters/http` 和 `adapters/persistence` 互不 import 的那兩條，插件只對存在的資料夾生效，所以它們的測試跟 `adapters/http` 一起加。
 
 ## 12. 要改東西時動哪裡
 

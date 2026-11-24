@@ -14,14 +14,21 @@
  * limitations under the License.
  */
 
-import type { PolicySettings } from '@kwkevinchan/ai-chat-harness';
-import type { Toolset } from '../../domain/toolset';
+import type {
+  AgentDefinition,
+  PolicySettings,
+} from '@kwkevinchan/ai-chat-harness';
+import type { Toolset } from '../../domain';
 
 /**
- * Where the toolsets and the policy of the administrator come from. Agents
- * join this port when they are added.
+ * Where the agents, the toolsets and the policy of the administrator come
+ * from.
  */
 export interface AgentCatalog {
+  /** The agent with this id. Throws `AgentNotFound` when there is none. */
+  agent(agentId: string): Promise<AgentDefinition>;
+  /** The id of the agent a new session has. */
+  defaultAgentId(): string;
   /** The toolsets that exist (T-01). */
   toolsets(): Promise<readonly Toolset[]>;
   /** The policy of the administrator (T-03). */
