@@ -397,7 +397,7 @@ function executeTools(
 要注意的地方：
 
 - **核准之後的繼續，跟第一次執行是同一個函式。** 宿主寫入 `approval` 之後再呼叫一次 `execute()`，並帶入存下的 `usage`。迴圈讀紀錄，發現有核准過但沒結果的呼叫，就去執行。
-- **用量不從紀錄算。** 模型的回答是空的時候不寫任何 Item，步數算不出來。步數、工具呼叫數、已用時間由 request 帶入，迴圈每一輪之後呼叫 `recordUsage`。時間 = 帶入的 `elapsedSeconds` 加這次呼叫內經過的時間（用 `Clock`）。
+- **已用時間不從紀錄算。** 已用時間（扣掉等核准的時間）紀錄裡沒有，由 request 帶入，迴圈每一輪之後呼叫 `recordUsage`。步數取帶入值和紀錄裡這個 Run 最大 `step` 的較大者（模型的回答是空的時候不寫任何 Item，所以帶入值不能省）。時間 = 帶入的 `elapsedSeconds` 加這次呼叫內經過的時間（用 `Clock`）。
 - **步驟編號** = max(`usage.stepsUsed`，紀錄裡這個 Run 的 `tool_call` 最大的 `step`) + 1。這樣在 `recordUsage` 之前當掉，接手的 backend 也不會重複編號，或超過 `maxSteps`。
 - **`callModel`**：
   - 呼叫 `buildModelInput`，Context provider 的輸出 P3 才有。
@@ -849,7 +849,7 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 | `run.ended`（取消）                                             | `data-run`（`transient`），然後 `abort`                                                  |
 
 - 串流中，要核准的呼叫由 `run.ended`（等核准）的 `pending` 決定，每個各送一次 `tool-approval-request`。
-- 從紀錄還原畫面（重新整理、接回、GetSession）時，「要核准」是 `needsApproval(call)` 而且沒有 `tool_result`。不看 `policy` 欄位：立即被拒絕的呼叫存成 `ask`，但它有結果，所以不算要核准。
+- 從紀錄還原畫面（重新整理、接回、GetSession）時，「要核准」是 `needsApproval(call)`、沒有 `approval`、沒有 `tool_result`，而且 Run 是 `waiting_approval`、這個呼叫在它的最後一步。不看 `policy` 欄位：立即被拒絕的呼叫存成 `ask`，但它有結果，所以不算要核准。Run 已經結束時：有 `tool_started` 沒有結果的呼叫顯示成「結果不明」；被取消或超時時留下的、沒有 `tool_started` 也沒有結果的呼叫，顯示成沒有執行。已決定但還沒有結果的呼叫（P-04 部分決定）顯示成 `approval-responded`（見 5.5）。
 - `run.ended`（失敗）的 `error` 只顯示固定文字。`outcome.cause` 是供應商的原文，宿主記 log，不送給畫面。
 
 `data-*` 事件標 `transient: true` 時不進訊息，只送給用戶端的 `onData`。

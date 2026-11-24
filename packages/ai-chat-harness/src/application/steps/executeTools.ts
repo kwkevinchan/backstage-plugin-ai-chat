@@ -99,6 +99,7 @@ export async function* executeTools(
           // before each call that is not read-only, so no more of them start.
           const { cancelRequested } = await deps.run.heartbeat(req.fence);
           if (cancelRequested) return 'cancelled';
+          if (req.signal.aborted) return undefined;
           yield* write({ kind: 'tool_started', callId: call.callId });
           if (req.signal.aborted) return undefined;
         }
@@ -147,7 +148,13 @@ async function run(
     const output = await deps.tools.execute(call, req.ctx, {
       signal: req.signal,
     });
-    if (typeof output === 'object' && output !== null) return output;
+    if (
+      typeof output === 'object' &&
+      output !== null &&
+      !Array.isArray(output)
+    ) {
+      return output;
+    }
     return req.signal.aborted
       ? undefined
       : { status: 'error', message: 'The tool gave no result.' };
