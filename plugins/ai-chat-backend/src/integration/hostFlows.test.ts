@@ -20,6 +20,7 @@ import {
   waitForAbort,
 } from '@kwkevinchan/ai-chat-harness/testing';
 import type { Item, ItemLog } from '@kwkevinchan/ai-chat-harness';
+import { ShuttingDown } from '../domain';
 import { jane, mallory, createWorld, drain, until } from './__testUtils__';
 
 type World = Awaited<ReturnType<typeof createWorld>>;
@@ -763,6 +764,327 @@ describe('the host on a real database', () => {
           patch: { enabledToolsets: ['other'] },
         }),
       ).rejects.toMatchObject({ code: 'UNKNOWN_TOOLSET' });
+    });
+  });
+
+  describe('a stop request that comes while the loop ends in waiting_approval', () => {
+    /** Runs `during` once, when the loop is about to write waiting_approval or has just written it. */
+    function hook(
+      when: 'before' | 'after',
+      during: (runId: string) => Promise<unknown>,
+    ) {
+      let done = false;
+      return async (
+        info: { runId: string; to: string },
+        call: () => Promise<any>,
+      ) => {
+        if (info.to !== 'waiting_approval' || done) return call();
+        done = true;
+        if (when === 'before') await during(info.runId);
+        const result = await call();
+        if (when === 'after') await during(info.runId);
+        return result;
+      };
+    }
+
+    async function expectCancelledAndFree(
+      a: ReturnType<typeof backend>,
+      runId: string,
+      sessionId: string,
+    ) {
+      const row = await world.runRow(runId);
+      expect(row.status).toBe('cancelled');
+      expect(row.end_reason).toBe('user');
+      expect(row.active_session_id).toBeNull();
+      const next = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId,
+        text: 'again',
+      });
+      await drain(next);
+      expect(world.actions.count('demo:write')).toBe(0);
+    }
+
+    it('cancels the run when the request is stored before the status is written (same backend)', async () => {
+      const session = await world.newSession();
+      const holder: { a?: ReturnType<typeof backend> } = {};
+      const a = backend([[writeCall], [say('again')]], {
+        aroundTransition: hook('before', runId =>
+          holder.a!.useCases.cancelRun.execute({
+            principal: jane,
+            sessionId: session.id,
+            runId,
+          }),
+        ),
+      });
+      holder.a = a;
+      const handle = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'go',
+      });
+      await handle.done;
+      await expectCancelledAndFree(a, handle.runId, session.id);
+    });
+
+    it('cancels the run when another backend stored the request (the loop is not here)', async () => {
+      const session = await world.newSession();
+      const b = backend([]);
+      const a = backend([[writeCall], [say('again')]], {
+        aroundTransition: hook('before', runId =>
+          b.useCases.cancelRun.execute({
+            principal: jane,
+            sessionId: session.id,
+            runId,
+          }),
+        ),
+      });
+      const handle = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'go',
+      });
+      await handle.done;
+      await expectCancelledAndFree(a, handle.runId, session.id);
+    });
+
+    it('cancels the run when the request comes just after the status was written, while the loop is still in this process', async () => {
+      const session = await world.newSession();
+      const holder: { a?: ReturnType<typeof backend> } = {};
+      const a = backend([[writeCall], [say('again')]], {
+        aroundTransition: hook('after', runId =>
+          holder.a!.useCases.cancelRun.execute({
+            principal: jane,
+            sessionId: session.id,
+            runId,
+          }),
+        ),
+      });
+      holder.a = a;
+      const handle = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'go',
+      });
+      await handle.done;
+      await expectCancelledAndFree(a, handle.runId, session.id);
+    });
+  });
+
+  describe('an approval while this backend shuts down (H-11)', () => {
+    async function waiting(a: ReturnType<typeof backend>) {
+      const session = await world.newSession();
+      const handle = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'go',
+      });
+      const events = await drain(handle);
+      const ended = events[events.length - 1] as any;
+      return {
+        session,
+        handle,
+        callId: (ended.outcome.pending[0] as any).callId as string,
+      };
+    }
+
+    it('stores the decision and leaves the run waiting; another backend carries it on and the tool runs once', async () => {
+      const a = backend([[writeCall]]);
+      const b = backend([[say('done')]]);
+      const { session, handle, callId } = await waiting(a);
+      await a.supervisor.shutdown(0);
+
+      await expect(
+        a.useCases.decideApproval.execute({
+          principal: jane,
+          sessionId: session.id,
+          callId,
+          decision: 'allow',
+        }),
+      ).rejects.toMatchObject({ code: 'SHUTTING_DOWN' });
+      const row = await world.runRow(handle.runId);
+      expect(row.status).toBe('waiting_approval');
+      expect(kinds(await world.items.read(session.id))).toContain('approval');
+      expect(world.actions.count('demo:write')).toBe(0);
+
+      const resumed = await b.useCases.decideApproval.execute({
+        principal: jane,
+        sessionId: session.id,
+        callId,
+        decision: 'allow',
+      });
+      await drain(resumed.run!);
+      expect(world.actions.count('demo:write')).toBe(1);
+      expect((await world.runRow(handle.runId)).status).toBe('completed');
+    });
+
+    it('puts the run back, not to failed, when the loop cannot start because of the shutdown', async () => {
+      const a = backend([[writeCall], [say('done')]]);
+      const { session, handle, callId } = await waiting(a);
+      const launch = jest
+        .spyOn(a.supervisor, 'launch')
+        .mockImplementationOnce(() => {
+          throw new ShuttingDown();
+        });
+      await expect(
+        a.useCases.decideApproval.execute({
+          principal: jane,
+          sessionId: session.id,
+          callId,
+          decision: 'allow',
+        }),
+      ).rejects.toMatchObject({ code: 'SHUTTING_DOWN' });
+      launch.mockRestore();
+      expect((await world.runRow(handle.runId)).status).toBe(
+        'waiting_approval',
+      );
+
+      const again = await a.useCases.decideApproval.execute({
+        principal: jane,
+        sessionId: session.id,
+        callId,
+        decision: 'allow',
+      });
+      await drain(again.run!);
+      expect(world.actions.count('demo:write')).toBe(1);
+    });
+  });
+
+  describe('a run that waits although every call is decided', () => {
+    const twoCalls = [
+      callTool('m1', 'demo:write', { name: 'a' }),
+      callTool('m2', 'demo:write2', { name: 'b' }),
+    ];
+
+    async function setup(script: Parameters<typeof backend>[0]) {
+      const a = backend(script);
+      const session = await world.newSession();
+      const handle = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'go',
+      });
+      const events = await drain(handle);
+      const pending = (events[events.length - 1] as any).outcome
+        .pending as any[];
+      // The request that made the decision stored it and died.
+      const decide = (callId: string) =>
+        world.items.append(
+          session.id,
+          [
+            {
+              kind: 'approval',
+              callId,
+              decision: 'allow',
+              decidedBy: jane.userRef,
+            },
+          ],
+          { runId: handle.runId, leaseOwner: '' },
+        );
+      return { a, session, handle, pending, decide };
+    }
+
+    it('GetSession lists the calls that wait, whatever afterSeq says, and tells when nothing is left', async () => {
+      const { a, session, pending, decide } = await setup([twoCalls]);
+      let view = await a.useCases.getSession.execute({
+        principal: jane,
+        sessionId: session.id,
+      });
+      expect(view.awaitingDecision).toEqual(pending.map(c => c.callId));
+      expect(view.resumable).toBe(false);
+
+      await decide(pending[0].callId);
+      const last = (await world.items.read(session.id)).length;
+      view = await a.useCases.getSession.execute({
+        principal: jane,
+        sessionId: session.id,
+        afterSeq: last,
+      });
+      expect(view.items).toEqual([]);
+      expect(view.awaitingDecision).toEqual([pending[1].callId]);
+      expect(view.resumable).toBe(false);
+
+      await decide(pending[1].callId);
+      view = await a.useCases.getSession.execute({
+        principal: jane,
+        sessionId: session.id,
+        afterSeq: last + 5,
+      });
+      expect(view.awaitingDecision).toEqual([]);
+      expect(view.resumable).toBe(true);
+    });
+
+    it('is not resumable while the run goes on or after it ended', async () => {
+      const a = backend([[say('hi')]]);
+      const session = await world.newSession();
+      await drain(
+        await a.useCases.sendMessage.execute({
+          principal: jane,
+          sessionId: session.id,
+          text: 'go',
+        }),
+      );
+      const view = await a.useCases.getSession.execute({
+        principal: jane,
+        sessionId: session.id,
+      });
+      expect(view).toMatchObject({ awaitingDecision: [], resumable: false });
+    });
+
+    it('ResumeRun carries it on once, with the credentials of the caller', async () => {
+      const { a, session, handle, pending, decide } = await setup([
+        twoCalls,
+        [say('done')],
+      ]);
+      const b = backend([[say('never')]]);
+      await decide(pending[0].callId);
+      // One call still waits: nothing to carry on.
+      expect(
+        await a.useCases.resumeRun.execute({
+          principal: jane,
+          sessionId: session.id,
+        }),
+      ).toBeUndefined();
+      await decide(pending[1].callId);
+
+      await expect(
+        a.useCases.resumeRun.execute({
+          principal: mallory,
+          sessionId: session.id,
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_SESSION_OWNER' });
+      expect(world.actions.invocations).toHaveLength(0);
+
+      const resumed = await a.useCases.resumeRun.execute({
+        principal: jane,
+        sessionId: session.id,
+      });
+      await drain(resumed!);
+      expect(world.actions.count('demo:write')).toBe(1);
+      expect(world.actions.count('demo:write2')).toBe(1);
+      expect((await world.runRow(handle.runId)).status).toBe('completed');
+      // Nothing left: another request does nothing.
+      expect(
+        await b.useCases.resumeRun.execute({
+          principal: jane,
+          sessionId: session.id,
+        }),
+      ).toBeUndefined();
+    });
+
+    it('ResumeRun is refused on a backend that shuts down', async () => {
+      const { a, session, pending, decide } = await setup([
+        [callTool('m1', 'demo:write', { name: 'a' })],
+      ]);
+      await decide(pending[0].callId);
+      await a.supervisor.shutdown(0);
+      await expect(
+        a.useCases.resumeRun.execute({
+          principal: jane,
+          sessionId: session.id,
+        }),
+      ).rejects.toMatchObject({ code: 'SHUTTING_DOWN' });
+      expect(world.actions.invocations).toHaveLength(0);
     });
   });
 });

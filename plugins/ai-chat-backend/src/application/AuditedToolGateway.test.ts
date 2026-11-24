@@ -49,7 +49,7 @@ const ctx = {
   principal: { userRef: 'user:default/jane' },
 };
 
-function setup(tools: FakeTool[]) {
+function setup(tools: FakeTool[], broken = false) {
   const events: (AuditEvent & { outcome?: string })[] = [];
   const audit: AuditLog = {
     async begin(event) {
@@ -57,16 +57,24 @@ function setup(tools: FakeTool[]) {
       events.push(record);
       return {
         success: async () => {
+          if (broken) throw new Error('auditor down');
           record.outcome = 'success';
         },
         fail: async message => {
+          if (broken) throw new Error('auditor down');
           record.outcome = `fail: ${message}`;
         },
       };
     },
   };
   const inner = new FakeToolGateway(tools);
-  return { events, gateway: new AuditedToolGateway(inner, audit), inner };
+  const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
+  return {
+    events,
+    logger,
+    gateway: new AuditedToolGateway(inner, audit, logger),
+    inner,
+  };
 }
 
 const opts = { signal: new AbortController().signal };
@@ -115,5 +123,34 @@ describe('AuditedToolGateway (O-02)', () => {
       'fail: The tool ended with status error',
       'fail: boom',
     ]);
+  });
+
+  it('only logs when the audit record cannot be ended: the result of the tool stays', async () => {
+    const { gateway, logger } = setup(
+      [
+        tool('a:write', false),
+        tool('a:err', false, {
+          execute: () => ({ status: 'error', message: 'no' }),
+        }),
+        tool('a:throw', false, {
+          execute: () => {
+            throw new Error('boom');
+          },
+        }),
+      ],
+      true,
+    );
+    expect(await gateway.execute(call('a:write', false), ctx, opts)).toEqual({
+      status: 'ok',
+      output: {},
+    });
+    expect(
+      await gateway.execute(call('a:err', false), ctx, opts),
+    ).toMatchObject({ status: 'error' });
+    // The error of the tool itself still reaches the loop.
+    await expect(
+      gateway.execute(call('a:throw', false), ctx, opts),
+    ).rejects.toThrow('boom');
+    expect(logger.warn).toHaveBeenCalledTimes(3);
   });
 });

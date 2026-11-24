@@ -23,7 +23,7 @@ import type {
   ToolOutput,
   ValidationResult,
 } from '@kwkevinchan/ai-chat-harness';
-import type { AuditLog } from './ports';
+import type { AuditLog, AuditSpan, Logger } from './ports';
 
 /**
  * A `ToolGateway` that records every run of a tool that is not read-only with
@@ -39,6 +39,7 @@ export class AuditedToolGateway implements ToolGateway {
   constructor(
     private readonly inner: ToolGateway,
     private readonly audit: AuditLog,
+    private readonly logger: Logger,
   ) {}
 
   list(ctx: CallContext): Promise<ToolDescriptor[]> {
@@ -72,15 +73,42 @@ export class AuditedToolGateway implements ToolGateway {
     try {
       output = await this.inner.execute(call, ctx, opts);
     } catch (error) {
-      await span.fail(error instanceof Error ? error.message : String(error));
+      await this.close(
+        span,
+        'fail',
+        error instanceof Error ? error.message : String(error),
+      );
       throw error;
     }
     if (output.status === 'ok') {
-      await span.success();
+      await this.close(span, 'success');
     } else {
-      await span.fail(`The tool ended with status ${output.status}`);
+      await this.close(
+        span,
+        'fail',
+        `The tool ended with status ${output.status}`,
+      );
     }
     return output;
+  }
+
+  /**
+   * Ends the record. A failure of the audit log is logged and nothing more:
+   * the tool has run, and its result must reach the log of the session.
+   */
+  private async close(
+    span: AuditSpan,
+    how: 'success' | 'fail',
+    message = '',
+  ): Promise<void> {
+    try {
+      if (how === 'success') await span.success();
+      else await span.fail(message);
+    } catch (error) {
+      this.logger.warn('Could not end an audit record', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 }
 

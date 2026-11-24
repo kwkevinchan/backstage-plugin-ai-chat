@@ -17,6 +17,7 @@
 import type { Item, ItemLog } from '@kwkevinchan/ai-chat-harness';
 import {
   assertOwner,
+  callsAwaitingDecision,
   type Principal,
   type Run,
   type Session,
@@ -29,6 +30,16 @@ export type SessionView = {
   /** The run that has not ended, if there is one. */
   run?: Run;
   items: Item[];
+  /**
+   * The ids of the calls that wait for a decision of the user. Not limited to
+   * `afterSeq`. Empty unless the run waits for an approval.
+   */
+  awaitingDecision: string[];
+  /**
+   * The run waits for an approval and no call is left to decide: the loop did
+   * not start after the last decision. `ResumeRun` carries it on.
+   */
+  resumable: boolean;
 };
 
 /** The session with its items and its active run, for the owner (SE-01). */
@@ -50,10 +61,23 @@ export class GetSession {
     const { sessions, runs, items } = this.deps;
     const session = await sessions.get(input.sessionId);
     assertOwner(session, input.principal);
-    const [run, list] = await Promise.all([
-      runs.findActive(session.id),
-      items.read(session.id, { afterSeq: input.afterSeq }),
-    ]);
-    return { session, ...(run && { run }), items: list };
+    const run = await runs.findActive(session.id);
+    const list = await items.read(session.id, { afterSeq: input.afterSeq });
+    let awaitingDecision: string[] = [];
+    if (run?.status === 'waiting_approval') {
+      // Whole log, whatever `afterSeq` says: a decision may be before it.
+      const all = input.afterSeq ? await items.read(session.id) : list;
+      awaitingDecision = callsAwaitingDecision(all, run.id).map(
+        call => call.callId,
+      );
+    }
+    return {
+      session,
+      ...(run && { run }),
+      items: list,
+      awaitingDecision,
+      resumable:
+        run?.status === 'waiting_approval' && awaitingDecision.length === 0,
+    };
   }
 }

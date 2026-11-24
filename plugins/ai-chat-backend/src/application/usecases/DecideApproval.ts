@@ -23,17 +23,15 @@ import {
 } from '@kwkevinchan/ai-chat-harness';
 import {
   assertOwner,
-  callsAwaitingDecision,
   findToolCall,
   hasResult,
   RunNotWaiting,
   ToolCallNotFound,
   ToolCallNotWaiting,
-  type LeasedRun,
   type Principal,
-  type Session,
 } from '../../domain';
-import { buildRunRequest, type RunSettings } from '../buildRunRequest';
+import type { RunSettings } from '../buildRunRequest';
+import { resumeIfDecided } from '../resumeIfDecided';
 import type { RunHandle, RunSupervisor } from '../RunSupervisor';
 import type {
   AgentCatalog,
@@ -109,19 +107,16 @@ export class DecideApproval {
       decision = await this.store(input, call, run.id);
     }
 
-    // A decision that was stored but whose request died before the run went
-    // on is picked up here by the next request about the same call.
-    if (!run || run.status !== 'waiting_approval' || run.id !== call.runId) {
-      return { decision };
-    }
-    const after = await items.read(session.id);
-    if (callsAwaitingDecision(after, run.id).length > 0) {
-      return { decision };
-    }
-    // Of any number of requests that see "all decided", one gets the lease.
-    const leased = await runs.acquireLease(run.id);
-    if (!leased) return { decision };
-    return { decision, run: await this.carryOn(leased, input, session) };
+    // Also when the call was decided before: a request that died after it
+    // stored the decision, and before the run went on, is picked up here.
+    if (!run || run.id !== call.runId) return { decision };
+    const resumed = await resumeIfDecided(this.deps, {
+      session,
+      run,
+      principal: input.principal,
+      page: input.page,
+    });
+    return { decision, ...(resumed && { run: resumed }) };
   }
 
   /** Audits and writes the decision. Returns the decision that stands. */
@@ -176,38 +171,5 @@ export class DecideApproval {
     }
     await span.success();
     return input.decision;
-  }
-
-  private async carryOn(
-    leased: LeasedRun,
-    input: {
-      principal: Principal;
-      page?: { path: string; entityRef?: string };
-    },
-    session: Session,
-  ): Promise<RunHandle> {
-    const { agents, clock, settings, supervisor, runs } = this.deps;
-    try {
-      const request = await buildRunRequest(
-        { agents, clock, settings },
-        {
-          session,
-          run: leased,
-          principal: input.principal,
-          page: input.page,
-        },
-      );
-      return supervisor.launch(leased, request);
-    } catch (error) {
-      try {
-        await runs.transition(leased.id, 'failed', {
-          leaseOwner: leased.fence.leaseOwner,
-          endReason: 'not_started',
-        });
-      } catch {
-        // The lease expiry (ExpireStaleRuns) ends it.
-      }
-      throw error;
-    }
   }
 }

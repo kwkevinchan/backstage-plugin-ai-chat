@@ -32,5 +32,6 @@ export { ExpireStaleRuns } from './usecases/ExpireStaleRuns';
 export { GetSession } from './usecases/GetSession';
 export type { SessionView } from './usecases/GetSession';
 export { ListSessions } from './usecases/ListSessions';
+export { ResumeRun } from './usecases/ResumeRun';
 export { SendMessage } from './usecases/SendMessage';
 export { UpdateSession } from './usecases/UpdateSession';

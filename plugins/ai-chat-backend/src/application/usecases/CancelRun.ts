@@ -35,7 +35,9 @@ export class CancelRun {
    *
    * The request is stored, so the backend that runs the loop sees it at its
    * next heartbeat. A loop in this process stops now. A run that waits for an
-   * approval has no loop: it is cancelled here.
+   * approval has no loop: it is cancelled here. A loop that finds the request
+   * only after it wrote `waiting_approval` cancels the run itself
+   * (`RunSupervisor`).
    */
   async execute(input: {
     principal: Principal;
@@ -49,7 +51,9 @@ export class CancelRun {
     if (run.sessionId !== session.id) throw new RunNotFound(input.runId);
 
     if (!(await runs.requestCancel(run.id))) return false;
-    if (supervisor.cancel(run.id)) return true;
+    supervisor.cancel(run.id);
+    // A loop that stopped now may still be writing `waiting_approval`: look at
+    // the status after the request, whoever runs the loop.
     if ((await runs.get(run.id)).status === 'waiting_approval') {
       try {
         await runs.transition(run.id, 'cancelled', { endReason: 'user' });

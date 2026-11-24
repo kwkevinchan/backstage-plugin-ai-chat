@@ -23,7 +23,7 @@ import {
   type RunFence,
   type RunOutcome,
 } from '@kwkevinchan/ai-chat-harness';
-import { ShuttingDown, type LeasedRun } from '../domain';
+import { ShuttingDown, type LeasedRun, type Run } from '../domain';
 import { EventChannel } from './EventChannel';
 import type { Logger, RunRepository, RunTransitionTarget } from './ports';
 
@@ -231,7 +231,7 @@ export class RunSupervisor {
             cause: describe(next.value.cause),
           });
         }
-        this.publish(loop, next.value);
+        this.publish(loop, forSubscribers(next.value));
       }
     } catch (error) {
       if (!ended) await this.settleError(loop, error);
@@ -253,13 +253,16 @@ export class RunSupervisor {
       );
       if (cancelRequested) loop.controller.abort();
     } catch (error) {
-      loop.controller.abort();
-      if (!(error instanceof LeaseLost)) {
-        this.deps.logger.warn('Could not renew the lease of a run', {
-          runId: loop.run.id,
-          error: describe(error),
-        });
+      if (error instanceof LeaseLost) {
+        loop.controller.abort();
+        return;
       }
+      // A failed attempt (the database is slow, say) is not a lost lease: the
+      // lease lasts longer than one interval, and the loop renews it too.
+      this.deps.logger.warn('Could not renew the lease of a run', {
+        runId: loop.run.id,
+        error: describe(error),
+      });
     }
   }
 
@@ -273,7 +276,13 @@ export class RunSupervisor {
       });
     }
     const [to, endReason] = statusOf(outcome);
-    await this.end(loop, to, endReason);
+    const run = await this.end(loop, to, endReason);
+    // A stop request that was stored after the last heartbeat of the loop:
+    // the loop did not see it, and the run must not wait for an approval that
+    // the user no longer wants.
+    if (to === 'waiting_approval' && run?.cancelRequested) {
+      await this.end(loop, 'cancelled', 'user', false);
+    }
   }
 
   /** The loop ended with an error of a port, so there is no `run.ended` yet. */
@@ -297,18 +306,24 @@ export class RunSupervisor {
     }
     this.publish(loop, {
       type: 'run.ended',
-      outcome: { status: 'failed', message: 'The run stopped.', cause: error },
+      outcome: { status: 'failed', message: 'The run stopped.' },
     });
   }
 
+  /**
+   * Changes the status of the run. `withLease` is false once the loop gave up
+   * the lease (a run that waits for an approval has none). Returns the run, or
+   * `undefined` when it is not ours any more.
+   */
   private async end(
     loop: Loop,
     to: RunTransitionTarget,
     endReason?: string,
-  ): Promise<void> {
+    withLease = true,
+  ): Promise<Run | undefined> {
     try {
-      await this.deps.runs.transition(loop.run.id, to, {
-        leaseOwner: loop.run.fence.leaseOwner,
+      return await this.deps.runs.transition(loop.run.id, to, {
+        ...(withLease && { leaseOwner: loop.run.fence.leaseOwner }),
         ...(endReason !== undefined && { endReason }),
       });
     } catch (error) {
@@ -316,8 +331,24 @@ export class RunSupervisor {
       if (!(error instanceof LeaseLost || isInvalidTransition(error))) {
         throw error;
       }
+      return undefined;
     }
   }
+}
+
+/**
+ * What the subscribers get: the original error of a failure or of a failed
+ * summary stays out (it can hold text of the provider); the log has it.
+ */
+function forSubscribers(event: HarnessEvent): HarnessEvent {
+  if (event.type === 'summary.failed') return { type: 'summary.failed' };
+  if (event.type === 'run.ended' && event.outcome.status === 'failed') {
+    return {
+      type: 'run.ended',
+      outcome: { status: 'failed', message: event.outcome.message },
+    };
+  }
+  return event;
 }
 
 function statusOf(outcome: RunOutcome): [RunTransitionTarget, string?] {
@@ -327,7 +358,7 @@ function statusOf(outcome: RunOutcome): [RunTransitionTarget, string?] {
     case 'waiting_approval':
       return ['waiting_approval'];
     case 'cancelled':
-      return ['cancelled'];
+      return ['cancelled', 'user'];
     case 'failed':
       return ['failed', 'error'];
     default:

@@ -38,7 +38,7 @@ import { KnexRunRepository } from '../../adapters/persistence/KnexRunRepository'
 import { KnexSessionRepository } from '../../adapters/persistence/KnexSessionRepository';
 import { CreateSession, type RunHandle } from '../../application';
 import type { AuditEvent, AuditLog } from '../../application/ports';
-import type { Principal } from '../../domain';
+import type { Principal, Run } from '../../domain';
 import { createHost } from '../../host';
 import { createMigratedDb } from '../../__testUtils__';
 
@@ -170,17 +170,42 @@ export async function createWorld(
   /** Another backend process on the same database. */
   function backend(
     script: ScriptedStep[],
-    extra: { items?: (inner: ItemLog) => ItemLog; heartbeatMs?: number } = {},
+    extra: {
+      items?: (inner: ItemLog) => ItemLog;
+      heartbeatMs?: number;
+      /**
+       * Runs around every `transition` of this backend: `call()` makes the
+       * change. For tests that need something to happen just before or after.
+       */
+      aroundTransition?: (
+        info: { runId: string; to: string },
+        call: () => Promise<Run>,
+      ) => Promise<Run>;
+    } = {},
   ) {
     const model = new ScriptedModel(script);
     const runs = new KnexRunRepository(knex, clock, ids, {
       leaseSeconds: options.leaseSeconds,
     });
     const logger = mockServices.logger.mock();
+    const hooked = extra.aroundTransition
+      ? (new Proxy(runs, {
+          get(target, prop) {
+            const value = Reflect.get(target, prop);
+            if (prop === 'transition') {
+              return (runId: string, to: string, opts: unknown) =>
+                extra.aroundTransition!({ runId, to }, () =>
+                  (target.transition as any)(runId, to, opts),
+                );
+            }
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        }) as KnexRunRepository)
+      : runs;
     const host = createHost({
       items: extra.items ? extra.items(items) : items,
       sessions,
-      runs,
+      runs: hooked,
       agents: catalog,
       tools: new ActionsToolGateway({
         actions,

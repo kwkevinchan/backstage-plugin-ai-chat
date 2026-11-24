@@ -133,7 +133,7 @@ describe('RunSupervisor', () => {
     },
   );
 
-  it('logs the cause of a failure and of a failed summary, and does not publish the cause as text', async () => {
+  it('logs the cause of a failure and of a failed summary, and keeps it from the subscribers', async () => {
     const { supervisor, logger } = setup(async function* () {
       yield { type: 'summary.failed', cause: new Error('provider said x') };
       const outcome: RunOutcome = {
@@ -144,7 +144,9 @@ describe('RunSupervisor', () => {
       yield { type: 'run.ended', outcome };
       return outcome;
     });
-    await supervisor.launch(leased('r1', 'lease-1'), request).done;
+    const handle = supervisor.launch(leased('r1', 'lease-1'), request);
+    const seen: HarnessEvent[] = [];
+    for await (const event of handle.events) seen.push(event);
     expect(logger.warn).toHaveBeenCalledWith(
       'A summary could not be made',
       expect.objectContaining({ cause: 'provider said x' }),
@@ -153,6 +155,87 @@ describe('RunSupervisor', () => {
       'A run failed',
       expect.objectContaining({ cause: 'provider said y' }),
     );
+    expect(seen).toEqual([
+      { type: 'summary.failed' },
+      {
+        type: 'run.ended',
+        outcome: { status: 'failed', message: 'The model call failed.' },
+      },
+    ]);
+    expect(JSON.stringify(seen)).not.toContain('provider said');
+  });
+
+  it('keeps the cause of a port error from the subscribers too', async () => {
+    const { supervisor } = setup(async function* () {
+      yield { type: 'run.started', runId: 'r1' };
+      throw new Error('secret text of the database');
+    });
+    const handle = supervisor.launch(leased('r1', 'lease-1'), request);
+    const seen: HarnessEvent[] = [];
+    for await (const event of handle.events) seen.push(event);
+    expect(JSON.stringify(seen)).not.toContain('secret');
+    expect(seen[seen.length - 1]).toEqual({
+      type: 'run.ended',
+      outcome: { status: 'failed', message: 'The run stopped.' },
+    });
+  });
+
+  it('does not stop the loop when a renewal fails for another reason than a lost lease', async () => {
+    let beats = 0;
+    let aborted = false;
+    const { supervisor, runs, logger } = setup(
+      async function* (_fence, signal) {
+        yield { type: 'run.started', runId: 'r1' };
+        const until = Date.now() + 2000;
+        while (beats < 4 && Date.now() < until) {
+          await new Promise(resolve => setTimeout(resolve, 5));
+        }
+        aborted = signal.aborted;
+        const outcome: RunOutcome = { status: 'completed' };
+        yield { type: 'run.ended', outcome };
+        return outcome;
+      },
+      {
+        heartbeat: jest.fn(async () => {
+          beats += 1;
+          if (beats === 2) throw new Error('connection timeout');
+          return { cancelRequested: false };
+        }),
+      },
+    );
+    await supervisor.launch(leased('r1', 'lease-1'), request).done;
+    expect(beats).toBeGreaterThanOrEqual(4);
+    expect(aborted).toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Could not renew the lease of a run',
+      expect.objectContaining({ error: 'connection timeout' }),
+    );
+    expect(runs.transition).toHaveBeenCalledWith(
+      'r1',
+      'completed',
+      expect.anything(),
+    );
+  });
+
+  it('cancels a run whose stop request came after the last heartbeat of the loop, when it waits for an approval', async () => {
+    const { supervisor, runs } = setup(
+      () => ending({ status: 'waiting_approval', pending: [] }),
+      {
+        transition: jest.fn(async (id: string, to: string) => {
+          return { id, status: to, cancelRequested: to === 'waiting_approval' };
+        }),
+      },
+    );
+    await supervisor.launch(leased('r1', 'lease-1'), request).done;
+    expect(runs.transition).toHaveBeenNthCalledWith(
+      1,
+      'r1',
+      'waiting_approval',
+      { leaseOwner: 'lease-1' },
+    );
+    expect(runs.transition).toHaveBeenNthCalledWith(2, 'r1', 'cancelled', {
+      endReason: 'user',
+    });
   });
 
   it('keeps the fence of a run until its loop ends, and drops it when the loop throws', async () => {
