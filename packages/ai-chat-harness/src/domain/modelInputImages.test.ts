@@ -264,6 +264,89 @@ describe('buildModelInput: images (IN-05, IN-06, IN-07)', () => {
       expect(users[2].images).toHaveLength(1);
     });
 
+    describe('with the default of six recent steps', () => {
+      const MB = 1024 * 1024;
+      const budget6 = { keepRecentSteps: 6, maxImageBytesPerInput: 20 * MB };
+      const four = (prefix: string) =>
+        [1, 2, 3, 4].map(n => ref(`${prefix}${n}`, 5 * MB));
+      const totalBytes = (messages: ModelMessage[], all: AttachmentRef[]) =>
+        messages
+          .flatMap(m => (m.role === 'user' ? m.images ?? [] : []))
+          .reduce(
+            (sum, image) =>
+              sum + all.find(r => r.id === image.attachmentId)!.size,
+            0,
+          );
+
+      it('leaves out the images of the message before the only earlier answer: 4 images of 5 MB, an answer, 4 images of 5 MB', () => {
+        const older = four('o');
+        const current = four('c');
+        const { messages } = build(
+          [
+            withImages('earlier', ...older),
+            agentSays('answer'),
+            withImages('now', ...current),
+          ],
+          { budget: budget6 },
+        );
+
+        const users = userMessages(messages);
+        expect(users[0].images).toBeUndefined();
+        expect(users[0].content).toContain('[image: o1.png, left out]');
+        expect(users[1].images).toHaveLength(4);
+        expect(
+          totalBytes(messages, [...older, ...current]),
+        ).toBeLessThanOrEqual(20 * MB);
+      });
+
+      it('does it when every message is among the recent steps, and leaves out only as many as it must', () => {
+        const a = four('a');
+        const b = [ref('b1', 5 * MB), ref('b2', 5 * MB)];
+        const current = four('c');
+        const { messages } = build(
+          [
+            withImages('one', ...a),
+            agentSays('r1'),
+            withImages('two', ...b),
+            agentSays('r2'),
+            withImages('now', ...current),
+          ],
+          { budget: budget6 },
+        );
+
+        const users = userMessages(messages);
+        // 4 + 2 + 4 images of 5 MB are 50 MB: the oldest message goes first,
+        // then the next one is within the limit with the run's 20 MB.
+        expect(users[0].images).toBeUndefined();
+        expect(users[1].images).toBeUndefined();
+        expect(users[2].images).toHaveLength(4);
+        expect(
+          totalBytes(messages, [...a, ...b, ...current]),
+        ).toBeLessThanOrEqual(20 * MB);
+      });
+
+      it('stops when the limit is met: a younger message keeps its images', () => {
+        const a = four('a');
+        const b = [ref('b1', 5 * MB)];
+        const c = [ref('c1', 5 * MB), ref('c2', 5 * MB)];
+        const { messages } = build(
+          [
+            withImages('one', ...a),
+            agentSays('r1'),
+            withImages('two', ...b),
+            agentSays('r2'),
+            withImages('now', ...c),
+          ],
+          { budget: budget6 },
+        );
+        const users = userMessages(messages);
+        // 20 + 5 + 10 MB: leaving out the first message is enough.
+        expect(users[0].images).toBeUndefined();
+        expect(users[1].images).toHaveLength(1);
+        expect(users[2].images).toHaveLength(2);
+      });
+    });
+
     it('does not touch the images of the run, even when they alone are over the limit', () => {
       const { messages } = build(
         [

@@ -1561,7 +1561,7 @@ controller 依序做（`controllers/attachments.ts`；`route()` 先取出身分�
 
 - 每張圖片算 `input.images.tokensPerImage`（預設 1600，是設定值，不是量出來的）。`tokensOfMessage` 把 `images.length` 乘上它加進去。
 - 超過 token 預算時的順序：舊工具輸出換成一行（現有）；舊訊息的圖片換成一行 `[image: <name>, left out]`，從最舊的開始；省略舊的 Step（現有）。「舊」指不在這個 Run 的使用者訊息、也不在最近的 Step 裡。
-- **位元組上限**：`ContextBudget.maxImageBytesPerInput`（設定 `input.images.maxBytesPerInput`，預設 20 MB）。`buildModelInput` 加總輸入裡所有圖片的 `size`（`AttachmentRef` 帶 `size`，核心不用讀位元組）。超過時，從最舊的訊息起把圖片換成 `[image: <name>, left out]`，直到不超過；token 預算夠不夠都一樣。這個 Run 的使用者訊息的圖片不換，所以用寫入時的檢查擋住：`InsertMessage` 加總這個 Run 所有使用者訊息的附件 `size`，再加這則的，超過 `maxBytesPerInput` 就丟 `TooManyImageBytes`（400）。單則訊息最多 `maxPerMessage` 乘 `maxBytes`；設定載入時要求 `maxBytesPerInput` 不小於這個乘積，否則 backend 啟動失敗（`InputError`），所以第一則訊息一定不超過。
+- **位元組上限**：`ContextBudget.maxImageBytesPerInput`（設定 `input.images.maxBytesPerInput`，預設 20 MB）。`buildModelInput` 加總輸入裡所有圖片的 `size`（`AttachmentRef` 帶 `size`，核心不用讀位元組）。超過時，從最舊的訊息起（範圍是這個 Run 第一則使用者訊息之前的所有使用者訊息，含舊 Run 的插入訊息）把圖片換成 `[image: <name>, left out]`，直到不超過；token 預算夠不夠都一樣。這個 Run 的使用者訊息的圖片不換，所以用寫入時的檢查擋住：`InsertMessage` 加總這個 Run 所有使用者訊息的附件 `size`，再加這則的，超過 `maxBytesPerInput` 就丟 `TooManyImageBytes`（400）。單則訊息最多 `maxPerMessage` 乘 `maxBytes`；設定載入時要求 `maxBytesPerInput` 不小於這個乘積，否則 backend 啟動失敗（`InputError`），所以第一則訊息一定不超過。位元組上限不受「最近的 Step 不動」的例外：舊訊息即使落在最近的 Step 裡，圖片也會被換掉；token 預算那條路維持原來的定義。
 - 摘要：`buildSummaryInput` 把附件寫成 `[image: <name>]` 一行，摘要的模型呼叫不帶圖片。
 
 **分享和複製（P2）**
@@ -1664,20 +1664,21 @@ controller 依序做（`controllers/attachments.ts`；`route()` 先取出身分�
 - `queued_messages` 的索引：`(session_id, position)`，外鍵 `session_id` 連帶刪除。
 - **取鎖順序。** 每個 transaction 照下表的順序碰資料表：要碰 `runs` 的先碰它，再取 `sessions` 的列鎖；`sessions` 之後的表（`items`、`queued_messages`、`attachments`）由 `sessions` 的列鎖排成一個接一個，同一段 Session 的 transaction 不會互等。不碰 `runs` 的（排隊的 `update`、`remove`、`reorder`、上傳）從 `sessions` 開始；`startNext` 用 INSERT 建立自己的 `runs` 列（新列沒有別人在等），再取 `sessions`。碰 `runs` 時一開始就取需要的最強的鎖，不先取 `FOR SHARE` 再升級：兩個都持有共享鎖的 transaction 同時要升級，會互等。
 
-| 寫入                                                   | 順序                                                                                           |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| 模型輸出的 `append`（有 `agent_message`、`tool_call`） | `runs`（`FOR NO KEY UPDATE`）、更新 `runs.read_up_to_seq`、`sessions`、`items`                 |
-| 其他核心的寫入（`tool_started`、`tool_result`）        | `runs`（`FOR SHARE`）、`sessions`、`items`                                                     |
-| 直接送出的 `user_message`、`approval`                  | `runs`（`FOR SHARE`）、`sessions`、`items`、`attachments`（`FOR UPDATE`）                      |
-| 插入                                                   | `runs`（`FOR SHARE`）、`sessions`、`items`、`attachments`（`FOR UPDATE`）                      |
-| Run 正常結束的 `transition`                            | `runs`（`FOR UPDATE`），之後只讀 `items`                                                       |
-| 排隊的 `add`                                           | `runs`（`FOR SHARE`）、`sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`attachments`     |
-| `startNext`                                            | `runs`（INSERT）、`sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`items`、`attachments` |
-| 排隊的 `update`、`remove`、`reorder`                   | `sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`attachments`                            |
-| 上傳（`put`）                                          | `sessions`（`FOR NO KEY UPDATE`）、`attachments`                                               |
-| `PurgeUnusedAttachments`                               | 只有 `attachments`（`FOR UPDATE SKIP LOCKED` 選出，再刪除）                                    |
+| 寫入                                                   | 順序                                                                                                                                                                                     |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 模型輸出的 `append`（有 `agent_message`、`tool_call`） | `runs`（`FOR NO KEY UPDATE`）、更新 `runs.read_up_to_seq`、`sessions`、`items`                                                                                                           |
+| 其他核心的寫入（`tool_started`、`tool_result`）        | `runs`（`FOR SHARE`）、`sessions`、`items`                                                                                                                                               |
+| 直接送出的 `user_message`、`approval`                  | `runs`（`FOR SHARE`）、`sessions`、`items`、`attachments`（`FOR UPDATE`）                                                                                                                |
+| 插入                                                   | `runs`（`FOR SHARE`）、`sessions`、`items`、`attachments`（`FOR UPDATE`）                                                                                                                |
+| Run 正常結束的 `transition`                            | `runs`（`FOR UPDATE`），之後只讀 `items`                                                                                                                                                 |
+| 排隊的 `add`                                           | `runs`（`FOR SHARE`）、`sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`attachments`                                                                                               |
+| `startNext`                                            | `runs`（INSERT）、`sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`attachments`（`FOR UPDATE`，讀出附件的中繼資料）、`items`、`attachments`（標記 `used_seq`、重算 `reserved_by`） |
+| 排隊的 `update`、`remove`、`reorder`                   | `sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`attachments`                                                                                                                      |
+| 上傳（`put`）                                          | `sessions`（`FOR NO KEY UPDATE`）、`attachments`                                                                                                                                         |
+| `PurgeUnusedAttachments`                               | 只有 `attachments`（`FOR UPDATE SKIP LOCKED` 選出，再刪除）                                                                                                                              |
 
 - 一個 transaction 要鎖多列 `attachments` 時，依 `id` 排序上鎖。
+- `startNext` 的實際順序：先鎖附件（為了把中繼資料寫進 `user_message`），再取序號、寫 `items`，最後標記附件。不會死結：同一段 Session 的寫入都先排在 `sessions` 的列鎖後面，所以不會有兩個 transaction 同時持有同一段 Session 的 `attachments` 鎖；`PurgeUnusedAttachments` 不碰 `sessions`，只持有 `attachments` 的鎖，而且用 `SKIP LOCKED` 不等任何鎖。
 - 沒有新的唯一索引：同一則排隊訊息只送一次靠 transaction 內「刪除影響 1 列」和 `runs.active_session_id` 的唯一索引。
 
 ### 13.9 前端

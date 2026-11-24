@@ -221,7 +221,6 @@ function assemble(
     segments.map(segment => ({ ...segment, messages: [...segment.messages] }));
   const old = copy(layout.old);
   const mid = copy(layout.mid);
-  limitImageBytes(old, mid, [...layout.pinned, ...layout.recent], budget);
   let total =
     layout.fixedTokens +
     sumTokens(old, perImage) +
@@ -326,7 +325,6 @@ export function planSummary(
     segments.map(segment => ({ ...segment, messages: [...segment.messages] }));
   const old = copy(layout.old);
   const mid = copy(layout.mid);
-  limitImageBytes(old, mid, [...layout.pinned, ...layout.recent], budget);
   let total =
     layout.fixedTokens +
     sumTokens(old, perImage) +
@@ -701,6 +699,8 @@ function layoutOf(
     estimateTokens(JSON.stringify(extra.tools)) +
     summaryMessages.reduce((sum, m) => sum + tokensOfMessage(m, 0), 0);
 
+  limitImageBytes(segments, budget);
+
   // The newest steps stay whole, and so do the user messages right before
   // them: the question the first of them answers.
   const keep = Math.max(1, Math.floor(budget.keepRecentSteps));
@@ -828,25 +828,27 @@ function bytesOf(segment: Segment): number {
 }
 
 /**
- * Leaves out the images of the older messages, oldest first, while the image
- * bytes of the whole input are over `maxImageBytesPerInput` (IN-06). The
- * images of the run's own messages count but are not left out. Changes the
- * segments.
+ * Leaves out the images of the user messages before the first message of the
+ * run (older runs, with the messages inserted into them), oldest first, while
+ * the image bytes of the whole input are over `maxImageBytesPerInput`
+ * (IN-06). It does not depend on which messages are among the newest steps:
+ * the limit is on bytes, whatever the budget of tokens says. The images of the
+ * messages of the run count but are not left out. Changes the segments.
  */
-function limitImageBytes(
-  old: Segment[],
-  mid: Segment[],
-  rest: Segment[],
-  budget: ContextBudget,
-): void {
+function limitImageBytes(segments: Segment[], budget: ContextBudget): void {
   const limit = budget.maxImageBytesPerInput;
   if (limit === undefined) return;
-  let bytes = [...old, ...mid, ...rest].reduce(
-    (sum, segment) => sum + bytesOf(segment),
-    0,
-  );
-  for (const segment of leavable(old, mid)) {
+  let runStart = -1;
+  for (let i = segments.length - 1; i >= 0; i--) {
+    if (segments[i].role === 'user' && !segments[i].inserted) {
+      runStart = i;
+      break;
+    }
+  }
+  let bytes = segments.reduce((sum, segment) => sum + bytesOf(segment), 0);
+  for (const segment of segments.slice(0, Math.max(runStart, 0))) {
     if (bytes <= limit) return;
+    if (segment.role !== 'user' || !segment.attachments) continue;
     bytes -= bytesOf(segment);
     replaceImages(segment, 'left out');
   }
