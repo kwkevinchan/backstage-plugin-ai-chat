@@ -28,11 +28,13 @@ import { defineConfig } from '@playwright/test';
  * e2e-test-results/<app>); SMOKE_SHOT_SUFFIX is added to their names.
  * SMOKE_APP_URL and SMOKE_BACKEND_URL point at
  * servers on other ports (start them yourself, with the same ports in the
- * app config).
+ * app config); FAKE_LLM_PORT moves the scripted model server (and the
+ * backend reaches it with AI_CHAT_BASE_URL).
  */
 const app = process.env.SMOKE_APP ?? 'app';
 const appUrl = process.env.SMOKE_APP_URL ?? 'http://localhost:3000';
 const backendUrl = process.env.SMOKE_BACKEND_URL ?? 'http://localhost:7007';
+const llmPort = process.env.FAKE_LLM_PORT ?? '4010';
 const ci = Boolean(process.env.CI);
 
 export default defineConfig({
@@ -49,7 +51,7 @@ export default defineConfig({
   webServer: [
     {
       command: 'node scripts/fake-llm.mjs',
-      url: 'http://127.0.0.1:4010/health',
+      url: `http://127.0.0.1:${llmPort}/health`,
       reuseExistingServer: !ci,
       timeout: 60_000,
     },

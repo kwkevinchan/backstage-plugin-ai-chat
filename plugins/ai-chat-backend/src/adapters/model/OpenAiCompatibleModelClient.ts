@@ -23,11 +23,7 @@ import type {
   ToolDescriptor,
 } from '@kwkevinchan/ai-chat-harness';
 import type { JSONSchema7 } from 'json-schema';
-import type {
-  LlmClient,
-  LlmMessage,
-  LlmTool,
-} from '../../llm/OpenAiCompatibleClient';
+import type { LlmClient, LlmMessage, LlmTool } from './OpenAiCompatibleClient';
 
 /** The longest function name that OpenAI-compatible servers accept. */
 const MAX_TOOL_NAME_LENGTH = 64;

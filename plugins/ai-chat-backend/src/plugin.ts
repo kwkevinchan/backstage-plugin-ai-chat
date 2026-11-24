@@ -23,6 +23,9 @@ import { actionsServiceRef } from '@backstage/backend-plugin-api/alpha';
 import { ActionsToolGateway } from './adapters/backstage/ActionsToolGateway';
 import { AuditorAuditLog } from './adapters/backstage/AuditorAuditLog';
 import { ConfigAgentCatalog } from './adapters/backstage/ConfigAgentCatalog';
+import { principalFromRequest } from './adapters/backstage/principalFromRequest';
+import { createRouter } from './adapters/http';
+import { OpenAiCompatibleClient } from './adapters/model/OpenAiCompatibleClient';
 import { OpenAiCompatibleModelClient } from './adapters/model/OpenAiCompatibleModelClient';
 import {
   KnexItemLog,
@@ -30,12 +33,8 @@ import {
   KnexSessionRepository,
 } from './adapters/persistence';
 import { SystemClock, UuidGenerator } from './adapters/system';
-import { ChatService } from './chat/ChatService';
 import { readAiChatConfig } from './config';
-import { ChatStore } from './database/ChatStore';
 import { createHost } from './host';
-import { OpenAiCompatibleClient } from './llm/OpenAiCompatibleClient';
-import { createRouter } from './routes/router';
 
 /** How often the runs whose lease expired are marked `expired`. */
 const EXPIRE_STALE_RUNS_EVERY = { seconds: 30 };
@@ -59,6 +58,8 @@ export const aiChatPlugin = createBackendPlugin({
         config: coreServices.rootConfig,
         auditor: coreServices.auditor,
         httpAuth: coreServices.httpAuth,
+        userInfo: coreServices.userInfo,
+        auth: coreServices.auth,
         httpRouter: coreServices.httpRouter,
         database: coreServices.database,
         lifecycle: coreServices.lifecycle,
@@ -70,6 +71,8 @@ export const aiChatPlugin = createBackendPlugin({
         config,
         auditor,
         httpAuth,
+        userInfo,
+        auth,
         httpRouter,
         database,
         lifecycle,
@@ -94,9 +97,6 @@ export const aiChatPlugin = createBackendPlugin({
           });
         }
 
-        // The runs of the new agent loop. No route uses them yet; the routes
-        // still go to ChatService. The shutdown and the sweep of expired
-        // leases already run.
         const clock = new SystemClock();
         const ids = new UuidGenerator();
         const items = new KnexItemLog(db, clock);
@@ -141,15 +141,14 @@ export const aiChatPlugin = createBackendPlugin({
           },
         });
 
-        const chat = new ChatService({
-          store: new ChatStore(db),
-          actions,
-          llm: new OpenAiCompatibleClient(aiChat.llm),
-          auditor,
-          logger,
-          config: aiChat,
-        });
-        httpRouter.use(createRouter({ httpAuth, chat, logger }));
+        httpRouter.use(
+          createRouter({
+            principal: req =>
+              principalFromRequest(req, { httpAuth, userInfo, auth }),
+            useCases: host.useCases,
+            logger,
+          }),
+        );
         logger.info(
           `AI chat uses the model ${aiChat.llm.model} at ${aiChat.llm.baseUrl}`,
         );

@@ -238,6 +238,43 @@ describe('RunSupervisor', () => {
     });
   });
 
+  it('tells the subscribers the run is cancelled, not waiting, when a stop request turns the wait into a cancellation', async () => {
+    const pending = [{ kind: 'tool_call', callId: 'c1' }] as any;
+    const { supervisor } = setup(
+      () => ending({ status: 'waiting_approval', pending }),
+      {
+        transition: jest.fn(async (id: string, to: string) => ({
+          id,
+          status: to,
+          cancelRequested: to === 'waiting_approval',
+        })),
+      },
+    );
+    const handle = supervisor.launch(leased('r1', 'lease-1'), request);
+    const ended: HarnessEvent[] = [];
+    for await (const event of handle.events) {
+      if (event.type === 'run.ended') ended.push(event);
+    }
+    expect(ended).toEqual([
+      { type: 'run.ended', outcome: { status: 'cancelled' } },
+    ]);
+  });
+
+  it('tells the subscribers the run waits for an approval when no stop request came', async () => {
+    const pending = [{ kind: 'tool_call', callId: 'c1' }] as any;
+    const { supervisor } = setup(() =>
+      ending({ status: 'waiting_approval', pending }),
+    );
+    const handle = supervisor.launch(leased('r1', 'lease-1'), request);
+    const ended: HarnessEvent[] = [];
+    for await (const event of handle.events) {
+      if (event.type === 'run.ended') ended.push(event);
+    }
+    expect(ended).toEqual([
+      { type: 'run.ended', outcome: { status: 'waiting_approval', pending } },
+    ]);
+  });
+
   it('keeps the fence of a run until its loop ends, and drops it when the loop throws', async () => {
     let release!: () => void;
     const gate = new Promise<void>(resolve => (release = resolve));
@@ -347,5 +384,26 @@ describe('RunSupervisor', () => {
     for await (const event of late) seen.push(event.type);
     await handle.done;
     expect(seen).toEqual(['run.ended']);
+  });
+
+  it('gives no subscription once run.ended went out, so nobody waits for an end that will not come', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => (release = resolve));
+    const { supervisor } = setup(async function* endedButRunning() {
+      yield { type: 'run.started', runId: 'r1' };
+      const outcome: RunOutcome = { status: 'completed' };
+      yield { type: 'run.ended', outcome };
+      // The loop is not over yet: the generator still has to return.
+      await gate;
+      return outcome;
+    });
+    const handle = supervisor.launch(leased('r1', 'lease-1'), request);
+    for await (const event of handle.events) {
+      if (event.type === 'run.ended') break;
+    }
+    expect(supervisor.activeRunIds()).toEqual(['r1']);
+    expect(supervisor.subscribe('r1')).toBeUndefined();
+    release();
+    await handle.done;
   });
 });

@@ -28,9 +28,7 @@
 //    reach the outside.
 // 3. `domain/` also has no `async` function, no `await` and no `Promise`.
 //
-// The old `chat/`, `routes/`, `database/` and `llm/` folders are outside the
-// rules until they are removed. `src/lintRules.test.ts` lints sample files
-// against this configuration.
+// `src/lintRules.test.ts` lints sample files against this configuration.
 
 const { builtinModules } = require('module');
 

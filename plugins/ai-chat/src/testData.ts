@@ -14,54 +14,116 @@
  * limitations under the License.
  */
 
+import type {
+  ChatItem,
+  ChatItemBody,
+  ChatRun,
+  ChatSession,
+  ChatSessionDetail,
+} from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { AiChatApi } from './api';
-import type { ChatToolCall } from './common';
 
-export const pendingCall: ChatToolCall = {
-  id: 'call-1',
-  messageId: 'm-2',
-  actionId: 'dev-actions:restart-service',
-  title: 'Restart a service',
-  description: 'Restarts one of the example services.',
-  input: { name: 'payments', force: true },
-  attributes: { readOnly: false, destructive: true, idempotent: false },
-  status: 'pending_approval',
+export const session: ChatSession = {
+  id: 's-1',
+  ownerRef: 'user:default/guest',
+  agentId: 'default',
+  enabledToolsets: ['read'],
+  pinned: false,
   createdAt: '2026-01-01T10:00:00.000Z',
+  updatedAt: '2026-01-01T10:00:00.000Z',
 };
 
-export const readCall: ChatToolCall = {
-  id: 'call-0',
-  messageId: 'm-2',
-  actionId: 'dev-actions:list-services',
-  title: 'List services',
-  description: 'Lists the example services.',
-  input: {},
-  attributes: { readOnly: true, destructive: false, idempotent: true },
-  status: 'succeeded',
-  output: {
-    services: [
-      { name: 'payments', statusUrl: 'https://example.test/payments' },
-    ],
-  },
-  createdAt: '2026-01-01T10:00:00.000Z',
-};
+export function run(status: ChatRun['status'], id = 'r-1'): ChatRun {
+  return {
+    id,
+    sessionId: session.id,
+    status,
+    cancelRequested: false,
+    startedAt: '2026-01-01T10:00:00.000Z',
+  };
+}
+
+/** Items with consecutive `seq` numbers, all of run `r-1` unless `runId` says otherwise. */
+export function items(
+  ...bodies: Array<ChatItemBody & { runId?: string }>
+): ChatItem[] {
+  return bodies.map((body, index) => ({
+    runId: 'r-1',
+    ...body,
+    sessionId: session.id,
+    seq: index + 1,
+    createdAt: '2026-01-01T10:00:00.000Z',
+  })) as ChatItem[];
+}
+
+export const user = (text: string): ChatItemBody & { runId: string } => ({
+  kind: 'user_message',
+  text,
+  runId: 'r-1',
+});
+
+export const call = (
+  callId: string,
+  toolId = 'dev-actions:restart-service',
+  input: Record<string, unknown> = { name: 'payments' },
+  step = 1,
+): ChatItemBody => ({
+  kind: 'tool_call',
+  callId,
+  toolId,
+  input: input as never,
+  schemaHash: 'h',
+  policy: 'ask',
+  readOnly: false,
+  step,
+  position: 0,
+});
+
+export function detail(
+  overrides: Partial<ChatSessionDetail> = {},
+): ChatSessionDetail {
+  return {
+    session,
+    items: [],
+    awaitingDecision: [],
+    resumable: false,
+    ...overrides,
+  };
+}
 
 export function mockApi(
   overrides: Partial<AiChatApi> = {},
 ): jest.Mocked<AiChatApi> {
   return {
-    listConversations: jest.fn().mockResolvedValue([]),
-    createConversation: jest.fn().mockResolvedValue({
-      id: 'c-1',
-      title: 'New conversation',
-      createdAt: '2026-01-01T10:00:00.000Z',
-      updatedAt: '2026-01-01T10:00:00.000Z',
-    }),
-    getConversation: jest.fn().mockRejectedValue(new Error('not found')),
-    deleteConversation: jest.fn().mockResolvedValue(undefined),
+    listSessions: jest.fn().mockResolvedValue([]),
+    createSession: jest.fn().mockResolvedValue(session),
+    getSession: jest.fn().mockResolvedValue(detail()),
+    updateSession: jest.fn().mockResolvedValue(session),
+    deleteSession: jest.fn().mockResolvedValue(undefined),
+    listToolsets: jest.fn().mockResolvedValue([]),
+    listSessionTools: jest.fn().mockResolvedValue([]),
     sendMessage: jest.fn(),
-    approveToolCall: jest.fn(),
-    rejectToolCall: jest.fn(),
+    decide: jest.fn(),
+    resume: jest.fn(),
+    follow: jest.fn().mockResolvedValue(undefined),
+    cancelRun: jest.fn().mockResolvedValue(undefined),
     ...overrides,
   } as jest.Mocked<AiChatApi>;
+}
+
+/** A response of the stream of a run: `data:` lines for the chunks, and the end. */
+export function streamResponse(chunks: object[]): Response {
+  const lines = [...chunks.map(chunk => JSON.stringify(chunk)), '[DONE]'];
+  const text = lines.map(line => `data: ${line}\n\n`).join('');
+  return new Response(text, {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+  });
+}
+
+export function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
 }

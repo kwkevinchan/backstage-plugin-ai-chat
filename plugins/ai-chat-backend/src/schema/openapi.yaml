@@ -5,11 +5,13 @@ info:
   description: |-
     The HTTP API of the AI chat backend plugin for Backstage (`@kwkevinchan/backstage-plugin-ai-chat-backend`).
 
-    The paths are relative to the base URL of the plugin, `/api/ai-chat` in a default backend. Every route needs the Backstage credentials of a signed-in user (a user token from the identity API); a service token is refused with 403. A conversation belongs to the user who created it: another user gets 404 for it, as for a conversation that does not exist.
+    The paths are relative to the base URL of the plugin, `/api/ai-chat` in a default backend. Every route needs the Backstage credentials of a signed-in user (a user token from the identity API); a service token is refused with 403. A session belongs to the user who created it: another user gets 404 for it, as for a session that does not exist.
 
-    The routes that answer with `text/event-stream` send the events of `ChatEvent`: each event has the SSE event name of its `type` and the whole object as JSON in `data`. A request that is refused before anything happens (400, 404, 409) gets a normal JSON error; a failure after the first event arrives as an `error` event. The response ends after the `done` event, or after an `approval_required` event followed by `done`.
+    The routes that answer with `text/event-stream` send the AI SDK UI message stream (`ai@7`, header `x-vercel-ai-ui-message-stream: v1`): each event is a line `data: <JSON>` followed by an empty line, and the stream ends with `data: [DONE]`. A request that is refused before anything is sent (400, 404, 409, 503) gets a normal JSON error. A run that fails sends the transient `data-run` part (`status: failed`) and then an `error` part with a fixed text, and no `finish`; a run that is cancelled sends `data-run` and `abort`; a run that waits for an approval sends a `tool-approval-request` for every call that waits, `data-run` and `finish` with `finishReason: tool-calls`. The text of an error of the model server is never sent.
 
-    An action that is not read-only never runs without a decision of the owner: the call waits as `pending_approval` until `approve` or `reject`, and `approve` runs the input that was stored when the model asked for the call.
+    A run is one pass of the agent loop over one message. The stream of a run has one assistant message, with the id `run_<runId>`; the streams that continue the run (after an approval, after a reload) start with the same id.
+
+    An action that is not read-only never runs without a decision of the owner: the call waits (`tool-approval-request`) until the decision route stores a decision, and the action runs with the input that was stored when the model asked for the call.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -17,10 +19,12 @@ info:
 servers:
   - url: /
 tags:
-  - name: Conversations
-    description: The conversations of the signed-in user.
-  - name: Responses
-    description: Routes that answer with a stream of events.
+  - name: Sessions
+    description: The sessions of the signed-in user.
+  - name: Runs
+    description: Routes that start, continue or follow a run, and answer with a stream.
+  - name: Toolsets
+    description: The groups of tools the user can switch on in a session.
 security:
   - JWT: []
 components:
@@ -30,20 +34,36 @@ components:
       scheme: bearer
       bearerFormat: JWT
   parameters:
-    conversationId:
+    sessionId:
       name: id
       in: path
       required: true
-      description: ID of the conversation.
+      description: ID of the session.
+      schema:
+        type: string
+    runId:
+      name: runId
+      in: path
+      required: true
+      description: ID of the run.
       schema:
         type: string
     callId:
       name: callId
       in: path
       required: true
-      description: ID of the tool call (`ChatToolCall.id`).
+      description: ID of the tool call (`callId` of the `tool_call` item). It is also the `approvalId` of the stream.
       schema:
         type: string
+    afterSeq:
+      name: afterSeq
+      in: query
+      required: false
+      description: 'Leave out the items up to this `seq`. On `GET /sessions/{id}/stream`, a client that uses `useChat` of the AI SDK must not send it: the SDK finds a tool part only when the stream carries the whole run, so a stream that leaves items out loses the tool parts.'
+      allowReserved: true
+      schema:
+        type: integer
+        minimum: 0
   responses:
     Error:
       description: An error, with the body of the Backstage backend.
@@ -52,13 +72,13 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     Stream:
-      description: 'A stream of `ChatEvent`s, `text/event-stream`. Each event has the line `event: <type>` and the line `data: <the event as JSON>`.'
+      description: 'A UI message stream, `text/event-stream`, with the response header `x-vercel-ai-ui-message-stream: v1`. The parts: `start`, `start-step`, `text-start`, `text-delta`, `text-end`, `tool-input-available`, `tool-approval-request`, `tool-approval-response`, `tool-output-available`, `tool-output-error`, `tool-output-denied`, `finish-step`, `finish`, `error`, `abort`, and the data parts `data-run`, `data-item`, `data-notice` (all three transient) and `data-plan`.'
       content:
         text/event-stream:
           schema:
             type: string
-          x-event-schema:
-            $ref: '#/components/schemas/ChatEvent'
+    NoContent:
+      description: There is nothing to stream.
   schemas:
     Error:
       type: object
@@ -84,178 +104,319 @@ components:
             statusCode:
               type: integer
       required: [error]
-    ChatConversation:
+    ChatPageContext:
+      type: object
+      description: The page the user is on, as the client says it. The model gets it as one line before the text of the message, and the log keeps it with the message; that is why the form is checked.
+      properties:
+        path:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: '^/[^\s\x00-\x1f\x7f]*$'
+          description: A path that starts with `/`; no blank and no control character. The server also refuses Unicode control and format characters (category C), which the pattern does not show.
+        entityRef:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '^(?:[A-Za-z][A-Za-z0-9]*:)?(?:[a-z0-9]+(?:-+[a-z0-9]+)*/)?(?:[A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]$'
+          description: An entity reference, `[kind:][namespace/]name`, with the characters and the lengths (63 for each part) that `@backstage/catalog-model` allows. The client gives it, and the backend checks the form before the model reads it.
+      required: [path]
+    ChatSession:
       type: object
       properties:
         id:
           type: string
+        ownerRef:
+          type: string
+        agentId:
+          type: string
         title:
+          type: string
+        entityRef:
+          type: string
+          description: The entity the session was opened for.
+        enabledToolsets:
+          type: array
+          items:
+            type: string
+        pinned:
+          type: boolean
+        archivedAt:
           type: string
         createdAt:
           type: string
         updatedAt:
           type: string
-      required: [id, title, createdAt, updatedAt]
-    ChatMessage:
+      required:
+        [id, ownerRef, agentId, enabledToolsets, pinned, createdAt, updatedAt]
+    ChatRun:
       type: object
       properties:
         id:
           type: string
-        role:
+        sessionId:
           type: string
-          enum: [user, assistant]
-        content:
+        status:
+          type: string
+          enum:
+            [running, waiting_approval, completed, failed, cancelled, expired]
+        cancelRequested:
+          type: boolean
+        endReason:
+          type: string
+        startedAt:
+          type: string
+        endedAt:
+          type: string
+      required: [id, sessionId, status, cancelRequested, startedAt]
+    ChatItem:
+      description: 'One entry of the log of a session, discriminated by `kind`. `seq` grows by one with each item of the session. A `summary` item is for the model, not for the screen.'
+      oneOf:
+        - $ref: '#/components/schemas/UserMessageItem'
+        - $ref: '#/components/schemas/AgentMessageItem'
+        - $ref: '#/components/schemas/ToolCallItem'
+        - $ref: '#/components/schemas/ApprovalItem'
+        - $ref: '#/components/schemas/ToolStartedItem'
+        - $ref: '#/components/schemas/ToolResultItem'
+        - $ref: '#/components/schemas/PlanUpdateItem'
+        - $ref: '#/components/schemas/SummaryItem'
+        - $ref: '#/components/schemas/NoteItem'
+      discriminator:
+        propertyName: kind
+    ItemBase:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        seq:
+          type: integer
+        runId:
           type: string
         createdAt:
           type: string
-      required: [id, role, content, createdAt]
-    ChatActionAttributes:
+      required: [sessionId, seq, createdAt]
+    UserMessageItem:
+      allOf:
+        - $ref: '#/components/schemas/ItemBase'
+        - type: object
+          properties:
+            kind:
+              const: user_message
+            text:
+              type: string
+            page:
+              $ref: '#/components/schemas/ChatPageContext'
+          required: [kind, text]
+    AgentMessageItem:
+      allOf:
+        - $ref: '#/components/schemas/ItemBase'
+        - type: object
+          properties:
+            kind:
+              const: agent_message
+            text:
+              type: string
+          required: [kind, text]
+    ToolCallItem:
+      allOf:
+        - $ref: '#/components/schemas/ItemBase'
+        - type: object
+          properties:
+            kind:
+              const: tool_call
+            callId:
+              type: string
+            toolId:
+              type: string
+              description: The ID of the action in the actions registry, for example `catalog:get-catalog-entity`.
+            input:
+              type: object
+              description: The exact input that runs when the call is allowed.
+              additionalProperties: true
+            schemaHash:
+              type: string
+            policy:
+              type: string
+              enum: [allow, ask]
+            readOnly:
+              type: boolean
+            step:
+              type: integer
+            position:
+              type: integer
+          required:
+            [
+              kind,
+              callId,
+              toolId,
+              input,
+              schemaHash,
+              policy,
+              readOnly,
+              step,
+              position,
+            ]
+    ApprovalItem:
+      allOf:
+        - $ref: '#/components/schemas/ItemBase'
+        - type: object
+          properties:
+            kind:
+              const: approval
+            callId:
+              type: string
+            decision:
+              type: string
+              enum: [allow, deny]
+            decidedBy:
+              type: string
+          required: [kind, callId, decision, decidedBy]
+    ToolStartedItem:
+      allOf:
+        - $ref: '#/components/schemas/ItemBase'
+        - type: object
+          properties:
+            kind:
+              const: tool_started
+            callId:
+              type: string
+          required: [kind, callId]
+    ToolResultItem:
+      allOf:
+        - $ref: '#/components/schemas/ItemBase'
+        - type: object
+          properties:
+            kind:
+              const: tool_result
+            callId:
+              type: string
+            status:
+              type: string
+              enum: [ok, error, timeout, denied, invalid, unknown]
+            output:
+              description: The output of the action. When it was cut, `truncated` is true.
+            truncated:
+              type: boolean
+            message:
+              type: string
+          required: [kind, callId, status]
+    PlanUpdateItem:
+      allOf:
+        - $ref: '#/components/schemas/ItemBase'
+        - type: object
+          properties:
+            kind:
+              const: plan_update
+            plan:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      text:
+                        type: string
+                      status:
+                        type: string
+                        enum: [pending, in_progress, completed]
+                    required: [text, status]
+              required: [items]
+          required: [kind, plan]
+    SummaryItem:
+      allOf:
+        - $ref: '#/components/schemas/ItemBase'
+        - type: object
+          properties:
+            kind:
+              const: summary
+            coversUpToSeq:
+              type: integer
+            text:
+              type: string
+          required: [kind, coversUpToSeq, text]
+    NoteItem:
+      allOf:
+        - $ref: '#/components/schemas/ItemBase'
+        - type: object
+          properties:
+            kind:
+              const: note
+            text:
+              type: string
+          required: [kind, text]
+    ChatSessionDetail:
       type: object
-      description: The attributes of the action at the time of the call.
       properties:
-        readOnly:
+        session:
+          $ref: '#/components/schemas/ChatSession'
+        run:
+          $ref: '#/components/schemas/ChatRun'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatItem'
+        awaitingDecision:
+          type: array
+          description: The IDs of the tool calls that wait for a decision of the user. Not limited by `afterSeq`. Empty unless the run waits for an approval.
+          items:
+            type: string
+        resumable:
           type: boolean
-        destructive:
-          type: boolean
-        idempotent:
-          type: boolean
-      required: [readOnly, destructive, idempotent]
-    ChatToolCall:
+          description: The run waits for an approval and no call is left to decide, so the loop did not start after the last decision. `POST /sessions/{id}/resume` carries it on.
+      required: [session, items, awaitingDecision, resumable]
+    ChatTool:
       type: object
       properties:
         id:
           type: string
-        messageId:
-          type: string
-          description: The assistant message that asked for the call.
-        actionId:
-          type: string
-          description: The action ID in the actions registry, for example `catalog:get-catalog-entity`.
+          description: The ID of the action in the actions registry; it names a call.
         title:
           type: string
         description:
           type: string
-        input:
-          type: object
-          description: The exact input that runs when the call is allowed.
-          additionalProperties: true
-        attributes:
-          $ref: '#/components/schemas/ChatActionAttributes'
-        status:
-          type: string
-          enum:
-            [pending_approval, approved, rejected, running, succeeded, failed]
-        output:
-          description: 'The output of the action. When it was cut: an object with `truncated` (true), `originalLength` and the first part as `text`.'
-        error:
-          type: string
-          description: 'Why the call failed; `superseded` for a call that was rejected because the user sent a new message.'
-        decidedBy:
-          type: string
-        decidedAt:
-          type: string
-        createdAt:
-          type: string
-      required:
-        [
-          id,
-          messageId,
-          actionId,
-          title,
-          description,
-          input,
-          attributes,
-          status,
-          createdAt,
-        ]
-    ChatConversationDetail:
+        readOnly:
+          type: boolean
+          description: Whether the tool only reads. Any other tool asks for approval.
+      required: [id, description, readOnly]
+    ChatToolset:
       type: object
       properties:
-        conversation:
-          $ref: '#/components/schemas/ChatConversation'
-        messages:
-          type: array
-          items:
-            $ref: '#/components/schemas/ChatMessage'
-        toolCalls:
-          type: array
-          items:
-            $ref: '#/components/schemas/ChatToolCall'
-      required: [conversation, messages, toolCalls]
-    ChatEvent:
-      description: One event of a response stream, discriminated by `type`.
-      oneOf:
-        - type: object
-          properties:
-            type:
-              const: user_message
-            message:
-              $ref: '#/components/schemas/ChatMessage'
-          required: [type, message]
-        - type: object
-          properties:
-            type:
-              const: text_delta
-            text:
-              type: string
-          required: [type, text]
-        - type: object
-          properties:
-            type:
-              const: assistant_message
-            message:
-              $ref: '#/components/schemas/ChatMessage'
-          required: [type, message]
-        - type: object
-          properties:
-            type:
-              const: tool_call
-            toolCall:
-              $ref: '#/components/schemas/ChatToolCall'
-          required: [type, toolCall]
-        - type: object
-          properties:
-            type:
-              const: tool_result
-            toolCall:
-              $ref: '#/components/schemas/ChatToolCall'
-          required: [type, toolCall]
-        - type: object
-          properties:
-            type:
-              const: approval_required
-            toolCall:
-              $ref: '#/components/schemas/ChatToolCall'
-          required: [type, toolCall]
-        - type: object
-          properties:
-            type:
-              const: notice
-            message:
-              type: string
-          required: [type, message]
-        - type: object
-          properties:
-            type:
-              const: error
-            message:
-              type: string
-          required: [type, message]
-        - type: object
-          properties:
-            type:
-              const: done
-          required: [type]
+        id:
+          type: string
+        title:
+          type: string
+        default:
+          type: boolean
+          description: Whether a new session has it switched on.
+        egress:
+          type: boolean
+          description: Whether its tools send data out of the organization.
+      required: [id, default, egress]
 paths:
-  /conversations:
+  /sessions:
     get:
-      operationId: listConversations
-      tags: [Conversations]
-      summary: List the conversations of the user, the most recently changed first.
-      description: Only the conversations that the signed-in user owns.
+      operationId: listSessions
+      tags: [Sessions]
+      summary: List the sessions of the user, the most recently changed first.
+      description: Only the sessions that the signed-in user owns. Archived sessions are left out unless `includeArchived` is `true`.
+      parameters:
+        - name: includeArchived
+          in: query
+          allowReserved: true
+          schema:
+            type: string
+            enum: ['true', 'false']
+        - name: limit
+          in: query
+          allowReserved: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
       responses:
         '200':
-          description: The conversations.
+          description: The sessions.
           content:
             application/json:
               schema:
@@ -264,48 +425,115 @@ paths:
                   items:
                     type: array
                     items:
-                      $ref: '#/components/schemas/ChatConversation'
+                      $ref: '#/components/schemas/ChatSession'
                 required: [items]
+        '400':
+          $ref: '#/components/responses/Error'
         '403':
           $ref: '#/components/responses/Error'
     post:
-      operationId: createConversation
-      tags: [Conversations]
-      summary: Create an empty conversation.
-      description: The conversation is titled with the first message that is sent to it.
+      operationId: createSession
+      tags: [Sessions]
+      summary: Create an empty session.
+      description: Without `enabledToolsets` the session has the toolsets that are on by default. 400 for a toolset or an agent that does not exist.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                agentId:
+                  type: string
+                title:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                entityRef:
+                  type: string
+                enabledToolsets:
+                  type: array
+                  items:
+                    type: string
       responses:
         '201':
-          description: The new conversation.
+          description: The new session.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ChatConversation'
+                $ref: '#/components/schemas/ChatSession'
+        '400':
+          $ref: '#/components/responses/Error'
         '403':
           $ref: '#/components/responses/Error'
-  /conversations/{id}:
+  /sessions/{id}:
     parameters:
-      - $ref: '#/components/parameters/conversationId'
+      - $ref: '#/components/parameters/sessionId'
     get:
-      operationId: getConversation
-      tags: [Conversations]
-      summary: Read a conversation with its messages and tool calls.
-      description: Messages are those of the roles `user` and `assistant`; the results of tool calls are in `toolCalls`.
+      operationId: getSession
+      tags: [Sessions]
+      summary: Read a session with its items and its run that has not ended.
+      description: Only the owner reads a session; anyone else gets 404. Use `afterSeq` to read only the items that are new.
+      parameters:
+        - $ref: '#/components/parameters/afterSeq'
       responses:
         '200':
-          description: The conversation.
+          description: The session.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ChatConversationDetail'
+                $ref: '#/components/schemas/ChatSessionDetail'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+    patch:
+      operationId: updateSession
+      tags: [Sessions]
+      summary: Change the title, the pin, the archive state or the toolsets of a session.
+      description: Only the fields in the body change. 400 for a toolset that does not exist.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type:
+                    - string
+                    - 'null'
+                  minLength: 1
+                  maxLength: 200
+                  description: '`null` removes the title.'
+                pinned:
+                  type: boolean
+                archived:
+                  type: boolean
+                enabledToolsets:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: The session after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSession'
+        '400':
+          $ref: '#/components/responses/Error'
         '403':
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
     delete:
-      operationId: deleteConversation
-      tags: [Conversations]
-      summary: Delete a conversation with its messages and tool calls.
-      description: 409 while a response of the conversation is in progress.
+      operationId: deleteSession
+      tags: [Sessions]
+      summary: Delete a session with its runs and items.
+      description: 409 while a run of the session has not ended.
       responses:
         '204':
           description: Deleted.
@@ -315,14 +543,14 @@ paths:
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
-  /conversations/{id}/messages:
+  /sessions/{id}/runs:
     parameters:
-      - $ref: '#/components/parameters/conversationId'
+      - $ref: '#/components/parameters/sessionId'
     post:
       operationId: sendMessage
-      tags: [Responses]
-      summary: Send a message and stream the answer.
-      description: A call that waits for approval is rejected as `superseded`. 409 while another response of the conversation is in progress.
+      tags: [Runs]
+      summary: Send a message, start a run and stream it.
+      description: 409 while a run of the session has not ended (also one that waits for an approval), 503 while the backend shuts down. A message that is refused is not stored. A client that goes away does not stop the run.
       requestBody:
         required: true
         content:
@@ -330,11 +558,13 @@ paths:
             schema:
               type: object
               properties:
-                content:
+                text:
                   type: string
                   minLength: 1
                   maxLength: 8000
-              required: [content]
+                page:
+                  $ref: '#/components/schemas/ChatPageContext'
+              required: [text]
       responses:
         '200':
           $ref: '#/components/responses/Stream'
@@ -346,39 +576,169 @@ paths:
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
-  /conversations/{id}/tool-calls/{callId}/approve:
+        '503':
+          $ref: '#/components/responses/Error'
+  /sessions/{id}/runs/{runId}/cancel:
     parameters:
-      - $ref: '#/components/parameters/conversationId'
-      - $ref: '#/components/parameters/callId'
+      - $ref: '#/components/parameters/sessionId'
+      - $ref: '#/components/parameters/runId'
     post:
-      operationId: approveToolCall
-      tags: [Responses]
-      summary: Allow a call that waits, and stream what follows.
-      description: Runs the stored input of the call, with the credentials of the request, and then continues the conversation when no other call waits. 409 when the call is not `pending_approval`, so a second request never runs the action again. Only the owner of the conversation can decide (404 for anyone else).
+      operationId: cancelRun
+      tags: [Runs]
+      summary: Ask a run to stop.
+      description: Returns at once; the run stops at its next step, and the results that are stored stay. 409 when the run has ended.
       responses:
-        '200':
-          $ref: '#/components/responses/Stream'
+        '202':
+          description: The request to stop is stored.
+          content:
+            application/json:
+              schema:
+                type: object
         '403':
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
-  /conversations/{id}/tool-calls/{callId}/reject:
+  /sessions/{id}/tool-calls/{callId}/decision:
     parameters:
-      - $ref: '#/components/parameters/conversationId'
+      - $ref: '#/components/parameters/sessionId'
       - $ref: '#/components/parameters/callId'
     post:
-      operationId: rejectToolCall
-      tags: [Responses]
-      summary: Refuse a call that waits, and stream what follows.
-      description: The action does not run. The model is told that the user refused. Same rules as `approve`.
+      operationId: decideToolCall
+      tags: [Runs]
+      summary: Allow or deny a call that waits, and carry the run on when it was the last one.
+      description: The decision is stored at once. When other calls of the run still wait, or another request carries the run on, the answer is JSON. When this decision was the last one the run waited for and this request carried the run on, the answer is the stream of the run, which starts with `tool-approval-response`. The action runs the input that was stored, with the credentials of this request. A call that was decided already keeps its decision (the answer says which). 409 when the call does not wait or the run does not wait for an approval, 503 while the backend shuts down (the decision is stored, and another backend carries the run on). Only the owner can decide (404 for anyone else).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                approved:
+                  type: boolean
+                page:
+                  $ref: '#/components/schemas/ChatPageContext'
+              required: [approved]
       responses:
         '200':
-          $ref: '#/components/responses/Stream'
+          description: The decision that stands, when the answer is not a stream. When the run was carried on, the content type is `text/event-stream` (see `Stream`).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  approved:
+                    type: boolean
+                required: [approved]
+            text/event-stream:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/Error'
         '403':
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
         '409':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+  /sessions/{id}/resume:
+    parameters:
+      - $ref: '#/components/parameters/sessionId'
+    post:
+      operationId: resumeRun
+      tags: [Runs]
+      summary: Carry on a run that waits for an approval although every call has a decision.
+      description: For a run whose last decision was stored and whose loop did not start (`resumable` of the session). It asks for no decision. 204 when there is nothing to carry on (no run, calls that still wait, another request got there first). 503 while the backend shuts down.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                page:
+                  $ref: '#/components/schemas/ChatPageContext'
+      responses:
+        '200':
+          $ref: '#/components/responses/Stream'
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+  /sessions/{id}/stream:
+    parameters:
+      - $ref: '#/components/parameters/sessionId'
+    get:
+      operationId: followSession
+      tags: [Runs]
+      summary: Join the run that is under way.
+      description: 'The stream starts with `start` (the same message ID as the run), `data-run`, and the items of the run from its first one; then it goes on with the new events until the run ends. Each text arrives whole, when it is complete. Only a run that is `running` is streamed, and only by the backend that runs it; for a run that waits for an approval, a run that ended, no run, or a run of another backend the answer is 204. `afterSeq` leaves out the items up to it, for a client that does not use the AI SDK.'
+      parameters:
+        - $ref: '#/components/parameters/afterSeq'
+      responses:
+        '200':
+          $ref: '#/components/responses/Stream'
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /sessions/{id}/tools:
+    parameters:
+      - $ref: '#/components/parameters/sessionId'
+    get:
+      operationId: listSessionTools
+      tags: [Sessions]
+      summary: List the tools that the session offers to the model.
+      description: Listed with the credentials of the signed-in user, from the toolsets that are switched on in the session. Only the owner reads it; anyone else gets 404. The screen uses it to show a call with its title, its description and whether it changes anything.
+      responses:
+        '200':
+          description: The tools.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChatTool'
+                required: [items]
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /toolsets:
+    get:
+      operationId: listToolsets
+      tags: [Toolsets]
+      summary: List the toolsets the administrator defined.
+      description: The user switches these on or off in a session (`enabledToolsets`), and only these. `default` says whether a new session has the toolset switched on.
+      responses:
+        '200':
+          description: The toolsets.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChatToolset'
+                required: [items]
+        '403':
           $ref: '#/components/responses/Error'

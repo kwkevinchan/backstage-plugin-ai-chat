@@ -10,8 +10,12 @@ action that is not read-only. It needs
 yarn --cwd packages/app add @kwkevinchan/backstage-plugin-ai-chat
 ```
 
+Each session has its own URL, `/ai-chat/<session id>`. `/ai-chat?entityRef=component:default/my-service`
+opens the chat for an entity: every message carries the entity to the backend.
+
 - New frontend system: `import aiChatPlugin from '@kwkevinchan/backstage-plugin-ai-chat/alpha'`;
   the page is on `/ai-chat`.
-- Legacy frontend system: `AiChatPage` and `aiChatPlugin` from the package.
+- Legacy frontend system: `AiChatPage` and `aiChatPlugin` from the package;
+  mount the page with `path="/ai-chat/*"` (`FlatRoutes` adds the `/*`).
 
 More in the [README of the repository](https://github.com/kwkevinchan/backstage-plugin-ai-chat#readme).

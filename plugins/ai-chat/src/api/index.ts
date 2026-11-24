@@ -14,7 +14,5 @@
  * limitations under the License.
  */
 
-export { AiChatClient } from './AiChatClient';
 export { aiChatApiRef } from './types';
 export type { AiChatApi } from './types';
-export { describeError } from './describeError';

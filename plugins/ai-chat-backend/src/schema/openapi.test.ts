@@ -17,8 +17,12 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse } from 'yaml';
-import { MAX_MESSAGE_LENGTH } from '../common';
-import { createRouter } from '../routes/router';
+import {
+  chatPaths,
+  MAX_MESSAGE_LENGTH,
+  MAX_TITLE_LENGTH,
+} from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import { createRouter } from '../adapters/http';
 
 const spec = parse(readFileSync(resolve(__dirname, 'openapi.yaml'), 'utf8'));
 
@@ -50,34 +54,58 @@ function operationsOf(): string[] {
 
 describe('the OpenAPI spec', () => {
   it('describes every route of the router, and no other', () => {
-    const router = createRouter({} as any);
+    const router = createRouter({ useCases: {}, logger: {} } as any);
     expect(operationsOf()).toEqual(routesOf(router));
   });
 
   it('has the message limit of the code', () => {
     expect(
-      spec.paths['/conversations/{id}/messages'].post.requestBody.content[
+      spec.paths['/sessions/{id}/runs'].post.requestBody.content[
         'application/json'
-      ].schema.properties.content.maxLength,
+      ].schema.properties.text.maxLength,
     ).toBe(MAX_MESSAGE_LENGTH);
   });
 
-  it('has an event schema for every event type of the code', () => {
-    const types = spec.components.schemas.ChatEvent.oneOf.map(
-      (e: any) => e.properties.type.const,
-    );
-    expect(types.sort()).toEqual(
+  it('has the title limit of the code', () => {
+    expect(
+      spec.paths['/sessions/{id}'].patch.requestBody.content['application/json']
+        .schema.properties.title.maxLength,
+    ).toBe(MAX_TITLE_LENGTH);
+  });
+
+  it('has a schema for every kind of item of the log', () => {
+    const kinds = spec.components.schemas.ChatItem.oneOf.map((ref: any) => {
+      const name = ref.$ref.split('/').pop();
+      const schema = spec.components.schemas[name];
+      return schema.allOf[1].properties.kind.const;
+    });
+    expect(kinds.sort()).toEqual(
       [
-        'approval_required',
-        'assistant_message',
-        'done',
-        'error',
-        'notice',
-        'text_delta',
+        'agent_message',
+        'approval',
+        'note',
+        'plan_update',
+        'summary',
         'tool_call',
         'tool_result',
+        'tool_started',
         'user_message',
       ].sort(),
     );
+  });
+
+  it('has the route of every path of the shared definitions', () => {
+    const paths = [
+      chatPaths.sessions(),
+      chatPaths.session('{id}'),
+      chatPaths.runs('{id}'),
+      chatPaths.cancelRun('{id}', '{runId}'),
+      chatPaths.decision('{id}', '{callId}'),
+      chatPaths.resume('{id}'),
+      chatPaths.stream('{id}'),
+      chatPaths.tools('{id}'),
+      chatPaths.toolsets(),
+    ].map(path => decodeURIComponent(path));
+    expect(paths.sort()).toEqual(Object.keys(spec.paths).sort());
   });
 });

@@ -24,14 +24,3 @@
 export { aiChatPlugin, AiChatPage } from './plugin';
 export { aiChatApiRef } from './api';
 export type { AiChatApi } from './api';
-export type {
-  ChatActionAttributes,
-  ChatConversation,
-  ChatConversationDetail,
-  ChatCutOutput,
-  ChatEvent,
-  ChatMessage,
-  ChatRole,
-  ChatToolCall,
-  ChatToolCallStatus,
-} from './common';

@@ -47,12 +47,12 @@ backend:
 的組即使唯讀也要核准）和 `aiChat.policy`（`{action id: allow|ask|deny}`）取代
 `actions.include`、`actions.exclude`。啟動時會讀取並檢查，值不對會讓後端無法啟動。
 `allow` 只對標了 `readOnly: true` 的 action 有效；沒標的當成不是唯讀，仍然要核准，
-並在 log 記一筆警告。這一版的對話仍然使用 `include`、`exclude`，新設定在新的
-agent 迴圈接上之後生效。細節見[英文 README](README.md#toolsets-and-policy)。
+並在 log 記一筆警告。沒有設定 `toolsets` 時，`include`、`exclude` 組成預設的那一組；
+有設定時它們被忽略。細節見[英文 README](README.md#toolsets-and-policy)。
 
 ## 核准的規則
 
-- 核准時執行的是**後端存起來的輸入**；`approve` 不接受請求帶來的新輸入。
+- 核准時執行的是**後端存起來的輸入**；`decision` 路由不接受請求帶來的新輸入。
 - 一次決定只會被接受一次（資料庫裡的條件式更新），而且只有對話的擁有者能決定。
 - 不是唯讀的 action，沒有核准就絕不執行；唯讀與否看 actions service 的屬性，不看模型的說法。
 - 只有不是唯讀的 action 的核准、拒絕與執行會寫入 Backstage auditor；唯讀的 action 執行時不稽核。

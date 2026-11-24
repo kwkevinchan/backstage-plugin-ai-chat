@@ -22,6 +22,10 @@
  *
  *   user: "list ..."          -> calls the tool that ends in `list-services`
  *   user: "restart <name>"    -> calls the tool that ends in `restart-service`
+ *   user: "restart both"      -> calls `restart-service` for two services in one answer
+ *   user: "slow restart <n>"  -> calls the tool that ends in `restart-service-slowly`
+ *   user: "where ..."         -> says what the model was told about the page of the user
+ *   user: "story"             -> a long text that arrives word by word
  *   user: "catalog ..."       -> calls the tool that ends in `query-catalog-entities`
  *   user: "loop ..."          -> calls `list-services` again after every result
  *   tool result               -> a sentence that repeats part of the result
@@ -37,26 +41,44 @@ import { fileURLToPath } from 'node:url';
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+const STORY = Array.from({ length: 60 }, (_, i) => `word${i + 1}`).join(' ');
+
+/**
+ * A message of the user may start with one line that says where the user is
+ * ("The user is on the page of ..."), then an empty line, then the text.
+ */
+function splitContext(content) {
+  const match = /^(The user is on [^\n]*)\n\n([\s\S]*)$/.exec(content);
+  return match
+    ? { context: match[1], text: match[2] }
+    : { context: undefined, text: content };
+}
+
 function findTool(tools, suffix) {
   return (tools ?? []).find(t => t.function?.name?.endsWith(suffix))?.function
     ?.name;
 }
 
-/** The scripted reply for a request body: `{ text }` or `{ call }`. */
+/** The scripted reply for a request body: `{ text }` or `{ calls }`. */
 export function scriptedReply(body) {
   const messages = body.messages ?? [];
   const last = messages[messages.length - 1];
   const tools = body.tools ?? [];
-  const call = (suffix, args) => {
+  const call = (suffix, ...argsList) => {
     const name = findTool(tools, suffix);
     return name
-      ? { call: { name, arguments: JSON.stringify(args) } }
+      ? {
+          calls: argsList.map(args => ({
+            name,
+            arguments: JSON.stringify(args),
+          })),
+        }
       : { text: `The tool ${suffix} is not available.` };
   };
 
   if (last?.role === 'tool') {
     const content = String(last.content ?? '');
-    if (content.startsWith('The user rejected')) {
+    if (content.includes('"status":"denied"')) {
       return {
         text: 'Understood. I did not run that action, so nothing changed.',
       };
@@ -68,7 +90,7 @@ export function scriptedReply(body) {
       return { text: `The action failed. ${content.slice(0, 200)}` };
     }
     const lastUser = [...messages].reverse().find(m => m.role === 'user');
-    if (/^loop/i.test(String(lastUser?.content ?? ''))) {
+    if (/^loop/i.test(splitContext(String(lastUser?.content ?? '')).text)) {
       return call('list-services', {});
     }
     return {
@@ -76,10 +98,23 @@ export function scriptedReply(body) {
     };
   }
 
-  const text = String(last?.content ?? '');
+  const { context, text } = splitContext(String(last?.content ?? ''));
+  if (/^where/i.test(text)) {
+    return {
+      text: context
+        ? `You asked where you are. ${context}`
+        : 'I do not know where you are.',
+    };
+  }
   if (/^list/i.test(text)) return call('list-services', {});
+  if (/^restart both/i.test(text)) {
+    return call('restart-service', { name: 'search' }, { name: 'billing' });
+  }
+  const slow = /^slow restart\s+([\w-]+)/i.exec(text);
+  if (slow) return call('restart-service-slowly', { name: slow[1] });
   const restart = /^restart\s+([\w-]+)/i.exec(text);
   if (restart) return call('restart-service', { name: restart[1] });
+  if (/^story/i.test(text)) return { text: STORY };
   if (/^catalog/i.test(text))
     return call('query-catalog-entities', { limit: 3 });
   if (/^loop/i.test(text)) return call('list-services', {});
@@ -113,17 +148,15 @@ async function handle(req, res) {
   const reply = scriptedReply(body);
 
   if (body.stream === false) {
-    const message = reply.call
+    const message = reply.calls
       ? {
           role: 'assistant',
           content: null,
-          tool_calls: [
-            {
-              id: 'call_fake_1',
-              type: 'function',
-              function: reply.call,
-            },
-          ],
+          tool_calls: reply.calls.map((call, index) => ({
+            id: `call_fake_${index + 1}`,
+            type: 'function',
+            function: call,
+          })),
         }
       : { role: 'assistant', content: reply.text };
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -137,32 +170,36 @@ async function handle(req, res) {
   });
   const send = data => res.write(`data: ${JSON.stringify(data)}\n\n`);
   send(chunk({ role: 'assistant', content: '' }));
-  if (reply.call) {
-    const id = `call_${Math.random().toString(36).slice(2, 10)}`;
-    send(
-      chunk({
-        tool_calls: [
-          {
-            index: 0,
-            id,
-            type: 'function',
-            function: { name: reply.call.name, arguments: '' },
-          },
-        ],
-      }),
-    );
-    const args = reply.call.arguments;
-    const half = Math.ceil(args.length / 2);
-    for (const piece of [args.slice(0, half), args.slice(half)]) {
+  if (reply.calls) {
+    for (const [index, call] of reply.calls.entries()) {
+      const id = `call_${Math.random().toString(36).slice(2, 10)}`;
       send(
-        chunk({ tool_calls: [{ index: 0, function: { arguments: piece } }] }),
+        chunk({
+          tool_calls: [
+            {
+              index,
+              id,
+              type: 'function',
+              function: { name: call.name, arguments: '' },
+            },
+          ],
+        }),
       );
+      const half = Math.ceil(call.arguments.length / 2);
+      for (const piece of [
+        call.arguments.slice(0, half),
+        call.arguments.slice(half),
+      ]) {
+        send(
+          chunk({ tool_calls: [{ index, function: { arguments: piece } }] }),
+        );
+      }
     }
     send(chunk({}, 'tool_calls'));
   } else {
     for (const word of reply.text.split(/(?<= )/)) {
       send(chunk({ content: word }));
-      await wait(25);
+      await wait(reply.text === STORY ? 40 : 25);
     }
     send(chunk({}, 'stop'));
   }

@@ -20,8 +20,7 @@ import type {
   LoggerService,
 } from '@backstage/backend-plugin-api';
 // The only adapter that uses the actions service, which is still alpha (the
-// assembly in plugin.ts and the old ChatService and ToolCatalog also use it,
-// until P1-08 and P1-09 remove them). Check it again with every Backstage
+// assembly in plugin.ts passes it in). Check it again with every Backstage
 // upgrade.
 import type {
   ActionsService,
@@ -227,6 +226,7 @@ function describe(
   const inputSchema = toInputSchema(action.schema.input);
   return {
     id: action.id,
+    title: action.title,
     description: `${action.title}: ${action.description}`,
     inputSchema,
     schemaHash: hashOf(inputSchema),

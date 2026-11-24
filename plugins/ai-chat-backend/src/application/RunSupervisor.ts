@@ -56,6 +56,8 @@ type Loop = {
   request: LaunchRequest;
   controller: AbortController;
   subscribers: Set<EventChannel<HarnessEvent>>;
+  /** Set when `run.ended` went to the subscribers: a new subscriber would not get it. */
+  ended: boolean;
   /** Set when the shutdown takes the run over; the loop then leaves its status alone. */
   shuttingDown: boolean;
   done: Promise<void>;
@@ -114,6 +116,7 @@ export class RunSupervisor {
       request,
       controller: new AbortController(),
       subscribers: new Set(),
+      ended: false,
       shuttingDown: false,
       done: Promise.resolve(),
     };
@@ -126,12 +129,13 @@ export class RunSupervisor {
 
   /**
    * A new subscriber of a run that this process runs; it gets the events from
-   * now on. `undefined` when the run is not running here.
+   * now on. `undefined` when the run is not running here, and when its
+   * `run.ended` went out already: the new subscriber would never get it.
    */
   subscribe(runId: string): AsyncIterable<HarnessEvent> | undefined {
     const fence = this.fences.get(runId);
     const loop = fence && this.loops.get(fence.leaseOwner);
-    return loop ? this.addSubscriber(loop) : undefined;
+    return loop && !loop.ended ? this.addSubscriber(loop) : undefined;
   }
 
   /** Stops the loop of the run if this process runs it. Returns whether it did. */
@@ -201,6 +205,7 @@ export class RunSupervisor {
   }
 
   private publish(loop: Loop, event: HarnessEvent): void {
+    if (event.type === 'run.ended') loop.ended = true;
     for (const subscriber of loop.subscribers) subscriber.push(event);
   }
 
@@ -220,18 +225,20 @@ export class RunSupervisor {
       for (;;) {
         const next = await generator.next();
         if (next.done) break;
-        if (next.value.type === 'run.ended') {
-          await this.settle(loop, next.value.outcome);
+        let event: HarnessEvent = next.value;
+        if (event.type === 'run.ended') {
+          const outcome = await this.settle(loop, event.outcome);
           ended = true;
+          if (outcome !== event.outcome) event = { ...event, outcome };
         }
-        if (next.value.type === 'summary.failed') {
+        if (event.type === 'summary.failed') {
           // The cause is the original error: it goes to the log only.
           this.deps.logger.warn('A summary could not be made', {
             runId: run.id,
-            cause: describe(next.value.cause),
+            cause: describe(event.cause),
           });
         }
-        this.publish(loop, forSubscribers(next.value));
+        this.publish(loop, forSubscribers(event));
       }
     } catch (error) {
       if (!ended) await this.settleError(loop, error);
@@ -266,9 +273,13 @@ export class RunSupervisor {
     }
   }
 
-  /** Writes the status the outcome gives the run. */
-  private async settle(loop: Loop, outcome: RunOutcome): Promise<void> {
-    if (loop.shuttingDown) return;
+  /**
+   * Writes the status the outcome gives the run. Returns the outcome the
+   * subscribers get: the same one, except when a stop request turns a wait for
+   * an approval into `cancelled`.
+   */
+  private async settle(loop: Loop, outcome: RunOutcome): Promise<RunOutcome> {
+    if (loop.shuttingDown) return outcome;
     if (outcome.status === 'failed') {
       this.deps.logger.error('A run failed', {
         runId: loop.run.id,
@@ -282,7 +293,10 @@ export class RunSupervisor {
     // the user no longer wants.
     if (to === 'waiting_approval' && run?.cancelRequested) {
       await this.end(loop, 'cancelled', 'user', false);
+      // The subscribers must not show approval buttons of a cancelled run.
+      return { status: 'cancelled' };
     }
+    return outcome;
   }
 
   /** The loop ended with an error of a port, so there is no `run.ended` yet. */

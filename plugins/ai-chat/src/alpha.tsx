@@ -37,7 +37,8 @@ import {
   PageBlueprint,
 } from '@backstage/frontend-plugin-api';
 import { RiChat3Line } from '@remixicon/react';
-import { AiChatClient, aiChatApiRef } from './api';
+import { aiChatApiRef } from './api';
+import { AiChatClient } from './adapters/AiChatClient';
 import { rootRouteRef } from './routes';
 
 const aiChatApi = ApiBlueprint.make({
@@ -58,7 +59,7 @@ const aiChatPage = PageBlueprint.make({
     icon: <RiChat3Line size="1em" />,
     routeRef: convertLegacyRouteRef(rootRouteRef),
     loader: () =>
-      import('./components/ChatPage').then(m =>
+      import('./ui/ChatPage').then(m =>
         compatWrapper(<m.ChatPageInContainer />),
       ),
   },

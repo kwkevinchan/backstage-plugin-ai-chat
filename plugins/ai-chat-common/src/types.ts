@@ -1,0 +1,303 @@
+/*
+ * Copyright 2026 The backstage-plugin-ai-chat Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import type { JsonObject, JsonValue } from '@backstage/types';
+
+/**
+ * Where a run is in its life. A run that has not ended is `running` or
+ * `waiting_approval`.
+ *
+ * @public
+ */
+export type ChatRunStatus =
+  | 'running'
+  | 'waiting_approval'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'expired';
+
+/** A session: one conversation of one owner. @public */
+export interface ChatSession {
+  id: string;
+  ownerRef: string;
+  agentId: string;
+  title?: string;
+  /** The entity the session was opened for. */
+  entityRef?: string;
+  /** The ids of the toolsets that are switched on in this session. */
+  enabledToolsets: string[];
+  pinned: boolean;
+  archivedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A run: one pass of the agent loop over a message of the user. @public */
+export interface ChatRun {
+  id: string;
+  sessionId: string;
+  status: ChatRunStatus;
+  cancelRequested: boolean;
+  /** Why the run ended, for a run that ended. */
+  endReason?: string;
+  startedAt: string;
+  endedAt?: string;
+}
+
+/** @public */
+export type ChatToolResultStatus =
+  | 'ok'
+  | 'error'
+  | 'timeout'
+  | 'denied'
+  | 'invalid'
+  | 'unknown';
+
+/** @public */
+export type ChatPlanItemStatus = 'pending' | 'in_progress' | 'completed';
+
+/** The plan of the agent; an update replaces the whole plan. @public */
+export interface ChatPlan {
+  items: { text: string; status: ChatPlanItemStatus }[];
+}
+
+/** @public */
+export type ChatItemBody =
+  | { kind: 'user_message'; text: string; page?: ChatPageContext }
+  | { kind: 'agent_message'; text: string }
+  | {
+      kind: 'tool_call';
+      callId: string;
+      /** The id of the action in the actions registry. */
+      toolId: string;
+      /** The exact input that runs when the call is allowed. */
+      input: JsonObject;
+      schemaHash: string;
+      policy: 'allow' | 'ask';
+      readOnly: boolean;
+      step: number;
+      position: number;
+    }
+  | {
+      kind: 'approval';
+      callId: string;
+      decision: 'allow' | 'deny';
+      decidedBy: string;
+    }
+  | { kind: 'tool_started'; callId: string }
+  | {
+      kind: 'tool_result';
+      callId: string;
+      status: ChatToolResultStatus;
+      output?: JsonValue;
+      truncated?: boolean;
+      message?: string;
+    }
+  | { kind: 'plan_update'; plan: ChatPlan }
+  | { kind: 'summary'; coversUpToSeq: number; text: string }
+  | { kind: 'note'; text: string };
+
+/** @public */
+export type ChatItemKind = ChatItemBody['kind'];
+
+/**
+ * One entry of the log of a session. `seq` grows by one with each item of
+ * the session. A `summary` item is for the model, not for the screen.
+ *
+ * @public
+ */
+export type ChatItem = ChatItemBody & {
+  sessionId: string;
+  seq: number;
+  runId?: string;
+  createdAt: string;
+};
+
+/** The answer of `GET /sessions`. @public */
+export interface ChatSessionList {
+  items: ChatSession[];
+}
+
+/**
+ * The answer of `GET /sessions/:id`.
+ *
+ * @public
+ */
+export interface ChatSessionDetail {
+  session: ChatSession;
+  /** The run that has not ended, if there is one. */
+  run?: ChatRun;
+  items: ChatItem[];
+  /**
+   * The ids of the tool calls that wait for a decision of the user. Not
+   * limited by `afterSeq`. Empty unless the run waits for an approval.
+   */
+  awaitingDecision: string[];
+  /**
+   * The run waits for an approval and no call is left to decide: the loop did
+   * not start after the last decision. `POST /sessions/:id/resume` carries it
+   * on.
+   */
+  resumable: boolean;
+}
+
+/** The page the user is on; the model gets it with the message. @public */
+export interface ChatPageContext {
+  path: string;
+  entityRef?: string;
+}
+
+/** The body of `POST /sessions`. @public */
+export interface CreateChatSessionRequest {
+  agentId?: string;
+  title?: string;
+  entityRef?: string;
+  enabledToolsets?: string[];
+}
+
+/** The body of `PATCH /sessions/:id`. `null` as the title removes it. @public */
+export interface UpdateChatSessionRequest {
+  title?: string | null;
+  pinned?: boolean;
+  archived?: boolean;
+  enabledToolsets?: string[];
+}
+
+/** The body of `POST /sessions/:id/runs`. @public */
+export interface SendChatMessageRequest {
+  text: string;
+  page?: ChatPageContext;
+}
+
+/** The body of `POST /sessions/:id/tool-calls/:callId/decision`. @public */
+export interface DecideToolCallRequest {
+  approved: boolean;
+  page?: ChatPageContext;
+}
+
+/** The body of `POST /sessions/:id/resume`. @public */
+export interface ResumeChatRunRequest {
+  page?: ChatPageContext;
+}
+
+/**
+ * The JSON answer of the decision route, when the response is not a stream:
+ * other calls still wait for a decision, or another request carries the run
+ * on. `approved` is the decision that stands; for a call that had been
+ * decided already, that is the earlier decision, not the one of the request.
+ *
+ * @public
+ */
+export interface ChatDecisionResponse {
+  approved: boolean;
+}
+
+/** A toolset the user can switch on or off in a session. @public */
+export interface ChatToolset {
+  id: string;
+  title?: string;
+  /** Whether a new session has it switched on. */
+  default: boolean;
+  /** Whether its tools send data out of the organization. */
+  egress: boolean;
+}
+
+/** A tool that a session offers to the model, as the screen shows a call. @public */
+export interface ChatTool {
+  /** The id of the action in the actions registry; the name of a call. */
+  id: string;
+  title?: string;
+  /** What the tool does. */
+  description: string;
+  /** Whether the tool only reads. Any other tool asks for approval. */
+  readOnly: boolean;
+}
+
+/** The answer of `GET /sessions/:id/tools`. @public */
+export interface ChatToolList {
+  items: ChatTool[];
+}
+
+/** The answer of `GET /toolsets`. @public */
+export interface ChatToolsetList {
+  items: ChatToolset[];
+}
+
+/**
+ * The data of the `data-run` part of the response stream (transient): the
+ * state of the run at that point of the stream. It comes before the end of the
+ * stream (`finish`, `error` or `abort`), so a client that stops reading at an
+ * `error` has it already.
+ *
+ * @public
+ */
+export interface ChatRunData {
+  runId: string;
+  status: ChatRunStatus;
+  endReason?: string;
+}
+
+/**
+ * The data of the `data-item` part of the response stream (transient): an
+ * item was written to the log. A client that follows a stream keeps the
+ * highest `seq`.
+ *
+ * @public
+ */
+export interface ChatItemData {
+  seq: number;
+  kind: ChatItemKind;
+}
+
+/**
+ * The data of the `data-notice` part of the response stream (transient): a
+ * short note for the screen. `code` is for a client that translates the text.
+ *
+ * - `summarizing`: the older part of the conversation is being summarized.
+ * - `context_trimmed`: older content was left out of what the model reads.
+ *   Sent at most once in a stream.
+ *
+ * @public
+ */
+export interface ChatNoticeData {
+  code: 'summarizing' | 'context_trimmed';
+  text: string;
+}
+
+/**
+ * The data parts of the response stream, by the name after `data-`. The plan
+ * part has the fixed id `plan`: a later one replaces an earlier one in the same
+ * message.
+ *
+ * @public
+ */
+export interface ChatDataParts {
+  run: ChatRunData;
+  item: ChatItemData;
+  notice: ChatNoticeData;
+  plan: ChatPlan;
+}
+
+/**
+ * The `errorText` of the `tool-output-error` part for a call whose result is
+ * not known: the tool may have run, but its result was lost. The stream sends
+ * it for a result with status `unknown`, and the screen shows "result unknown"
+ * for it, live and after a reload.
+ *
+ * @public
+ */
+export const TOOL_RESULT_NOT_KNOWN = 'The result of the call is not known.';

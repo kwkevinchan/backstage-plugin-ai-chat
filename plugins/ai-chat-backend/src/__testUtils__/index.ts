@@ -24,17 +24,9 @@ import type {
   ActionsService,
   ActionsServiceAction,
 } from '@backstage/backend-plugin-api/alpha';
-import { mockCredentials, TestDatabases } from '@backstage/backend-test-utils';
+import { TestDatabases } from '@backstage/backend-test-utils';
 import type { JsonObject, JsonValue } from '@backstage/types';
-import type { Request } from 'express';
 import type { Knex } from 'knex';
-import type { ChatCaller, ChatStream } from '../chat/ChatService';
-import type { ChatEvent } from '../common';
-import type {
-  LlmClient,
-  LlmRequest,
-  LlmResult,
-} from '../llm/OpenAiCompatibleClient';
 
 /**
  * The database of the tests: SQLite, or PostgreSQL 16 when its connection
@@ -127,75 +119,6 @@ export class FakeActions implements ActionsService {
     const output = await (action.run?.(opts.input ?? {}) ?? { ok: true });
     return { output };
   }
-}
-
-/** One scripted answer of the model: text, or the calls it asks for. */
-export type ScriptedAnswer =
-  | string
-  | {
-      text?: string;
-      calls: Array<{ id?: string; name: string; args: unknown }>;
-    }
-  | ((request: LlmRequest) => LlmResult);
-
-/** A model that gives the scripted answers in order and records its requests. */
-export class ScriptedLlm implements LlmClient {
-  readonly requests: LlmRequest[] = [];
-  private index = 0;
-
-  constructor(private readonly answers: ScriptedAnswer[]) {}
-
-  async complete(request: LlmRequest): Promise<LlmResult> {
-    this.requests.push(
-      JSON.parse(JSON.stringify({ ...request, signal: undefined })),
-    );
-    const answer = this.answers[Math.min(this.index, this.answers.length - 1)];
-    this.index += 1;
-    return toResult(answer, request);
-  }
-}
-
-function toResult(answer: ScriptedAnswer, request: LlmRequest): LlmResult {
-  if (typeof answer === 'function') return answer(request);
-  const result: LlmResult =
-    typeof answer === 'string'
-      ? { content: answer, toolCalls: [] }
-      : {
-          content: answer.text ?? '',
-          toolCalls: answer.calls.map((call, i) => ({
-            id: call.id ?? `call_${i + 1}`,
-            name: call.name,
-            arguments:
-              typeof call.args === 'string'
-                ? call.args
-                : JSON.stringify(call.args),
-          })),
-        };
-  if (result.content) request.onText?.(result.content);
-  return result;
-}
-
-/** Collects the events of a response. */
-export function recordStream(signal?: AbortSignal): ChatStream & {
-  events: ChatEvent[];
-} {
-  const events: ChatEvent[] = [];
-  return {
-    events,
-    emit: event => events.push(event),
-    signal: signal ?? new AbortController().signal,
-  };
-}
-
-export function caller(
-  userEntityRef = 'user:default/alice',
-  request: Partial<Request> = {},
-): ChatCaller {
-  return {
-    credentials: mockCredentials.user(userEntityRef),
-    userEntityRef,
-    request: request as Request,
-  };
 }
 
 /** A local server that gives the answers of a model server. */
