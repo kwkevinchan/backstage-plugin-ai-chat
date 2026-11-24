@@ -1479,7 +1479,7 @@ Run 正常結束（`completed`、沒有 `endReason`）時，`RunSupervisor` 用 
   - 插入先 commit：結束的第 2 步是新的查詢，用新的快照，看得到剛 commit 的訊息，它的序號比 `read_up_to_seq` 大，所以不結束。
   - 結束先拿到鎖：插入的第 3.1 步要等結束 commit，之後讀到 `status` 是 `completed`，丟 `LeaseLost`，得到 409。訊息沒寫入。
   - 第 2 步不能和第 1 步合成一個 `UPDATE … WHERE NOT EXISTS (…)`：同一個陳述式的子查詢用陳述式開始時的快照，看不到等鎖期間 commit 的插入。
-- **SQLite**：knex 把 `forShare` 和 `forUpdate` 在 SQLite 編成空字串，不加任何鎖。靠的是 knex 的 SQLite 連線池預設只有一條連線，所有 transaction 在這條連線上排隊，做完一個才換下一個。所以結果仍是「插入先」或「結束先」，SQL 相同，結果同上。連線池開到多條的檔案資料庫沒有這個保證：兩個連線同時寫入時，後來的可能收到 `SQLITE_BUSY`，請求失敗，不會寫出錯的結果（這一點只靠推理，沒有測試；V-10 的結論見實作計畫）。測試確認的是：測試用的 SQLite 資料庫只有一條連線（`KnexItemLog.test.ts`），PostgreSQL 的測試用兩條以上的連線（`postgresConcurrency.test.ts`）。
+- **SQLite**：knex 把 `forShare` 和 `forUpdate` 在 SQLite 編成空字串，不加任何鎖。靠的是 knex 的 SQLite 連線池預設只有一條連線，所有 transaction 在這條連線上排隊，做完一個才換下一個。所以結果仍是「插入先」或「結束先」，SQL 相同，結果同上。連線池開到多條時，兩個連線都讀過之後再寫，後寫的會收到 `SQLITE_BUSY`，不是 `UnreadMessages`；`RunSupervisor` 只把 `UnreadMessages` 當成「插入先、再讀一次」，別的錯誤會把 Run 標成失敗。所以不支援多條連線：啟動時 `assertSingleSqliteConnection` 要求 pool 的 `max` 是 1（knex 的 SQLite 預設）。正式環境用 PostgreSQL。測試確認的是：測試用的 SQLite 資料庫只有一條連線（`databasePool.test.ts`），pool 的 `max` 不是 1 時啟動失敗（`sqliteConnection.test.ts`），PostgreSQL 的測試用兩條以上的連線（`postgresConcurrency.test.ts`）。V-10 的測量見實作計畫。
 - 在 `transition` 之前，迴圈自己的 `complete` 判斷（`unreadInserted`）也會擋掉大部分的情況。資料庫的檢查是剩下的空檔的保證：迴圈讀完紀錄、到 `transition` 之間才 commit 的插入。
 
 被拒絕之後：`RunSupervisor` 不把 `run.ended` 交給訂閱者，帶著租約用 `runs.get` 讀到的用量再呼叫一次 `AdvanceRun.execute()`，第二次的 `run.started` 也不交出去。迴圈讀到未讀的訊息，呼叫模型（一個 Step）。每次重跑至少用掉一個 Step，所以最多重跑到 `maxSteps`；每次重跑也至少讀到一則新的插入訊息，一個 Run 最多 `insert.maxPerRun` 則，設定檔把它限制在 20 以內，所以 `MAX_REREADS`（20）夠用；那時結果是 `completed` 加 `endReason`，不檢查（見下），未讀的訊息標成「Agent 沒有讀到」。另外有一個保險：同一個迴圈被拒絕超過 20 次（`MAX_REREADS`；正常不會發生，因為每次都讀到更多）就當成錯誤，Run 結束成 `failed`，原因 `error`。只有「模型給出最後回答」的結束（`completed`、沒有 `endReason`）帶 `requireAllRead`。
@@ -1675,9 +1675,10 @@ controller 依序做（`controllers/attachments.ts`；`route()` 先取出身分�
 | `startNext`                                            | `runs`（INSERT）、`sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`attachments`（`FOR UPDATE`，讀出附件的中繼資料）、`items`、`attachments`（標記 `used_seq`、重算 `reserved_by`） |
 | 排隊的 `update`、`remove`、`reorder`                   | `sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`attachments`                                                                                                                      |
 | 上傳（`put`）                                          | `sessions`（`FOR NO KEY UPDATE`）、`attachments`                                                                                                                                         |
+| 刪除 Session                                           | `runs`（`FOR UPDATE`，依 `id` 一列一列取）、`sessions`（`FOR UPDATE`），然後刪除 `sessions`（連帶刪除 `items`、`queued_messages`、`attachments`）                                        |
 | `PurgeUnusedAttachments`                               | 只有 `attachments`（`FOR UPDATE SKIP LOCKED` 選出，再刪除）                                                                                                                              |
 
-- 一個 transaction 要鎖多列 `attachments` 時，依 `id` 排序上鎖。
+- 一個 transaction 要鎖多列 `attachments` 時，依 `id` 排序上鎖。刪除 Session 要鎖多列 `runs` 時也一樣，一列一列取，然後才取 `sessions`。直接 `DELETE` `sessions` 會先鎖 session 那一列，連帶刪除才去鎖 `runs`，和先鎖 run 再鎖 session 的寫入相反，PostgreSQL 會判死結。取到 `sessions` 之後若多了新的 `runs` 列，這次就放棄重來，不拿著 `sessions` 再去等那一列。
 - `startNext` 的實際順序：先鎖附件（為了把中繼資料寫進 `user_message`），再取序號、寫 `items`，最後標記附件。不會死結：同一段 Session 的寫入都先排在 `sessions` 的列鎖後面，所以不會有兩個 transaction 同時持有同一段 Session 的 `attachments` 鎖；`PurgeUnusedAttachments` 不碰 `sessions`，只持有 `attachments` 的鎖，而且用 `SKIP LOCKED` 不等任何鎖。
 - 沒有新的唯一索引：同一則排隊訊息只送一次靠 transaction 內「刪除影響 1 列」和 `runs.active_session_id` 的唯一索引。
 

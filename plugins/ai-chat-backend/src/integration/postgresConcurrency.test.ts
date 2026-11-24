@@ -32,6 +32,7 @@ import {
   QueueFull,
   RunNotRunning,
   TooManyImageBytes,
+  SessionNotFound,
   TooManyPendingAttachments,
   UnknownAttachment,
   UnreadMessages,
@@ -210,6 +211,54 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
       attachments: db.attachments,
       images: { ...DEFAULT_IMAGE_LIMITS, enabled: true },
     });
+  });
+
+  it('a delete waits for an append that holds the run, and then deletes the session, without a deadlock', async () => {
+    const { sessionId, run } = await runningRun(db);
+    let releaseAppend!: () => void;
+    const hold = new Promise<void>(resolve => {
+      releaseAppend = resolve;
+    });
+    let locked!: () => void;
+    const hasRun = new Promise<void>(resolve => {
+      locked = resolve;
+    });
+    // The order of an append: the run, then the session. It keeps the run
+    // until it is released, so a delete that locked the session first would
+    // be holding it and waiting for this run (a deadlock).
+    const append = db.knex.transaction(async trx => {
+      await trx('runs').where({ id: run.id }).forNoKeyUpdate();
+      locked();
+      await hold;
+      await trx('sessions').where({ id: sessionId }).forUpdate();
+    });
+    await hasRun;
+
+    let settled = false;
+    const deleting = db.sessions.delete(sessionId).then(
+      () => {
+        settled = true;
+      },
+      (error: unknown) => {
+        settled = true;
+        throw error;
+      },
+    );
+    const raced = await Promise.race([
+      deleting.then(() => 'finished' as const),
+      new Promise<'waiting'>(resolve =>
+        setTimeout(() => resolve('waiting'), 1500),
+      ),
+    ]);
+    expect(raced).toBe('waiting');
+    expect(settled).toBe(false);
+
+    releaseAppend();
+    await append;
+    await deleting;
+    await expect(db.sessions.get(sessionId)).rejects.toBeInstanceOf(
+      SessionNotFound,
+    );
   });
 
   it(`an insert and the end of the run at the same time, ${ROUNDS} rounds: each round, the message is written and the run goes on, or the run ended and the insert got RunNotRunning; no message is lost`, async () => {

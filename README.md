@@ -73,7 +73,10 @@ backend.add(import('@kwkevinchan/backstage-plugin-ai-chat-backend'));
 
 The plugin keeps its state in its own database (`ai-chat`; tables
 `sessions`, `runs`, `items`), with migrations that it runs when
-it starts. It uses the actions service of Backstage (`@alpha` in
+it starts. On SQLite it allows one connection: the pool maximum must be 1,
+which is what Knex uses for SQLite unless the configuration says otherwise.
+A deployment that needs more than one connection uses PostgreSQL. It uses the
+actions service of Backstage (`@alpha` in
 `@backstage/backend-plugin-api/alpha`), which `createBackend()` provides.
 
 ### Frontend: new frontend system

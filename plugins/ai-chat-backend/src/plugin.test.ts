@@ -21,6 +21,7 @@ import {
   mockServices,
   startTestBackend,
 } from '@backstage/backend-test-utils';
+import knex from 'knex';
 import request from 'supertest';
 import {
   parseSse,
@@ -106,6 +107,43 @@ describe('aiChatPlugin', () => {
 
   const alice = mockCredentials.user.header('user:default/alice');
   const bob = mockCredentials.user.header('user:default/bob');
+
+  it('does not start when the SQLite pool allows more than one connection', async () => {
+    const db = knex({
+      client: 'better-sqlite3',
+      connection: { filename: ':memory:' },
+      pool: { min: 1, max: 2 },
+      useNullAsDefault: true,
+    });
+    try {
+      await expect(
+        startTestBackend({
+          features: [
+            aiChatPlugin,
+            mockServices.rootConfig.factory({
+              data: {
+                aiChat: {
+                  llm: { baseUrl: 'http://127.0.0.1:9', model: 'test-model' },
+                },
+              },
+            }),
+            mockServices.database.factory({ knex: db }),
+            mockServices.auditor.mock().factory,
+            mockServices.httpAuth.factory({
+              defaultCredentials: mockCredentials.none(),
+            }),
+            createServiceFactory({
+              service: actionsServiceRef,
+              deps: {},
+              factory: () => new FakeActions([]),
+            }),
+          ],
+        }),
+      ).rejects.toThrow(/one SQLite connection/);
+    } finally {
+      await db.destroy();
+    }
+  });
 
   it('refuses a request without credentials (401) and a service token (403)', async () => {
     const server = await startBackend();

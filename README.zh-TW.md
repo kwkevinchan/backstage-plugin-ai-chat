@@ -34,7 +34,7 @@ backend.add(import('@kwkevinchan/backstage-plugin-ai-chat-backend'));
 `/ai-chat?entityRef=component:default/my-service` 會以那個 entity 開啟對話。
 舊前端系統的接法見[英文 README](README.md#frontend-legacy-frontend-system)。
 
-後端用自己的資料庫存狀態（`sessions`、`runs`、`items` 三張表），啟動時自己跑 migration。
+後端用自己的資料庫存狀態（`sessions`、`runs`、`items` 三張表），啟動時自己跑 migration。SQLite 只允許一條連線（連線池的上限必須是 1，這是 Knex 對 SQLite 的預設，除非設定改過）。需要多條連線時用 PostgreSQL。
 
 ## 設定
 
