@@ -133,6 +133,12 @@
   color: var(--bui-fg-secondary);
   font-size: var(--bui-font-size-2);
 }
+.chat-unread {
+  align-self: flex-end;
+  margin-top: calc(var(--bui-space-1) * -1);
+  color: var(--bui-fg-secondary);
+  font-size: var(--bui-font-size-1);
+}
 .chat-error {
   align-self: stretch;
   padding: var(--bui-space-2) var(--bui-space-3);
@@ -366,4 +372,79 @@
   flex-wrap: wrap;
   gap: 4px 16px;
   padding-top: 4px;
+}
+
+/* Messages added to a run, and the queue */
+.chat-pending,
+.chat-queue-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.chat-pending {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bui-space-1);
+  padding: var(--bui-space-2) var(--bui-space-3) 0;
+}
+.chat-pending-item {
+  display: flex;
+  flex-direction: column;
+  align-self: flex-end;
+  max-width: min(760px, 100%);
+  padding: var(--bui-space-2) var(--bui-space-3);
+  border: 1px dashed var(--bui-border-2);
+  border-radius: var(--bui-radius-3);
+  color: var(--bui-fg-secondary);
+  font-size: var(--bui-font-size-3);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-pending-label {
+  font-size: var(--bui-font-size-1);
+}
+.chat-queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bui-space-2);
+  padding: var(--bui-space-2) var(--bui-space-3);
+  border-top: 1px solid var(--bui-border-1);
+  font-size: var(--bui-font-size-2);
+}
+.chat-queue-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bui-space-3);
+  align-items: baseline;
+}
+.chat-queue-title span,
+.chat-queue-notice {
+  color: var(--bui-fg-secondary);
+}
+.chat-queue-paused {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bui-space-2);
+  align-items: center;
+}
+.chat-queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bui-space-1);
+}
+.chat-queue-item {
+  display: flex;
+  gap: var(--bui-space-2);
+  align-items: center;
+}
+.chat-queue-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-queue-actions {
+  display: flex;
+  gap: var(--bui-space-1);
 }

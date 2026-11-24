@@ -18,15 +18,22 @@ import { DiscoveryApi, FetchApi } from '@backstage/core-plugin-api';
 import { ResponseError } from '@backstage/errors';
 import {
   chatPaths,
+  type ChatItem,
+  type ChatQueue,
+  type ChatQueuedMessage,
   type ChatSession,
   type ChatSessionDetail,
   type ChatTool,
   type ChatToolset,
   type CreateChatSessionRequest,
   type DecideToolCallRequest,
+  type InsertChatMessageRequest,
+  type QueueChatMessageRequest,
+  type ReorderQueueRequest,
   type ResumeChatRunRequest,
   type SendChatMessageRequest,
   type UpdateChatSessionRequest,
+  type UpdateQueuedMessageRequest,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { AiChatApi } from '../api';
 
@@ -137,5 +144,60 @@ export class AiChatClient implements AiChatApi {
       }
       throw error;
     }
+  }
+
+  async insertMessage(
+    id: string,
+    runId: string,
+    request: InsertChatMessageRequest,
+  ) {
+    const response = await this.post(
+      chatPaths.insertMessage(id, runId),
+      request,
+    );
+    return (await response.json()) as ChatItem;
+  }
+
+  async getQueue(id: string) {
+    const response = await this.request(chatPaths.queue(id));
+    return (await response.json()) as ChatQueue;
+  }
+
+  async queueMessage(id: string, request: QueueChatMessageRequest) {
+    const response = await this.post(chatPaths.queue(id), request);
+    return (await response.json()) as ChatQueuedMessage;
+  }
+
+  async updateQueuedMessage(
+    id: string,
+    queuedId: string,
+    request: UpdateQueuedMessageRequest,
+  ) {
+    const response = await this.request(chatPaths.queuedMessage(id, queuedId), {
+      method: 'PATCH',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(request),
+    });
+    return (await response.json()) as ChatQueuedMessage;
+  }
+
+  async deleteQueuedMessage(id: string, queuedId: string): Promise<void> {
+    await this.request(chatPaths.queuedMessage(id, queuedId), {
+      method: 'DELETE',
+    });
+  }
+
+  async reorderQueue(id: string, request: ReorderQueueRequest) {
+    const response = await this.request(chatPaths.queueOrder(id), {
+      method: 'PUT',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(request),
+    });
+    return (await response.json()) as ChatQueue;
+  }
+
+  async resumeQueue(id: string, signal?: AbortSignal) {
+    const response = await this.post(chatPaths.queueResume(id), {}, signal);
+    return response.status === 204 ? undefined : response;
   }
 }

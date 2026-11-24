@@ -17,8 +17,22 @@
 import type { UIMessage } from 'ai';
 import type { ChatDataParts } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 
-/** The data parts of the stream, in the shape that `UIMessage` takes. */
-export type ChatUiDataParts = { [K in keyof ChatDataParts]: ChatDataParts[K] };
+/**
+ * What the screen adds to an inserted message that the run ended without
+ * reading: `sendAgain` is set when the message has a button of its own.
+ */
+export interface ChatUnreadData {
+  seq: number;
+  sendAgain: boolean;
+}
+
+/**
+ * The data parts of the stream, in the shape that `UIMessage` takes, and
+ * `unread`, which only the screen makes (from the stored items).
+ */
+export type ChatUiDataParts = {
+  [K in keyof ChatDataParts]: ChatDataParts[K];
+} & { unread: ChatUnreadData };
 
 /** A message of the screen: a message of the AI SDK with the data parts of the chat. */
 export type ChatUiMessage = UIMessage<unknown, ChatUiDataParts>;

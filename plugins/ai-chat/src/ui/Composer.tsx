@@ -20,34 +20,52 @@ import { MAX_MESSAGE_LENGTH } from '@kwkevinchan/backstage-plugin-ai-chat-common
 import { cx } from './styles';
 
 export interface ComposerProps {
-  /** Sends the text. Resolves with `false` when the message was not sent at all. */
+  /**
+   * Enter, and the Send button. Resolves with `false` when the message was not
+   * sent at all.
+   */
   onSend(text: string): Promise<boolean | void> | void;
-  /** A response is on its way, or a run waits: a new message cannot start now. */
+  /**
+   * Ctrl or Cmd with Enter, and the Queue button, which shows only with this.
+   * Without it Ctrl or Cmd with Enter does what Enter does.
+   */
+  onQueue?(text: string): Promise<boolean | void> | void;
+  /** A response is on its way that the new message cannot join. */
   disabled: boolean;
   /** Shown above the box. */
   hint?: string;
+  /** The text of the empty box. */
+  placeholder?: string;
+  /** The name of the main button; default Send. */
+  sendLabel?: string;
   /** Set while a run is active: shows Stop. */
   onStop?(): void;
 }
 
-/** The input box with Send, and Stop while a run is active. */
+const DEFAULT_PLACEHOLDER =
+  'Write a message (Enter sends, Shift+Enter starts a new line)';
+
+/** The input box with Send, Queue while a run is active, and Stop. */
 export function Composer(props: ComposerProps) {
   const [draft, setDraft] = useState('');
 
-  const submit = async () => {
+  const submit = async (queue: boolean) => {
     const text = draft.trim();
     if (!text || props.disabled) return;
     setDraft('');
-    const sent = await props.onSend(text);
+    const handler = queue && props.onQueue ? props.onQueue : props.onSend;
+    const sent = await handler(text);
     // A message that was not sent goes back into the box, unless the user typed again.
     if (sent === false) setDraft(current => current || text);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      submit();
-    }
+    if (event.key !== 'Enter') return;
+    const modified = event.ctrlKey || event.metaKey;
+    if (event.shiftKey && !modified) return;
+    event.preventDefault();
+    submit(modified);
   };
+  const empty = !draft.trim();
 
   return (
     <>
@@ -58,7 +76,7 @@ export function Composer(props: ComposerProps) {
         <textarea
           className={cx('chat-composer-input')}
           aria-label="Message"
-          placeholder="Write a message (Enter sends, Shift+Enter starts a new line)"
+          placeholder={props.placeholder ?? DEFAULT_PLACEHOLDER}
           rows={2}
           maxLength={MAX_MESSAGE_LENGTH}
           value={draft}
@@ -70,12 +88,21 @@ export function Composer(props: ComposerProps) {
             Stop
           </Button>
         )}
+        {props.onQueue && (
+          <Button
+            variant="secondary"
+            isDisabled={props.disabled || empty}
+            onPress={() => submit(true)}
+          >
+            Queue
+          </Button>
+        )}
         <Button
           variant="primary"
-          isDisabled={props.disabled || !draft.trim()}
-          onPress={submit}
+          isDisabled={props.disabled || empty}
+          onPress={() => submit(false)}
         >
-          Send
+          {props.sendLabel ?? 'Send'}
         </Button>
       </div>
     </>

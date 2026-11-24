@@ -14,9 +14,8 @@
  * limitations under the License.
  */
 
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
 import { expect, Page, test } from '@playwright/test';
+import { signIn, watch } from './support';
 
 /**
  * The chat with the scripted model server and the development actions:
@@ -30,64 +29,6 @@ import { expect, Page, test } from '@playwright/test';
  * The tests run in this order against one backend with its state in memory:
  * the first one counts the restarts of \`payments\` and \`search\`.
  */
-const app = process.env.SMOKE_APP ?? 'app';
-const shotSuffix = process.env.SMOKE_SHOT_SUFFIX ?? '';
-const shotDir = process.env.SMOKE_SHOT_DIR ?? join('e2e-test-results', app);
-
-function isIgnoredConsoleError(text: string): boolean {
-  if (
-    /Failed to load resource: the server responded with a status of (401|400)/.test(
-      text,
-    )
-  ) {
-    return true;
-  }
-  // React warnings of the Backstage packages (for example findDOMNode in
-  // Material UI 4) are not ours; a warning that names this plugin is.
-  const fromOurCode = /plugins\/ai-chat|backstage-plugin-ai-chat/.test(text);
-  return text.startsWith('Warning: ') && !fromOurCode;
-}
-
-function watch(page: Page) {
-  const errors: string[] = [];
-  page.on('console', msg => {
-    if (msg.type() === 'error' && !isIgnoredConsoleError(msg.text())) {
-      errors.push(msg.text());
-    }
-  });
-  page.on('pageerror', error => errors.push(`pageerror: ${error}`));
-  page.on('response', response => {
-    if (response.status() >= 500) {
-      errors.push(`${response.status()} ${response.url()}`);
-    }
-  });
-  mkdirSync(shotDir, { recursive: true });
-  return async (name: string) => {
-    // Wait until the answer is complete.
-    await expect(page.locator('[aria-live="polite"]')).toHaveAttribute(
-      'aria-busy',
-      'false',
-    );
-    await page.screenshot({
-      path: join(shotDir, `${name}${shotSuffix}.png`),
-      fullPage: true,
-      animations: 'disabled',
-    });
-    expect(errors, `errors before ${name}`).toEqual([]);
-  };
-}
-
-async function signIn(page: Page) {
-  await page.goto('/');
-  const enter = page.getByRole('button', { name: 'Enter' });
-  await expect(enter).toBeVisible();
-  await enter.click();
-  // The sign-in is done when the sign-in page is gone.
-  await expect(enter).toBeHidden();
-  await page.goto('/ai-chat');
-  await expect(page.getByLabel('Message')).toBeVisible();
-}
-
 async function say(page: Page, text: string) {
   // A message cannot start while the run of the last one goes on.
   await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(0);

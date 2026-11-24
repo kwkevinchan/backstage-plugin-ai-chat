@@ -140,4 +140,100 @@ describe('AiChatClient', () => {
       ResponseError,
     );
   });
+
+  it('inserts a message into a run and returns the stored item', async () => {
+    const { client, fetch } = setup(() =>
+      json({ kind: 'user_message', seq: 4, text: 'also this' }, 201),
+    );
+    const item = await client.insertMessage('s', 'r/1', {
+      text: 'also this',
+      page: { path: '/x' },
+    });
+    expect(item).toMatchObject({ seq: 4, text: 'also this' });
+    expect(urls(fetch)).toEqual([
+      ['POST', 'http://backend/api/ai-chat/sessions/s/runs/r%2F1/messages'],
+    ]);
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      text: 'also this',
+      page: { path: '/x' },
+    });
+  });
+
+  it('keeps the name of a 409 so that the screen can tell the refusals apart', async () => {
+    const { client } = setup(() =>
+      json(
+        {
+          error: { name: 'InsertLimitReached', message: 'too many' },
+          request: { method: 'POST', url: '/x' },
+          response: { statusCode: 409 },
+        },
+        409,
+      ),
+    );
+    const error = await client
+      .insertMessage('s', 'r', { text: 'x' })
+      .catch(e => e);
+    expect(error).toBeInstanceOf(ResponseError);
+    expect(error.response.status).toBe(409);
+    expect(error.body.error.name).toBe('InsertLimitReached');
+  });
+
+  it('reads and changes the queue with the routes of the queue', async () => {
+    const queue = {
+      items: [{ id: 'q1', position: 1, text: 'a' }],
+      paused: false,
+    };
+    const read = setup(json(queue));
+    expect(await read.client.getQueue('s')).toEqual(queue);
+
+    const add = setup(json(queue.items[0], 201));
+    expect(await add.client.queueMessage('s', { text: 'a' })).toEqual(
+      queue.items[0],
+    );
+
+    const edit = setup(json(queue.items[0]));
+    await edit.client.updateQueuedMessage('s', 'q/1', { text: 'b' });
+
+    const del = setup(() => new Response(null, { status: 204 }));
+    await del.client.deleteQueuedMessage('s', 'q1');
+
+    const order = setup(json(queue));
+    expect(await order.client.reorderQueue('s', { ids: ['q2', 'q1'] })).toEqual(
+      queue,
+    );
+
+    expect(urls(read.fetch)).toEqual([
+      ['GET', 'http://backend/api/ai-chat/sessions/s/queue'],
+    ]);
+    expect(urls(add.fetch)).toEqual([
+      ['POST', 'http://backend/api/ai-chat/sessions/s/queue'],
+    ]);
+    expect(urls(edit.fetch)).toEqual([
+      ['PATCH', 'http://backend/api/ai-chat/sessions/s/queue/q%2F1'],
+    ]);
+    expect(urls(del.fetch)).toEqual([
+      ['DELETE', 'http://backend/api/ai-chat/sessions/s/queue/q1'],
+    ]);
+    expect(urls(order.fetch)).toEqual([
+      ['PUT', 'http://backend/api/ai-chat/sessions/s/queue/order'],
+    ]);
+    expect(JSON.parse(order.fetch.mock.calls[0][1].body)).toEqual({
+      ids: ['q2', 'q1'],
+    });
+  });
+
+  it('continues the queue: the stream of the new run, or nothing (204)', async () => {
+    const stream = setup(
+      () =>
+        new Response('data: [DONE]\n\n', {
+          headers: { 'content-type': 'text/event-stream' },
+        }),
+    );
+    expect(await stream.client.resumeQueue('s')).toBeInstanceOf(Response);
+    expect(urls(stream.fetch)).toEqual([
+      ['POST', 'http://backend/api/ai-chat/sessions/s/queue/resume'],
+    ]);
+    const nothing = setup(() => new Response(null, { status: 204 }));
+    expect(await nothing.client.resumeQueue('s')).toBeUndefined();
+  });
 });

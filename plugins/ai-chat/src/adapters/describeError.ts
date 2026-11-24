@@ -14,6 +14,21 @@
  * limitations under the License.
  */
 
+import { ResponseError } from '@backstage/errors';
+
+/** The status code of a failed request of the chat backend, if the error is one. */
+export function statusOf(error: unknown): number | undefined {
+  return error instanceof ResponseError ? error.response.status : undefined;
+}
+
+/**
+ * The name of the error that the backend answered with (`InsertLimitReached`,
+ * `QueueChanged`...), which tells apart the errors that share a status code.
+ */
+export function errorNameOf(error: unknown): string | undefined {
+  return error instanceof ResponseError ? error.body?.error?.name : undefined;
+}
+
 /**
  * The text to show for an error. The message of a failed request is the
  * status line; the reason that the backend gave is in its cause.

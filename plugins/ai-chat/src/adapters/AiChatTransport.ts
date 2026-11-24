@@ -32,11 +32,13 @@ import type { ChatUiMessage } from '../domain/types';
  *   at the parts of the messages to find the decision: after a reload, the
  *   decisions that are stored already are `approval-responded` as well.
  * - `resume`: carry on a run whose decisions are all stored.
+ * - `resumeQueue`: send the first queued message as a new run.
  */
 export type ChatRequestBody = {
   callId?: string;
   approved?: boolean;
   resume?: boolean;
+  resumeQueue?: boolean;
 };
 
 export interface AiChatTransportOptions {
@@ -53,8 +55,8 @@ export interface AiChatTransportOptions {
    */
   onDecisionStored?(): void;
   /**
-   * Called when there was nothing to carry on (204 of resume): another request
-   * carries the run on, as in the case above.
+   * Called when there was nothing to carry on (204 of resume or of the queue):
+   * another request carries the run on, as in the case above.
    */
   onNothingToResume?(): void;
 }
@@ -122,6 +124,12 @@ export class AiChatTransport implements ChatTransport<ChatUiMessage> {
       if (isEventStream(response)) return chunksOf(response);
       await response.body?.cancel();
       this.options.onDecisionStored?.();
+      return emptyStream();
+    }
+    if (body.resumeQueue) {
+      const response = await api.resumeQueue(sessionId, request.abortSignal);
+      if (response) return chunksOf(response);
+      this.options.onNothingToResume?.();
       return emptyStream();
     }
     if (body.resume) {
