@@ -188,6 +188,8 @@ aiChat:
       maxBytesPerInput: 20971520 # image bytes in one run and in one model call; default 20 MB, at least maxPerMessage times maxBytes
       maxPendingPerSession: 12 # uploaded images that are in no message yet; default 12
       tokensPerImage: 1600 # estimated tokens per image in the budget; default 1600
+  retention:
+    days: 90 # delete a session this many days after its last change; 0 keeps every session; default 90
 
 backend:
   actions:
@@ -219,6 +221,15 @@ against a real model. Set it for the model you use. Too low, and the input can
 pass the context limit of the model; too high, and older images are left out
 sooner.
 
+**Retention.** A task runs every hour and deletes a session whose last change
+is older than `aiChat.retention.days` (default 90; one day is 24 hours),
+together with its runs, messages, queued messages and images. The audit log
+is kept. A session with a run that has not ended is kept until that run ends.
+Pinning or archiving a session does not keep it past the limit; a rename, a
+pin, an archive or a change of toolsets does count as a change, and so does a
+new message. Set `days` to `0` to keep every session. A session changed
+exactly `days` ago is kept.
+
 | Setting                   | Meaning                                                                                                                                                                                                                                                                                                                     |
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `maxTurns`                | Most model calls in one run.                                                                                                                                                                                                                                                                                                |
@@ -229,6 +240,7 @@ sooner.
 | `input.insert.maxPerRun`  | Most messages the user may insert into one run that is going on (at most 20). The model reads an inserted message in its next call, and a run that is about to end reads it first. A run that stops without reading it (a limit, an error, Stop) leaves it marked as not read.                                              |
 | `input.queue.maxMessages` | Most messages in the queue of one session. A queued message waits for the run to end; when the run ends the normal way (the model answered, no limit stopped it) and the credentials of the user last for another run, the first message starts a new run. After any other end the queue waits until the user continues it. |
 | `maxToolOutputChars`      | The output of an action is cut here, and the cut is stated.                                                                                                                                                                                                                                                                 |
+| `retention.days`          | Days after the last change of a session before it is deleted, with its runs, messages, queued messages and images. Default 90. `0` keeps every session. A session with a run that has not ended is kept until the run ends. The audit log is kept.                                                                          |
 
 When the input is over `tokenBudget`, the old outputs of tools are shortened
 to one line first. If that is not enough, the old steps are replaced by a

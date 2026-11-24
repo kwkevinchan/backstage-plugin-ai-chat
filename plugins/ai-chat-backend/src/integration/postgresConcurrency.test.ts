@@ -658,4 +658,113 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
       ).toBe(true);
     });
   });
+
+  describe('purgeExpired (SE-05)', () => {
+    const age = (id: string) =>
+      db
+        .knex('sessions')
+        .where({ id })
+        .update({ updated_at: '2020-01-01T00:00:00.000Z' });
+
+    async function oldSession(): Promise<string> {
+      const session = await db.sessions.create({
+        ownerRef: owner.userRef,
+        agentId: 'default',
+      });
+      await age(session.id);
+      return session.id;
+    }
+
+    it('two purges at the same time delete each expired session once', async () => {
+      const ids = [];
+      for (let i = 0; i < 20; i++) ids.push(await oldSession());
+      const cutoff = db.clock.now();
+
+      const [a, b] = await Promise.all([
+        db.sessions.purgeExpired(cutoff),
+        db.sessions.purgeExpired(cutoff),
+      ]);
+
+      expect(a + b).toBe(ids.length);
+      expect(await db.knex('sessions').whereIn('id', ids)).toEqual([]);
+    });
+
+    it('does not wait for a transaction that holds a session, and does not delete it', async () => {
+      const heldId = await oldSession();
+      const freeId = await oldSession();
+      let release!: () => void;
+      const holding = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      let locked!: () => void;
+      const hasLock = new Promise<void>(resolve => {
+        locked = resolve;
+      });
+      const holder = db.knex.transaction(async trx => {
+        await trx('sessions').where({ id: heldId }).forUpdate();
+        locked();
+        await holding;
+      });
+      await hasLock;
+
+      const deleted = await Promise.race([
+        db.sessions.purgeExpired(db.clock.now()),
+        new Promise<string>(resolve =>
+          setTimeout(() => resolve('waited'), 3000),
+        ),
+      ]);
+      release();
+      await holder;
+
+      expect(deleted).toBe(1);
+      await expect(db.sessions.get(heldId)).resolves.toBeDefined();
+      await expect(db.sessions.get(freeId)).rejects.toBeInstanceOf(
+        SessionNotFound,
+      );
+    });
+
+    it('does not wait for a transaction that holds a run of the session, and does not delete it', async () => {
+      // An earlier test leaves the session it was holding. That row is also
+      // past the cutoff, and this call counts every session it deletes.
+      await db
+        .knex('sessions')
+        .where('updated_at', '<', db.clock.now().toISOString())
+        .delete();
+      const session = await db.sessions.create({
+        ownerRef: owner.userRef,
+        agentId: 'default',
+      });
+      const run = await db.runs.start(session.id);
+      await db.runs.transition(run.id, 'completed', {
+        leaseOwner: run.fence.leaseOwner,
+      });
+      await age(session.id);
+      let release!: () => void;
+      const holding = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      let locked!: () => void;
+      const hasLock = new Promise<void>(resolve => {
+        locked = resolve;
+      });
+      const holder = db.knex.transaction(async trx => {
+        await trx('runs').where({ id: run.id }).forUpdate();
+        locked();
+        await holding;
+      });
+      await hasLock;
+
+      const deleted = await Promise.race([
+        db.sessions.purgeExpired(db.clock.now()),
+        new Promise<string>(resolve =>
+          setTimeout(() => resolve('waited'), 3000),
+        ),
+      ]);
+      release();
+      await holder;
+
+      expect(deleted).toBe(0);
+      await expect(db.sessions.get(session.id)).resolves.toBeDefined();
+    });
+  });
 });

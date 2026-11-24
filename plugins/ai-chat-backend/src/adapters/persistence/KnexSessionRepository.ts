@@ -181,6 +181,28 @@ export class KnexSessionRepository implements SessionRepository {
       }
     }
   }
+
+  /**
+   * Deletes sessions last changed strictly before `olderThan`, except one
+   * whose run has not ended (SE-05). Each session is its own transaction, in
+   * the same lock order as `delete`: its runs first (`id` order), then the
+   * session. On PostgreSQL a row another transaction holds is skipped
+   * (`SKIP LOCKED`), so two purges do not delete one session twice and do not
+   * wait on each other. A run inserted after the runs were locked rolls this
+   * session's attempt back and starts it again.
+   */
+  async purgeExpired(olderThan: Date): Promise<number> {
+    const cutoff = olderThan.toISOString();
+    const candidates: { id: string }[] = await this.knex('sessions')
+      .where('updated_at', '<', cutoff)
+      .orderBy('id', 'asc')
+      .select('id');
+    let deleted = 0;
+    for (const { id } of candidates) {
+      if (await deleteExpired(this.knex, id, cutoff)) deleted += 1;
+    }
+    return deleted;
+  }
 }
 
 async function lockRuns(
@@ -219,6 +241,87 @@ function isDeadlock(error: unknown): boolean {
     'code' in error &&
     (error as { code?: unknown }).code === '40P01'
   );
+}
+
+/**
+ * Deletes one session when it is still older than `cutoff` and has no run
+ * that has not ended. Returns false when it is left in place: it is gone,
+ * newer, busy with a run, or a row of it is held by another transaction.
+ */
+async function deleteExpired(
+  knex: Knex,
+  sessionId: string,
+  cutoff: string,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < DELETE_ATTEMPTS; attempt++) {
+    try {
+      return await knex.transaction(async trx => {
+        const held = await lockRunsSkipLocked(trx, sessionId);
+        // Another transaction holds a run of this session. Leave it for the
+        // next purge instead of waiting.
+        if (!held) return false;
+        const current = await runIds(trx, sessionId);
+        if (!sameIds(held, current)) throw new DeleteRestart();
+        const active = await trx('runs')
+          .where({ active_session_id: sessionId })
+          .first('id');
+        if (active) return false;
+
+        const sessionQuery = trx('sessions')
+          .where({ id: sessionId })
+          .andWhere('updated_at', '<', cutoff);
+        const session = await (isPostgres(trx)
+          ? sessionQuery.forUpdate().skipLocked()
+          : sessionQuery.forUpdate()
+        ).first('id');
+        // Gone, changed since the list, or held by another transaction.
+        if (!session) return false;
+        const after = await runIds(trx, sessionId);
+        if (!sameIds(held, after)) throw new DeleteRestart();
+        const count = await trx('sessions').where({ id: sessionId }).delete();
+        return count > 0;
+      });
+    } catch (error) {
+      if (
+        attempt < DELETE_ATTEMPTS - 1 &&
+        (error instanceof DeleteRestart || isDeadlock(error))
+      ) {
+        continue;
+      }
+      // One busy session does not fail the purge of the others. The next
+      // hour tries it again.
+      if (error instanceof DeleteRestart || isDeadlock(error)) return false;
+      throw error;
+    }
+  }
+  return false;
+}
+
+/**
+ * Locks the runs of a session in `id` order. Returns their ids, or undefined
+ * when one of them is held by another transaction (PostgreSQL skips it).
+ */
+async function lockRunsSkipLocked(
+  trx: Knex.Transaction,
+  sessionId: string,
+): Promise<string[] | undefined> {
+  const ids = await runIds(trx, sessionId);
+  const held: string[] = [];
+  for (const id of ids) {
+    const query = trx('runs').where({ id });
+    const row = await (isPostgres(trx)
+      ? query.forUpdate().skipLocked()
+      : query.forUpdate()
+    ).first('id');
+    if (!row) return undefined;
+    held.push(row.id);
+  }
+  return held;
+}
+
+function isPostgres(knex: Knex | Knex.Transaction): boolean {
+  const client = String(knex.client.config.client);
+  return client === 'pg' || client === 'postgres' || client === 'postgresql';
 }
 
 function toSession(row: SessionRow): Session {

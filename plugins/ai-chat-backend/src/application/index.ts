@@ -50,6 +50,7 @@ export {
 export { ListSessionTools } from './usecases/ListSessionTools';
 export type { SessionTool } from './usecases/ListSessionTools';
 export { ListToolsets } from './usecases/ListToolsets';
+export { PurgeExpiredSessions } from './usecases/PurgeExpiredSessions';
 export { PurgeUnusedAttachments } from './usecases/PurgeUnusedAttachments';
 export { QueueMessage } from './usecases/QueueMessage';
 export { ReadAttachment, etagOf } from './usecases/ReadAttachment';

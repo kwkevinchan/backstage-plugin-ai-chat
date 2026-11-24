@@ -55,6 +55,7 @@ describe('readAiChatConfig', () => {
       systemPrompt: undefined,
       actions: { include: [], exclude: [] },
       maxToolOutputChars: 20000,
+      retentionDays: 90,
     });
   });
 
@@ -212,6 +213,21 @@ describe('readAiChatConfig', () => {
       ),
     ).toThrow(/maxToolOutputChars must be an integer of at least 100/);
 
+    expect(
+      readAiChatConfig(
+        mockServices.rootConfig({
+          data: { aiChat: { llm, retention: { days: 30 } } },
+        }),
+      ).retentionDays,
+    ).toBe(30);
+    expect(
+      readAiChatConfig(
+        mockServices.rootConfig({
+          data: { aiChat: { llm, retention: { days: 0 } } },
+        }),
+      ).retentionDays,
+    ).toBe(0);
+
     for (const [key, value] of [
       ['runTimeoutSeconds', 601],
       ['runTimeoutSeconds', 0],
@@ -224,6 +240,15 @@ describe('readAiChatConfig', () => {
           }),
         ),
       ).toThrow(new RegExp(key));
+    }
+    for (const days of [-1, 1.5]) {
+      expect(() =>
+        readAiChatConfig(
+          mockServices.rootConfig({
+            data: { aiChat: { llm, retention: { days } } },
+          }),
+        ),
+      ).toThrow(/retention\.days/);
     }
   });
 });
@@ -255,6 +280,7 @@ describe('the configuration in the READMEs', () => {
         runTimeoutSeconds: 300,
         context: { tokenBudget: 100000, keepRecentSteps: 6 },
         maxToolOutputChars: 20000,
+        retentionDays: 90,
       });
       const catalog = new ConfigAgentCatalog(root, logger);
       expect((await catalog.toolsets()).map(t => t.id)).toEqual(
