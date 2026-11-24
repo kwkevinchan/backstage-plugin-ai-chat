@@ -36,11 +36,22 @@ export interface AiChatConfig {
 const DEFAULT_MAX_TURNS = 10;
 const DEFAULT_TIMEOUT_SECONDS = 120;
 const DEFAULT_MAX_TOOL_OUTPUT_CHARS = 20000;
+/** A cut output keeps a wrapper of about 30 characters, so a smaller limit keeps no text. */
+const MIN_MAX_TOOL_OUTPUT_CHARS = 100;
 
-function positiveInt(config: Config, key: string, fallback: number): number {
+function positiveInt(
+  config: Config,
+  key: string,
+  fallback: number,
+  min = 1,
+): number {
   const value = config.getOptionalNumber(key) ?? fallback;
-  if (!Number.isInteger(value) || value < 1) {
-    throw new InputError(`${key} must be a positive integer, got ${value}`);
+  if (!Number.isInteger(value) || value < min) {
+    throw new InputError(
+      min === 1
+        ? `${key} must be a positive integer, got ${value}`
+        : `${key} must be an integer of at least ${min}, got ${value}`,
+    );
   }
   return value;
 }
@@ -74,6 +85,7 @@ export function readAiChatConfig(root: Config): AiChatConfig {
       config,
       'maxToolOutputChars',
       DEFAULT_MAX_TOOL_OUTPUT_CHARS,
+      MIN_MAX_TOOL_OUTPUT_CHARS,
     ),
   };
 }
