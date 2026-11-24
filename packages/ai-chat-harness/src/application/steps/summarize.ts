@@ -57,7 +57,7 @@ export async function* summarize(
   try {
     for await (const chunk of deps.model.stream(
       buildSummaryInput(plan, req.budget),
-      { signal: req.signal },
+      { signal: req.signal, sessionId: req.ctx.sessionId },
     )) {
       // The request offers no tools, so a call in the answer is ignored.
       if (chunk.type === 'text') text += chunk.text;

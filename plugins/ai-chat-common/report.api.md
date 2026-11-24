@@ -7,6 +7,17 @@ import type { JsonObject } from '@backstage/types';
 import type { JsonValue } from '@backstage/types';
 
 // @public
+export interface ChatAttachment {
+  // (undocumented)
+  id: string;
+  // (undocumented)
+  mediaType: string;
+  // (undocumented)
+  name: string;
+  size: number;
+}
+
+// @public
 export interface ChatDataParts {
   // (undocumented)
   inserted: ChatInsertedData;
@@ -32,7 +43,24 @@ export interface ChatDecisionResponse {
 export type ChatDelivery = 'direct' | 'inserted' | 'queued';
 
 // @public
+export interface ChatInputConfig {
+  // (undocumented)
+  images: {
+    enabled: boolean;
+    mediaTypes: string[];
+    maxPerMessage: number;
+    maxBytes: number;
+    maxBytesPerInput: number;
+    maxPendingPerSession: number;
+  };
+  insertMaxPerRun: number;
+  queueMaxMessages: number;
+}
+
+// @public
 export interface ChatInsertedData {
+  // (undocumented)
+  attachments?: ChatAttachment[];
   // (undocumented)
   page?: ChatPageContext;
   // (undocumented)
@@ -57,6 +85,7 @@ export type ChatItemBody =
   | {
       kind: 'user_message';
       text: string;
+      attachments?: ChatAttachment[];
       page?: ChatPageContext;
       delivery?: ChatDelivery;
       insertState?: ChatInsertState;
@@ -144,6 +173,9 @@ export const chatPaths: {
   runs: (id: string) => string;
   cancelRun: (id: string, runId: string) => string;
   decision: (id: string, callId: string) => string;
+  attachments: (id: string) => string;
+  attachment: (id: string, attachmentId: string) => string;
+  inputConfig: () => string;
   insertMessage: (id: string, runId: string) => string;
   queue: (id: string) => string;
   queuedMessage: (id: string, queuedId: string) => string;
@@ -185,6 +217,7 @@ export interface ChatQueueData extends ChatQueue {
 
 // @public
 export interface ChatQueuedMessage {
+  attachments?: ChatAttachment[];
   // (undocumented)
   createdAt: string;
   // (undocumented)
@@ -321,6 +354,18 @@ export interface ChatToolsetList {
 }
 
 // @public
+export interface ChatUploadedAttachment {
+  // (undocumented)
+  id: string;
+  // (undocumented)
+  mediaType: string;
+  // (undocumented)
+  name: string;
+  // (undocumented)
+  size: number;
+}
+
+// @public
 export interface CreateChatSessionRequest {
   // (undocumented)
   agentId?: string;
@@ -342,6 +387,7 @@ export interface DecideToolCallRequest {
 
 // @public
 export interface InsertChatMessageRequest {
+  attachmentIds?: string[];
   // (undocumented)
   page?: ChatPageContext;
   // (undocumented)
@@ -365,6 +411,7 @@ export function messageIdOfRun(runId: string): string;
 
 // @public
 export interface QueueChatMessageRequest {
+  attachmentIds?: string[];
   // (undocumented)
   page?: ChatPageContext;
   // (undocumented)
@@ -385,6 +432,7 @@ export interface ResumeChatRunRequest {
 
 // @public
 export interface SendChatMessageRequest {
+  attachmentIds?: string[];
   // (undocumented)
   page?: ChatPageContext;
   // (undocumented)
@@ -408,6 +456,7 @@ export interface UpdateChatSessionRequest {
 
 // @public
 export interface UpdateQueuedMessageRequest {
+  attachmentIds?: string[];
   // (undocumented)
   page?: ChatPageContext | null;
   // (undocumented)

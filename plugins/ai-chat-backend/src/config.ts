@@ -17,8 +17,10 @@
 import { Config } from '@backstage/config';
 import { InputError } from '@backstage/errors';
 import {
+  DEFAULT_IMAGE_LIMITS,
   DEFAULT_INSERT_MAX_PER_RUN,
   DEFAULT_QUEUE_MAX_MESSAGES,
+  type ImageLimits,
 } from './domain';
 
 export interface AiChatConfig {
@@ -27,6 +29,8 @@ export interface AiChatConfig {
     apiKey?: string;
     model: string;
     timeoutMs: number;
+    /** The model reads images (IN-05). */
+    images: boolean;
   };
   maxTurns: number;
   /** Most tool calls the model requests in one run. */
@@ -41,6 +45,8 @@ export interface AiChatConfig {
     insertMaxPerRun: number;
     /** Most messages in the queue of one session. */
     queueMaxMessages: number;
+    /** The limits on the images of a message (IN-01, IN-04, IN-06). */
+    images: ImageLimits;
   };
   systemPrompt?: string;
   actions: {
@@ -93,6 +99,48 @@ function positiveInt(
   return value;
 }
 
+/**
+ * The limits on images. `maxBytesPerInput` must not be less than
+ * `maxPerMessage` times `maxBytes`: the images of the first message of a run
+ * are never left out of the input, so they must always fit.
+ */
+function readImageLimits(config: Config): ImageLimits {
+  const defaults = DEFAULT_IMAGE_LIMITS;
+  const limits: ImageLimits = {
+    maxPerMessage: positiveInt(
+      config,
+      'input.images.maxPerMessage',
+      defaults.maxPerMessage,
+    ),
+    maxBytes: positiveInt(config, 'input.images.maxBytes', defaults.maxBytes),
+    maxBytesPerInput: positiveInt(
+      config,
+      'input.images.maxBytesPerInput',
+      defaults.maxBytesPerInput,
+    ),
+    maxPendingPerSession: positiveInt(
+      config,
+      'input.images.maxPendingPerSession',
+      defaults.maxPendingPerSession,
+    ),
+    tokensPerImage: positiveInt(
+      config,
+      'input.images.tokensPerImage',
+      defaults.tokensPerImage,
+    ),
+  };
+  if (limits.maxBytesPerInput < limits.maxPerMessage * limits.maxBytes) {
+    throw new InputError(
+      `aiChat.input.images.maxBytesPerInput (${
+        limits.maxBytesPerInput
+      }) must be at least maxPerMessage times maxBytes (${
+        limits.maxPerMessage * limits.maxBytes
+      })`,
+    );
+  }
+  return limits;
+}
+
 /** Reads and checks the `aiChat` section of the configuration. */
 export function readAiChatConfig(root: Config): AiChatConfig {
   const config = root.getConfig('aiChat');
@@ -111,6 +159,7 @@ export function readAiChatConfig(root: Config): AiChatConfig {
       timeoutMs:
         positiveInt(config, 'llm.timeoutSeconds', DEFAULT_TIMEOUT_SECONDS) *
         1000,
+      images: config.getOptionalBoolean('llm.images') ?? false,
     },
     maxTurns: positiveInt(config, 'maxTurns', DEFAULT_MAX_TURNS),
     maxToolCallsPerRun: positiveInt(
@@ -150,6 +199,7 @@ export function readAiChatConfig(root: Config): AiChatConfig {
         'input.queue.maxMessages',
         DEFAULT_QUEUE_MAX_MESSAGES,
       ),
+      images: readImageLimits(config),
     },
     systemPrompt: config.getOptionalString('systemPrompt'),
     actions: {

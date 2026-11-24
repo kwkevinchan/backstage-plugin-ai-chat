@@ -21,7 +21,12 @@ import {
   type PageContext,
 } from '@kwkevinchan/ai-chat-harness';
 import { assertOwner, RunNotRunning, type Principal } from '../../domain';
-import type { SessionRepository } from '../ports';
+import {
+  bindAttachments,
+  toAttachmentRef,
+  type ImageSettings,
+} from '../attachments';
+import type { AttachmentStore, SessionRepository } from '../ports';
 
 /**
  * The user adds a message to the run that is running (IN-10). The message is
@@ -32,24 +37,38 @@ import type { SessionRepository } from '../ports';
  */
 export class InsertMessage {
   constructor(
-    private readonly deps: { sessions: SessionRepository; items: ItemLog },
+    private readonly deps: {
+      sessions: SessionRepository;
+      items: ItemLog;
+      attachments: AttachmentStore;
+      images: ImageSettings;
+    },
   ) {}
 
   /**
    * Returns the item that was written. Throws `NotSessionOwner`,
    * `RunNotRunning` (the run waits for an approval, has ended, is another run
-   * or has no live lease) or `InsertLimitReached`.
+   * or has no live lease), `InsertLimitReached`, or, for the images,
+   * `ImagesNotSupported`, `TooManyAttachments`, `UnknownAttachment` or
+   * `TooManyImageBytes` (the images of the messages of the run, with these,
+   * are over the limit; checked in the transaction of the write).
    */
   async execute(input: {
     principal: Principal;
     sessionId: string;
     runId: string;
     text: string;
+    attachmentIds?: string[];
     page?: PageContext;
   }): Promise<Item> {
     const { sessions, items } = this.deps;
     const session = await sessions.get(input.sessionId);
     assertOwner(session, input.principal);
+    const attachments = await bindAttachments(
+      this.deps,
+      session.id,
+      input.attachmentIds,
+    );
     try {
       // The owner of the lease is not checked: the host writes for the user,
       // and does not hold the lease of the run.
@@ -59,6 +78,9 @@ export class InsertMessage {
           {
             kind: 'user_message',
             text: input.text,
+            ...(attachments.length > 0 && {
+              attachments: attachments.map(toAttachmentRef),
+            }),
             ...(input.page && { page: input.page }),
             delivery: 'inserted',
           },

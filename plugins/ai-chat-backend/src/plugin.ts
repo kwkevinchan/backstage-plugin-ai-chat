@@ -25,9 +25,11 @@ import { AuditorAuditLog } from './adapters/backstage/AuditorAuditLog';
 import { ConfigAgentCatalog } from './adapters/backstage/ConfigAgentCatalog';
 import { principalFromRequest } from './adapters/backstage/principalFromRequest';
 import { createRouter } from './adapters/http';
+import { inputConfigOf } from './adapters/http/controllers/attachments';
 import { OpenAiCompatibleClient } from './adapters/model/OpenAiCompatibleClient';
 import { OpenAiCompatibleModelClient } from './adapters/model/OpenAiCompatibleModelClient';
 import {
+  KnexAttachmentStore,
   KnexItemLog,
   KnexQueuedMessageRepository,
   KnexRunRepository,
@@ -39,6 +41,9 @@ import { createHost } from './host';
 
 /** How often the runs whose lease expired are marked `expired`. */
 const EXPIRE_STALE_RUNS_EVERY = { seconds: 30 };
+
+/** How often the images that no message uses are deleted (IN-04). */
+const PURGE_ATTACHMENTS_EVERY = { hours: 1 };
 
 /**
  * Backend plugin of the AI chat. Serves the routes under `/api/ai-chat`: the
@@ -102,13 +107,16 @@ export const aiChatPlugin = createBackendPlugin({
         const ids = new UuidGenerator();
         const items = new KnexItemLog(db, clock, {
           maxInsertsPerRun: aiChat.input.insertMaxPerRun,
+          maxImageBytesPerInput: aiChat.input.images.maxBytesPerInput,
         });
+        const attachments = new KnexAttachmentStore(db, clock, ids);
         const sessions = new KnexSessionRepository(db, clock, ids);
         const host = createHost({
           items,
           sessions,
           runs: new KnexRunRepository(db, clock, ids),
           queue: new KnexQueuedMessageRepository(db, clock, ids),
+          attachments,
           agents: catalog,
           tools: new ActionsToolGateway({
             actions,
@@ -121,19 +129,25 @@ export const aiChatPlugin = createBackendPlugin({
           }),
           model: new OpenAiCompatibleModelClient(
             new OpenAiCompatibleClient(aiChat.llm),
+            { attachments, images: aiChat.llm.images, logger },
           ),
           audit: new AuditorAuditLog(auditor),
           clock,
           ids,
           logger,
           queueMaxMessages: aiChat.input.queueMaxMessages,
+          images: { ...aiChat.input.images, enabled: aiChat.llm.images },
           settings: {
             limits: {
               maxSteps: aiChat.maxTurns,
               maxToolCallsPerRun: aiChat.maxToolCallsPerRun,
               runTimeoutSeconds: aiChat.runTimeoutSeconds,
             },
-            budget: aiChat.context,
+            budget: {
+              ...aiChat.context,
+              tokensPerImage: aiChat.input.images.tokensPerImage,
+              maxImageBytesPerInput: aiChat.input.images.maxBytesPerInput,
+            },
           },
         });
         lifecycle.addShutdownHook(() => host.supervisor.shutdown());
@@ -146,11 +160,35 @@ export const aiChatPlugin = createBackendPlugin({
           },
         });
 
+        await scheduler.scheduleTask({
+          id: 'ai-chat-purge-unused-attachments',
+          frequency: PURGE_ATTACHMENTS_EVERY,
+          timeout: { minutes: 5 },
+          fn: async () => {
+            const deleted =
+              await host.useCases.purgeUnusedAttachments.execute();
+            if (deleted > 0) {
+              logger.info(`AI chat deleted ${deleted} unused images`);
+            }
+          },
+        });
+
         httpRouter.use(
           createRouter({
             principal: req =>
               principalFromRequest(req, { httpAuth, userInfo, auth }),
             useCases: host.useCases,
+            inputConfig: inputConfigOf({
+              images: {
+                enabled: aiChat.llm.images,
+                maxPerMessage: aiChat.input.images.maxPerMessage,
+                maxBytes: aiChat.input.images.maxBytes,
+                maxBytesPerInput: aiChat.input.images.maxBytesPerInput,
+                maxPendingPerSession: aiChat.input.images.maxPendingPerSession,
+              },
+              insertMaxPerRun: aiChat.input.insertMaxPerRun,
+              queueMaxMessages: aiChat.input.queueMaxMessages,
+            }),
             logger,
           }),
         );

@@ -97,6 +97,8 @@ describe('the migration of the input phase', () => {
 
   it('can be undone: the queue table and the column go, and the rest stays', async () => {
     await knex.migrate.latest(config);
+    // The migration of the attachments comes after this one.
+    await knex.migrate.down(config);
     await knex.migrate.down(config);
     expect(await knex.schema.hasTable('queued_messages')).toBe(false);
     expect(await knex.schema.hasColumn('runs', 'read_up_to_seq')).toBe(false);

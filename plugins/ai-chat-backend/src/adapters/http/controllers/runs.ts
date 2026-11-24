@@ -73,11 +73,12 @@ export class RunsController {
     body: unknown,
     res: Response,
   ): Promise<void> {
-    const { text, page } = parse(sendMessageBody, body);
+    const { text, attachmentIds, page } = parse(sendMessageBody, body);
     const handle = await this.useCases.sendMessage.execute({
       principal,
       sessionId,
       text,
+      ...(attachmentIds && { attachmentIds }),
       ...(page && { page }),
     });
     await this.stream(res, handle);
@@ -139,12 +140,13 @@ export class RunsController {
     runId: string,
     body: unknown,
   ): Promise<ChatItem> {
-    const { text, page } = parse(insertMessageBody, body);
+    const { text, attachmentIds, page } = parse(insertMessageBody, body);
     return this.useCases.insertMessage.execute({
       principal,
       sessionId,
       runId,
       text,
+      ...(attachmentIds && { attachmentIds }),
       ...(page && { page }),
     });
   }

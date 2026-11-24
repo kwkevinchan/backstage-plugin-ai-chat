@@ -23,7 +23,14 @@ import type {
   ToolDescriptor,
 } from '@kwkevinchan/ai-chat-harness';
 import type { JSONSchema7 } from 'json-schema';
-import type { LlmClient, LlmMessage, LlmTool } from './OpenAiCompatibleClient';
+import type { AttachmentStore, Logger } from '../../application/ports';
+import { AttachmentNotFound } from '../../domain';
+import type {
+  LlmClient,
+  LlmContentPart,
+  LlmMessage,
+  LlmTool,
+} from './OpenAiCompatibleClient';
 
 /** The longest function name that OpenAI-compatible servers accept. */
 const MAX_TOOL_NAME_LENGTH = 64;
@@ -40,19 +47,39 @@ const MAX_TOOL_NAME_LENGTH = 64;
  * - The arguments are text that may not be valid JSON. A text that does not
  *   parse is passed as a string, which the loop answers with an `invalid`
  *   result; an empty text is `{}`.
+ * - The images of a user message are read from the `AttachmentStore`, of the
+ *   session of the call, and sent as `image_url` parts with a data URL
+ *   (`data:<type>;base64,<bytes>`) after the text. A message without images
+ *   keeps a string as its content. An image that cannot be read (it was
+ *   deleted) becomes a line `[image: <name>, not available]` in the text, and
+ *   the call goes on. The bytes are read at every call and not kept.
  * - The text arrives as it is generated; the tool calls arrive when the
  *   answer is complete, because the server sends the arguments in pieces.
  */
 export class OpenAiCompatibleModelClient implements ModelClient {
-  readonly capabilities = { parallelToolCalls: false };
+  readonly capabilities: ModelClient['capabilities'];
 
-  constructor(private readonly llm: LlmClient) {}
+  /**
+   * @param deps.images - `aiChat.llm.images`: the model reads images. The
+   *   loop never gives an image to a model that does not.
+   */
+  constructor(
+    private readonly llm: LlmClient,
+    private readonly deps: {
+      attachments: AttachmentStore;
+      images: boolean;
+      logger: Logger;
+    },
+  ) {
+    this.capabilities = { parallelToolCalls: false, images: deps.images };
+  }
 
   async *stream(
     input: ModelInput,
-    opts: { signal: AbortSignal },
+    opts: { signal: AbortSignal; sessionId: string },
   ): AsyncIterable<ModelChunk> {
     const names = toolNames(input);
+    const messages = await this.toLlmMessages(input, names, opts.sessionId);
     const toolIdOf = new Map([...names].map(([id, name]) => [name, id]));
     const pending: string[] = [];
     const waiters: (() => void)[] = [];
@@ -62,7 +89,7 @@ export class OpenAiCompatibleModelClient implements ModelClient {
 
     const result = this.llm
       .complete({
-        messages: toLlmMessages(input, names),
+        messages,
         tools: input.tools.map(tool => toLlmTool(tool, names)),
         signal: opts.signal,
         onText: text => {
@@ -99,6 +126,69 @@ export class OpenAiCompatibleModelClient implements ModelClient {
         input: parseArguments(call.arguments),
       };
     }
+  }
+
+  private async toLlmMessages(
+    input: ModelInput,
+    names: Map<string, string>,
+    sessionId: string,
+  ): Promise<LlmMessage[]> {
+    const messages: LlmMessage[] = [{ role: 'system', content: input.system }];
+    for (const message of input.messages) {
+      messages.push(
+        message.role === 'user'
+          ? await this.toUserMessage(message, sessionId)
+          : toLlmMessage(message, names),
+      );
+    }
+    return messages;
+  }
+
+  private async toUserMessage(
+    message: Extract<ModelMessage, { role: 'user' }>,
+    sessionId: string,
+  ): Promise<LlmMessage> {
+    if (!message.images || message.images.length === 0) {
+      return { role: 'user', content: message.content };
+    }
+    const parts: LlmContentPart[] = [];
+    const missing: string[] = [];
+    for (const image of message.images) {
+      try {
+        const { bytes, meta } = await this.deps.attachments.get(
+          sessionId,
+          image.attachmentId,
+        );
+        parts.push({
+          type: 'image_url',
+          image_url: {
+            url: `data:${meta.mediaType};base64,${Buffer.from(bytes).toString(
+              'base64',
+            )}`,
+          },
+        });
+      } catch (error) {
+        if (!(error instanceof AttachmentNotFound)) throw error;
+        this.deps.logger.warn('An image of a message is not available', {
+          sessionId,
+          attachmentId: image.attachmentId,
+        });
+        missing.push(`[image: ${image.name}, not available]`);
+      }
+    }
+    if (parts.length === 0) {
+      return {
+        role: 'user',
+        content: [message.content, ...missing].join('\n'),
+      };
+    }
+    return {
+      role: 'user',
+      content: [
+        { type: 'text', text: [message.content, ...missing].join('\n') },
+        ...parts,
+      ],
+    };
   }
 }
 
@@ -142,23 +232,13 @@ function toLlmTool(tool: ToolDescriptor, names: Map<string, string>): LlmTool {
   };
 }
 
-function toLlmMessages(
-  input: ModelInput,
-  names: Map<string, string>,
-): LlmMessage[] {
-  const messages: LlmMessage[] = [{ role: 'system', content: input.system }];
-  for (const message of input.messages) {
-    messages.push(toLlmMessage(message, names));
-  }
-  return messages;
-}
-
 function toLlmMessage(
   message: ModelMessage,
   names: Map<string, string>,
 ): LlmMessage {
   switch (message.role) {
     case 'user':
+      // A message with images is made by `toUserMessage`.
       return { role: 'user', content: message.content };
     case 'tool':
       return {

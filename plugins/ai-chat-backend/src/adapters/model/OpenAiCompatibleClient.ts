@@ -19,8 +19,13 @@ import type { JSONSchema7 } from 'json-schema';
 import type { AiChatConfig } from '../../config';
 
 /** A message in the form of the Chat Completions API. */
+export type LlmContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
 export type LlmMessage =
-  | { role: 'system' | 'user'; content: string }
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: string | LlmContentPart[] }
   | {
       role: 'assistant';
       content: string | null;
@@ -94,7 +99,12 @@ function safeCallId(id: unknown): string {
  * header; it is never logged or put in an error message.
  */
 export class OpenAiCompatibleClient implements LlmClient {
-  constructor(private readonly config: AiChatConfig['llm']) {}
+  constructor(
+    private readonly config: Pick<
+      AiChatConfig['llm'],
+      'baseUrl' | 'apiKey' | 'model' | 'timeoutMs'
+    >,
+  ) {}
 
   async complete(request: LlmRequest): Promise<LlmResult> {
     const timeout = AbortSignal.timeout(this.config.timeoutMs);

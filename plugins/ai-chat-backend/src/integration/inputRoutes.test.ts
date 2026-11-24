@@ -30,7 +30,7 @@ import {
   readMessage,
 } from '../adapters/http/__testUtils__/uiMessageStream';
 import { principalFromRequest } from '../adapters/backstage/principalFromRequest';
-import { createWorld, until } from './__testUtils__';
+import { createWorld, testInputConfig, until } from './__testUtils__';
 
 type World = Awaited<ReturnType<typeof createWorld>>;
 type Backend = ReturnType<World['backend']> & { app: express.Express };
@@ -74,6 +74,7 @@ describe('the routes of the inserted messages and the queue', () => {
               auth: mockServices.auth(),
             }),
           useCases: b.useCases,
+          inputConfig: testInputConfig,
           logger: b.logger,
         }),
       )
@@ -308,6 +309,7 @@ describe('the routes of the inserted messages and the queue', () => {
         id: expect.any(String),
         position: 1,
         text: 'one',
+        attachments: [],
         page: { path: '/a' },
         createdAt: expect.any(String),
         updatedAt: expect.any(String),

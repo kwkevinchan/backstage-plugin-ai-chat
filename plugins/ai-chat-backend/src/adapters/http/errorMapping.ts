@@ -24,7 +24,11 @@ import {
 import { InvalidRunTransition, LeaseLost } from '@kwkevinchan/ai-chat-harness';
 import {
   AgentNotFound,
+  AttachmentNotFound,
+  AttachmentTooLarge,
+  ImagesNotSupported,
   InsertLimitReached,
+  InvalidAttachment,
   NoActiveRun,
   NotSessionOwner,
   QueueChanged,
@@ -36,9 +40,14 @@ import {
   RunNotWaiting,
   SessionNotFound,
   ShuttingDown,
+  TooManyAttachments,
+  TooManyImageBytes,
+  TooManyPendingAttachments,
   ToolCallNotFound,
   ToolCallNotWaiting,
+  UnknownAttachment,
   UnknownToolset,
+  UnsupportedAttachmentType,
 } from '../../domain';
 
 const UNEXPECTED_TEXT = 'The request failed.';
@@ -67,6 +76,12 @@ class NamedHttpError extends CustomErrorBase {
  * - A run is active, or a call or a run is not in the state the request needs:
  *   409. The errors of the input phase (a message that cannot be inserted or
  *   queued, a queue that changed) keep their own name in `error.name`.
+ * - The errors of an image: the type is not supported 415, the image is too
+ *   large 413, the content or the name is not usable 400, the session has
+ *   too many images in no message 409, and a message that names an image of
+ *   another session 400 (`AttachmentNotFound`); the image itself, when read
+ *   by its id, is 404. A message with too many images, with images for a model
+ *   that cannot read them, or with more image bytes than the run may have: 400.
  * - A toolset or an agent that the request names and does not exist: 400.
  * - The backend is shutting down: 503.
  * - The run was taken over or ended by someone else in the meantime
@@ -110,6 +125,29 @@ export function toHttpError(
   }
   if (error instanceof QueuedMessageNotFound) {
     return new NamedHttpError(error.name, 404, error.message);
+  }
+  if (error instanceof UnsupportedAttachmentType) {
+    return new NamedHttpError(error.name, 415, error.message);
+  }
+  if (error instanceof AttachmentTooLarge) {
+    return new NamedHttpError(error.name, 413, error.message);
+  }
+  if (
+    error instanceof InvalidAttachment ||
+    error instanceof TooManyAttachments ||
+    error instanceof ImagesNotSupported ||
+    error instanceof TooManyImageBytes
+  ) {
+    return new NamedHttpError(error.name, 400, error.message);
+  }
+  if (error instanceof UnknownAttachment) {
+    return new NamedHttpError('AttachmentNotFound', 400, error.message);
+  }
+  if (error instanceof AttachmentNotFound) {
+    return new NamedHttpError(error.name, 404, error.message);
+  }
+  if (error instanceof TooManyPendingAttachments) {
+    return new NamedHttpError(error.name, 409, error.message);
   }
   if (error instanceof UnknownToolset || error instanceof AgentNotFound) {
     return new InputError(error.message);

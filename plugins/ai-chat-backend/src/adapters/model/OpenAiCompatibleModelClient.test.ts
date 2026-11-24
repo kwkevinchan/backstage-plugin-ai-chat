@@ -15,6 +15,8 @@
  */
 
 import type { ModelChunk, ModelInput } from '@kwkevinchan/ai-chat-harness';
+import { mockServices } from '@backstage/backend-test-utils';
+import type { AttachmentStore } from '../../application/ports';
 import type { LlmClient, LlmRequest } from './OpenAiCompatibleClient';
 import { OpenAiCompatibleModelClient } from './OpenAiCompatibleModelClient';
 
@@ -54,6 +56,15 @@ async function collect(stream: AsyncIterable<ModelChunk>) {
 }
 
 const signal = new AbortController().signal;
+const opts = { signal, sessionId: 'session-1' };
+
+// A model client that reads no image: the store has none.
+const modelClient = (llm: LlmClient) =>
+  new OpenAiCompatibleModelClient(llm, {
+    attachments: {} as AttachmentStore,
+    images: false,
+    logger: mockServices.logger.mock(),
+  });
 
 describe('OpenAiCompatibleModelClient', () => {
   it('sends names the API accepts, and maps the answer back to tool ids', async () => {
@@ -75,9 +86,7 @@ describe('OpenAiCompatibleModelClient', () => {
         };
       },
     };
-    const chunks = await collect(
-      new OpenAiCompatibleModelClient(llm).stream(input, { signal }),
-    );
+    const chunks = await collect(modelClient(llm).stream(input, opts));
     expect(chunks).toEqual([
       { type: 'text', text: 'Hel' },
       { type: 'text', text: 'lo' },
@@ -135,9 +144,7 @@ describe('OpenAiCompatibleModelClient', () => {
         };
       },
     };
-    const chunks = await collect(
-      new OpenAiCompatibleModelClient(llm).stream(input, { signal }),
-    );
+    const chunks = await collect(modelClient(llm).stream(input, opts));
     expect(chunks.map(c => (c as any).input)).toEqual(['{oops', {}, {}]);
     expect((chunks[2] as any).toolId).toBe('unknown_tool');
   });
@@ -148,9 +155,9 @@ describe('OpenAiCompatibleModelClient', () => {
         throw new Error('server down');
       },
     };
-    await expect(
-      collect(new OpenAiCompatibleModelClient(llm).stream(input, { signal })),
-    ).rejects.toThrow('server down');
+    await expect(collect(modelClient(llm).stream(input, opts))).rejects.toThrow(
+      'server down',
+    );
   });
 
   it('makes two tool ids that give one name unique', async () => {
@@ -163,9 +170,9 @@ describe('OpenAiCompatibleModelClient', () => {
     };
     const tool = (id: string) => ({ ...input.tools[0], id });
     await collect(
-      new OpenAiCompatibleModelClient(llm).stream(
+      modelClient(llm).stream(
         { system: '', messages: [], tools: [tool('a:b'), tool('a_b')] },
-        { signal },
+        opts,
       ),
     );
     expect(seen!.tools.map(t => t.function.name).sort()).toEqual([

@@ -53,13 +53,15 @@ export async function kit(options: {
   limits?: Partial<Limits>;
   policy?: PolicySettings;
   budget?: ContextBudget;
+  /** What the scripted model can do, besides the defaults of `ScriptedModel`. */
+  capabilities?: ConstructorParameters<typeof ScriptedModel>[1];
   /** The log before the run: the first item is normally a user message. */
   log?: ItemBody[];
 }) {
   const clock = new FakeClock();
   const items = new InMemoryItemLog({ clock });
   items.grantLease(sessionId, fence);
-  const model = new ScriptedModel(options.script);
+  const model = new ScriptedModel(options.script, options.capabilities);
   const tools = new FakeToolGateway(options.tools ?? []);
   const run = new FakeRunControl();
   const ids = new SequentialIdGenerator('call');

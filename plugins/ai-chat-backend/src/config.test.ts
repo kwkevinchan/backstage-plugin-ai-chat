@@ -35,12 +35,23 @@ describe('readAiChatConfig', () => {
         apiKey: undefined,
         model: 'm',
         timeoutMs: 120000,
+        images: false,
       },
       maxTurns: 10,
       maxToolCallsPerRun: 30,
       runTimeoutSeconds: 300,
       context: { tokenBudget: 100000, keepRecentSteps: 6 },
-      input: { insertMaxPerRun: 5, queueMaxMessages: 5 },
+      input: {
+        insertMaxPerRun: 5,
+        queueMaxMessages: 5,
+        images: {
+          maxPerMessage: 4,
+          maxBytes: 5242880,
+          maxBytesPerInput: 20971520,
+          maxPendingPerSession: 12,
+          tokensPerImage: 1600,
+        },
+      },
       systemPrompt: undefined,
       actions: { include: [], exclude: [] },
       maxToolOutputChars: 20000,
@@ -54,7 +65,7 @@ describe('readAiChatConfig', () => {
       ).input;
     expect(
       read({ insert: { maxPerRun: 2 }, queue: { maxMessages: 9 } }),
-    ).toEqual({ insertMaxPerRun: 2, queueMaxMessages: 9 });
+    ).toMatchObject({ insertMaxPerRun: 2, queueMaxMessages: 9 });
     expect(() => read({ insert: { maxPerRun: 0 } })).toThrow(
       /input\.insert\.maxPerRun must be a positive integer/,
     );
@@ -64,6 +75,90 @@ describe('readAiChatConfig', () => {
     expect(() => read({ queue: { maxMessages: 1.5 } })).toThrow(
       /input\.queue\.maxMessages must be a positive integer/,
     );
+  });
+
+  describe('images (IN-01, IN-05, IN-06)', () => {
+    const readImages = (images: JsonObject | undefined, llmImages?: boolean) =>
+      readAiChatConfig(
+        mockServices.rootConfig({
+          data: {
+            aiChat: {
+              llm: {
+                ...llm,
+                ...(llmImages !== undefined && { images: llmImages }),
+              },
+              input: { images: images ?? {} },
+            },
+          },
+        }),
+      );
+
+    it('leaves the model without images unless the configuration says it reads them', () => {
+      expect(readImages(undefined).llm.images).toBe(false);
+      expect(readImages(undefined, true).llm.images).toBe(true);
+      expect(readImages(undefined, false).llm.images).toBe(false);
+    });
+
+    it('reads the limits, and has the defaults of the specification', () => {
+      expect(readImages({}).input.images).toEqual({
+        maxPerMessage: 4,
+        maxBytes: 5 * 1024 * 1024,
+        maxBytesPerInput: 20 * 1024 * 1024,
+        maxPendingPerSession: 12,
+        tokensPerImage: 1600,
+      });
+      expect(
+        readImages({
+          maxPerMessage: 2,
+          maxBytes: 1000,
+          maxBytesPerInput: 5000,
+          maxPendingPerSession: 3,
+          tokensPerImage: 800,
+        }).input.images,
+      ).toEqual({
+        maxPerMessage: 2,
+        maxBytes: 1000,
+        maxBytesPerInput: 5000,
+        maxPendingPerSession: 3,
+        tokensPerImage: 800,
+      });
+    });
+
+    it('refuses a limit that is not a positive integer', () => {
+      for (const key of [
+        'maxPerMessage',
+        'maxBytes',
+        'maxBytesPerInput',
+        'maxPendingPerSession',
+        'tokensPerImage',
+      ]) {
+        expect(() => readImages({ [key]: 0 })).toThrow(
+          new RegExp(`input\\.images\\.${key} must be a positive integer`),
+        );
+        expect(() => readImages({ [key]: 1.5 })).toThrow(
+          new RegExp(`input\\.images\\.${key} must be a positive integer`),
+        );
+      }
+    });
+
+    it('stops the backend when maxBytesPerInput is less than maxPerMessage times maxBytes, and takes it when it is equal', () => {
+      expect(() =>
+        readImages({
+          maxPerMessage: 4,
+          maxBytes: 1000,
+          maxBytesPerInput: 3999,
+        }),
+      ).toThrow(
+        /maxBytesPerInput \(3999\) must be at least maxPerMessage times maxBytes \(4000\)/,
+      );
+      expect(
+        readImages({ maxPerMessage: 4, maxBytes: 1000, maxBytesPerInput: 4000 })
+          .input.images.maxBytesPerInput,
+      ).toBe(4000);
+      // The defaults satisfy it: 4 times 5 MB is 20 MB.
+      expect(() => readImages({})).not.toThrow();
+      expect(() => readImages({ maxPerMessage: 5 })).toThrow(/at least/);
+    });
   });
 
   it('reads everything that can be set', () => {

@@ -37,7 +37,9 @@ import {
   ListSessions,
   ListSessionTools,
   ListToolsets,
+  PurgeUnusedAttachments,
   QueueMessage,
+  ReadAttachment,
   ReorderQueue,
   ResumeQueue,
   ResumeRun,
@@ -46,19 +48,22 @@ import {
   StartNextQueued,
   UpdateQueuedMessage,
   UpdateSession,
+  UploadAttachment,
   createAfterRun,
   type AfterRun,
+  type ImageSettings,
   type RunSettings,
 } from './application';
 import type {
   AgentCatalog,
+  AttachmentStore,
   AuditLog,
   Logger,
   QueuedMessageRepository,
   RunRepository,
   SessionRepository,
 } from './application/ports';
-import { DEFAULT_QUEUE_MAX_MESSAGES } from './domain';
+import { DEFAULT_IMAGE_LIMITS, DEFAULT_QUEUE_MAX_MESSAGES } from './domain';
 
 /** The ports of the host: what the use cases and the supervisor run on. */
 export type HostPorts = {
@@ -67,6 +72,7 @@ export type HostPorts = {
   runs: RunRepository;
   queue: QueuedMessageRepository;
   agents: AgentCatalog;
+  attachments: AttachmentStore;
   tools: ToolGateway;
   model: ModelClient;
   audit: AuditLog;
@@ -76,6 +82,12 @@ export type HostPorts = {
   settings: RunSettings;
   /** `aiChat.input.queue.maxMessages`; 5 by default. */
   queueMaxMessages?: number;
+  /**
+   * The limits on images and whether the model reads them
+   * (`aiChat.input.images`, `aiChat.llm.images`). Images are off, with the
+   * default limits, when not given.
+   */
+  images?: ImageSettings;
   /** How often the supervisor renews the lease of a run; 10 seconds by default. */
   heartbeatMs?: number;
 };
@@ -96,7 +108,12 @@ export function createHost(ports: HostPorts) {
     clock,
     logger,
     settings,
+    attachments,
   } = ports;
+  const images: ImageSettings = ports.images ?? {
+    ...DEFAULT_IMAGE_LIMITS,
+    enabled: false,
+  };
   const advance = new AdvanceRun({
     items,
     model: ports.model,
@@ -150,6 +167,8 @@ export function createHost(ports: HostPorts) {
         agents,
         clock,
         settings,
+        attachments,
+        images,
       }),
       decideApproval: new DecideApproval({
         sessions,
@@ -171,13 +190,25 @@ export function createHost(ports: HostPorts) {
         settings,
       }),
       cancelRun: new CancelRun({ sessions, runs, supervisor }),
-      insertMessage: new InsertMessage({ sessions, items }),
+      insertMessage: new InsertMessage({
+        sessions,
+        items,
+        attachments,
+        images,
+      }),
       queueMessage: new QueueMessage({
         sessions,
         queue,
         maxMessages: ports.queueMaxMessages ?? DEFAULT_QUEUE_MAX_MESSAGES,
+        attachments,
+        images,
       }),
-      updateQueuedMessage: new UpdateQueuedMessage({ sessions, queue }),
+      updateQueuedMessage: new UpdateQueuedMessage({
+        sessions,
+        queue,
+        attachments,
+        images,
+      }),
       deleteQueuedMessage: new DeleteQueuedMessage({ sessions, queue }),
       reorderQueue: new ReorderQueue({ sessions, queue, runs }),
       listQueue: new ListQueue({ sessions, queue, runs }),
@@ -185,6 +216,12 @@ export function createHost(ports: HostPorts) {
       followSession: new FollowSession({ sessions, runs, items, supervisor }),
       listToolsets: new ListToolsets({ agents }),
       listSessionTools: new ListSessionTools({ sessions, tools: ports.tools }),
+      uploadAttachment: new UploadAttachment({ sessions, attachments, images }),
+      readAttachment: new ReadAttachment({ sessions, attachments }),
+      purgeUnusedAttachments: new PurgeUnusedAttachments({
+        attachments,
+        clock,
+      }),
       expireStaleRuns: new ExpireStaleRuns({ runs, logger }),
     },
   };

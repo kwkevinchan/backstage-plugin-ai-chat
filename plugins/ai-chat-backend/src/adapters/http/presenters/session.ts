@@ -15,6 +15,7 @@
  */
 
 import type {
+  ChatAttachment,
   ChatItem,
   ChatQueue,
   ChatQueuedMessage,
@@ -55,11 +56,27 @@ export function toChatRun(run: Run): ChatRun {
   };
 }
 
+/** The fields of an image that the owner gets: no hash, no session. */
+export function toChatAttachment(meta: {
+  id: string;
+  mediaType: string;
+  name: string;
+  size: number;
+}): ChatAttachment {
+  return {
+    id: meta.id,
+    mediaType: meta.mediaType,
+    name: meta.name,
+    size: meta.size,
+  };
+}
+
 export function toChatQueuedMessage(message: QueuedMessage): ChatQueuedMessage {
   return {
     id: message.id,
     position: message.position,
     text: message.text,
+    attachments: message.attachments.map(toChatAttachment),
     ...(message.page && { page: message.page }),
     createdAt: message.createdAt,
     updatedAt: message.updatedAt,

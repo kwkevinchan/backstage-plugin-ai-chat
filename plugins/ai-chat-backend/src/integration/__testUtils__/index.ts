@@ -27,8 +27,10 @@ import {
   type ScriptedStep,
 } from '@kwkevinchan/ai-chat-harness/testing';
 import type { ItemLog, Limits } from '@kwkevinchan/ai-chat-harness';
+import type { ChatInputConfig } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import { ActionsToolGateway } from '../../adapters/backstage/ActionsToolGateway';
 import { ConfigAgentCatalog } from '../../adapters/backstage/ConfigAgentCatalog';
+import { KnexAttachmentStore } from '../../adapters/persistence/KnexAttachmentStore';
 import { KnexItemLog } from '../../adapters/persistence/KnexItemLog';
 import { KnexQueuedMessageRepository } from '../../adapters/persistence/KnexQueuedMessageRepository';
 import { KnexRunRepository } from '../../adapters/persistence/KnexRunRepository';
@@ -36,10 +38,11 @@ import { KnexSessionRepository } from '../../adapters/persistence/KnexSessionRep
 import {
   CreateSession,
   type HostEvent,
+  type ImageSettings,
   type RunHandle,
 } from '../../application';
 import type { AuditEvent, AuditLog } from '../../application/ports';
-import type { Principal, Run } from '../../domain';
+import { DEFAULT_IMAGE_LIMITS, type Principal, type Run } from '../../domain';
 import { createHost } from '../../host';
 import { createMigratedDb } from '../../__testUtils__';
 
@@ -149,13 +152,40 @@ export const mallory: Principal = {
   credentials: mockCredentials.user('user:default/mallory'),
 };
 
+/** The answer of `GET /input-config` for a router in a test. */
+export const testInputConfig: ChatInputConfig = {
+  images: {
+    enabled: true,
+    mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+    maxPerMessage: 4,
+    maxBytes: 5 * 1024 * 1024,
+    maxBytesPerInput: 20 * 1024 * 1024,
+    maxPendingPerSession: 12,
+  },
+  insertMaxPerRun: 5,
+  queueMaxMessages: 5,
+};
+
 export async function createWorld(
-  options: { leaseSeconds?: number; limits?: Partial<Limits> } = {},
+  options: {
+    leaseSeconds?: number;
+    limits?: Partial<Limits>;
+    /** The limits on images, and whether the model reads them (it does by default). */
+    images?: Partial<ImageSettings>;
+  } = {},
 ) {
   const knex = await createMigratedDb();
   const clock = new FakeClock();
   const ids = new SequentialIdGenerator('id');
-  const items = new KnexItemLog(knex, clock);
+  const images: ImageSettings = {
+    ...DEFAULT_IMAGE_LIMITS,
+    enabled: true,
+    ...options.images,
+  };
+  const items = new KnexItemLog(knex, clock, {
+    maxImageBytesPerInput: images.maxBytesPerInput,
+  });
+  const attachments = new KnexAttachmentStore(knex, clock, ids);
   const sessions = new KnexSessionRepository(knex, clock, ids);
   const actions = new FakeActions();
   const audit = new RecordingAuditLog();
@@ -195,7 +225,7 @@ export async function createWorld(
       ) => Promise<Run>;
     } = {},
   ) {
-    const model = new ScriptedModel(script);
+    const model = new ScriptedModel(script, { images: images.enabled });
     const runs = new KnexRunRepository(knex, clock, ids, {
       leaseSeconds: options.leaseSeconds,
     });
@@ -219,6 +249,8 @@ export async function createWorld(
       sessions,
       runs: hooked,
       queue,
+      attachments,
+      images,
       agents: catalog,
       tools: new ActionsToolGateway({
         actions,
@@ -247,6 +279,7 @@ export async function createWorld(
     clock,
     items,
     queue,
+    attachments,
     sessions,
     actions,
     audit,

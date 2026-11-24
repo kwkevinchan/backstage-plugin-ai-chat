@@ -18,6 +18,11 @@ import express from 'express';
 import Router from 'express-promise-router';
 import type { Logger } from '../../application/ports';
 import type { Principal } from '../../domain';
+import type { ChatInputConfig } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import {
+  AttachmentsController,
+  type AttachmentUseCases,
+} from './controllers/attachments';
 import { QueueController, type QueueUseCases } from './controllers/queue';
 import { RunsController, type RunUseCases } from './controllers/runs';
 import {
@@ -29,7 +34,9 @@ import { toHttpError } from './errorMapping';
 export type RouterOptions = {
   /** The signed-in user of the request. Refuses a request that has none. */
   principal(req: express.Request): Promise<Principal>;
-  useCases: SessionUseCases & RunUseCases & QueueUseCases;
+  useCases: SessionUseCases & RunUseCases & QueueUseCases & AttachmentUseCases;
+  /** The answer of `GET /input-config`. */
+  inputConfig: ChatInputConfig;
   logger: Logger;
   /** The time between the comment lines that keep an idle stream open; 15 seconds by default. */
   keepAliveMs?: number;
@@ -41,10 +48,11 @@ export type RouterOptions = {
  * error of Backstage that the backend answers with (`toHttpError`).
  */
 export function createRouter(options: RouterOptions): express.Router {
-  const { principal, useCases, logger, keepAliveMs } = options;
+  const { principal, useCases, logger, keepAliveMs, inputConfig } = options;
   const sessions = new SessionsController(useCases);
   const runs = new RunsController(useCases, logger, keepAliveMs);
   const queue = new QueueController(useCases);
+  const attachments = new AttachmentsController(useCases);
   const router = Router();
   router.use(express.json({ limit: '64kb' }));
 
@@ -121,6 +129,32 @@ export function createRouter(options: RouterOptions): express.Router {
     }),
   );
 
+  router.get(
+    '/input-config',
+    route(async (_user, _req, res) => {
+      res.json(inputConfig);
+    }),
+  );
+  router.post(
+    '/sessions/:id/attachments',
+    route(async (user, req, res) => {
+      res
+        .status(201)
+        .json(await attachments.upload(user, req.params.id, req, res));
+    }),
+  );
+  router.get(
+    '/sessions/:id/attachments/:attachmentId',
+    route(async (user, req, res) => {
+      await attachments.read(
+        user,
+        req.params.id,
+        req.params.attachmentId,
+        req,
+        res,
+      );
+    }),
+  );
   router.post(
     '/sessions/:id/runs',
     route(async (user, req, res) => {

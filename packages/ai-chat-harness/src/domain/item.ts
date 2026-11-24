@@ -71,8 +71,24 @@ export type PageContext = { path: string; entityRef?: string };
 export type Delivery = 'direct' | 'inserted' | 'queued';
 
 /**
+ * An image attached to a message of the user (IN-01): the id of the
+ * attachment the host stores, with what the log and the model input need to
+ * show it without reading the bytes. `name` is only a label.
+ *
+ * @public
+ */
+export type AttachmentRef = {
+  id: string;
+  mediaType: string;
+  name: string;
+  /** The size in bytes; the budget of image bytes (IN-06) counts it. */
+  size: number;
+};
+
+/**
  * The message of the user. `page` is where the user was; `buildModelInput`
- * tells the model with one line before the text.
+ * tells the model with one line before the text. `attachments` are the
+ * images of the message, in the order the user gave them.
  *
  * @public
  */
@@ -80,6 +96,7 @@ export type UserMessageBody = {
   kind: 'user_message';
   text: string;
   page?: PageContext;
+  attachments?: AttachmentRef[];
   delivery?: Delivery;
 };
 

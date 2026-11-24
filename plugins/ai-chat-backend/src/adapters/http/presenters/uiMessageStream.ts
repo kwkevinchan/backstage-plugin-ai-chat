@@ -272,6 +272,9 @@ export class UiMessageStreamPresenter {
         data: {
           seq: message.seq,
           text: message.text,
+          ...(message.attachments?.length && {
+            attachments: message.attachments,
+          }),
           ...(message.page && { page: message.page }),
         },
       },

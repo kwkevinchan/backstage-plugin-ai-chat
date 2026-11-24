@@ -19,18 +19,26 @@ import {
   SequentialIdGenerator,
 } from '@kwkevinchan/ai-chat-harness/testing';
 import type { Knex } from 'knex';
+import { KnexAttachmentStore } from '../adapters/persistence/KnexAttachmentStore';
 import { KnexItemLog } from '../adapters/persistence/KnexItemLog';
 import { KnexQueuedMessageRepository } from '../adapters/persistence/KnexQueuedMessageRepository';
 import { KnexRunRepository } from '../adapters/persistence/KnexRunRepository';
 import { KnexSessionRepository } from '../adapters/persistence/KnexSessionRepository';
 import { InsertMessage } from '../application';
 import {
+  DEFAULT_IMAGE_LIMITS,
+  InsertLimitReached,
   NoActiveRun,
   QueueFull,
   RunNotRunning,
+  TooManyImageBytes,
+  TooManyPendingAttachments,
+  UnknownAttachment,
   UnreadMessages,
+  type AttachmentMeta,
   type LeasedRun,
 } from '../domain';
+import { IMAGES } from '../__testUtils__/images';
 import { createMigratedDb } from '../__testUtils__';
 
 /**
@@ -67,6 +75,10 @@ type Db = {
   items: KnexItemLog;
   queue: KnexQueuedMessageRepository;
   insertMessage: InsertMessage;
+  /** Inserts messages with images; the model reads images. */
+  insertImages: InsertMessage;
+  attachments: KnexAttachmentStore;
+  clock: FakeClock;
 };
 
 /** Lets the other side start first or second. */
@@ -184,9 +196,19 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
     db.runs = new KnexRunRepository(db.knex, clock, ids);
     db.items = new KnexItemLog(db.knex, clock, { maxInsertsPerRun: 1000 });
     db.queue = new KnexQueuedMessageRepository(db.knex, clock, ids);
+    db.clock = clock;
+    db.attachments = new KnexAttachmentStore(db.knex, clock, ids);
     db.insertMessage = new InsertMessage({
       sessions: db.sessions,
       items: db.items,
+      attachments: db.attachments,
+      images: { ...DEFAULT_IMAGE_LIMITS, enabled: false },
+    });
+    db.insertImages = new InsertMessage({
+      sessions: db.sessions,
+      items: db.items,
+      attachments: db.attachments,
+      images: { ...DEFAULT_IMAGE_LIMITS, enabled: true },
     });
   });
 
@@ -343,5 +365,248 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
         r.added ? r.inQueue === 1 : r.refused && r.inQueue === 0,
       ),
     ).toBe(true);
+  });
+  describe('images (IN-03, IN-04, IN-06)', () => {
+    const upload = (
+      sessionId: string,
+      maxPending = 100,
+    ): Promise<AttachmentMeta> =>
+      db.attachments.put({
+        sessionId,
+        ownerRef: owner.userRef,
+        mediaType: 'image/png',
+        name: 'a.png',
+        bytes: IMAGES['image/png'],
+        maxPending,
+      });
+
+    /** Makes the images a day old without moving the clock: the lease of the run stays live. */
+    const age = (...ids: string[]) =>
+      db
+        .knex('attachments')
+        .whereIn('id', ids)
+        .update({ created_at: '2025-01-01T00:00:00.000Z' });
+
+    const insertWith = (sessionId: string, runId: string, ids: string[]) =>
+      jitter().then(() =>
+        db.insertImages.execute({
+          principal: owner,
+          sessionId,
+          runId,
+          text: 'with images',
+          attachmentIds: ids,
+        }),
+      );
+
+    it(`the cleaning and an insert that uses the same old image at the same time, ${ROUNDS} rounds: the message is written and its image is there and marked, or the image was deleted and nothing was written`, async () => {
+      const outcomes: { written: boolean; refused: boolean; ok: boolean }[] =
+        [];
+      for (let round = 0; round < ROUNDS; round++) {
+        const { sessionId, run } = await runningRun(db);
+        const image = await upload(sessionId);
+        await age(image.id);
+        const [inserted, purged] = await Promise.allSettled([
+          insertWith(sessionId, run.id, [image.id]),
+          // The insert takes several queries before it reaches the image, so
+          // the cleaning is started after a random number of milliseconds:
+          // sometimes before the insert holds the image, sometimes after.
+          new Promise<void>(resolve =>
+            setTimeout(resolve, Math.floor(Math.random() * 15)),
+          ).then(() => db.attachments.purgeUnused(db.clock.now())),
+        ]);
+        expect(purged.status).toBe('fulfilled');
+        const row = await db
+          .knex('attachments')
+          .where({ id: image.id })
+          .first('used_seq');
+        const messages = (await db.items.read(sessionId)).filter(
+          item => item.kind === 'user_message' && item.attachments,
+        );
+        outcomes.push({
+          written: inserted.status === 'fulfilled',
+          refused:
+            inserted.status === 'rejected' &&
+            inserted.reason instanceof UnknownAttachment,
+          // A message with the image: the image exists and says which message
+          // used it. No message: the image may be there (unused) or deleted.
+          ok:
+            messages.length === 1
+              ? row !== undefined && row.used_seq === messages[0].seq
+              : messages.length === 0,
+        });
+      }
+      expect(outcomes.every(o => o.ok && (o.written || o.refused))).toBe(true);
+      expect(outcomes).toHaveLength(ROUNDS);
+    });
+
+    it('the cleaning does not wait for a transaction that holds an image, and does not delete it', async () => {
+      const session = await db.sessions.create({
+        ownerRef: owner.userRef,
+        agentId: 'default',
+      });
+      const image = await upload(session.id);
+      await age(image.id);
+      let release!: () => void;
+      const holding = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      let locked!: () => void;
+      const hasLock = new Promise<void>(resolve => {
+        locked = resolve;
+      });
+      const holder = db.knex.transaction(async trx => {
+        await trx('attachments').where({ id: image.id }).forUpdate();
+        locked();
+        await holding;
+      });
+      await hasLock;
+
+      // It must return while the row is locked: it skips the row.
+      const deleted = await Promise.race([
+        db.attachments.purgeUnused(db.clock.now()),
+        new Promise<string>(resolve =>
+          setTimeout(() => resolve('waited'), 3000),
+        ),
+      ]);
+      release();
+      await holder;
+
+      expect(deleted).toBe(0);
+      expect(
+        await db.knex('attachments').where({ id: image.id }).first('id'),
+      ).toBeDefined();
+    });
+
+    it('inserts with images, queued messages with the same images, outputs and the cleaning at once: no deadlock, and every image of a message is marked', async () => {
+      const { sessionId, run } = await runningRun(db);
+      const images = [await upload(sessionId), await upload(sessionId)];
+      const ids = images.map(i => i.id);
+      await age(...ids);
+      const expected = (reason: unknown) =>
+        reason instanceof InsertLimitReached ||
+        reason instanceof TooManyImageBytes ||
+        reason instanceof QueueFull ||
+        reason instanceof UnknownAttachment;
+      const work: Promise<unknown>[] = [];
+      for (let i = 0; i < 20; i++) {
+        work.push(
+          insertWith(sessionId, run.id, ids),
+          jitter().then(() =>
+            db.queue.add(
+              sessionId,
+              { text: `q${i}`, attachmentIds: ids },
+              { max: 1000 },
+            ),
+          ),
+          appendOutput(db, sessionId, run),
+          jitter().then(() => db.attachments.purgeUnused(db.clock.now())),
+        );
+      }
+      const results = await Promise.allSettled(work);
+      const failures = results.flatMap(result =>
+        result.status === 'rejected' && !expected(result.reason)
+          ? [String(result.reason)]
+          : [],
+      );
+      expect(failures).toEqual([]);
+      const log = await db.items.read(sessionId);
+      expect(log.map(item => item.seq)).toEqual(
+        log.map((_s, index) => index + 1),
+      );
+      for (const item of log) {
+        if (item.kind !== 'user_message' || !item.attachments) continue;
+        for (const ref of item.attachments) {
+          const row = await db
+            .knex('attachments')
+            .where({ id: ref.id })
+            .first('used_seq');
+          expect(row).toBeDefined();
+          expect(row.used_seq).not.toBeNull();
+        }
+      }
+    });
+
+    it('two inserts with images that do not both fit, at the same time, 20 rounds: one is written, the other is refused', async () => {
+      const kinds: string[] = [];
+      for (let round = 0; round < 20; round++) {
+        const { sessionId, run } = await runningRun(db);
+        const limited = new KnexItemLog(db.knex, db.clock, {
+          maxInsertsPerRun: 1000,
+          maxImageBytesPerInput: IMAGES['image/png'].length * 3 - 1,
+        });
+        const insert = new InsertMessage({
+          sessions: db.sessions,
+          items: limited,
+          attachments: db.attachments,
+          images: { ...DEFAULT_IMAGE_LIMITS, enabled: true },
+        });
+        const a = await upload(sessionId);
+        const b = await upload(sessionId);
+        // The run holds one image; each insert alone fits, both do not.
+        const first = await upload(sessionId);
+        await limited.append(
+          sessionId,
+          [
+            {
+              kind: 'user_message',
+              text: 'with image',
+              delivery: 'inserted',
+              attachments: [
+                {
+                  id: first.id,
+                  mediaType: first.mediaType,
+                  name: first.name,
+                  size: first.size,
+                },
+              ],
+            },
+          ],
+          { runId: run.id, leaseOwner: '' },
+        );
+        const results = await Promise.allSettled(
+          [a, b].map(image =>
+            jitter().then(() =>
+              insert.execute({
+                principal: owner,
+                sessionId,
+                runId: run.id,
+                text: 'x',
+                attachmentIds: [image.id],
+              }),
+            ),
+          ),
+        );
+        kinds.push(
+          results
+            .map(r => {
+              if (r.status === 'fulfilled') return 'written';
+              return r.reason instanceof TooManyImageBytes
+                ? 'refused'
+                : String(r.reason);
+            })
+            .sort()
+            .join(),
+        );
+      }
+      expect(kinds.every(k => k === 'refused,written')).toBe(true);
+    });
+
+    it('lets in only the free places when uploads arrive at the same time', async () => {
+      const session = await db.sessions.create({
+        ownerRef: owner.userRef,
+        agentId: 'default',
+      });
+      const results = await Promise.allSettled(
+        Array.from({ length: 8 }, () => upload(session.id, 3)),
+      );
+      expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(3);
+      expect(
+        results.every(
+          r =>
+            r.status === 'fulfilled' ||
+            r.reason instanceof TooManyPendingAttachments,
+        ),
+      ).toBe(true);
+    });
   });
 });

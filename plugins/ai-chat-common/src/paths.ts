@@ -31,6 +31,13 @@ export const chatPaths = {
     `/sessions/${encodeURIComponent(id)}/tool-calls/${encodeURIComponent(
       callId,
     )}/decision`,
+  attachments: (id: string) =>
+    `/sessions/${encodeURIComponent(id)}/attachments`,
+  attachment: (id: string, attachmentId: string) =>
+    `/sessions/${encodeURIComponent(id)}/attachments/${encodeURIComponent(
+      attachmentId,
+    )}`,
+  inputConfig: () => '/input-config',
   insertMessage: (id: string, runId: string) =>
     `/sessions/${encodeURIComponent(id)}/runs/${encodeURIComponent(
       runId,

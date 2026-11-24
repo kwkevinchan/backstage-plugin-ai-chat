@@ -40,7 +40,9 @@ export type ModelChunk =
 /**
  * Calls the model. The adapter maps tool ids to the names the API accepts,
  * turns `input` into the argument string, and maps the ids of the calls in
- * the answer back (a `tool_call` chunk carries the id the model gave).
+ * the answer back (a `tool_call` chunk carries the id the model gave). The
+ * images of a message carry no bytes (`ModelImage`): the adapter reads them
+ * from the attachments of `opts.sessionId`, so the core does no I/O.
  *
  * @public
  */
@@ -51,7 +53,11 @@ export interface ModelClient {
    */
   stream(
     input: ModelInput,
-    opts: { signal: AbortSignal },
+    opts: { signal: AbortSignal; sessionId: string },
   ): AsyncIterable<ModelChunk>;
-  readonly capabilities: { parallelToolCalls: boolean };
+  /**
+   * What the model can do. `images`: it reads the images of a message (IN-05).
+   * When it is `false`, the loop never gives it an image.
+   */
+  readonly capabilities: { parallelToolCalls: boolean; images: boolean };
 }

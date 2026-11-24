@@ -34,6 +34,13 @@ export interface Config {
       model: string;
       /** Seconds to wait for the model to finish one answer. Defaults to 120. */
       timeoutSeconds?: number;
+      /**
+       * Whether the model reads images (JPEG, PNG, WebP, GIF). When it does,
+       * the images a user attaches are sent to the model server as part of the
+       * message, so they leave your organization if the server is outside it.
+       * Defaults to false: the chat then takes no image.
+       */
+      images?: boolean;
     };
     /**
      * Most model calls in one run. A run is one message of the user and the
@@ -78,6 +85,32 @@ export interface Config {
       queue?: {
         /** Most queued messages in one session. Defaults to 5. */
         maxMessages?: number;
+      };
+      /**
+       * Images in messages. They need `llm.images`.
+       */
+      images?: {
+        /** Most images in one message. Defaults to 4. */
+        maxPerMessage?: number;
+        /** Largest image, in bytes. Defaults to 5242880 (5 MB). */
+        maxBytes?: number;
+        /**
+         * Most image bytes the model gets in one call, and the messages of one
+         * run may have in all. At least `maxPerMessage` times `maxBytes`; a
+         * smaller value stops the backend at startup. Defaults to 20971520
+         * (20 MB).
+         */
+        maxBytesPerInput?: number;
+        /**
+         * Most images of a session that are uploaded and in no message yet.
+         * Defaults to 12.
+         */
+        maxPendingPerSession?: number;
+        /**
+         * What an image counts in the context budget, in tokens. It is a
+         * setting, not a measure. Defaults to 1600.
+         */
+        tokensPerImage?: number;
       };
     };
     /**

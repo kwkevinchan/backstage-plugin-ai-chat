@@ -15,6 +15,8 @@
  */
 
 export { AuditedToolGateway } from './AuditedToolGateway';
+export { bindAttachments, toAttachmentRef } from './attachments';
+export type { ImageSettings } from './attachments';
 export { createAfterRun } from './afterRun';
 export { buildRunRequest } from './buildRunRequest';
 export type { RunSettings } from './buildRunRequest';
@@ -43,11 +45,14 @@ export { ListSessions } from './usecases/ListSessions';
 export { ListSessionTools } from './usecases/ListSessionTools';
 export type { SessionTool } from './usecases/ListSessionTools';
 export { ListToolsets } from './usecases/ListToolsets';
+export { PurgeUnusedAttachments } from './usecases/PurgeUnusedAttachments';
 export { QueueMessage } from './usecases/QueueMessage';
+export { ReadAttachment, etagOf } from './usecases/ReadAttachment';
 export { ReorderQueue } from './usecases/ReorderQueue';
 export { ResumeQueue } from './usecases/ResumeQueue';
 export { ResumeRun } from './usecases/ResumeRun';
 export { SendMessage } from './usecases/SendMessage';
 export { StartNextQueued } from './usecases/StartNextQueued';
 export { UpdateQueuedMessage } from './usecases/UpdateQueuedMessage';
+export { UploadAttachment } from './usecases/UploadAttachment';
 export { UpdateSession } from './usecases/UpdateSession';

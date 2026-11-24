@@ -28,7 +28,13 @@ import request from 'supertest';
 import { createRouter } from '../adapters/http';
 import { parseSse } from '../adapters/http/__testUtils__/uiMessageStream';
 import { principalFromRequest } from '../adapters/backstage/principalFromRequest';
-import { createWorld, jane, janeFresh, until } from './__testUtils__';
+import {
+  createWorld,
+  jane,
+  janeFresh,
+  testInputConfig,
+  until,
+} from './__testUtils__';
 
 type World = Awaited<ReturnType<typeof createWorld>>;
 type Backend = ReturnType<World['backend']>;
@@ -77,6 +83,7 @@ describe('two backends on one database', () => {
           principal: req =>
             principalFromRequest(req, { httpAuth, userInfo, auth }),
           useCases: host.useCases,
+          inputConfig: testInputConfig,
           logger: host.logger,
         }),
       )
