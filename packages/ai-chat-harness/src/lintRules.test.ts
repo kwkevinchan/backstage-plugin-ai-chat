@@ -101,6 +101,48 @@ describe('dependency rules of the core', () => {
   });
 });
 
+describe('the domain circle is pure', () => {
+  it.each([
+    ['an async function', 'export async function f() {\n  return 1;\n}\n'],
+    ['an async arrow function', 'export const f = async () => 1;\n'],
+    ['await', 'export const f = () => {\n  return (async () => 1)();\n};\n'],
+    ['a Promise type', 'export type P = Promise<number>;\n'],
+    ['fetch', "export const f = () => fetch('https://example.com');\n"],
+  ])('rejects %s', async (_name, code) => {
+    const messages = await lint('src/domain/example.ts', code);
+    expect(messages.length).toBeGreaterThan(0);
+  });
+
+  it.each([['fs'], ['node:fs'], ['http'], ['child_process']])(
+    'rejects an import of %s',
+    async source => {
+      const messages = await lint(
+        'src/domain/example.ts',
+        `import {} from '${source}';\n`,
+      );
+      expect(messages.map(m => m.rule)).toContain('no-restricted-imports');
+    },
+  );
+
+  it('accepts plain synchronous code', async () => {
+    expect(
+      await lint(
+        'src/domain/example.ts',
+        'export const double = (n: number): number => n * 2;\n',
+      ),
+    ).toEqual([]);
+  });
+
+  it('leaves the application circle free to be asynchronous', async () => {
+    expect(
+      await lint(
+        'src/application/example.ts',
+        'export async function run(): Promise<number> {\n  return 1;\n}\n',
+      ),
+    ).toEqual([]);
+  });
+});
+
 describe('manifest of the core', () => {
   it('lists no @backstage package as a runtime dependency', () => {
     const manifest = JSON.parse(

@@ -23,7 +23,10 @@
 // 2. `import/no-restricted-paths` keeps the circles in order: domain imports
 //    neither the application circle nor the testing entry point, and the
 //    application circle does not import the testing entry point.
-// 3. `domain/` and `application/` also never import `express` or `knex`.
+// 3. `domain/` and `application/` also never import `express` or `knex`, and
+//    do not use `fetch`.
+// 4. `domain/` has no `async` function, no `await`, no `Promise`, and imports
+//    no Node.js module that does I/O.
 //
 // `src/lintRules.test.ts` lints sample files against this configuration.
 
@@ -38,6 +41,7 @@ const baseRestrictedPatterns = [
 
 const noBackstage = '@backstage/*';
 const noFrameworkPaths = ['express', 'knex'];
+const noIoPaths = ['fs', 'http', 'https', 'net', 'os', 'child_process'];
 const noFrameworkPatterns = ['express/*', 'knex/*'];
 
 module.exports = require('@backstage/cli/config/eslint-factory')(__dirname, {
@@ -97,6 +101,43 @@ module.exports = require('@backstage/cli/config/eslint-factory')(__dirname, {
               noBackstage,
               ...noFrameworkPatterns,
             ],
+          },
+        ],
+        'no-restricted-globals': [
+          'error',
+          { name: 'fetch', message: 'Use a port instead of fetch.' },
+        ],
+      },
+    },
+    {
+      // Pure code: no I/O and nothing asynchronous.
+      files: ['src/domain/**'],
+      rules: {
+        'no-restricted-imports': [
+          'error',
+          {
+            paths: [...noFrameworkPaths, ...noIoPaths],
+            patterns: [
+              ...baseRestrictedPatterns,
+              noBackstage,
+              ...noFrameworkPatterns,
+              'node:*',
+            ],
+          },
+        ],
+        'no-restricted-syntax': [
+          'error',
+          {
+            selector: ':function[async=true]',
+            message: 'The domain circle has no async function.',
+          },
+          {
+            selector: 'AwaitExpression',
+            message: 'The domain circle has no await.',
+          },
+          {
+            selector: "Identifier[name='Promise']",
+            message: 'The domain circle has no Promise.',
           },
         ],
       },
