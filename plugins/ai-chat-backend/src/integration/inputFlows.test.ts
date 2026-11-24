@@ -746,15 +746,32 @@ describe('inserted messages and the queue on a database', () => {
       expect((await view(a, session.id)).queue.items).toHaveLength(1);
     });
 
-    it('sends nothing while the run waits for an approval, and sends when it ends well afterwards', async () => {
-      const a = backend([[writeCall], [say('done')], [say('next answer')]]);
-      const { session, callId } = await waitingRun(a);
-      await queue(a, session.id, 'after the approval');
-      // The state of the wait: not paused, nothing sent, the message is kept.
+    it('sends nothing and does not pause the queue when the run turns to waiting for an approval with messages in it; it sends when the run ends well afterwards', async () => {
+      const session = await world.newSession();
+      let queued = false;
+      const a: Backend = backend(
+        [[writeCall], [say('done')], [say('next answer')]],
+        {
+          aroundTransition: async (info, call) => {
+            if (info.to === 'waiting_approval' && !queued) {
+              queued = true;
+              await queue(a, session.id, 'after the approval');
+            }
+            return call();
+          },
+        },
+      );
+      const first = await drain(await send(a, session.id));
+      // The run has not ended: the queue is not paused, and nothing started.
+      expect(queueStateOf(first)).toMatchObject({ paused: false });
+      expect(queueStateOf(first)!.items).toHaveLength(1);
+      expect(queueStateOf(first)!.nextRunId).toBeUndefined();
       expect(await world.runCount()).toBe(1);
-      expect((await view(a, session.id)).queue.items).toHaveLength(1);
 
-      const decided = await allow(a, session.id, callId);
+      const call = (await world.items.read(session.id)).find(
+        i => i.kind === 'tool_call',
+      ) as { callId: string };
+      const decided = await allow(a, session.id, call.callId);
       const events = await drain(decided.run!);
       expect(queueStateOf(events)!.nextRunId).toEqual(expect.any(String));
     });

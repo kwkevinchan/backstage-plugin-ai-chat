@@ -702,6 +702,7 @@ paths:
       operationId: listQueue
       tags: [Queue]
       summary: Read the queue of a session.
+      description: The messages in the order they are sent, and whether the queue is paused (the session has no run that has not ended and the queue is not empty).
       responses:
         '200':
           description: The queue.
