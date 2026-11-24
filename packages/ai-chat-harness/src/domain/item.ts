@@ -66,8 +66,9 @@ export type AgentMessageBody = { kind: 'agent_message'; text: string };
  * of one step are written in one append, after the `agent_message` of that
  * step if there is one.
  *
- * `callId` is unique in the session. The host generates it (IdGenerator); it
- * is not the id the model gave, which the model adapter maps to it. The log
+ * `callId` is unique in the session. The loop generates it with its
+ * `IdGenerator` port (the host only supplies the implementation); it is not
+ * the id the model gave, which `callModel` maps to it. The log
  * refuses a second call with the same id (see {@link dedupeKeyOf}), so an
  * approval or a result always belongs to exactly one call.
  *

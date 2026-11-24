@@ -111,23 +111,23 @@ ends without finish  status= ready  onError= []
 
 這張表已經寫進程式架構第 8 節。
 
-| HarnessEvent                                                    | UI message stream                                                                          |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `run.started`                                                   | `start`（`messageId` 用 Run 的 id 推出來），加 `data-run`（`transient`，Run 的 id 和狀態） |
-| `step.started`、`step.ended`                                    | `start-step`、`finish-step`                                                                |
-| `item.started`（agent_message）、`item.delta`、`item.completed` | `text-start`、`text-delta`、`text-end`                                                     |
-| `item.completed`（tool_call）                                   | `tool-input-available`                                                                     |
-| `item.completed`（tool_call，政策是 ask）                       | 再加 `tool-approval-request`（`approvalId` 等於 `toolCallId`，`reason` 說明為什麼要核准）  |
-| `approval` Item（核准或拒絕）                                   | `tool-approval-response`（`approved`、可選 `reason`）。放在核准後接續串流的開頭            |
-| `item.completed`（tool_result，成功）                           | `tool-output-available`                                                                    |
-| `item.completed`（tool_result，失敗）                           | `tool-output-error`（`errorText`）                                                         |
-| `item.completed`（tool_result，被拒絕）                         | `tool-output-denied`                                                                       |
-| `item.completed`（plan_update）                                 | `data-plan`（固定 `id`，同一則訊息內後送的取代先送的）                                     |
-| 每一筆完成的 Item                                               | `data-item`（`transient`，`seq` 和 `kind`），給 A-07 接回用                                |
-| `run.ended`（等核准）                                           | `data-run`（`transient`，狀態），然後 `finish`（`finishReason: 'tool-calls'`）             |
-| `run.ended`（完成）                                             | `data-run`（`transient`），然後 `finish`（`finishReason: 'stop'`）                         |
-| `run.ended`（失敗）                                             | `data-run`（`transient`），然後 `error`（`errorText`）。不送 `finish`                      |
-| `run.ended`（取消）                                             | `data-run`（`transient`），然後 `abort`                                                    |
+| HarnessEvent                                                    | UI message stream                                                                                                                                                         |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run.started`                                                   | `start`（`messageId` 用 Run 的 id 推出來），加 `data-run`（`transient`，Run 的 id 和狀態）                                                                                |
+| `step.started`、`step.ended`                                    | `start-step`、`finish-step`                                                                                                                                               |
+| `item.started`（agent_message）、`item.delta`、`item.completed` | `text-start`、`text-delta`、`text-end`                                                                                                                                    |
+| `item.completed`（tool_call）                                   | `tool-input-available`                                                                                                                                                    |
+| `run.ended`（等核准）的 `pending`，每個呼叫                     | 各送一次 `tool-approval-request`（`approvalId` 等於 `toolCallId`，`reason` 說明為什麼要核准）。從紀錄還原畫面時，「要核准」是 `needsApproval` 而且沒有結果，不看 `policy` |
+| `approval` Item（核准或拒絕）                                   | `tool-approval-response`（`approved`、可選 `reason`）。放在核准後接續串流的開頭                                                                                           |
+| `item.completed`（tool_result，成功）                           | `tool-output-available`                                                                                                                                                   |
+| `item.completed`（tool_result，失敗）                           | `tool-output-error`（`errorText`）                                                                                                                                        |
+| `item.completed`（tool_result，被拒絕）                         | `tool-output-denied`                                                                                                                                                      |
+| `item.completed`（plan_update）                                 | `data-plan`（固定 `id`，同一則訊息內後送的取代先送的）                                                                                                                    |
+| 每一筆完成的 Item                                               | `data-item`（`transient`，`seq` 和 `kind`），給 A-07 接回用                                                                                                               |
+| `run.ended`（等核准）                                           | `data-run`（`transient`，狀態），然後 `finish`（`finishReason: 'tool-calls'`）                                                                                            |
+| `run.ended`（完成）                                             | `data-run`（`transient`），然後 `finish`（`finishReason: 'stop'`）                                                                                                        |
+| `run.ended`（失敗）                                             | `data-run`（`transient`），然後 `error`（`errorText`）。不送 `finish`                                                                                                     |
+| `run.ended`（取消）                                             | `data-run`（`transient`），然後 `abort`                                                                                                                                   |
 
 和原本的差別：
 

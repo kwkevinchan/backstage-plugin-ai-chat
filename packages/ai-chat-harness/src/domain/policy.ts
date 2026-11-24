@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import type { ToolCallBody } from './item';
 import type { ToolDescriptor } from './tool';
 
 /** @public */
@@ -62,4 +63,17 @@ function configuredPolicy(
     return undefined;
   }
   return byTool[toolId];
+}
+
+/**
+ * Whether a call waits for the decision of the user (D-06): its recorded
+ * policy is `ask`, or it is not read-only whatever the policy says. The loop
+ * and the host use this one rule.
+ *
+ * @public
+ */
+export function needsApproval(
+  call: Pick<ToolCallBody, 'policy' | 'readOnly'>,
+): boolean {
+  return call.policy === 'ask' || call.readOnly !== true;
 }

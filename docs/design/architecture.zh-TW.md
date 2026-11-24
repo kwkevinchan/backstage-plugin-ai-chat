@@ -103,7 +103,7 @@ packages/ai-chat-harness/src/
     item.ts                    Item 的型別（九種 kind）
     run.ts                     RunStatus、合法的狀態轉移
     tool.ts                    ToolDescriptor、ToolCall、ToolResult
-    policy.ts                  decidePolicy()
+    policy.ts                  decidePolicy()、needsApproval()
     agent.ts                   AgentDefinition、Limits
     plan.ts                    Plan、currentPlan()
     nextAction.ts              decideNextAction()：從紀錄算出下一步
@@ -111,28 +111,27 @@ packages/ai-chat-harness/src/
     errors.ts
   application/                 第 2 圈
     ports/
-      ItemLog.ts               讀和寫 Item
-      ModelClient.ts           呼叫模型，回傳串流
-      ToolGateway.ts           列出工具、執行工具
+      ItemLog.ts               讀和寫 Item、ItemDraft、RunFence
+      ModelClient.ts           呼叫模型，回傳串流；ModelChunk
+      ToolGateway.ts           列出工具、驗證、執行；CallContext、ToolOutput、ValidationResult
       RunControl.ts            續租、讀取停止要求、更新用量
       Clock.ts
       IdGenerator.ts
-      extensions.ts            ContextProvider、Skill、Hooks
+      extensions.ts            P3 才有內容。現在 Extensions 是空型別
     AdvanceRun.ts              迴圈
+    types.ts                   AdvanceRunDeps、AdvanceRunRequest
     steps/
       callModel.ts
       executeTools.ts
-      summarize.ts
-    builtins/
-      updatePlan.ts            P3
-      loadSkill.ts             P3
-      delegate.ts              P4
-    events.ts                  HarnessEvent
+    events.ts                  HarnessEvent、RunOutcome
+    （還沒有：steps/summarize.ts（P1-07）、builtins/（updatePlan、loadSkill 是 P3，delegate 是 P4）、extensions 的內容（P3））
   testing/                     另一個入口：ai-chat-harness/testing
     ScriptedModel.ts           照劇本回答的假模型
     InMemoryItemLog.ts
     FakeToolGateway.ts
+    fakes.ts                   FakeClock、SequentialIdGenerator、FakeRunControl
     itemLogContract.ts         ItemLog 的共用測試（A-10）
+    fixture.ts                 核心迴圈測試用的組合（不對外匯出）
   index.ts
 ```
 
@@ -220,13 +219,17 @@ export function buildModelInput(
 
 `decideNextAction` 的規則，由上往下，先符合的先用：
 
-| 紀錄的狀態                                         | 下一步                                                                                        |
-| -------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| 用量超過上限                                       | `stop`                                                                                        |
-| 最後一步有工具呼叫是 `ask`，還沒有 `approval`      | `wait_approval`                                                                               |
-| 最後一步有工具呼叫還沒有 `tool_result`             | `execute_tools`。有 `tool_started` 但沒有結果的放進 `interrupted`，不執行，結果寫成 `unknown` |
-| 最後一筆是 `agent_message`，而且那一步沒有工具呼叫 | `complete`                                                                                    |
-| 其他（最後是使用者訊息，或工具結果都齊了）         | `call_model`                                                                                  |
+| 紀錄的狀態                                                              | 下一步                                                                                        |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| 最後一筆對話 Item 是 `agent_message`，而且最後一步沒有未完成的呼叫      | `complete`                                                                                    |
+| 總時間用完                                                              | `stop`（`timeout`）                                                                           |
+| 最後一步有要核准的呼叫（`needsApproval`），還沒有 `approval` 也沒有結果 | `wait_approval`                                                                               |
+| 最後一步有工具呼叫還沒有 `tool_result`                                  | `execute_tools`。有 `tool_started` 但沒有結果的放進 `interrupted`，不執行，結果寫成 `unknown` |
+| Step 數用完                                                             | `stop`（`max_steps`）                                                                         |
+| 工具呼叫數用完                                                          | `stop`（`max_tool_calls`）                                                                    |
+| 其他（最後是使用者訊息，或工具結果都齊了）                              | `call_model`                                                                                  |
+
+Step 數和工具呼叫數的上限只擋新的模型呼叫，不會讓最後一步的呼叫沒有結果。一步裡的呼叫超過 `maxToolCallsPerRun` 的部分，由 `callModel` 寫入時處理（見 4.3）。「要核准」的判斷是 domain 的 `needsApproval(call)`：`policy === 'ask'`，或 `readOnly !== true`。宿主也用它。
 
 ### 4.3 Application
 
@@ -235,7 +238,11 @@ export function buildModelInput(
 ```ts
 export interface ItemLog {
   read(sessionId: string, opts?: { afterSeq?: number }): Promise<Item[]>;
-  /** 一次寫入多筆，序號連續。dedupeKey 重複時丟 DuplicateItem。 */
+  /**
+   * 一次寫入多筆，序號連續（Session 的第一筆是 1）。
+   * - `dedupeKeyOf` 和紀錄裡的 Item 相同，或同一批裡有兩筆相同，都丟 DuplicateItem，整批不寫入。
+   * - fence 不是這個 Run 的租約持有者，或這個 Run 不屬於這段 Session，丟 LeaseLost，整批不寫入。
+   */
   append(
     sessionId: string,
     drafts: ItemDraft[],
@@ -243,13 +250,37 @@ export interface ItemLog {
   ): Promise<Item[]>;
 }
 
+/** 核心要寫的內容。紀錄補上 Session、序號、Run（來自 fence）和時間。 */
+export type ItemDraft = ItemBody;
+
+export type ModelChunk =
+  | { type: 'text'; text: string }
+  | {
+      type: 'tool_call';
+      modelCallId: string; // 模型給的 id，只用來區分同一個回答裡的呼叫
+      toolId: string;
+      input: JsonValue; // 已解析。不是物件的輸入會得到 invalid 結果
+    };
+
 export interface ModelClient {
+  /** 呼叫失敗時丟例外，迴圈把 Run 結束成 failed。signal 中止時停止。 */
   stream(
     input: ModelInput,
     opts: { signal: AbortSignal },
   ): AsyncIterable<ModelChunk>;
   readonly capabilities: { parallelToolCalls: boolean };
 }
+
+export type ValidationResult =
+  | { valid: true }
+  | { valid: false; message: string };
+
+export type ToolOutput = {
+  status: 'ok' | 'error' | 'timeout';
+  output?: JsonValue;
+  truncated?: boolean;
+  message?: string;
+};
 
 export interface ToolGateway {
   list(ctx: CallContext): Promise<ToolDescriptor[]>;
@@ -268,6 +299,10 @@ export interface ToolGateway {
 export interface RunControl {
   /** 續租。租約已經不是自己的就丟 LeaseLost。 */
   heartbeat(fence: RunFence): Promise<{ cancelRequested: boolean }>;
+  /**
+   * 宿主把用量跟 Run 一起存下來，包含 `elapsedSeconds`（不含等核准的時間）。
+   * 核准後再呼叫迴圈時，宿主把存下的用量帶進 request。
+   */
   recordUsage(fence: RunFence, usage: RunUsage): Promise<void>;
 }
 
@@ -284,66 +319,110 @@ export interface RunFence {
   runId: string;
   leaseOwner: string;
 }
-```
 
-**Use case：`AdvanceRun`**。這就是迴圈。它沒有成員變數形式的狀態，每一步都重新讀紀錄。
-
-```ts
-export class AdvanceRun {
-  constructor(
-    private readonly deps: {
-      items: ItemLog;
-      model: ModelClient;
-      tools: ToolGateway;
-      run: RunControl;
-      clock: Clock;
-      ids: IdGenerator;
-      extensions: Extensions;
-    },
-  ) {}
-
-  async *execute(req: {
-    agent: AgentDefinition;
-    limits: Limits;
-    fence: RunFence;
-    ctx: CallContext;
-    signal: AbortSignal;
-  }): AsyncGenerator<HarnessEvent, RunOutcome> {
-    for (;;) {
-      const { cancelRequested } = await this.deps.run.heartbeat(req.fence);
-      if (cancelRequested || req.signal.aborted) return { status: 'cancelled' };
-
-      const items = await this.deps.items.read(req.ctx.sessionId);
-      const action = decideNextAction(
-        items,
-        usageOf(items, req.fence.runId),
-        req.limits,
-      );
-
-      switch (action.type) {
-        case 'call_model':
-          yield* callModel(this.deps, req, items);
-          break;
-        case 'execute_tools':
-          yield* executeTools(this.deps, req, action);
-          break;
-        case 'wait_approval':
-          return { status: 'waiting_approval' };
-        case 'complete':
-          return { status: 'completed' };
-        case 'stop':
-          return { status: 'completed', endReason: action.reason };
-      }
-    }
-  }
+export interface Clock {
+  now(): Date;
+}
+export interface IdGenerator {
+  next(): string; // 核心的 port，宿主提供實作（P1 用 UUID）
 }
 ```
 
-要注意的三點：
+**Use case：`AdvanceRun`**。這就是迴圈。它沒有成員變數形式的狀態，每一輪都重新讀紀錄。
 
-- **核准之後的繼續，跟第一次執行是同一個函式。** 宿主寫入 `approval` 之後再呼叫一次 `execute()`。迴圈讀紀錄，發現有核准過但沒結果的呼叫，就去執行。
-- **`callModel` 做四件事**：收集 Context provider 的輸出、呼叫 `buildModelInput`、把模型的串流轉成事件、把完成的 `agent_message` 和 `tool_call` 寫進紀錄。參數驗證不合格的呼叫，直接寫一筆 `invalid` 的結果退回給模型（T-05）。
-- **`executeTools` 的順序**：唯讀的同時執行；不是唯讀的先寫 `tool_started`，再照 `position` 一個一個執行；被拒絕的寫 `denied`。結果照原本的順序寫入（P-03）。
+```ts
+export type AdvanceRunDeps = {
+  items: ItemLog;
+  model: ModelClient;
+  tools: ToolGateway;
+  run: RunControl;
+  clock: Clock;
+  ids: IdGenerator;
+  extensions: Extensions; // P3 才有內容，現在是空型別
+};
+
+export type AdvanceRunRequest = {
+  agent: AgentDefinition;
+  limits: Limits;
+  budget: ContextBudget; // P1-07 才套用
+  policy: PolicySettings; // 每個呼叫的政策都用它算
+  fence: RunFence;
+  ctx: CallContext;
+  signal: AbortSignal;
+  usage: RunUsage; // 這個 Run 之前用掉的量。新的 Run 是 0，核准後接續是宿主存下的值
+};
+
+export class AdvanceRun {
+  constructor(private readonly deps: AdvanceRunDeps) {}
+
+  async *execute(
+    req: AdvanceRunRequest,
+  ): AsyncGenerator<HarnessEvent, RunOutcome> {
+    yield { type: 'run.started', runId: req.fence.runId };
+    // 每一輪：
+    //   1. heartbeat；cancelRequested 或 signal 中止 → cancelled
+    //   2. 讀紀錄，decideNextAction(items, usage, limits)
+    //   3. call_model     → callModel(deps, req, items, usage)
+    //      execute_tools  → executeTools(deps, req, items, action)
+    //      wait_approval  → waiting_approval（pending 是還沒決定的呼叫）
+    //      complete       → completed
+    //      stop           → completed，endReason 是上限的名稱
+    //   4. recordUsage
+    yield { type: 'run.ended', outcome };
+    return outcome;
+  }
+}
+
+export type RunOutcome =
+  | { status: 'completed'; endReason?: StopReason }
+  | { status: 'waiting_approval'; pending: ToolCallItem[] }
+  | { status: 'cancelled' }
+  | { status: 'failed'; message: string; cause?: unknown };
+
+// 內部步驟
+function callModel(
+  deps,
+  req,
+  items,
+  usage,
+): AsyncGenerator<HarnessEvent, CallModelResult>;
+function executeTools(
+  deps,
+  req,
+  items,
+  action: { calls; interrupted },
+): AsyncGenerator<HarnessEvent, 'cancelled' | undefined>;
+```
+
+要注意的地方：
+
+- **核准之後的繼續，跟第一次執行是同一個函式。** 宿主寫入 `approval` 之後再呼叫一次 `execute()`，並帶入存下的 `usage`。迴圈讀紀錄，發現有核准過但沒結果的呼叫，就去執行。
+- **用量不從紀錄算。** 模型的回答是空的時候不寫任何 Item，步數算不出來。步數、工具呼叫數、已用時間由 request 帶入，迴圈每一輪之後呼叫 `recordUsage`。時間 = 帶入的 `elapsedSeconds` 加這次呼叫內經過的時間（用 `Clock`）。
+- **步驟編號** = max(`usage.stepsUsed`，紀錄裡這個 Run 的 `tool_call` 最大的 `step`) + 1。這樣在 `recordUsage` 之前當掉，接手的 backend 也不會重複編號，或超過 `maxSteps`。
+- **`callModel`**：
+  - 呼叫 `buildModelInput`，Context provider 的輸出 P3 才有。
+  - 被政策 `deny` 的工具不給模型看。
+  - 把模型的串流轉成事件，完成後把 `agent_message` 和所有 `tool_call` 用同一次 `append` 寫入，文字在前；空白文字不寫。
+  - 每個呼叫的 `callId` 在收到呼叫時由 `IdGenerator` 產生，不用模型的 id。
+  - `policy` 一律由 `decidePolicy` 算。
+  - 不能執行的呼叫，結果寫在同一次 `append`，排在所有 `tool_call` 之後：
+    - 未知的工具、輸入不是物件、`validate` 不合格（或丟例外，訊息固定為 `The input could not be checked.`）→ `invalid`（T-05，不產生核准）。
+    - 政策 `deny` → `denied`。
+    - 超過 `maxToolCallsPerRun` 剩餘額度 → `denied`，訊息 `tool call limit`。
+  - `tool_call` 的 `policy` 型別沒有 `deny`。立即被拒絕的呼叫存成 `ask`，靠同一批的結果把它關閉，所以不會等核准。
+  - 模型沒有文字也沒有呼叫：什麼都不寫，Run 結束成 `failed`。再問一次輸入相同。
+  - 模型呼叫失敗：Run 結束成 `failed`，`message` 是固定文字 `The model call failed.`，供應商的原文放 `cause`。`cause` 只給宿主記 log，不給使用者看。
+  - 寫入之前再檢查一次 `signal`（驗證會 `await`）。中止的話什麼都不寫。
+- **`executeTools`**：
+  - 先把 `interrupted` 的呼叫寫成 `unknown`，不執行。
+  - 呼叫分成批次：連續的唯讀呼叫一批，每個不是唯讀的呼叫自己一批。P1 每個呼叫依序執行；P3 的平行唯讀（D-09）只要改批次內的執行方式，結果照 `position` 寫入（P-03）。
+  - 只在決定是 `allow` 時執行：需要核准的看 `approval`（`needsApproval`），其他的看政策。`deny` 寫 `denied`，不執行。沒有決定的不動。決定不是 `allow` 也不是 `deny` 時丟錯。
+  - 不是唯讀的工具：先 `heartbeat`，看到 `cancelRequested` 就停止（回傳 `'cancelled'`，這個呼叫和後面的都不開始）；再寫 `tool_started`；再檢查 `signal`；才執行（D-25）。
+  - 工具丟例外，或沒有回傳結果，寫成 `error`。`signal` 中止時什麼都不寫。
+  - 每個 Item 準備好就寫，當掉時已完成的不會丟。
+- **停止**：使用者按停止時，`heartbeat` 回 `cancelRequested`。迴圈在每一輪開頭和每個不是唯讀的呼叫之前呼叫 `heartbeat`，所以一步裡的第二個寫入工具在停止之後不會開始。
+- **一步之內的時間上限**：迴圈從 `limits.runTimeoutSeconds` 減去 `usage.elapsedSeconds` 算出剩餘時間，設一個計時器，到時候中止傳給模型和工具的 `signal`。因此執行中的模型呼叫或工具在截止時間結束。這時 Run 結束成 `completed`，`endReason: 'timeout'`，不是 `cancelled`。使用者的 `signal` 先中止則是 `cancelled`。每一輪開頭仍用 `Clock` 檢查總時間。
+- **例外**：port 丟的例外（例如 `LeaseLost`）直接丟出來，沒有 `run.ended`。宿主要自己更新 Run 的狀態。
 
 **事件**（A-03）：
 
@@ -355,12 +434,18 @@ export type HarnessEvent =
       type: 'item.started';
       draftId: string;
       kind: 'agent_message' | 'tool_call';
+      modelCallId?: string; // tool_call：模型給的 id
     }
   | { type: 'item.delta'; draftId: string; text: string } // 不存
   | { type: 'item.completed'; draftId?: string; item: Item } // 已經寫進紀錄
   | { type: 'step.ended'; step: number }
   | { type: 'run.ended'; outcome: RunOutcome };
 ```
+
+- 寫進紀錄的每一筆 Item 都回報一次 `item.completed`，依序號，包含 `tool_started` 和迴圈自己寫的結果。`approval` 由宿主寫，由宿主回報。
+- `draftId`：`agent_message` 是迴圈產生的 id；`tool_call` 就是它在紀錄裡的 `callId`（同一步裡模型的 id 可能重複，所以不用模型的 id）。結果沒有 `draftId`。
+- 一個 step 是一次模型呼叫：`step.started` 在呼叫之前，`step.ended` 在這次的 Item 寫完之後。工具的結果在 `step.ended` 之後。
+- 模型呼叫失敗或中止時，已送出的 `item.started` 沒有對應的 `item.completed`。畫面要能忽略它們。
 
 ## 5. 宿主：`ai-chat-backend`
 
@@ -533,7 +618,7 @@ export class SendMessage {
 
 - **啟動**：呼叫核心的 `AdvanceRun.execute()`，在背景消費事件。HTTP 的回應只是其中一個訂閱者。
 - **訂閱**：每個 Run 可以有多個訂閱者。訂閱者斷線不影響 Run（H-07、A-06）。
-- **續租**：核心每一步呼叫一次 `heartbeat`。模型呼叫很久時，另外有計時器每 10 秒續租一次。租約長度 30 秒。
+- **續租**：核心每一輪呼叫一次 `heartbeat`；執行不是唯讀的工具之前也會呼叫，讓停止要求在兩個寫入工具之間生效。模型呼叫很久時，另外有計時器每 10 秒續租一次。租約長度 30 秒。
 - **結束**：依照 `RunOutcome` 更新 Run 的狀態，清掉 `active_session_id`，通知 Notifier。
 - **關機**：停止接新的 Run。等進行中的 Run 最多 20 秒。沒跑完的中止並標成 `expired`（H-11）。
 
@@ -683,6 +768,7 @@ runs
   lease_expires_at      string(32)   null, index
   steps_used            integer      not null default 0
   tool_calls_used       integer      not null default 0
+  elapsed_seconds       real         not null default 0   不含等核准的已用時間（RunUsage.elapsedSeconds）
   cancel_requested      boolean      not null default false
   end_reason            string(32)   null
   started_at            string(32)   not null
@@ -743,23 +829,28 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 
 **SSE 的格式**是 AI SDK 的 UI message stream（鎖定 `ai@7.0.166`）。`uiMessageStream.ts` 把 `HarnessEvent` 轉過去。回應的 header：`content-type: text/event-stream`、`cache-control: no-cache`、`x-vercel-ai-ui-message-stream: v1`、`x-accel-buffering: no`。每個事件一行 `data: <JSON>`，結尾 `data: [DONE]`。
 
-| HarnessEvent                                                    | UI message stream                                                                       |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `run.started`                                                   | `start`（`messageId` 每個 Run 一個），加 `data-run`（`transient`，Run 的 id 和狀態）    |
-| `step.started`、`step.ended`                                    | `start-step`、`finish-step`                                                             |
-| `item.started`（agent_message）、`item.delta`、`item.completed` | `text-start`、`text-delta`、`text-end`                                                  |
-| `item.completed`（tool_call）                                   | `tool-input-available`                                                                  |
-| `item.completed`（tool_call，政策是 ask）                       | 再加 `tool-approval-request`（`approvalId` 等於 `toolCallId`）                          |
-| `approval` Item                                                 | `tool-approval-response`（`approved`），放在核准後接續串流的開頭                        |
-| `item.completed`（tool_result，成功）                           | `tool-output-available`                                                                 |
-| `item.completed`（tool_result，失敗）                           | `tool-output-error`                                                                     |
-| `item.completed`（tool_result，被拒絕）                         | `tool-output-denied`                                                                    |
-| `item.completed`（plan_update）                                 | `data-plan`（固定 `id`，同一則訊息內後送的取代先送的）                                  |
-| 每一筆完成的 Item                                               | `data-item`（`transient`，序號和 kind），給 A-07 接回用                                 |
-| `run.ended`（等核准）                                           | `data-run`（`transient`），然後 `finish`（`finishReason: 'tool-calls'`）                |
-| `run.ended`（完成）                                             | `data-run`（`transient`），然後 `finish`（`finishReason: 'stop'`）                      |
-| `run.ended`（失敗）                                             | `data-run`（`transient`），然後 `error`。不送 `finish`，`useChat` 遇到 `error` 就丟例外 |
-| `run.ended`（取消）                                             | `data-run`（`transient`），然後 `abort`                                                 |
+| HarnessEvent                                                    | UI message stream                                                                        |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `run.started`                                                   | `start`（`messageId` 每個 Run 一個），加 `data-run`（`transient`，Run 的 id 和狀態）     |
+| `step.started`、`step.ended`                                    | `start-step`、`finish-step`                                                              |
+| `item.started`（agent_message）、`item.delta`、`item.completed` | `text-start`、`text-delta`、`text-end`                                                   |
+| `item.completed`（tool_call）                                   | `tool-input-available`                                                                   |
+| `run.ended`（等核准）的 `pending`，每個呼叫                     | 各送一次 `tool-approval-request`（`approvalId` 等於 `toolCallId`），放在 `data-run` 之前 |
+| `approval` Item                                                 | `tool-approval-response`（`approved`），放在核准後接續串流的開頭                         |
+| `item.completed`（tool_result，成功）                           | `tool-output-available`                                                                  |
+| `item.completed`（tool_result，失敗）                           | `tool-output-error`                                                                      |
+| `item.completed`（tool_result，被拒絕）                         | `tool-output-denied`                                                                     |
+| `item.completed`（plan_update）                                 | `data-plan`（固定 `id`，同一則訊息內後送的取代先送的）                                   |
+| 每一筆完成的 Item                                               | `data-item`（`transient`，序號和 kind），給 A-07 接回用                                  |
+| `run.ended`（等核准）                                           | `data-run`（`transient`），然後 `finish`（`finishReason: 'tool-calls'`）                 |
+| `item.started`（tool_call）                                     | 忽略。`tool-input-available` 在 `item.completed` 才送                                    |
+| `run.ended`（完成）                                             | `data-run`（`transient`），然後 `finish`（`finishReason: 'stop'`）                       |
+| `run.ended`（失敗）                                             | `data-run`（`transient`），然後 `error`。不送 `finish`，`useChat` 遇到 `error` 就丟例外  |
+| `run.ended`（取消）                                             | `data-run`（`transient`），然後 `abort`                                                  |
+
+- 串流中，要核准的呼叫由 `run.ended`（等核准）的 `pending` 決定，每個各送一次 `tool-approval-request`。
+- 從紀錄還原畫面（重新整理、接回、GetSession）時，「要核准」是 `needsApproval(call)` 而且沒有 `tool_result`。不看 `policy` 欄位：立即被拒絕的呼叫存成 `ask`，但它有結果，所以不算要核准。
+- `run.ended`（失敗）的 `error` 只顯示固定文字。`outcome.cause` 是供應商的原文，宿主記 log，不送給畫面。
 
 `data-*` 事件標 `transient: true` 時不進訊息，只送給用戶端的 `onData`。
 
