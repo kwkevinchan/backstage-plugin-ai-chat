@@ -69,6 +69,7 @@
     "@backstage/errors": "backstage:^",
     "@backstage/types": "backstage:^",
     "@kwkevinchan/ai-chat-harness": "workspace:^",
+    "ajv": "^8.20.0",
     "express": "^4.22.0",
     "express-promise-router": "^4.1.0",
     "knex": "^3.1.0",
