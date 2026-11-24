@@ -62,13 +62,18 @@ export type ApprovalItem = Item & ApprovalBody;
 export function assertTransition(from: RunStatus, to: RunStatus): void;
 
 // @public
+export type AttachmentRef = {
+  id: string;
+  mediaType: string;
+  name: string;
+  size: number;
+};
+
+// @public
 export function buildModelInput(
   items: readonly Item[],
   agent: AgentDefinition,
-  extra: {
-    context: string[];
-    tools: ToolDescriptor[];
-  },
+  extra: ModelInputExtra,
   budget: ContextBudget,
 ): ModelInput;
 
@@ -105,6 +110,8 @@ export interface Clock {
 export type ContextBudget = {
   tokenBudget: number;
   keepRecentSteps: number;
+  tokensPerImage?: number;
+  maxImageBytesPerInput?: number;
 };
 
 // @public
@@ -131,6 +138,9 @@ export function decisionOf(
 
 // @public
 export function dedupeKeyOf(body: ItemBody): string | undefined;
+
+// @public
+export const DEFAULT_TOKENS_PER_IMAGE = 1600;
 
 // @public
 export type Delivery = 'direct' | 'inserted' | 'queued';
@@ -310,17 +320,25 @@ export type ModelChunk =
 
 // @public
 export interface ModelClient {
-  // (undocumented)
   readonly capabilities: {
     parallelToolCalls: boolean;
+    images: boolean;
   };
   stream(
     input: ModelInput,
     opts: {
       signal: AbortSignal;
+      sessionId: string;
     },
   ): AsyncIterable<ModelChunk>;
 }
+
+// @public
+export type ModelImage = {
+  attachmentId: string;
+  mediaType: string;
+  name: string;
+};
 
 // @public (undocumented)
 export type ModelInput = {
@@ -330,10 +348,18 @@ export type ModelInput = {
 };
 
 // @public
+export type ModelInputExtra = {
+  context: string[];
+  tools: ToolDescriptor[];
+  images?: boolean;
+};
+
+// @public
 export type ModelMessage =
   | {
       role: 'user';
       content: string;
+      images?: ModelImage[];
     }
   | {
       role: 'assistant';
@@ -410,10 +436,7 @@ export type PlanItemStatus = 'pending' | 'in_progress' | 'completed';
 export function planSummary(
   items: readonly Item[],
   agent: AgentDefinition,
-  extra: {
-    context: string[];
-    tools: ToolDescriptor[];
-  },
+  extra: ModelInputExtra,
   budget: ContextBudget,
 ): SummaryPlan | undefined;
 
@@ -594,10 +617,7 @@ export type ToolStartedItem = Item & ToolStartedBody;
 export function trimmedPartsOf(
   items: readonly Item[],
   agent: AgentDefinition,
-  extra: {
-    context: string[];
-    tools: ToolDescriptor[];
-  },
+  extra: ModelInputExtra,
   budget: ContextBudget,
 ): {
   earlier: boolean;
@@ -616,6 +636,7 @@ export type UserMessageBody = {
   kind: 'user_message';
   text: string;
   page?: PageContext;
+  attachments?: AttachmentRef[];
   delivery?: Delivery;
 };
 

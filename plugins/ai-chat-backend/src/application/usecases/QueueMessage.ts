@@ -16,7 +16,12 @@
 
 import type { PageContext } from '@kwkevinchan/ai-chat-harness';
 import { assertOwner, type Principal, type QueuedMessage } from '../../domain';
-import type { QueuedMessageRepository, SessionRepository } from '../ports';
+import { bindAttachments, type ImageSettings } from '../attachments';
+import type {
+  AttachmentStore,
+  QueuedMessageRepository,
+  SessionRepository,
+} from '../ports';
 
 /** The user queues a message for when the run ends (IN-13). */
 export class QueueMessage {
@@ -26,23 +31,31 @@ export class QueueMessage {
       queue: QueuedMessageRepository;
       /** `aiChat.input.queue.maxMessages`. */
       maxMessages: number;
+      attachments: AttachmentStore;
+      images: ImageSettings;
     },
   ) {}
 
-  /** Throws `NotSessionOwner`, `NoActiveRun` or `QueueFull`. */
+  /**
+   * Throws `NotSessionOwner`, `NoActiveRun`, `QueueFull`, or, for the images,
+   * `ImagesNotSupported`, `TooManyAttachments` or `UnknownAttachment`.
+   */
   async execute(input: {
     principal: Principal;
     sessionId: string;
     text: string;
+    attachmentIds?: string[];
     page?: PageContext;
   }): Promise<QueuedMessage> {
     const { sessions, queue, maxMessages } = this.deps;
     const session = await sessions.get(input.sessionId);
     assertOwner(session, input.principal);
+    await bindAttachments(this.deps, session.id, input.attachmentIds);
     return queue.add(
       session.id,
       {
         text: input.text,
+        attachmentIds: input.attachmentIds ?? [],
         ...(input.page && { page: input.page }),
       },
       { max: maxMessages },

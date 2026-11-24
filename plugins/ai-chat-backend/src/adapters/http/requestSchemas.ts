@@ -85,13 +85,25 @@ export const updateSessionBody = z.object({
   enabledToolsets: z.array(id).max(100).optional(),
 });
 
+/**
+ * The images of a message, by attachment id. The number the administrator
+ * allows is checked by the use case; this is the bound of the shape.
+ */
+const attachmentIds = z
+  .array(id)
+  .max(100)
+  .refine(ids => new Set(ids).size === ids.length, 'must not repeat an id');
+
+const messageText = z
+  .string()
+  .trim()
+  .min(1)
+  .max(MAX_MESSAGE_LENGTH)
+  .refine(noNul, NUL_MESSAGE);
+
 export const sendMessageBody = z.object({
-  text: z
-    .string()
-    .trim()
-    .min(1)
-    .max(MAX_MESSAGE_LENGTH)
-    .refine(noNul, NUL_MESSAGE),
+  text: messageText,
+  attachmentIds: attachmentIds.optional(),
   page: page.optional(),
 });
 
@@ -101,13 +113,21 @@ export const queueMessageBody = sendMessageBody;
 
 export const updateQueuedMessageBody = z
   .object({
-    text: sendMessageBody.shape.text.optional(),
+    text: messageText.optional(),
+    attachmentIds: attachmentIds.optional(),
     page: page.nullable().optional(),
   })
   .refine(
-    body => body.text !== undefined || body.page !== undefined,
-    'must change the text or the page',
+    body =>
+      body.text !== undefined ||
+      body.page !== undefined ||
+      body.attachmentIds !== undefined,
+    'must change the text, the images or the page',
   );
+
+export const uploadAttachmentQuery = z.object({
+  name: z.string().min(1).max(1000).refine(noNul, NUL_MESSAGE),
+});
 
 export const reorderQueueBody = z.object({
   ids: z.array(id).max(100),

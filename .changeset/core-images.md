@@ -1,0 +1,5 @@
+---
+'@kwkevinchan/ai-chat-harness': minor
+---
+
+Let a message of the user carry images. `user_message` items have `attachments` (`AttachmentRef`: id, media type, name, size). `buildModelInput` gives the `user` message `images` (`ModelImage`, with no bytes) when `extra.images` is true, and otherwise adds one line `[image: <name>, not sent: the model cannot read images]` for each image. An image counts `ContextBudget.tokensPerImage` tokens (1600 by default). When the input is over the token budget, or the image bytes of the input are over `ContextBudget.maxImageBytesPerInput`, the images of older messages are replaced by `[image: <name>, left out]`, oldest first and before any step is left out; the images of the messages of the run are never replaced. `buildSummaryInput` writes `[image: <name>]` and sends no image. `ModelClient.capabilities` has `images`, and `ModelClient.stream` gets `opts.sessionId`, so an adapter can read the bytes of the attachments of the session. `ScriptedModel` takes the capabilities and records the sessions.

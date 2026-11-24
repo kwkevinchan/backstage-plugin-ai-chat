@@ -1229,7 +1229,7 @@ plugins/ai-chat/src/
 
 ## 13. 輸入：圖片、插入、排隊（PI）
 
-這一節是 PI 的設計。已實作的部分：核心（PI-02：Item 的欄位、`unreadInserted`、`insertStatesOf`、`decideNextAction`、`buildModelInput`、`message.read`），和宿主的插入與排隊（PI-03）；前端和圖片（附件）尚未。對應規格 D-27 到 D-30 和需求 4.11（IN-01 到 IN-19）。其他節的表格（use case、路由、事件、資料表）已列出 PI 的項目，細節在這裡。
+這一節是 PI 的設計。已實作的部分：核心（PI-02：Item 的欄位、`unreadInserted`、`insertStatesOf`、`decideNextAction`、`buildModelInput`、`message.read`），宿主的插入與排隊（PI-03），以及圖片（附件）的核心和宿主（PI-05）；前端的圖片（PI-06）尚未。對應規格 D-27 到 D-30 和需求 4.11（IN-01 到 IN-19）。其他節的表格（use case、路由、事件、資料表）已列出 PI 的項目，細節在這裡。
 
 ### 13.1 結論
 
@@ -1270,7 +1270,7 @@ plugins/ai-chat/src/
 | ------------------------ | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------- |
 | `UploadAttachment`       | 檢查擁有者和檔案，存成附件                                                    | SessionRepository、AttachmentStore                                                               | IN-01 到 IN-04      |
 | `ReadAttachment`         | 檢查擁有者，回傳位元組和型別                                                  | SessionRepository、AttachmentStore                                                               | IN-03、IN-08        |
-| `InsertMessage`          | 檢查訊息，寫入 `delivery: inserted` 的 `user_message`。不建立 Run，不啟動迴圈 | SessionRepository、ItemLog（PI-05 加 AttachmentStore、AgentCatalog）                             | IN-10、IN-11、IN-17 |
+| `InsertMessage`          | 檢查訊息，寫入 `delivery: inserted` 的 `user_message`。不建立 Run，不啟動迴圈 | SessionRepository、ItemLog、AttachmentStore                                                      | IN-10、IN-11、IN-17 |
 | `QueueMessage`           | 檢查訊息，加進佇列                                                            | SessionRepository、QueuedMessageRepository、AttachmentStore                                      | IN-13               |
 | `UpdateQueuedMessage`    | 改文字、附件、頁面                                                            | SessionRepository、QueuedMessageRepository                                                       | IN-13               |
 | `DeleteQueuedMessage`    | 刪除一則，釋放它保留的附件                                                    | SessionRepository、QueuedMessageRepository                                                       | IN-13、IN-15        |
@@ -1282,7 +1282,11 @@ plugins/ai-chat/src/
 
 `SendMessage` 多收 `attachmentIds`，其他不變。`GetSession` 多回傳佇列和每則插入訊息的狀態（13.7）。`ForkSession`（P2）帶走範圍內的附件（13.5）。
 
-兩個 port 放在宿主的 `application/ports/`。`AttachmentStore` 在 PI-05 加；下面的 `QueuedMessage` 在 PI-03 沒有 `attachments`，`add` 沒有 `attachmentIds`（`queued_messages.attachment_ids` 欄位存在，一律是 `[]`），PI-05 加上：
+兩個 port 放在宿主的 `application/ports/`：
+
+- `QueuedMessageRepository.add` 的 `attachmentIds` 是選用的，沒給等於空陣列。
+- `AttachmentStore.put` 多收 `maxPending`（`maxPendingPerSession`）：port 不讀設定，限制由 use case 帶進來。
+- `AttachmentStore.copy` 的實作和測試在 PI-05；用它的 `ForkSession` 在 P2。
 
 ```ts
 export type AttachmentMeta = {
@@ -1296,7 +1300,7 @@ export type AttachmentMeta = {
 
 export interface AttachmentStore {
   /**
-   * 存一個附件。Session 沒用到的附件已經有 `maxPendingPerSession` 個時丟
+   * 存一個附件。Session 沒用到的附件（`used_seq` 是空值，被排隊的訊息保留的也算）已經有 `maxPending` 個時丟
    * TooManyPendingAttachments。sha256 由 adapter 算。
    */
   put(input: {
@@ -1305,6 +1309,7 @@ export interface AttachmentStore {
     mediaType: AttachmentMeta['mediaType'];
     name: string;
     bytes: Uint8Array;
+    maxPending: number;
   }): Promise<AttachmentMeta>;
   /** 丟 AttachmentNotFound：不存在，或不屬於這段 Session。 */
   get(
@@ -1333,7 +1338,7 @@ export type QueuedMessage = {
   sessionId: string;
   position: number; // 1 起算
   text: string;
-  attachments: AttachmentMeta[]; // PI-05；PI-03 沒有這個欄位
+  attachments: AttachmentMeta[];
   page?: { path: string; entityRef?: string };
   createdAt: string;
   updatedAt: string;
@@ -1343,14 +1348,14 @@ export interface QueuedMessageRepository {
   list(sessionId: string): Promise<QueuedMessage[]>; // 依 position
   /**
    * 一個 transaction：Session 有進行中的 Run（沒有就丟 NoActiveRun）、
-   * 筆數小於 `max`（否則 QueueFull）、保留附件（`reserved_by`，PI-05）、寫入。
+   * 筆數小於 `max`（否則 QueueFull）、保留附件（`reserved_by`）、寫入。
    */
   add(
     sessionId: string,
     input: { text: string; attachmentIds: string[]; page?: PageContext },
     opts: { max: number },
   ): Promise<QueuedMessage>;
-  /** 丟 QueuedMessageNotFound。改附件時，移掉的釋放、新的保留（PI-05）。`page: null` 移掉頁面。 */
+  /** 丟 QueuedMessageNotFound。改附件時，移掉的釋放、新的保留。`page: null` 移掉頁面。 */
   update(
     sessionId: string,
     id: string,
@@ -1448,7 +1453,7 @@ export type UserMessageBody = {
    3. 照現有的步驟更新 `sessions.next_seq`（取得序號，同一段 Session 的寫入從這裡開始一個接一個）。
    4. 上限檢查：這個 Run 的 `user_message` 筆數減 1（第一則不算）要小於 `insert.maxPerRun`，否則丟 `InsertLimitReached`（409）。放在第 3 步之後，所以同時進來的插入不會一起超過上限。
    5. 檢查 `dedupe_key`、插入 Item。
-   6. 附件（PI-05；PI-03 沒有這一步）：`SELECT … FROM attachments WHERE id IN (…) FOR UPDATE`，確認每個 id 都屬於這段 Session，再把 `used_seq` 是空值的設成這則的序號、`reserved_by` 清空。有 id 不屬於這段 Session 就丟 `AttachmentNotFound`，整個 transaction 回復。
+   6. 附件：`SELECT … FROM attachments WHERE id IN (…) FOR UPDATE`，確認每個 id 都屬於這段 Session，再把 `used_seq` 是空值的設成這則的序號、`reserved_by` 清空。有 id 不屬於這段 Session 就丟 `AttachmentNotFound`，整個 transaction 回復。
    7. commit 時釋放共享鎖。
 4. 回應 201 和寫入的 Item。迴圈不知道有人插入：它下一輪讀紀錄就會看到（D-18）。哪一台 backend 跑這個 Run 都沒關係，插入只寫資料庫，所以插入請求不受 503 影響。
 
@@ -1516,16 +1521,15 @@ Run 正常結束（`completed`、沒有 `endReason`）時，`RunSupervisor` 用 
 
 `POST /sessions/:id/attachments?name=<檔名>`，請求內容是圖片的位元組，`Content-Type` 是圖片的型別。不用 multipart：不用加套件，大小的檢查也簡單。
 
-route 上的中介層依序是：
+controller 依序做（`controllers/attachments.ts`；`route()` 先取出身分，沒有登入 401）：
 
-1. 取出身分（沒有登入 401）。
-2. 讀 Session 並做擁有者檢查（不是擁有者 404）。這時還沒讀請求內容，所以沒有身分或不是擁有者的請求，不會讓伺服器讀任何位元組。
-3. `express.raw({ type: [四種圖片型別], limit: maxBytes })`，只掛在這條 route。請求有 `Content-Length` 而且超過上限時，在讀內容之前回 413。沒有 `Content-Length`（chunked）時，讀到超過上限就停止。記憶體最多用 `maxBytes`。全域的 `express.json({ limit: '64kb' })` 不處理這個型別。
-4. controller：`Content-Type` 不是四種之一（SVG 也在這裡）回 415；內容是空的、`name` 不合格回 400。`name` 去掉控制字元，路徑分隔字元換成 `_`，最長 255。
-5. `UploadAttachment` 呼叫 `checkImage(mediaType, bytes)`，只看檔頭：PNG 的 8 個位元組標記、JPEG 的 `FF D8 FF`、GIF 的 `GIF87a` 或 `GIF89a`、WebP 的 `RIFF`、4 個位元組的長度、`WEBP`。和宣告的型別不一致回 400。不解碼圖片，所以不檢查像素大小，EXIF 也不會被移除。
-6. `AttachmentStore.put`。Session 已有 `maxPendingPerSession` 個沒用到的附件時，409（`TooManyPendingAttachments`）。回應 201 和 `{ id, mediaType, name, size }`。
+1. `UploadAttachment.authorize`：讀 Session 並做擁有者檢查（不是擁有者 404）；模型不能讀圖片時 400（`ImagesNotSupported`）；`Content-Type`（去掉參數、轉小寫）不是四種之一（SVG 也在這裡）回 415。這時還沒讀請求內容，所以失敗的請求不會讓伺服器讀任何位元組。失敗時回應帶 `Connection: close`：伺服器不把沒讀的內容從 socket 讀掉。
+2. `readLimited(req, maxBytes)`（`rawBody.ts`）：請求有 `Content-Length` 而且超過上限時，在讀內容之前回 413（`AttachmentTooLarge`）。沒有 `Content-Length`（chunked），或內容比標頭說的長時，讀到總量超過上限的那一個 chunk 就停止（`req.pause()`）、回 413 並關閉連線；那個 chunk 丟掉，所以記憶體最多用 `maxBytes` 加一個 chunk。全域的 `express.json({ limit: '64kb' })` 不處理圖片型別。
+3. `UploadAttachment.execute`：內容是空的、`name` 不合格回 400（`InvalidAttachment`）。`name` 去掉控制字元，路徑分隔字元換成 `_`，最長 255。
+4. `checkImage(mediaType, bytes)`，只看檔頭：PNG 的 8 個位元組標記、JPEG 的 `FF D8 FF`、GIF 的 `GIF87a` 或 `GIF89a`、WebP 的 `RIFF`、4 個位元組的長度、`WEBP`。和宣告的型別不一致回 400。不解碼圖片，所以不檢查像素大小，EXIF 也不會被移除。
+5. `AttachmentStore.put`。Session 已有 `maxPendingPerSession` 個沒用到的附件時，409（`TooManyPendingAttachments`）。回應 201 和 `{ id, mediaType, name, size }`。
 
-body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 413，固定文字。
+不用 `express.raw`：V-09 的驗證發現它在超過上限之後，仍然把整個請求內容從 socket 讀完（丟掉）才回 413，所以「大小在讀完內容之前就擋」做不到（見實作計畫的 V-09）。`readLimited` 自己計數，超過就停；Backstage 的錯誤處理只看 `statusCode`，所以 `AttachmentTooLarge` 由 `errorMapping.ts` 轉成 413，名稱是 `AttachmentTooLarge`。
 
 **讀取**
 
@@ -1534,13 +1538,14 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 - `Content-Type`：存下的型別。
 - `X-Content-Type-Options: nosniff`、`Content-Disposition: inline`。
 - `Content-Security-Policy: default-src 'none'; sandbox`：萬一有人繞過檢查存進可執行的內容，瀏覽器也不會執行。
-- `Cache-Control: private, no-cache`、`ETag: "<sha256>"`。有 `If-None-Match` 而且相符回 304。每次請求都要通過身分檢查，再比對 `ETag`：附件被刪除或 Session 的權限改變（P2）後，快取的內容不會繼續被用。
+- `Cache-Control: private, no-cache`、`ETag: "<sha256>"`。有 `If-None-Match` 而且相符回 304。每次請求都要通過身分檢查，再比對 `ETag`：附件被刪除或 Session 的權限改變（P2）後，快取的內容不會繼續被用。`ReadAttachment` 先用 `describe` 只讀中繼資料（確認存在、屬於這段 Session），`ETag` 相符時不讀位元組。
 
 **綁定和標記**
 
 - 附件有 `session_id` 和 `owner_ref`。訊息（直接送、插入、排隊）只能用同一段 Session 的附件，`describe` 檢查。附件可以被同一段 Session 的多則訊息用：「再送一次」要用同一張圖。
 - `used_seq`：第一則用它的 `user_message` 的序號。直接送和插入由 `KnexItemLog.append` 在寫入的 transaction 裡設定；排隊的由 `startNext` 在寫入的 transaction 裡設定。所以「訊息寫了、附件沒標」不會發生。
-- `reserved_by`：排隊列的 id。`add` 和 `update` 設定，`remove` 清除，`startNext` 寫入訊息後清除。保留中的附件不會被清理。
+- `reserved_by`：排隊列的 id。`add`、`update`、`remove`、`reorder` 和 `startNext` 在改完佇列的同一個 transaction 裡，依佇列的順序重算（`syncReservations`）：每張附件由「排在最前面、列出它的那一則」保留，沒有排隊的訊息列出它就釋放。同一張圖被兩則排隊訊息列出時，刪掉前面那則，保留會交給後面那則，圖不會在它還在等的時候被清理。保留中的附件不會被清理。
+- 訊息帶圖片時，用例在寫入前先檢查：模型能讀圖片（`ImagesNotSupported`）、張數（`TooManyAttachments`）、附件屬於這段 Session（`UnknownAttachment`）；寫入的 transaction 會再檢查一次最後一項。直接送出和排隊的單則訊息最多 `maxPerMessage` 乘 `maxBytes`，設定載入時已保證不超過 `maxBytesPerInput`，所以 `TooManyImageBytes` 只在插入檢查。
 - 清理：`PurgeUnusedAttachments` 每小時刪除 `used_seq` 和 `reserved_by` 都是空值、`created_at` 早於 24 小時前的列（IN-04）。多台 backend 同時跑也只是重複刪除同樣的列。刪除用 `FOR UPDATE SKIP LOCKED` 先選出要刪的列：正在被訊息標成已用的附件被跳過，不會和插入、送出互等。刪除 Session 時，外鍵連帶刪除。
 
 **送給模型**
@@ -1549,7 +1554,7 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 - `OpenAiCompatibleModelClient` 收到 `AttachmentStore`。`ModelClient.stream` 的 `opts` 加 `sessionId`（`callModel` 從 `CallContext` 帶入），adapter 用它呼叫 `AttachmentStore.get(sessionId, id)`；`ModelImage` 因此不必帶 `sessionId`，也不會讀到別的 Session 的附件。每次呼叫前，對有 `images` 的 `user` 訊息逐張 `get`，轉成 data URL（`data:<型別>;base64,<內容>`），訊息的 `content` 改成陣列：第一項是文字，後面是 `{ type: 'image_url', image_url: { url } }`。沒有圖片的訊息維持字串。
 - 附件讀不到（已被刪除）：那張換成文字 `[image: <name>, not available]`，記一筆警告，呼叫照常進行。
 - 每個 Step 都會重新讀、重新轉。沒有快取。一次輸入的圖片位元組有上限（下面的「位元組上限」），所以記憶體用量最多是 `maxBytesPerInput` 加三分之一（base64）。
-- 這個格式是 OpenAI Chat Completions 的 `image_url`。沒有對特定的供應商驗證（規劃的 V-08）。
+- 這個格式是 OpenAI Chat Completions 的 `image_url`（V-08：官方文件列出 PNG、JPEG、WebP、不含動畫的 GIF）。沒有對特定的供應商驗證：不同的相容伺服器可能不接受 GIF 動畫、或對單張大小有自己的上限。
 - 模型的 `capabilities.images` 是 `false`：`buildModelInput` 不放 `images`，改在那則訊息後加 `[image: <name>, not sent: the model cannot read images]`。
 
 **上下文預算**
@@ -1617,7 +1622,7 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 
 既有路由的變更：`POST /sessions/:id/runs` 的內容多一個選用的 `attachmentIds`。`GET /sessions/:id` 多回傳 `queue`（`{ items, paused }`），每則 `delivery` 是 `inserted` 的 `user_message` 多一個 `insertState`：`read`（有 `agent_message` 或 `tool_call` 的 `readUpToSeq` 涵蓋它）、`pending`（沒讀到，而且它的 Run 還在進行）、`unread`（沒讀到，Run 已結束）。`GET /sessions/:id` 回傳的 Item 裡有這些訊息，但模型輸入不含 `unread` 的舊訊息（13.4）。
 
-新增的錯誤。domain 的錯誤名稱放在回應的 `error.name`，畫面用它區分同一個狀態碼的不同情形。`errorMapping.ts` 的 `NamedHttpError` 帶這個名稱和 `statusCode`（Backstage 的錯誤處理只對自己的錯誤類別從名稱推狀態碼，其他的讀 `statusCode`）。已經實作的是 `RunNotRunning`、`InsertLimitReached`、`NoActiveRun`、`QueueFull`、`QueueChanged`、`QueuedMessageNotFound`；其餘屬於附件，在 PI-05：
+新增的錯誤。domain 的錯誤名稱放在回應的 `error.name`，畫面用它區分同一個狀態碼的不同情形。`errorMapping.ts` 的 `NamedHttpError` 帶這個名稱和 `statusCode`（Backstage 的錯誤處理只對自己的錯誤類別從名稱推狀態碼，其他的讀 `statusCode`）。下表都已實作。訊息裡的附件 id 不屬於這段 Session 時，domain 的錯誤是 `UnknownAttachment`，回應的 `error.name` 是 `AttachmentNotFound`（400）；讀取時附件不存在，domain 的錯誤是 `AttachmentNotFound`（404）。模型不能讀圖片時，上傳也回 400（`ImagesNotSupported`），不存沒有用的附件。
 
 | 錯誤                        | 狀態碼   | 情形                                                                                         |
 | --------------------------- | -------- | -------------------------------------------------------------------------------------------- |
@@ -1653,7 +1658,7 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 
 欄位在第 7 節。這裡寫索引的理由和 migration。
 
-- PI-03 的 migration `20260104000000_input.js`：`runs` 加 `read_up_to_seq integer not null default 0`；新增 `queued_messages`（含 `attachment_ids`，預設 `[]`）。`down` 刪除那張表和那個欄位。`attachments` 在 PI-05 的 migration（日期較晚）。
+- PI-03 的 migration `20260104000000_input.js`：`runs` 加 `read_up_to_seq integer not null default 0`；新增 `queued_messages`（含 `attachment_ids`，預設 `[]`）。`down` 刪除那張表和那個欄位。`attachments` 在 PI-05 的 migration `20260105000000_attachments.js`。
 - `attachments.bytes` 用 knex 的 `binary`（PostgreSQL 是 `bytea`，SQLite 是 `blob`）。所有只要中繼資料的查詢明列欄位，不用 `select *`。
 - `attachments` 的索引：`(session_id)`、`(created_at)`（清理）。外鍵 `session_id` 連帶刪除。
 - `queued_messages` 的索引：`(session_id, position)`，外鍵 `session_id` 連帶刪除。

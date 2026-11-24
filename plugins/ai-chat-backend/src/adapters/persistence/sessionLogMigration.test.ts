@@ -107,9 +107,11 @@ describe('the migration of the session log', () => {
         'migrations',
       ),
     };
-    // Two later migrations come first: the tables of the input phase, and the
-    // one that drops the tables of the first version (undoing it brings them
-    // back). Undoing this one drops the tables of the log.
+    // Three later migrations come first: the attachments, the tables of the
+    // input phase, and the one that drops the tables of the first version
+    // (undoing it brings them back). Undoing this one drops the tables of the
+    // log.
+    await knex.migrate.down(config);
     await knex.migrate.down(config);
     await knex.migrate.down(config);
     await knex.migrate.down(config);

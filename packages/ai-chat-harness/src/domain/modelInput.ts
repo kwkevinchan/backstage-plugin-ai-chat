@@ -17,6 +17,7 @@
 import type { AgentDefinition } from './agent';
 import { inCausalOrder, withoutLostInserts } from './inputs';
 import type {
+  AttachmentRef,
   Item,
   JsonObject,
   ToolCallBody,
@@ -36,11 +37,49 @@ import type { ToolDescriptor } from './tool';
  * which take more tokens per character than prose, so set `tokenBudget` well
  * below the context window of the model.
  *
+ * An image counts `tokensPerImage` tokens (IN-06; {@link DEFAULT_TOKENS_PER_IMAGE}
+ * when not set): the size is a setting, not a measure. `maxImageBytesPerInput`
+ * is the most image bytes one input may carry; there is no limit when it is
+ * not set. When the images of the older messages are over it, or over the
+ * token budget, they are left out, oldest first. The images of the messages of
+ * the run itself are never left out.
+ *
  * @public
  */
 export type ContextBudget = {
   tokenBudget: number;
   keepRecentSteps: number;
+  tokensPerImage?: number;
+  maxImageBytesPerInput?: number;
+};
+
+/** The size of an image in tokens when the budget gives none. @public */
+export const DEFAULT_TOKENS_PER_IMAGE = 1600;
+
+/**
+ * An image of a message, without its bytes: the adapter of the model reads
+ * them from the attachment `attachmentId` of the session (IN-07: only the
+ * model sees an image).
+ *
+ * @public
+ */
+export type ModelImage = {
+  attachmentId: string;
+  mediaType: string;
+  name: string;
+};
+
+/**
+ * What the loop adds to the input besides the log: the context lines, the
+ * tools, and whether the model reads images (`images`, false when not set).
+ * When it does not, the images of a message are not sent and a line says so.
+ *
+ * @public
+ */
+export type ModelInputExtra = {
+  context: string[];
+  tools: ToolDescriptor[];
+  images?: boolean;
 };
 
 /** A tool call of the model, as the model API needs it. @public */
@@ -59,7 +98,7 @@ export type ModelToolCall = {
  * @public
  */
 export type ModelMessage =
-  | { role: 'user'; content: string }
+  | { role: 'user'; content: string; images?: ModelImage[] }
   | { role: 'assistant'; content: string; toolCalls: ModelToolCall[] }
   | { role: 'tool'; callId: string; content: string };
 
@@ -144,7 +183,7 @@ const STEPS_OMITTED = 'Some earlier steps of this answer were left out.';
 export function buildModelInput(
   items: readonly Item[],
   agent: AgentDefinition,
-  extra: { context: string[]; tools: ToolDescriptor[] },
+  extra: ModelInputExtra,
   budget: ContextBudget,
 ): ModelInput {
   return assemble(items, agent, extra, budget).input;
@@ -163,7 +202,7 @@ export function buildModelInput(
 export function trimmedPartsOf(
   items: readonly Item[],
   agent: AgentDefinition,
-  extra: { context: string[]; tools: ToolDescriptor[] },
+  extra: ModelInputExtra,
   budget: ContextBudget,
 ): { earlier: boolean; steps: boolean } {
   const { earlier, steps } = assemble(items, agent, extra, budget);
@@ -173,23 +212,26 @@ export function trimmedPartsOf(
 function assemble(
   items: readonly Item[],
   agent: AgentDefinition,
-  extra: { context: string[]; tools: ToolDescriptor[] },
+  extra: ModelInputExtra,
   budget: ContextBudget,
 ): { input: ModelInput; earlier: boolean; steps: boolean } {
   const layout = layoutOf(withoutLostInserts(items), agent, extra, budget);
+  const perImage = tokensPerImageOf(budget);
   const copy = (segments: Segment[]) =>
     segments.map(segment => ({ ...segment, messages: [...segment.messages] }));
   const old = copy(layout.old);
   const mid = copy(layout.mid);
+  limitImageBytes(old, mid, [...layout.pinned, ...layout.recent], budget);
   let total =
     layout.fixedTokens +
-    sumTokens(old) +
-    sumTokens(layout.pinned) +
-    sumTokens(mid) +
-    sumTokens(layout.recent);
+    sumTokens(old, perImage) +
+    sumTokens(layout.pinned, perImage) +
+    sumTokens(mid, perImage) +
+    sumTokens(layout.recent, perImage);
 
   total = shortenOutputs(old, total, budget.tokenBudget);
   total = shortenOutputs(mid, total, budget.tokenBudget);
+  total = leaveOutImages(old, mid, total, budget);
   // Still too big: leave the oldest steps out, and say so in a message that
   // is part of the size. Without a summary, the earlier part is announced
   // first (which also keeps the input starting with a user message); the steps
@@ -199,7 +241,7 @@ function assemble(
   let steps = false;
   while (old.length > 0 && total > budget.tokenBudget) {
     const [dropped] = old.splice(0, 1);
-    total -= tokensOfSegment(dropped);
+    total -= tokensOfSegment(dropped, perImage);
     if (!earlier && !hasSummary) total += estimateTokens(EARLIER_OMITTED);
     earlier = true;
   }
@@ -208,7 +250,7 @@ function assemble(
     const at = mid.findIndex(segment => !segment.inserted);
     if (at < 0) break;
     const [dropped] = mid.splice(at, 1);
-    total -= tokensOfSegment(dropped);
+    total -= tokensOfSegment(dropped, perImage);
     if (!steps) total += estimateTokens(STEPS_OMITTED);
     steps = true;
   }
@@ -259,7 +301,7 @@ export type SummaryPlan = {
 export function planSummary(
   items: readonly Item[],
   agent: AgentDefinition,
-  extra: { context: string[]; tools: ToolDescriptor[] },
+  extra: ModelInputExtra,
   budget: ContextBudget,
 ): SummaryPlan | undefined {
   const visible = withoutLostInserts(items);
@@ -268,11 +310,15 @@ export function planSummary(
   // A summary cannot make room when the parts that always stay, with the
   // room a summary takes, are over the budget already: it would be written
   // again at every step and the input would not shrink.
+  const perImage = tokensPerImageOf(budget);
   const kept =
     layout.fixedTokens +
-    sumTokens(layout.pinned) +
-    sumTokens(layout.mid.filter(segment => segment.inserted)) +
-    sumTokens(layout.recent) +
+    sumTokens(layout.pinned, perImage) +
+    sumTokens(
+      layout.mid.filter(segment => segment.inserted),
+      perImage,
+    ) +
+    sumTokens(layout.recent, perImage) +
     Math.min(SUMMARY_RESERVE_TOKENS, Math.ceil(budget.tokenBudget / 10));
   if (kept > budget.tokenBudget) return undefined;
 
@@ -280,14 +326,16 @@ export function planSummary(
     segments.map(segment => ({ ...segment, messages: [...segment.messages] }));
   const old = copy(layout.old);
   const mid = copy(layout.mid);
+  limitImageBytes(old, mid, [...layout.pinned, ...layout.recent], budget);
   let total =
     layout.fixedTokens +
-    sumTokens(old) +
-    sumTokens(layout.pinned) +
-    sumTokens(mid) +
-    sumTokens(layout.recent);
+    sumTokens(old, perImage) +
+    sumTokens(layout.pinned, perImage) +
+    sumTokens(mid, perImage) +
+    sumTokens(layout.recent, perImage);
   total = shortenOutputs(old, total, budget.tokenBudget);
   total = shortenOutputs(mid, total, budget.tokenBudget);
+  total = leaveOutImages(old, mid, total, budget);
   if (total <= budget.tokenBudget) return undefined;
 
   // The first message of the run is never covered: the summary stops before
@@ -337,7 +385,10 @@ export function buildSummaryInput(
   for (const segment of toSegments(plan.items, lookup)) {
     for (const message of segment.messages) {
       if (message.role === 'user') {
-        lines.push(`User: ${message.content}`);
+        const images = (segment.attachments ?? []).map(
+          ref => `[image: ${ref.name}]`,
+        );
+        lines.push(`User: ${[message.content, ...images].join('\n')}`);
       } else if (message.role === 'assistant') {
         if (message.content.length > 0) {
           lines.push(`Agent: ${message.content}`);
@@ -441,6 +492,8 @@ type Segment = {
   firstSeq: number;
   /** A message of the user that was inserted into a run that was running. */
   inserted?: true;
+  /** The images of a user message that are still attached to it. */
+  attachments?: AttachmentRef[];
   messages: ModelMessage[];
 };
 
@@ -509,7 +562,24 @@ function toSegments(items: readonly Item[], lookup: Lookup): Segment[] {
           role: 'user',
           firstSeq: item.seq,
           ...(item.delivery === 'inserted' ? { inserted: true as const } : {}),
-          messages: [{ role: 'user', content: userContent(item) }],
+          ...(item.attachments && item.attachments.length > 0
+            ? { attachments: item.attachments }
+            : {}),
+          messages: [
+            {
+              role: 'user',
+              content: userContent(item),
+              ...(item.attachments && item.attachments.length > 0
+                ? {
+                    images: item.attachments.map(ref => ({
+                      attachmentId: ref.id,
+                      mediaType: ref.mediaType,
+                      name: ref.name,
+                    })),
+                  }
+                : {}),
+            },
+          ],
         });
         break;
       case 'agent_message':
@@ -595,7 +665,7 @@ type Layout = {
 function layoutOf(
   items: readonly Item[],
   agent: AgentDefinition,
-  extra: { context: string[]; tools: ToolDescriptor[] },
+  extra: ModelInputExtra,
   budget: ContextBudget,
 ): Layout {
   let newest: Extract<Item, { kind: 'summary' }> | undefined;
@@ -609,6 +679,11 @@ function layoutOf(
     item => item.kind !== 'summary' && item.seq > coveredUpTo,
   );
   const segments = toSegments(inCausalOrder(live), lookupOf(live));
+  if (extra.images !== true) {
+    for (const segment of segments) {
+      replaceImages(segment, 'not sent: the model cannot read images');
+    }
+  }
 
   const system = [agent.systemPrompt, UNTRUSTED_OUTPUT_NOTICE, ...extra.context]
     .filter(part => part.length > 0)
@@ -624,7 +699,7 @@ function layoutOf(
   const fixedTokens =
     estimateTokens(system) +
     estimateTokens(JSON.stringify(extra.tools)) +
-    summaryMessages.reduce((sum, m) => sum + tokensOfMessage(m), 0);
+    summaryMessages.reduce((sum, m) => sum + tokensOfMessage(m, 0), 0);
 
   // The newest steps stay whole, and so do the user messages right before
   // them: the question the first of them answers.
@@ -698,18 +773,104 @@ function oneLine(content: string): string {
   return render(status as ModelResultStatus, { message: SHORTENED_OUTPUT });
 }
 
-function tokensOfMessage(message: ModelMessage): number {
+function tokensPerImageOf(budget: ContextBudget): number {
+  return budget.tokensPerImage ?? DEFAULT_TOKENS_PER_IMAGE;
+}
+
+function tokensOfMessage(message: ModelMessage, perImage: number): number {
   const calls =
     message.role === 'assistant' ? JSON.stringify(message.toolCalls) : '';
-  return estimateTokens(message.content) + estimateTokens(calls);
+  const images =
+    message.role === 'user' ? (message.images?.length ?? 0) * perImage : 0;
+  return estimateTokens(message.content) + estimateTokens(calls) + images;
 }
 
-function tokensOfSegment(segment: Segment): number {
-  return segment.messages.reduce((sum, m) => sum + tokensOfMessage(m), 0);
+function tokensOfSegment(segment: Segment, perImage: number): number {
+  return segment.messages.reduce(
+    (sum, m) => sum + tokensOfMessage(m, perImage),
+    0,
+  );
 }
 
-function sumTokens(segments: Segment[]): number {
-  return segments.reduce((sum, s) => sum + tokensOfSegment(s), 0);
+function sumTokens(segments: Segment[], perImage: number): number {
+  return segments.reduce((sum, s) => sum + tokensOfSegment(s, perImage), 0);
+}
+
+/**
+ * Takes the images off a user message and says so in one line each after its
+ * text, with `reason` (`left out`, or why they are not sent).
+ */
+function replaceImages(segment: Segment, reason: string): void {
+  const refs = segment.attachments;
+  if (!refs) return;
+  const [message] = segment.messages;
+  if (message?.role !== 'user') return;
+  const lines = refs.map(ref => `[image: ${ref.name}, ${reason}]`);
+  segment.messages = [
+    { role: 'user', content: [message.content, ...lines].join('\n') },
+  ];
+  delete segment.attachments;
+}
+
+/**
+ * The messages whose images may be left out, oldest first: the user messages
+ * of `old`, and those of `mid` that were not inserted into the run (`mid`
+ * holds the messages of the run, which stay).
+ */
+function leavable(old: Segment[], mid: Segment[]): Segment[] {
+  return [...old, ...mid.filter(segment => !segment.inserted)].filter(
+    segment => segment.role === 'user' && segment.attachments,
+  );
+}
+
+function bytesOf(segment: Segment): number {
+  return (segment.attachments ?? []).reduce((sum, ref) => sum + ref.size, 0);
+}
+
+/**
+ * Leaves out the images of the older messages, oldest first, while the image
+ * bytes of the whole input are over `maxImageBytesPerInput` (IN-06). The
+ * images of the run's own messages count but are not left out. Changes the
+ * segments.
+ */
+function limitImageBytes(
+  old: Segment[],
+  mid: Segment[],
+  rest: Segment[],
+  budget: ContextBudget,
+): void {
+  const limit = budget.maxImageBytesPerInput;
+  if (limit === undefined) return;
+  let bytes = [...old, ...mid, ...rest].reduce(
+    (sum, segment) => sum + bytesOf(segment),
+    0,
+  );
+  for (const segment of leavable(old, mid)) {
+    if (bytes <= limit) return;
+    bytes -= bytesOf(segment);
+    replaceImages(segment, 'left out');
+  }
+}
+
+/**
+ * Leaves out the images of the older messages, oldest first, until `total` is
+ * within the token budget. Changes the segments and returns the new total.
+ */
+function leaveOutImages(
+  old: Segment[],
+  mid: Segment[],
+  total: number,
+  budget: ContextBudget,
+): number {
+  const perImage = tokensPerImageOf(budget);
+  let size = total;
+  for (const segment of leavable(old, mid)) {
+    if (size <= budget.tokenBudget) return size;
+    const before = tokensOfSegment(segment, perImage);
+    replaceImages(segment, 'left out');
+    size -= before - tokensOfSegment(segment, perImage);
+  }
+  return size;
 }
 
 type ModelResultStatus = ToolResultStatus | 'not_run';

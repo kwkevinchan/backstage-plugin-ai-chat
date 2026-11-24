@@ -33,6 +33,7 @@ const message = (id: string): QueuedMessage => ({
   sessionId: 's1',
   position: 1,
   text: id,
+  attachments: [],
   createdAt: 'x',
   updatedAt: 'x',
 });

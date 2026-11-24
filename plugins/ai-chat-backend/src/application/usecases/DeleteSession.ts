@@ -18,7 +18,8 @@ import { assertOwner, RunAlreadyActive, type Principal } from '../../domain';
 import type { RunRepository, SessionRepository } from '../ports';
 
 /**
- * Deletes a session of the signed-in user with its runs and items. A session
+ * Deletes a session of the signed-in user with its runs, items, queued
+ * messages and images. A session
  * with a run that has not ended is not deleted: the database locks the session
  * and then its runs when it deletes, and the log locks a run and then the
  * session when it appends, so the two can wait for each other.

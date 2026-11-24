@@ -93,11 +93,62 @@ export type ChatDelivery = 'direct' | 'inserted' | 'queued';
  */
 export type ChatInsertState = 'read' | 'pending' | 'unread';
 
+/**
+ * An image of a message: what the screen needs to draw it. The bytes are read
+ * with `GET /sessions/:id/attachments/:attachmentId`.
+ *
+ * @public
+ */
+export interface ChatAttachment {
+  id: string;
+  mediaType: string;
+  name: string;
+  /** Size in bytes. */
+  size: number;
+}
+
+/** The answer of `POST /sessions/:id/attachments`. @public */
+export interface ChatUploadedAttachment {
+  id: string;
+  mediaType: string;
+  name: string;
+  size: number;
+}
+
+/**
+ * The answer of `GET /input-config`: what a message may carry, so the screen
+ * checks an image before it uploads it.
+ *
+ * @public
+ */
+export interface ChatInputConfig {
+  images: {
+    /** Whether the model reads images. The screen shows no attach button when it does not. */
+    enabled: boolean;
+    /** The media types the upload takes. */
+    mediaTypes: string[];
+    /** Most images in one message. */
+    maxPerMessage: number;
+    /** Largest image, in bytes. */
+    maxBytes: number;
+    /** Most image bytes in the messages of one run. */
+    maxBytesPerInput: number;
+    /** Most images of a session that are in no message yet. */
+    maxPendingPerSession: number;
+  };
+  /** Most messages inserted into one run. */
+  insertMaxPerRun: number;
+  /** Most messages in the queue of one session. */
+  queueMaxMessages: number;
+}
+
 /** @public */
 export type ChatItemBody =
   | {
       kind: 'user_message';
       text: string;
+      /** The images of the message, in the order the user gave them. */
+      attachments?: ChatAttachment[];
       page?: ChatPageContext;
       delivery?: ChatDelivery;
       /**
@@ -201,6 +252,8 @@ export interface ChatQueuedMessage {
   /** From 1, in the order the messages are sent. */
   position: number;
   text: string;
+  /** The images of the message; the queue holds them until it is sent. */
+  attachments?: ChatAttachment[];
   page?: ChatPageContext;
   createdAt: string;
   updatedAt: string;
@@ -242,24 +295,32 @@ export interface UpdateChatSessionRequest {
 /** The body of `POST /sessions/:id/runs`. @public */
 export interface SendChatMessageRequest {
   text: string;
+  /** Ids of uploaded images of this session. */
+  attachmentIds?: string[];
   page?: ChatPageContext;
 }
 
 /** The body of `POST /sessions/:id/runs/:runId/messages`. @public */
 export interface InsertChatMessageRequest {
   text: string;
+  /** Ids of uploaded images of this session. */
+  attachmentIds?: string[];
   page?: ChatPageContext;
 }
 
 /** The body of `POST /sessions/:id/queue`. @public */
 export interface QueueChatMessageRequest {
   text: string;
+  /** Ids of uploaded images of this session. */
+  attachmentIds?: string[];
   page?: ChatPageContext;
 }
 
 /** The body of `PATCH /sessions/:id/queue/:queuedId`. `null` as the page removes it. @public */
 export interface UpdateQueuedMessageRequest {
   text?: string;
+  /** The ids of all the images the message keeps. */
+  attachmentIds?: string[];
   page?: ChatPageContext | null;
 }
 
@@ -374,6 +435,7 @@ export interface ChatNoticeData {
 export interface ChatInsertedData {
   seq: number;
   text: string;
+  attachments?: ChatAttachment[];
   page?: ChatPageContext;
 }
 

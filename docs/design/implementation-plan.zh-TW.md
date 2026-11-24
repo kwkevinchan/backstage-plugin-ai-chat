@@ -235,7 +235,7 @@ flowchart LR
 | PI-02 | 核心：插入       | M    | IN-10、IN-11、IN-17（核心的部分）   | #25 | 進行中 |
 | PI-03 | 宿主：插入和排隊 | L    | IN-10 到 IN-17                      | #26 | 進行中 |
 | PI-04 | 前端：插入和排隊 | M    | IN-12、IN-13、IN-15、IN-18          | #28 | 進行中 |
-| PI-05 | 核心和宿主：圖片 | L    | IN-01 到 IN-07                      |     |        |
+| PI-05 | 核心和宿主：圖片 | L    | IN-01 到 IN-07                      | #29 | 進行中 |
 | PI-06 | 前端：圖片       | M    | IN-08、IN-09                        |     |        |
 | PI-07 | 收尾             | S    | 整體驗收                            |     |        |
 
@@ -344,6 +344,13 @@ flowchart LR
   - 讀取附件的回應標頭是 `private, no-cache` 加 `ETag`；`If-None-Match` 相符回 304，但附件被刪除之後回 404。
   - 預算：每張圖片算 `tokensPerImage`；超過預算時，舊訊息的圖片先換成 `[image: <name>, left out]`，這個 Run 的使用者訊息的圖片不動；摘要的輸入只有 `[image: <name>]`。
   - 核心的測試不啟動 Backstage，PI-02 的測試不改。
+- **實作和上面不同的地方**：
+  - 上傳不用 `express.raw`，用 `readLimited`（V-09）。
+  - 模型不能讀圖片時，上傳也回 400（`ImagesNotSupported`），不只是帶圖片的訊息。
+  - `ContextBudget` 的 `tokensPerImage` 和 `maxImageBytesPerInput` 是選用的（沒有時用 1600、不限制），所以核心 PI-02 的測試不用改；模型能不能讀圖片由 `buildModelInput` 的 `extra.images` 帶入（`callModel` 從 `capabilities.images` 設）。
+  - 訊息裡的附件 id 不屬於這段 Session：domain 的錯誤是 `UnknownAttachment`，回應的名稱是 `AttachmentNotFound`（400）。
+  - `GET /input-config` 多回 `maxBytesPerInput` 和 `maxPendingPerSession`。
+  - `AttachmentStore.put` 多收 `maxPending`；`QueuedMessage` 的 `attachments` 在 HTTP 型別（`ChatQueuedMessage`）是選用的，前端的 PI-04 測試不用改。
 
 ### PI-06 前端：圖片
 
@@ -441,8 +448,8 @@ P4 開始之前要重新評估：先看 P3-07 的平行唯讀呼叫在實際使�
 | V-05 | Backstage 有沒有官方的 search 或 TechDocs action                                                                                                                                                                                                        | P3-06 的範圍                  | P3-06 開始前                                                  |
 | V-06 | 使用者 token 的有效期在各種登入方式下是多少                                                                                                                                                                                                             | `runTimeoutSeconds` 的上限    | P1-08 已確認（見下）                                          |
 | V-07 | `auditor` 在沒有 HTTP 請求時（自動送出排隊的訊息）能不能記事件，要帶什麼身分                                                                                                                                                                            | 自動送出的稽核寫法            | PI-03 已確認（見下）                                          |
-| V-08 | OpenAI 相容的端點是否接受 `image_url` 的 data URL；各家對圖片大小和型別的限制                                                                                                                                                                           | 模型 adapter 的圖片格式       | PI-05 開始前                                                  |
-| V-09 | `express.raw` 的 `limit` 在沒有 `Content-Length` 時是否讀到上限就停；Backstage 的錯誤處理怎麼處理 body 太大的錯誤（要轉成 413）                                                                                                                         | 上傳的大小檢查                | PI-05 開始前                                                  |
+| V-08 | OpenAI 相容的端點是否接受 `image_url` 的 data URL；各家對圖片大小和型別的限制                                                                                                                                                                           | 模型 adapter 的圖片格式       | PI-05 已確認（見下）                                          |
+| V-09 | `express.raw` 的 `limit` 在沒有 `Content-Length` 時是否讀到上限就停；Backstage 的錯誤處理怎麼處理 body 太大的錯誤（要轉成 413）                                                                                                                         | 上傳的大小檢查                | PI-05 已確認（見下）：不用 `express.raw`                      |
 | V-10 | 插入和 Run 結束的 transaction 同時進行時的結果：PostgreSQL 的 `FOR SHARE`、`FOR NO KEY UPDATE`、`FOR UPDATE` 的排序和不死結；SQLite 靠連線池只有一條連線排隊（knex 把鎖編成空字串），連線池開到多條時的行為（要「插入先」或「結束先」，不能是錯的結果） | 插入和結束的競爭（IN-11）     | PI-03 已確認（見下）                                          |
 
 V-06 的確認結果（P1-08，Backstage 1.56.2，讀 `plugin-auth-backend` 0.30.2 和 `backend-defaults` 的程式）：
@@ -458,6 +465,18 @@ V-07 的確認結果（PI-03，讀 `backend-defaults` 的 `DefaultAuditorService
 - 所以自動送出的稽核事件 `queued-message-send` 用同一個 `AuditorAuditLog`：事件的 `meta` 帶 `actor`（使用者的 entity ref，來自 `afterRun` 收到的 `principal`）、`sessionId`、`runId`（新的 Run）、`queuedMessageId`。auditor 自己記的 actor 是外掛的服務身分，使用者在 `meta.actor`，跟 `tool-call-invoke` 一致。不需要備案。
 - 使用者按「繼續」（`ResumeQueue`）也走 `StartNextQueued`，同樣寫 `queued-message-send`，因為訊息也是從佇列送出的；它有 HTTP 請求，但 auditor 讀到的 actor 同樣不用，一律放 `meta.actor`，兩條路徑的事件長一樣。
 - 稽核在 `supervisor.launch` 之前開始（`begin`），之後 `success`；`begin` 丟錯時 Run 以 `not_started` 結束，不送沒有紀錄的訊息。
+
+V-08 的確認結果（PI-05）：
+
+- OpenAI 的圖片文件（`images-vision`）：圖片以 base64 的 data URL 放在使用者訊息 `content` 陣列的 `image_url` 項目，旁邊是 `text` 項目；支援 PNG、JPEG、WebP 和不含動畫的 GIF。文件沒有單張的位元組上限（用像素和 patch 數限制），整個請求最多 512 MB、1500 張。沒有使用任何 API key，也沒有呼叫模型服務：這是讀文件的結果。
+- `OpenAiCompatibleModelClient` 送出的 `content` 是 `[{ type: 'text', text }, { type: 'image_url', image_url: { url: 'data:<型別>;base64,<位元組>' } }]`；沒有圖片的訊息維持字串。`OpenAiCompatibleModelClientImages.test.ts` 用本機 HTTP 伺服器收請求，確認 JSON 的形狀和 base64 解碼後的位元組和上傳的相同。`scripts/fake-llm.mjs` 也能讀這個形狀（陣列的 `content`），回應「I can see N image(s): <型別> <位元組數> bytes」。
+- 沒有驗證的：各家相容伺服器（vLLM、Ollama、各種閘道）是否都接受 data URL；它們對 GIF 動畫和單張大小的限制。管理員用 `aiChat.llm.images` 決定模型能不能讀圖片；不能讀的模型不會收到 `image_url`。
+
+V-09 的確認結果（PI-05，express 4.22.3、body-parser 1.20.9、raw-body 2.5.3，實際的小測試）：
+
+- `express.raw({ limit })`：有 `Content-Length` 而且超過上限時，錯誤（`entity.too.large`、413）馬上建立，沒有把內容放進記憶體；但是 body-parser 在回應之前把整個請求內容讀完（`stream.resume()`，等 `finish` 才呼叫 `next(error)`），客戶端送多少，伺服器就讀多少，到結束才回 413。沒有 `Content-Length`（chunked）時也一樣：累計超過上限就不再保存，但繼續讀到請求結束才回 413。測試：宣告 100000 位元組、送 50000 位元組後不結束，600 ms 內沒有回應；連線關閉之後才出現錯誤。
+- 所以 `express.raw` 的記憶體上限成立，但「大小在讀完內容之前就擋」不成立，也停不下大檔的上傳。採用的做法：`readLimited`（`adapters/http/rawBody.ts`）：`Content-Length` 超過上限時不讀就回 413；chunked 時計數，超過就停止讀取、回 413、回應帶 `Connection: close`。
+- Backstage 的錯誤處理（`MiddlewareFactory.error`）從錯誤的 `statusCode` 或 `status` 欄位取狀態碼，所以 body-parser 的 413 也會得到 413，但名稱是 `PayloadTooLargeError`，訊息是 body-parser 的文字。`errorMapping.ts` 把 `AttachmentTooLarge` 轉成名稱固定為 `AttachmentTooLarge` 的 413。
 
 V-10 的確認結果（PI-03）：
 

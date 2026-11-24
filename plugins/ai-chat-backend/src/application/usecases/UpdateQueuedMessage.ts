@@ -16,7 +16,12 @@
 
 import type { PageContext } from '@kwkevinchan/ai-chat-harness';
 import { assertOwner, type Principal, type QueuedMessage } from '../../domain';
-import type { QueuedMessageRepository, SessionRepository } from '../ports';
+import { bindAttachments, type ImageSettings } from '../attachments';
+import type {
+  AttachmentStore,
+  QueuedMessageRepository,
+  SessionRepository,
+} from '../ports';
 
 /** The user changes a queued message that was not sent yet (IN-13). */
 export class UpdateQueuedMessage {
@@ -24,19 +29,29 @@ export class UpdateQueuedMessage {
     private readonly deps: {
       sessions: SessionRepository;
       queue: QueuedMessageRepository;
+      attachments: AttachmentStore;
+      images: ImageSettings;
     },
   ) {}
 
-  /** Throws `NotSessionOwner` or `QueuedMessageNotFound`. */
+  /**
+   * Throws `NotSessionOwner`, `QueuedMessageNotFound`, or, for the images,
+   * `ImagesNotSupported`, `TooManyAttachments` or `UnknownAttachment`.
+   */
   async execute(input: {
     principal: Principal;
     sessionId: string;
     queuedId: string;
-    patch: { text?: string; page?: PageContext | null };
+    patch: {
+      text?: string;
+      attachmentIds?: string[];
+      page?: PageContext | null;
+    };
   }): Promise<QueuedMessage> {
     const { sessions, queue } = this.deps;
     const session = await sessions.get(input.sessionId);
     assertOwner(session, input.principal);
+    await bindAttachments(this.deps, session.id, input.patch.attachmentIds);
     return queue.update(session.id, input.queuedId, input.patch);
   }
 }

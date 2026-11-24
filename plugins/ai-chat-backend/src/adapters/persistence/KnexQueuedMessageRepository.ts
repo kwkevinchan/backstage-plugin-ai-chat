@@ -23,6 +23,7 @@ import type {
 import type { Knex } from 'knex';
 import type { QueuedMessageRepository } from '../../application/ports';
 import {
+  type AttachmentMeta,
   NoActiveRun,
   QueueChanged,
   QueuedMessageNotFound,
@@ -33,8 +34,12 @@ import {
 } from '../../domain';
 import {
   leased,
+  lockAttachments,
+  markAttachmentsUsed,
   newRunRow,
+  readAttachmentMetas,
   reserveSeq,
+  syncReservations,
   toRun,
   writeItems,
 } from './transactions';
@@ -63,6 +68,10 @@ class NothingToStart extends Error {}
  * a run takes the run first: the order is `runs`, `sessions`, `items`,
  * `queued_messages`, the same as in `KnexItemLog`.
  *
+ * The attachments of a queued message are held with `reserved_by` while it
+ * waits (`syncReservations` after each change), and marked used in the
+ * transaction that writes it as a message (`startNext`).
+ *
  * `position` has no unique index: a reorder writes the new values one row at
  * a time, and two rows hold the same value for a moment.
  */
@@ -86,12 +95,17 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
         { column: 'position', order: 'asc' },
         { column: 'id', order: 'asc' },
       ]);
-    return rows.map(toQueued);
+    const metas = await readAttachmentMetas(
+      this.knex,
+      sessionId,
+      rows.flatMap(row => idsOf(row)),
+    );
+    return rows.map(row => toQueued(row, metas));
   }
 
   async add(
     sessionId: string,
-    input: { text: string; page?: PageContext },
+    input: { text: string; attachmentIds?: string[]; page?: PageContext },
     opts: { max: number },
   ): Promise<QueuedMessage> {
     return this.knex.transaction(async trx => {
@@ -110,25 +124,32 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
         .max({ last: 'position' });
       if (Number(n) >= opts.max) throw new QueueFull(sessionId, opts.max);
       const now = this.clock.now().toISOString();
+      const attachmentIds = input.attachmentIds ?? [];
       const row: QueuedRow = {
         id: this.ids.next(),
         session_id: sessionId,
         position: Number(last ?? 0) + 1,
         text: input.text,
-        attachment_ids: '[]',
+        attachment_ids: JSON.stringify(attachmentIds),
         page: input.page ? JSON.stringify(input.page) : null,
         created_at: now,
         updated_at: now,
       };
       await trx('queued_messages').insert(row);
-      return toQueued(row);
+      const metas = await lockAttachments(trx, sessionId, attachmentIds);
+      await syncReservations(trx, sessionId);
+      return toQueued(row, byId(metas));
     });
   }
 
   async update(
     sessionId: string,
     id: string,
-    patch: { text?: string; page?: PageContext | null },
+    patch: {
+      text?: string;
+      attachmentIds?: string[];
+      page?: PageContext | null;
+    },
   ): Promise<QueuedMessage> {
     return this.knex.transaction(async trx => {
       await this.lockSession(trx, sessionId);
@@ -136,6 +157,9 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
         updated_at: this.clock.now().toISOString(),
       };
       if (patch.text !== undefined) changes.text = patch.text;
+      if (patch.attachmentIds !== undefined) {
+        changes.attachment_ids = JSON.stringify(patch.attachmentIds);
+      }
       if (patch.page !== undefined) {
         changes.page = patch.page === null ? null : JSON.stringify(patch.page);
       }
@@ -143,8 +167,14 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
         .where({ id, session_id: sessionId })
         .update(changes);
       if (count === 0) throw new QueuedMessageNotFound(id);
-      const row = await trx<QueuedRow>('queued_messages').where({ id }).first();
-      return toQueued(row!);
+      const row = (await trx<QueuedRow>('queued_messages')
+        .where({ id })
+        .first())!;
+      // Locks the images of the message, and fails when one is not in the
+      // session; the update is rolled back with it.
+      const metas = await lockAttachments(trx, sessionId, idsOf(row));
+      await syncReservations(trx, sessionId);
+      return toQueued(row, byId(metas));
     });
   }
 
@@ -155,6 +185,7 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
         .where({ id, session_id: sessionId })
         .delete();
       if (count === 0) throw new QueuedMessageNotFound(id);
+      await syncReservations(trx, sessionId);
     });
   }
 
@@ -177,10 +208,17 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
           .where({ id })
           .update({ position: index + 1 });
       }
+      // The first message that lists an image holds it: the order decides.
+      await syncReservations(trx, sessionId);
       const ordered = await trx<QueuedRow>('queued_messages')
         .where({ session_id: sessionId })
         .orderBy('position', 'asc');
-      return ordered.map(toQueued);
+      const metas = await readAttachmentMetas(
+        trx,
+        sessionId,
+        ordered.flatMap(row => idsOf(row)),
+      );
+      return ordered.map(row => toQueued(row, metas));
     });
   }
 
@@ -215,10 +253,23 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
           .delete();
         if (deleted !== 1) throw new NothingToStart();
 
-        const message = toQueued(first);
+        // An image that is gone is left out of the message; one that is held
+        // cannot be deleted, so this is for a row that was changed by hand.
+        const metas = await lockAttachments(trx, sessionId, idsOf(first), {
+          ignoreMissing: true,
+        });
+        const message = toQueued(first, byId(metas));
         const draft: ItemDraft = {
           kind: 'user_message',
           text: message.text,
+          ...(metas.length > 0 && {
+            attachments: metas.map(meta => ({
+              id: meta.id,
+              mediaType: meta.mediaType,
+              name: meta.name,
+              size: meta.size,
+            })),
+          }),
           ...(message.page && { page: message.page }),
           delivery: 'queued',
         };
@@ -230,6 +281,13 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
           drafts: [draft],
           keys: [undefined],
         });
+        await markAttachmentsUsed(
+          trx,
+          sessionId,
+          metas.map(meta => meta.id),
+          firstSeq,
+        );
+        await syncReservations(trx, sessionId);
         return { run: leased(toRun(row)), message };
       });
     } catch (error) {
@@ -255,12 +313,27 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
   }
 }
 
-function toQueued(row: QueuedRow): QueuedMessage {
+function idsOf(row: QueuedRow): string[] {
+  return JSON.parse(row.attachment_ids) as string[];
+}
+
+function byId(metas: AttachmentMeta[]): Map<string, AttachmentMeta> {
+  return new Map(metas.map(meta => [meta.id, meta]));
+}
+
+function toQueued(
+  row: QueuedRow,
+  metas: Map<string, AttachmentMeta>,
+): QueuedMessage {
   return {
     id: row.id,
     sessionId: row.session_id,
     position: row.position,
     text: row.text,
+    attachments: idsOf(row).flatMap(id => {
+      const meta = metas.get(id);
+      return meta ? [meta] : [];
+    }),
     ...(row.page !== null && { page: JSON.parse(row.page) as PageContext }),
     createdAt: row.created_at,
     updatedAt: row.updated_at,

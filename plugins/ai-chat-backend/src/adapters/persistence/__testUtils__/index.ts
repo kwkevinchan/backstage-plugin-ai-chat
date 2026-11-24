@@ -19,6 +19,7 @@ import {
   SequentialIdGenerator,
 } from '@kwkevinchan/ai-chat-harness/testing';
 import { createMigratedDb } from '../../../__testUtils__';
+import { KnexAttachmentStore } from '../KnexAttachmentStore';
 import { KnexItemLog } from '../KnexItemLog';
 import { KnexQueuedMessageRepository } from '../KnexQueuedMessageRepository';
 import { KnexRunRepository } from '../KnexRunRepository';
@@ -26,10 +27,12 @@ import { KnexSessionRepository } from '../KnexSessionRepository';
 
 /**
  * A migrated database (SQLite, or PostgreSQL 16 when CI sets it; see
- * `createMigratedDb`) with the three repositories on it. `newRuns()` is another
+ * `createMigratedDb`) with the repositories on it. `newRuns()` is another
  * backend on the same database.
  */
-export async function createPersistence() {
+export async function createPersistence(
+  options: { maxImageBytesPerInput?: number } = {},
+) {
   const knex = await createMigratedDb();
   const clock = new FakeClock();
   const ids = new SequentialIdGenerator('id');
@@ -43,7 +46,10 @@ export async function createPersistence() {
     sessions: new KnexSessionRepository(knex, clock, ids),
     runs: newRuns(),
     newRuns,
-    items: new KnexItemLog(knex, clock),
+    items: new KnexItemLog(knex, clock, {
+      maxImageBytesPerInput: options.maxImageBytesPerInput,
+    }),
+    attachments: new KnexAttachmentStore(knex, clock, ids),
     queue: new KnexQueuedMessageRepository(knex, clock, ids),
     cleanup: () => knex.destroy(),
   };

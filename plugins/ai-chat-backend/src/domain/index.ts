@@ -14,11 +14,26 @@
  * limitations under the License.
  */
 
+export {
+  ATTACHMENT_TTL_HOURS,
+  checkImage,
+  cleanAttachmentName,
+  DEFAULT_IMAGE_LIMITS,
+  IMAGE_MEDIA_TYPES,
+  isImageMediaType,
+  type AttachmentMeta,
+  type ImageLimits,
+  type ImageMediaType,
+} from './attachment';
 export { callsAwaitingDecision, findToolCall, hasResult } from './approval';
 export {
   AgentNotFound,
+  AttachmentNotFound,
+  AttachmentTooLarge,
   ChatDomainError,
+  ImagesNotSupported,
   InsertLimitReached,
+  InvalidAttachment,
   NoActiveRun,
   NotSessionOwner,
   QueueChanged,
@@ -30,9 +45,14 @@ export {
   RunNotWaiting,
   SessionNotFound,
   ShuttingDown,
+  TooManyAttachments,
+  TooManyImageBytes,
+  TooManyPendingAttachments,
   ToolCallNotFound,
   ToolCallNotWaiting,
+  UnknownAttachment,
   UnknownToolset,
+  UnsupportedAttachmentType,
   UnreadMessages,
 } from './errors';
 export type { Principal } from './principal';

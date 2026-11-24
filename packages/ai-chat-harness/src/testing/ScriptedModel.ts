@@ -60,18 +60,30 @@ export const callTool = (
  * @public
  */
 export class ScriptedModel implements ModelClient {
-  readonly capabilities = { parallelToolCalls: false };
+  readonly capabilities: ModelClient['capabilities'];
   /** The input of every call, in order. */
   readonly inputs: ModelInput[] = [];
+  /** The session of every call, in order. */
+  readonly sessionIds: string[] = [];
 
-  constructor(private readonly script: ScriptedStep[]) {}
+  constructor(
+    private readonly script: ScriptedStep[],
+    capabilities: Partial<ModelClient['capabilities']> = {},
+  ) {
+    this.capabilities = {
+      parallelToolCalls: false,
+      images: false,
+      ...capabilities,
+    };
+  }
 
   async *stream(
     input: ModelInput,
-    opts: { signal: AbortSignal },
+    opts: { signal: AbortSignal; sessionId: string },
   ): AsyncIterable<ModelChunk> {
     const number = this.inputs.length;
     this.inputs.push(structuredClone(input));
+    this.sessionIds.push(opts.sessionId);
     const entry = this.script[number];
     if (entry === undefined) {
       throw new Error(`ScriptedModel has no step for call ${number + 1}`);

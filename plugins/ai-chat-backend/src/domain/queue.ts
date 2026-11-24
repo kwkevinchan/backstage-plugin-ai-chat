@@ -19,6 +19,7 @@ import type {
   PageContext,
   RunOutcome,
 } from '@kwkevinchan/ai-chat-harness';
+import type { AttachmentMeta } from './attachment';
 import type { Principal } from './principal';
 import { CREDENTIALS_MARGIN_SECONDS } from './runLimits';
 
@@ -35,6 +36,7 @@ export type QueuedMessage = {
   /** From 1, in the order the messages are sent. */
   position: number;
   text: string;
+  attachments: AttachmentMeta[];
   page?: PageContext;
   createdAt: string;
   updatedAt: string;

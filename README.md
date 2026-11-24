@@ -144,6 +144,7 @@ aiChat:
     apiKey: ${AI_CHAT_API_KEY} # secret; leave it out for a server without a key
     model: gpt-4o-mini
     timeoutSeconds: 120 # per model answer; default 120
+    images: false # the model reads images; default false. See "Images"
   systemPrompt: | # optional, added to the built-in rules
     You help the platform team of example.com.
   toolsets: # groups of actions; see "Toolsets and policy"
@@ -176,6 +177,12 @@ aiChat:
       maxPerRun: 5 # messages inserted into one run; default 5
     queue:
       maxMessages: 5 # queued messages in one session; default 5
+    images: # needs llm.images: true
+      maxPerMessage: 4 # images in one message; default 4
+      maxBytes: 5242880 # largest image; default 5 MB
+      maxBytesPerInput: 20971520 # image bytes in one run and in one model call; default 20 MB, at least maxPerMessage times maxBytes
+      maxPendingPerSession: 12 # uploaded images that are in no message yet; default 12
+      tokensPerImage: 1600 # what an image counts in the context budget; default 1600
 
 backend:
   actions:
@@ -193,6 +200,13 @@ sees only the actions that the actions service lists for the user. The
 `backend.actions.filter` rules of Backstage apply first, then the toolsets of
 the chat. An action that declares `secrets` is not offered: a chat cannot
 supply them.
+
+**Images.** With `aiChat.llm.images: true`, a user can attach PNG, JPEG, WebP
+or GIF images to a message. **The images are sent to the model server** as part
+of the message, so they leave your organization when the server is outside it.
+Leave `images` off (the default) when they must not. The backend stores the
+images in its database, per session; only the owner of the session reads them,
+and an image that no message uses is deleted after 24 hours.
 
 | Setting                   | Meaning                                                                                                                                                                                                                                                                                                                     |
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

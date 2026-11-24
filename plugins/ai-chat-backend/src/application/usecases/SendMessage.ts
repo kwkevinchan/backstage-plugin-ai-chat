@@ -19,7 +19,17 @@ import { assertOwner, ShuttingDown, type Principal } from '../../domain';
 import { abandonRun } from '../abandonRun';
 import { buildRunRequest, type RunSettings } from '../buildRunRequest';
 import type { RunHandle, RunSupervisor } from '../RunSupervisor';
-import type { AgentCatalog, RunRepository, SessionRepository } from '../ports';
+import {
+  bindAttachments,
+  toAttachmentRef,
+  type ImageSettings,
+} from '../attachments';
+import type {
+  AgentCatalog,
+  AttachmentStore,
+  RunRepository,
+  SessionRepository,
+} from '../ports';
 
 /**
  * The message of the user starts a run, and the loop works on it in the
@@ -35,11 +45,15 @@ export class SendMessage {
       agents: AgentCatalog;
       clock: Clock;
       settings: RunSettings;
+      attachments: AttachmentStore;
+      images: ImageSettings;
     },
   ) {}
 
   /**
-   * Throws `NotSessionOwner`, `RunAlreadyActive` (H-03) or `ShuttingDown`.
+   * Throws `NotSessionOwner`, `RunAlreadyActive` (H-03), `ShuttingDown`, or,
+   * for the images, `ImagesNotSupported`, `TooManyAttachments` or
+   * `UnknownAttachment` (nothing is written then, and no run starts).
    * The run comes first: the message of the user is written only once the
    * session has the run, so a message that the session cannot take (another
    * run is active) is not left in the log.
@@ -48,6 +62,7 @@ export class SendMessage {
     principal: Principal;
     sessionId: string;
     text: string;
+    attachmentIds?: string[];
     page?: { path: string; entityRef?: string };
   }): Promise<RunHandle> {
     const { sessions, runs, items, supervisor, agents, clock, settings } =
@@ -55,6 +70,11 @@ export class SendMessage {
     const session = await sessions.get(input.sessionId);
     assertOwner(session, input.principal);
     if (!supervisor.accepting) throw new ShuttingDown();
+    const attachments = await bindAttachments(
+      this.deps,
+      session.id,
+      input.attachmentIds,
+    );
 
     const run = await runs.start(session.id);
     try {
@@ -68,6 +88,9 @@ export class SendMessage {
           {
             kind: 'user_message',
             text: input.text,
+            ...(attachments.length > 0 && {
+              attachments: attachments.map(toAttachmentRef),
+            }),
             ...(input.page && { page: input.page }),
           },
         ],

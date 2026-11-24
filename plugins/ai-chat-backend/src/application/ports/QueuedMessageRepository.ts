@@ -28,22 +28,32 @@ export interface QueuedMessageRepository {
   /**
    * One transaction: the session has a run that has not ended (else
    * `NoActiveRun`), the queue has fewer than `max` messages (else `QueueFull`),
-   * and the message goes to the end.
+   * and the message goes to the end. The attachments are held for the message
+   * (`reserved_by`), so the cleaning does not delete them; one that is not in
+   * the session throws `UnknownAttachment`.
    */
   add(
     sessionId: string,
-    input: { text: string; page?: PageContext },
+    input: { text: string; attachmentIds?: string[]; page?: PageContext },
     opts: { max: number },
   ): Promise<QueuedMessage>;
 
-  /** Throws `QueuedMessageNotFound`. `page: null` removes the page. */
+  /**
+   * Throws `QueuedMessageNotFound`. `page: null` removes the page. A change of
+   * `attachmentIds` releases the attachments that are no longer used and holds
+   * the new ones.
+   */
   update(
     sessionId: string,
     id: string,
-    patch: { text?: string; page?: PageContext | null },
+    patch: {
+      text?: string;
+      attachmentIds?: string[];
+      page?: PageContext | null;
+    },
   ): Promise<QueuedMessage>;
 
-  /** Throws `QueuedMessageNotFound`. */
+  /** Throws `QueuedMessageNotFound`. Releases the attachments it held. */
   remove(sessionId: string, id: string): Promise<void>;
 
   /**
@@ -55,6 +65,7 @@ export interface QueuedMessageRepository {
   /**
    * One transaction: starts a run, takes the first queued message out of the
    * queue and writes it as the first message of the run (`delivery: queued`).
+   * The attachments of the message get `used_seq` in the same transaction.
    * Returns `undefined`, with nothing changed, when the queue is empty or the
    * session has a run that has not ended already.
    */

@@ -15,6 +15,7 @@
  */
 
 export type { AgentCatalog } from './AgentCatalog';
+export type { AttachmentStore } from './AttachmentStore';
 export type {
   AuditEvent,
   AuditLog,

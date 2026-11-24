@@ -171,3 +171,83 @@ export class QueuedMessageNotFound extends ChatDomainError {
     super('QUEUED_MESSAGE_NOT_FOUND', `There is no queued message ${queuedId}`);
   }
 }
+
+/** The `Content-Type` of an upload is not one of the image types the chat takes (IN-02). */
+export class UnsupportedAttachmentType extends ChatDomainError {
+  constructor(mediaType: string) {
+    super(
+      'UNSUPPORTED_ATTACHMENT_TYPE',
+      `The type ${
+        mediaType || '(none)'
+      } is not supported. Use PNG, JPEG, WebP or GIF.`,
+    );
+  }
+}
+
+/** The upload is larger than `maxBytes` (IN-02). */
+export class AttachmentTooLarge extends ChatDomainError {
+  constructor(maxBytes: number) {
+    super('ATTACHMENT_TOO_LARGE', `An image may be at most ${maxBytes} bytes`);
+  }
+}
+
+/** The upload is empty, its header does not match its type, or its name is not usable (IN-02). */
+export class InvalidAttachment extends ChatDomainError {
+  constructor(reason: string) {
+    super('INVALID_ATTACHMENT', reason);
+  }
+}
+
+/** The session has as many images in no message as it may (IN-04). */
+export class TooManyPendingAttachments extends ChatDomainError {
+  constructor(sessionId: string, max: number) {
+    super(
+      'TOO_MANY_PENDING_ATTACHMENTS',
+      `Session ${sessionId} has ${max} images that are in no message yet`,
+    );
+  }
+}
+
+/** There is no attachment with this id in the session. The caller asked for the image itself. */
+export class AttachmentNotFound extends ChatDomainError {
+  constructor(attachmentId: string) {
+    super('ATTACHMENT_NOT_FOUND', `There is no attachment ${attachmentId}`);
+  }
+}
+
+/**
+ * A message names an attachment that is not in its session. The answer is a
+ * 400 named `AttachmentNotFound`: the request is wrong, not the path.
+ */
+export class UnknownAttachment extends ChatDomainError {
+  constructor(attachmentId: string) {
+    super(
+      'UNKNOWN_ATTACHMENT',
+      `The message names the attachment ${attachmentId}, which is not in this session`,
+    );
+  }
+}
+
+/** A message has more images than `maxPerMessage` (IN-01). */
+export class TooManyAttachments extends ChatDomainError {
+  constructor(max: number) {
+    super('TOO_MANY_ATTACHMENTS', `A message may have at most ${max} images`);
+  }
+}
+
+/** The message has images, and the model cannot read images (IN-05). */
+export class ImagesNotSupported extends ChatDomainError {
+  constructor() {
+    super('IMAGES_NOT_SUPPORTED', 'The model cannot read images');
+  }
+}
+
+/** The images of the messages of the run, with this one, are over `maxBytesPerInput` (IN-06). */
+export class TooManyImageBytes extends ChatDomainError {
+  constructor(runId: string, max: number) {
+    super(
+      'TOO_MANY_IMAGE_BYTES',
+      `The messages of run ${runId} may have ${max} bytes of images in all`,
+    );
+  }
+}

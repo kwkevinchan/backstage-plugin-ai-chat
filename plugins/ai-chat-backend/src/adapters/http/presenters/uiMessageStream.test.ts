@@ -591,6 +591,7 @@ describe('UiMessageStreamPresenter', () => {
         sessionId: 's1',
         position: 1,
         text: 'Next',
+        attachments: [],
         createdAt: 'x',
         updatedAt: 'x',
       };
@@ -621,6 +622,7 @@ describe('UiMessageStreamPresenter', () => {
               id: 'q1',
               position: 1,
               text: 'Next',
+              attachments: [],
               createdAt: 'x',
               updatedAt: 'x',
             },

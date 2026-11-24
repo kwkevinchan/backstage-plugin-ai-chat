@@ -23,7 +23,12 @@ import {
   type RunStatus,
 } from '@kwkevinchan/ai-chat-harness';
 import type { Knex } from 'knex';
-import type { LeasedRun, Run } from '../../domain';
+import {
+  UnknownAttachment,
+  type AttachmentMeta,
+  type LeasedRun,
+  type Run,
+} from '../../domain';
 
 /*
  * The steps that more than one repository takes inside a transaction: a run
@@ -168,6 +173,160 @@ async function refuseDuplicates(
     .whereIn('dedupe_key', wanted)
     .first<{ dedupe_key: string }>('dedupe_key');
   if (existing) throw new DuplicateItem(existing.dedupe_key);
+}
+
+export type AttachmentRow = {
+  id: string;
+  session_id: string;
+  owner_ref: string;
+  media_type: AttachmentMeta['mediaType'];
+  size: number;
+  sha256: string;
+  name: string;
+  bytes: Uint8Array;
+  created_at: string;
+  used_seq: number | null;
+  reserved_by: string | null;
+};
+
+/** The columns of an attachment without its bytes: a query for the meta never reads them. */
+export const ATTACHMENT_META_COLUMNS = [
+  'id',
+  'session_id',
+  'media_type',
+  'size',
+  'sha256',
+  'name',
+] as const;
+
+export type AttachmentMetaRow = Pick<
+  AttachmentRow,
+  (typeof ATTACHMENT_META_COLUMNS)[number]
+>;
+
+export function toAttachmentMeta(row: AttachmentMetaRow): AttachmentMeta {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    mediaType: row.media_type,
+    name: row.name,
+    size: Number(row.size),
+    sha256: row.sha256,
+  };
+}
+
+/**
+ * Locks the attachments of `ids` (`FOR UPDATE`, in the order of their ids, so
+ * two transactions that lock several never wait for each other) and checks
+ * that each one is in the session. The session row is held already, so the
+ * transactions of one session go one after the other; the order is for the
+ * ones that do not hold it. Throws `UnknownAttachment` for the first id that
+ * is missing or belongs to another session, unless `ignoreMissing` is set:
+ * then it is left out. Returns the meta in the order of `ids`.
+ */
+export async function lockAttachments(
+  trx: Knex.Transaction,
+  sessionId: string,
+  ids: string[],
+  opts: { ignoreMissing?: boolean } = {},
+): Promise<AttachmentMeta[]> {
+  if (ids.length === 0) return [];
+  const rows = await trx<AttachmentRow>('attachments')
+    .whereIn('id', [...new Set(ids)])
+    .orderBy('id', 'asc')
+    .forUpdate()
+    .select(...ATTACHMENT_META_COLUMNS);
+  const byId = new Map(rows.map(row => [row.id, row]));
+  const metas: AttachmentMeta[] = [];
+  for (const id of ids) {
+    const row = byId.get(id);
+    if (!row || row.session_id !== sessionId) {
+      if (opts.ignoreMissing) continue;
+      throw new UnknownAttachment(id);
+    }
+    metas.push(toAttachmentMeta(row));
+  }
+  return metas;
+}
+
+/**
+ * Marks the attachments as used by the message at `seq`: `used_seq` is set
+ * when it is empty (the first message that uses an image keeps it), and the
+ * hold of a queued message ends. Runs in the transaction that writes the
+ * message, so a message never exists with attachments that are not marked.
+ */
+export async function markAttachmentsUsed(
+  trx: Knex.Transaction,
+  sessionId: string,
+  ids: string[],
+  seq: number,
+): Promise<AttachmentMeta[]> {
+  const metas = await lockAttachments(trx, sessionId, ids);
+  if (ids.length > 0) {
+    await trx('attachments')
+      .whereIn('id', [...new Set(ids)])
+      .update({
+        used_seq: trx.raw('coalesce(used_seq, ?)', [seq]),
+        reserved_by: null,
+      });
+  }
+  return metas;
+}
+
+/**
+ * Makes `reserved_by` of the attachments of a session say which queued
+ * message holds each one: the first message (in the order of the queue) that
+ * lists it. An attachment that no queued message lists is released. A queued
+ * message may share an image with another, so a release by id would take the
+ * hold of the other away. Call it in the transaction that changed the queue.
+ */
+export async function syncReservations(
+  trx: Knex.Transaction,
+  sessionId: string,
+): Promise<void> {
+  const queued = await trx('queued_messages')
+    .where({ session_id: sessionId })
+    .orderBy([
+      { column: 'position', order: 'asc' },
+      { column: 'id', order: 'asc' },
+    ])
+    .select<{ id: string; attachment_ids: string }[]>('id', 'attachment_ids');
+  const holder = new Map<string, string>();
+  for (const row of queued) {
+    for (const id of JSON.parse(row.attachment_ids) as string[]) {
+      if (!holder.has(id)) holder.set(id, row.id);
+    }
+  }
+  const rows = await trx<AttachmentRow>('attachments')
+    .where({ session_id: sessionId })
+    .andWhere(q =>
+      q.whereNotNull('reserved_by').orWhereIn('id', [...holder.keys()]),
+    )
+    .orderBy('id', 'asc')
+    .forUpdate()
+    .select('id', 'reserved_by');
+  for (const row of rows) {
+    const wanted = holder.get(row.id) ?? null;
+    if (row.reserved_by !== wanted) {
+      await trx('attachments')
+        .where({ id: row.id })
+        .update({ reserved_by: wanted });
+    }
+  }
+}
+
+/** The meta of the attachments of `ids`, by id; one that is not in the session is not there. */
+export async function readAttachmentMetas(
+  db: Knex | Knex.Transaction,
+  sessionId: string,
+  ids: string[],
+): Promise<Map<string, AttachmentMeta>> {
+  if (ids.length === 0) return new Map();
+  const rows = await db<AttachmentRow>('attachments')
+    .where({ session_id: sessionId })
+    .whereIn('id', [...new Set(ids)])
+    .select(...ATTACHMENT_META_COLUMNS);
+  return new Map(rows.map(row => [row.id, toAttachmentMeta(row)]));
 }
 
 export function toItem(row: ItemRow): Item {

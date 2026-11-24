@@ -138,17 +138,20 @@ export const say: (text: string) => ModelChunk;
 
 // @public
 export class ScriptedModel implements ModelClient {
-  constructor(script: ScriptedStep[]);
+  constructor(
+    script: ScriptedStep[],
+    capabilities?: Partial<ModelClient['capabilities']>,
+  );
   // (undocumented)
-  readonly capabilities: {
-    parallelToolCalls: boolean;
-  };
+  readonly capabilities: ModelClient['capabilities'];
   readonly inputs: ModelInput[];
+  readonly sessionIds: string[];
   // (undocumented)
   stream(
     input: ModelInput,
     opts: {
       signal: AbortSignal;
+      sessionId: string;
     },
   ): AsyncIterable<ModelChunk>;
 }

@@ -104,7 +104,11 @@ export async function* callModel(
     tool => decidePolicy(tool, req.policy) !== 'deny',
   );
   // Context providers come with the extension points (P3).
-  const extra = { context: [], tools: offered };
+  const extra = {
+    context: [],
+    tools: offered,
+    images: deps.model.capabilities.images,
+  };
 
   let current = items;
   let summaryFailed = false;
@@ -163,6 +167,7 @@ export async function* callModel(
   try {
     for await (const chunk of deps.model.stream(input, {
       signal: req.signal,
+      sessionId: req.ctx.sessionId,
     })) {
       if (chunk.type === 'text') {
         text += chunk.text;

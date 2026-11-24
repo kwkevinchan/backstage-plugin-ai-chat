@@ -27,8 +27,19 @@ import {
   type RunStatus,
 } from '@kwkevinchan/ai-chat-harness';
 import type { Knex } from 'knex';
-import { DEFAULT_INSERT_MAX_PER_RUN, InsertLimitReached } from '../../domain';
-import { reserveSeq, toItem, writeItems, type ItemRow } from './transactions';
+import {
+  DEFAULT_IMAGE_LIMITS,
+  DEFAULT_INSERT_MAX_PER_RUN,
+  InsertLimitReached,
+  TooManyImageBytes,
+} from '../../domain';
+import {
+  markAttachmentsUsed,
+  reserveSeq,
+  toItem,
+  writeItems,
+  type ItemRow,
+} from './transactions';
 import { isUniqueViolation } from './uniqueViolation';
 
 /**
@@ -110,21 +121,35 @@ function readUpToSeqOf(drafts: ItemDraft[]): number | undefined {
  * 4. An inserted message must not be one more than `maxInsertsPerRun`
  *    (`InsertLimitReached`). The check comes after step 3, so two inserts at
  *    the same time do not both pass it.
- * 5. It refuses a draft whose key is in the log already (`DuplicateItem`).
+ * 5. An inserted message with images: the images of all the user messages of
+ *    the run, with this one, must not be more than `maxImageBytesPerInput`
+ *    bytes (`TooManyImageBytes`). It is in the transaction and after step 3,
+ *    so two inserts at the same time do not both pass it.
+ * 6. It refuses a draft whose key is in the log already (`DuplicateItem`).
  *    The unique index on `(session_id, dedupe_key)` is what guarantees it.
- * 6. It inserts the items.
+ * 7. It inserts the items.
+ * 8. A `user_message` with images marks them used (`used_seq`, and the hold of
+ *    a queued message ends), in the same transaction: the table `attachments`
+ *    comes last, after `items`. An image that is not in the session fails the
+ *    whole append (`UnknownAttachment`).
  */
 export class KnexItemLog implements ItemLog {
   private readonly maxInsertsPerRun: number;
+  private readonly maxImageBytesPerInput: number;
 
-  /** @param options.maxInsertsPerRun - `aiChat.input.insert.maxPerRun`. 5 by default. */
+  /**
+   * @param options.maxInsertsPerRun - `aiChat.input.insert.maxPerRun`. 5 by default.
+   * @param options.maxImageBytesPerInput - `aiChat.input.images.maxBytesPerInput`. 20 MB by default.
+   */
   constructor(
     private readonly knex: Knex,
     private readonly clock: Clock,
-    options: { maxInsertsPerRun?: number } = {},
+    options: { maxInsertsPerRun?: number; maxImageBytesPerInput?: number } = {},
   ) {
     this.maxInsertsPerRun =
       options.maxInsertsPerRun ?? DEFAULT_INSERT_MAX_PER_RUN;
+    this.maxImageBytesPerInput =
+      options.maxImageBytesPerInput ?? DEFAULT_IMAGE_LIMITS.maxBytesPerInput;
   }
 
   async read(
@@ -179,14 +204,26 @@ export class KnexItemLog implements ItemLog {
         const firstSeq = await reserveSeq(trx, sessionId, drafts.length);
         if (kind === 'insert') {
           await this.checkInsertLimit(trx, sessionId, fence.runId);
+          await this.checkImageBytes(trx, sessionId, fence.runId, drafts[0]);
         }
-        return writeItems(trx, this.clock, {
+        const written = await writeItems(trx, this.clock, {
           sessionId,
           runId: fence.runId,
           firstSeq,
           drafts,
           keys,
         });
+        for (const item of written) {
+          if (item.kind === 'user_message' && item.attachments?.length) {
+            await markAttachmentsUsed(
+              trx,
+              sessionId,
+              item.attachments.map(ref => ref.id),
+              item.seq,
+            );
+          }
+        }
+        return written;
       });
     } catch (error) {
       if (isUniqueViolation(error, 'dedupe_key')) {
@@ -262,6 +299,33 @@ export class KnexItemLog implements ItemLog {
     // PostgreSQL gives a count as text, SQLite as a number.
     if (Number(n) - 1 >= this.maxInsertsPerRun) {
       throw new InsertLimitReached(runId, this.maxInsertsPerRun);
+    }
+  }
+
+  /** The images of the user messages of the run, with the draft, are within the limit. */
+  private async checkImageBytes(
+    trx: Knex.Transaction,
+    sessionId: string,
+    runId: string,
+    draft: ItemDraft,
+  ): Promise<void> {
+    if (draft.kind !== 'user_message' || !draft.attachments?.length) return;
+    const rows = await trx('items')
+      .where({ session_id: sessionId, run_id: runId, kind: 'user_message' })
+      .select<{ payload: string }[]>('payload');
+    const bytesOf = (attachments?: { size: number }[]) =>
+      (attachments ?? []).reduce((sum, ref) => sum + ref.size, 0);
+    const total = rows.reduce(
+      (sum, row) =>
+        sum +
+        bytesOf(
+          (JSON.parse(row.payload) as { attachments?: { size: number }[] })
+            .attachments,
+        ),
+      bytesOf(draft.attachments),
+    );
+    if (total > this.maxImageBytesPerInput) {
+      throw new TooManyImageBytes(runId, this.maxImageBytesPerInput);
     }
   }
 

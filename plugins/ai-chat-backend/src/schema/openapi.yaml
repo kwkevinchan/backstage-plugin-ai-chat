@@ -23,6 +23,10 @@ tags:
     description: The sessions of the signed-in user.
   - name: Runs
     description: Routes that start, continue or follow a run, and answer with a stream.
+  - name: Attachments
+    description: The images of the messages of a session. Only the owner of the session uploads and reads them.
+  - name: Input
+    description: What a message may carry.
   - name: Queue
     description: Messages that wait for the run of a session to end, and are sent as a new run when it ends well.
   - name: Toolsets
@@ -97,7 +101,7 @@ components:
           properties:
             name:
               type: string
-              description: 'The name of the error. The errors of the input phase keep their own name, so a client can tell apart errors of one status: `RunNotRunning`, `InsertLimitReached`, `NoActiveRun`, `QueueFull`, `QueueChanged` (409) and `QueuedMessageNotFound` (404).'
+              description: 'The name of the error. The errors of the input phase keep their own name, so a client can tell apart errors of one status: `RunNotRunning`, `InsertLimitReached`, `NoActiveRun`, `QueueFull`, `QueueChanged`, `TooManyPendingAttachments` (409), `QueuedMessageNotFound`, `AttachmentNotFound` (404, or 400 when a message names an image that is not in the session), `UnsupportedAttachmentType` (415), `AttachmentTooLarge` (413), and `InvalidAttachment`, `TooManyAttachments`, `ImagesNotSupported`, `TooManyImageBytes` (400).'
             message:
               type: string
           required: [name, message]
@@ -114,6 +118,60 @@ components:
             statusCode:
               type: integer
       required: [error]
+    ChatAttachment:
+      type: object
+      description: An image of a message. The bytes are read with `GET /sessions/{id}/attachments/{attachmentId}`.
+      properties:
+        id:
+          type: string
+        mediaType:
+          type: string
+          enum: [image/png, image/jpeg, image/webp, image/gif]
+        name:
+          type: string
+          maxLength: 255
+        size:
+          type: integer
+          description: Bytes.
+      required: [id, mediaType, name, size]
+    ChatInputConfig:
+      type: object
+      properties:
+        images:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+              description: Whether the model reads images (`aiChat.llm.images`). When it is false, the upload and a message with images are refused with 400 `ImagesNotSupported`.
+            mediaTypes:
+              type: array
+              items:
+                type: string
+            maxPerMessage:
+              type: integer
+            maxBytes:
+              type: integer
+              description: The largest image, in bytes.
+            maxBytesPerInput:
+              type: integer
+              description: The most image bytes in the messages of one run.
+            maxPendingPerSession:
+              type: integer
+              description: The most images of a session that are in no message yet.
+          required:
+            [
+              enabled,
+              mediaTypes,
+              maxPerMessage,
+              maxBytes,
+              maxBytesPerInput,
+              maxPendingPerSession,
+            ]
+        insertMaxPerRun:
+          type: integer
+        queueMaxMessages:
+          type: integer
+      required: [images, insertMaxPerRun, queueMaxMessages]
     ChatPageContext:
       type: object
       description: The page the user is on, as the client says it. The model gets it as one line before the text of the message, and the log keeps it with the message; that is why the form is checked.
@@ -214,6 +272,10 @@ components:
               const: user_message
             text:
               type: string
+            attachments:
+              type: array
+              items:
+                $ref: '#/components/schemas/ChatAttachment'
             page:
               $ref: '#/components/schemas/ChatPageContext'
             delivery:
@@ -404,6 +466,10 @@ components:
           description: From 1, in the order the messages are sent.
         text:
           type: string
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatAttachment'
         page:
           $ref: '#/components/schemas/ChatPageContext'
         createdAt:
@@ -600,6 +666,96 @@ paths:
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
+  /input-config:
+    get:
+      operationId: getInputConfig
+      tags: [Input]
+      summary: Read what a message may carry.
+      description: The limits on images and whether the model reads them, and the limits of the inserted and the queued messages. A client checks an image against it before it uploads.
+      responses:
+        '200':
+          description: The settings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatInputConfig'
+        '403':
+          $ref: '#/components/responses/Error'
+  /sessions/{id}/attachments:
+    parameters:
+      - $ref: '#/components/parameters/sessionId'
+    post:
+      operationId: uploadAttachment
+      tags: [Attachments]
+      summary: Upload an image to a session.
+      description: 'The request body is the bytes of the image, with no multipart form, and `Content-Type` is `image/png`, `image/jpeg`, `image/webp` or `image/gif`. (It is not described as a `requestBody` here: the lint rules of this repository ask every request body to offer `application/json`, which this one does not.) The owner and the type are checked before the body is read. 413 `AttachmentTooLarge` when `Content-Length` is over `aiChat.input.images.maxBytes` (before a byte is read), or when a body with no `Content-Length` grows over it (reading stops, and the connection is closed). 415 `UnsupportedAttachmentType` for any other type (SVG too). 400 `InvalidAttachment` when the body is empty, the header of the file is not the one of its type, or `name` is empty. 400 `ImagesNotSupported` when the model does not read images. 409 `TooManyPendingAttachments` when the session has `aiChat.input.images.maxPendingPerSession` images that are in no message yet. An image that no message uses is deleted after 24 hours. 404 for a session that is not the one of the caller.'
+      parameters:
+        - name: name
+          in: query
+          required: true
+          description: The name of the file. Control characters are removed, `/` and `\` become `_`, at most 255 characters. It is a label, never a path, and the type is never worked out from it.
+          allowReserved: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: The image is stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatAttachment'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '413':
+          $ref: '#/components/responses/Error'
+        '415':
+          $ref: '#/components/responses/Error'
+  /sessions/{id}/attachments/{attachmentId}:
+    parameters:
+      - $ref: '#/components/parameters/sessionId'
+      - name: attachmentId
+        in: path
+        required: true
+        description: ID of the image.
+        schema:
+          type: string
+    get:
+      operationId: readAttachment
+      tags: [Attachments]
+      summary: Read an image of a session.
+      description: "Only the owner of the session reads it; any other caller, and an image of another session, gets 404. The answer has the type that was stored, `X-Content-Type-Options: nosniff`, `Content-Disposition: inline`, `Content-Security-Policy: default-src 'none'; sandbox`, `Cache-Control: private, no-cache` and an `ETag` (the SHA-256 of the bytes, quoted). Every request is checked first; `If-None-Match` with the `ETag` answers 304 for an image that still exists, and 404 for one that was deleted."
+      responses:
+        '200':
+          description: The bytes of the image.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+            image/gif:
+              schema:
+                type: string
+                format: binary
+        '304':
+          description: The image did not change.
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
   /sessions/{id}/runs:
     parameters:
       - $ref: '#/components/parameters/sessionId'
@@ -619,6 +775,11 @@ paths:
                   type: string
                   minLength: 1
                   maxLength: 8000
+                attachmentIds:
+                  type: array
+                  items:
+                    type: string
+                  description: Ids of uploaded images of this session, in the order to show them. At most `aiChat.input.images.maxPerMessage`; 400 when the model does not read images, when there are too many, or when one is not an image of this session (`AttachmentNotFound`).
                 page:
                   $ref: '#/components/schemas/ChatPageContext'
               required: [text]
@@ -665,7 +826,7 @@ paths:
       operationId: insertMessage
       tags: [Runs]
       summary: Add a message to the run that is running.
-      description: 'The message is written to the log as an item with `delivery: inserted`, and the model reads it in its next call; no run starts and no stream opens. The answer is the item. Two outcomes only: the message is written, or the answer is 409. 409 `RunNotRunning` when the run waits for an approval, has ended, is not a run of this session, or has no live lease; 409 `InsertLimitReached` when the run has taken as many inserted messages as the configuration allows (`aiChat.input.insert.maxPerRun`). The model reads a message that comes in before the run ends; a run that is about to end reads it first.'
+      description: 'The message is written to the log as an item with `delivery: inserted`, and the model reads it in its next call; no run starts and no stream opens. The answer is the item. Two outcomes only: the message is written, or the answer is 409. 409 `RunNotRunning` when the run waits for an approval, has ended, is not a run of this session, or has no live lease; 409 `InsertLimitReached` when the run has taken as many inserted messages as the configuration allows (`aiChat.input.insert.maxPerRun`). With images: 400 `TooManyImageBytes` when the images of the messages of the run, with this one, are over `aiChat.input.images.maxBytesPerInput`; nothing is written then. The model reads a message that comes in before the run ends; a run that is about to end reads it first.'
       requestBody:
         required: true
         content:
@@ -677,6 +838,11 @@ paths:
                   type: string
                   minLength: 1
                   maxLength: 8000
+                attachmentIds:
+                  type: array
+                  items:
+                    type: string
+                  description: Ids of uploaded images of this session, in the order to show them. At most `aiChat.input.images.maxPerMessage`; 400 when the model does not read images, when there are too many, or when one is not an image of this session (`AttachmentNotFound`).
                 page:
                   $ref: '#/components/schemas/ChatPageContext'
               required: [text]
@@ -730,6 +896,11 @@ paths:
                   type: string
                   minLength: 1
                   maxLength: 8000
+                attachmentIds:
+                  type: array
+                  items:
+                    type: string
+                  description: Ids of uploaded images of this session, in the order to show them. At most `aiChat.input.images.maxPerMessage`; 400 when the model does not read images, when there are too many, or when one is not an image of this session (`AttachmentNotFound`).
                 page:
                   $ref: '#/components/schemas/ChatPageContext'
               required: [text]
@@ -823,6 +994,11 @@ paths:
                   type: string
                   minLength: 1
                   maxLength: 8000
+                attachmentIds:
+                  type: array
+                  items:
+                    type: string
+                  description: The ids of all the images the message keeps; one that is left out is released.
                 page:
                   oneOf:
                     - $ref: '#/components/schemas/ChatPageContext'

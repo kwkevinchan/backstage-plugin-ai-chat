@@ -33,6 +33,7 @@
  *                                time to add a message while the model is still answering
  *   user: "fail"              -> after 3 seconds, an HTTP 500 (the model call fails)
  *   user: "also <text>"       -> says that it got the addition
+ *   user with images          -> says how many images it got and their types and sizes
  *   tool result               -> a sentence that repeats part of the result
  *   tool result of a refusal  -> says that nothing was done
  *   anything else             -> a short help text
@@ -59,6 +60,32 @@ function splitContext(content) {
     : { context: undefined, text: content };
 }
 
+/**
+ * The text of the content of a message: the string, or the text parts of a
+ * content array (a message with images has one).
+ */
+function contentText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter(part => part?.type === 'text')
+    .map(part => part.text)
+    .join('\n');
+}
+
+/** The images of a content array: the media type and the bytes of each data URL. */
+function imagesOf(content) {
+  if (!Array.isArray(content)) return [];
+  return content
+    .filter(part => part?.type === 'image_url')
+    .map(part => {
+      const match = /^data:([^;,]+);base64,(.*)$/s.exec(part.image_url?.url);
+      return match
+        ? { mediaType: match[1], bytes: Buffer.from(match[2], 'base64').length }
+        : { mediaType: 'unknown', bytes: 0 };
+    });
+}
+
 function findTool(tools, suffix) {
   return (tools ?? []).find(t => t.function?.name?.endsWith(suffix))?.function
     ?.name;
@@ -68,7 +95,7 @@ function findTool(tools, suffix) {
 function userTexts(messages) {
   return messages
     .filter(m => m.role === 'user')
-    .map(m => splitContext(String(m.content ?? '')).text);
+    .map(m => splitContext(contentText(m.content)).text);
 }
 
 /**
@@ -106,7 +133,7 @@ export function scriptedReply(body) {
       return { text: `The action failed. ${content.slice(0, 200)}` };
     }
     const lastUser = [...messages].reverse().find(m => m.role === 'user');
-    if (/^loop/i.test(splitContext(String(lastUser?.content ?? '')).text)) {
+    if (/^loop/i.test(splitContext(contentText(lastUser?.content)).text)) {
       return call('list-services', {});
     }
     return {
@@ -114,7 +141,12 @@ export function scriptedReply(body) {
     };
   }
 
-  const { context, text } = splitContext(String(last?.content ?? ''));
+  const { context, text } = splitContext(contentText(last?.content));
+  const images = imagesOf(last?.content);
+  if (images.length > 0) {
+    const list = images.map(i => `${i.mediaType} ${i.bytes} bytes`).join(', ');
+    return { text: `I can see ${images.length} image(s): ${list}.` };
+  }
   if (/^where/i.test(text)) {
     return {
       text: context

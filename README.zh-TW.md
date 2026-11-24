@@ -44,6 +44,7 @@ aiChat:
     baseUrl: https://api.openai.com/v1 # 任何相容 OpenAI Chat Completions 的伺服器
     apiKey: ${AI_CHAT_API_KEY}
     model: gpt-4o-mini
+    images: false # 模型能讀圖片；預設 false。圖片會送到模型伺服器，見下方說明
   toolsets: # 工具分組
     catalog:
       title: Catalog
@@ -68,12 +69,20 @@ aiChat:
       maxPerRun: 5 # 一次 Run 最多插入幾則，最大 20；預設 5
     queue:
       maxMessages: 5 # 一段對話的佇列最多幾則；預設 5
+    images: # 需要 llm.images: true
+      maxPerMessage: 4 # 一則訊息最多幾張；預設 4
+      maxBytes: 5242880 # 單張上限；預設 5 MB
+      maxBytesPerInput: 20971520 # 一次 Run 和一次模型呼叫的圖片位元組上限；預設 20 MB，不小於 maxPerMessage 乘 maxBytes
+      maxPendingPerSession: 12 # 上傳了但還沒進訊息的圖片；預設 12
+      tokensPerImage: 1600 # 一張圖片在預算裡算幾個 token；預設 1600
 backend:
   actions:
     pluginSources: [catalog] # 對話只看得到這些外掛的 action
 ```
 
 只有 `aiChat.llm` 是必填。啟動時會讀取並檢查整段設定，值不對會讓後端無法啟動。
+
+**圖片。** `aiChat.llm.images: true` 時，使用者可以在訊息附上 PNG、JPEG、WebP 或 GIF。**圖片會隨訊息送到模型伺服器**；伺服器在組織之外時，圖片就離開組織。不允許時保持預設（關閉）。圖片存在後端的資料庫、屬於一段對話，只有擁有者讀得到；沒有進任何訊息的圖片 24 小時後刪除。
 
 - **Toolset**：對話只看得到自己開啟的工具組裡的 action。不在任何一組裡的 action 不會出現。
   使用者在自己的對話裡開關工具組（對話欄最上面、訊息列表之上的 **Toolsets**），範圍不超過你定義的。
