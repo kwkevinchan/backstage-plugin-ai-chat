@@ -214,6 +214,24 @@ export class UiMessageStreamPresenter {
   }
 
   /**
+   * Continues an agent message that was open when the client subscribed.
+   * `text` is what had been written by then. Later `text-delta` events of
+   * this draft are sent (the part is already open), and `item.completed`
+   * sends only the suffix. The step of the replay is closed first: this text
+   * belongs to the step that is still open on the loop, which the replay did
+   * not see.
+   */
+  resumeDraft(draftId: string, text: string): UiMessageChunk[] {
+    const chunks = [...this.closeStep(), ...this.openStep()];
+    this.openText.set(draftId, text);
+    chunks.push({ type: 'text-start', id: draftId });
+    if (text.length > 0) {
+      chunks.push({ type: 'text-delta', id: draftId, delta: text });
+    }
+    return chunks;
+  }
+
+  /**
    * The chunks to send when the events end. A run that ended has sent its own
    * end already; one whose events stop without `run.ended` is reported as
    * stopped, so the client does not wait for more.

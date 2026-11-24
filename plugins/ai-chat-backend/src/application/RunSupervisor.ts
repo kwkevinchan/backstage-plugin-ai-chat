@@ -32,7 +32,12 @@ import {
 } from '../domain';
 import { EventChannel } from './EventChannel';
 import type { AfterRun, HostEvent } from './hostEvents';
-import type { Logger, RunRepository, RunTransitionTarget } from './ports';
+import type {
+  Logger,
+  RunRepository,
+  RunTransitionTarget,
+  SessionActivity,
+} from './ports';
 
 /** What `launch` needs besides the run: the request of the loop without what the supervisor adds. */
 export type LaunchRequest = Omit<AdvanceRunRequest, 'fence' | 'signal'>;
@@ -61,6 +66,11 @@ export type RunSupervisorDeps = {
   afterRun?: AfterRun;
   /** How often the lease is renewed while a model call takes long. 10 seconds by default. */
   heartbeatMs?: number;
+  /**
+   * Tells the owner that the activity of the session changed (B-05). A failure
+   * is logged and does not fail the run. Unset in tests that do not care.
+   */
+  notify?: (sessionId: string, activity: SessionActivity) => Promise<void>;
 };
 
 type Loop = {
@@ -73,6 +83,8 @@ type Loop = {
   /** Set when the shutdown takes the run over; the loop then leaves its status alone. */
   shuttingDown: boolean;
   done: Promise<void>;
+  /** The agent text that is open, so a client that joins can be given it. */
+  draft?: { draftId: string; text: string };
 };
 
 const DEFAULT_HEARTBEAT_MS = 10_000;
@@ -150,6 +162,7 @@ export class RunSupervisor {
     this.fences.set(run.id, run.fence);
     this.loops.set(run.fence.leaseOwner, loop);
     loop.done = this.runLoop(loop);
+    this.tell(loop, 'running');
     return { runId: run.id, events, done: loop.done };
   }
 
@@ -158,10 +171,22 @@ export class RunSupervisor {
    * now on. `undefined` when the run is not running here, and when its
    * `run.ended` went out already: the new subscriber would never get it.
    */
-  subscribe(runId: string): AsyncIterable<HostEvent> | undefined {
-    const fence = this.fences.get(runId);
-    const loop = fence && this.loops.get(fence.leaseOwner);
+  subscribe(runId: string): EventChannel<HostEvent> | undefined {
+    const loop = this.loopOf(runId);
     return loop && !loop.ended ? this.addSubscriber(loop) : undefined;
+  }
+
+  /**
+   * The text of the agent message that is open, at this moment. A client that
+   * joins calls it in the same turn as `subscribe`, before it reads the log,
+   * so the text does not include deltas that are only queued for that
+   * subscriber. `undefined` when this process does not run the run, or no
+   * agent message is open.
+   */
+  openDraft(runId: string): { draftId: string; text: string } | undefined {
+    const loop = this.loopOf(runId);
+    if (!loop || loop.ended || !loop.draft) return undefined;
+    return { draftId: loop.draft.draftId, text: loop.draft.text };
   }
 
   /** Stops the loop of the run if this process runs it. Returns whether it did. */
@@ -196,6 +221,7 @@ export class RunSupervisor {
           leaseOwner: fence.leaseOwner,
           endReason: 'shutdown',
         });
+        if (loop) this.tell(loop, 'idle');
       } catch (error) {
         if (!(error instanceof LeaseLost || isInvalidTransition(error))) {
           this.deps.logger.error('Could not mark a run expired at shutdown', {
@@ -230,9 +256,55 @@ export class RunSupervisor {
     return channel;
   }
 
+  private loopOf(runId: string): Loop | undefined {
+    const fence = this.fences.get(runId);
+    return fence ? this.loops.get(fence.leaseOwner) : undefined;
+  }
+
   private publish(loop: Loop, event: HostEvent): void {
     if (event.type === 'run.ended') loop.ended = true;
+    this.noteDraft(loop, event);
     for (const subscriber of loop.subscribers) subscriber.push(event);
+  }
+
+  /** The open agent text, so a client that joins in the middle can show it. */
+  private noteDraft(loop: Loop, event: HostEvent): void {
+    if (event.type === 'item.started' && event.kind === 'agent_message') {
+      loop.draft = { draftId: event.draftId, text: '' };
+      return;
+    }
+    if (event.type === 'item.delta' && loop.draft?.draftId === event.draftId) {
+      loop.draft = {
+        draftId: event.draftId,
+        text: loop.draft.text + event.text,
+      };
+      return;
+    }
+    if (
+      event.type === 'item.completed' &&
+      loop.draft &&
+      event.draftId === loop.draft.draftId
+    ) {
+      loop.draft = undefined;
+    }
+  }
+
+  /**
+   * Tells the owner. A failure is logged: the run has its own result and is
+   * not affected.
+   */
+  private tell(loop: Loop, activity: SessionActivity): void {
+    const notify = this.deps.notify;
+    if (!notify) return;
+    const sessionId = loop.run.sessionId;
+    void Promise.resolve()
+      .then(() => notify(sessionId, activity))
+      .catch(error => {
+        this.deps.logger.warn('Could not notify the activity of a session', {
+          sessionId,
+          error: describe(error),
+        });
+      });
   }
 
   private async runLoop(loop: Loop): Promise<void> {
@@ -389,8 +461,10 @@ export class RunSupervisor {
         withLease: false,
       });
       // The subscribers must not show approval buttons of a cancelled run.
+      if (cancelled) this.tell(loop, 'idle');
       return { run: cancelled, outcome: { status: 'cancelled' } };
     }
+    if (run) this.tell(loop, activityOf(outcome));
     return { run, outcome };
   }
 
@@ -421,6 +495,8 @@ export class RunSupervisor {
       type: 'run.ended',
       outcome: { status: 'failed', message: 'The run stopped.' },
     });
+    // The shutdown tells `idle` itself. A lost lease is someone else's run.
+    if (!loop.shuttingDown && !lost) this.tell(loop, 'idle');
   }
 
   /**
@@ -466,6 +542,20 @@ function forSubscribers(event: HarnessEvent): HarnessEvent {
     };
   }
   return event;
+}
+
+function activityOf(outcome: RunOutcome): SessionActivity {
+  switch (outcome.status) {
+    case 'completed':
+      return 'replied';
+    case 'waiting_approval':
+      return 'waiting_approval';
+    case 'cancelled':
+    case 'failed':
+      return 'idle';
+    default:
+      return outcome satisfies never;
+  }
 }
 
 function statusOf(outcome: RunOutcome): [RunTransitionTarget, string?] {

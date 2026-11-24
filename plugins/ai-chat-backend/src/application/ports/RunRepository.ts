@@ -39,6 +39,12 @@ export interface RunRepository extends RunControl {
   findActive(sessionId: string): Promise<Run | undefined>;
 
   /**
+   * The runs that have not ended for these sessions, one at most per session.
+   * An empty list reads nothing.
+   */
+  findActiveForSessions(sessionIds: readonly string[]): Promise<Run[]>;
+
+  /**
    * Takes the lease of a run to carry it on: a run that waits for an approval
    * (it becomes `running`), or a running run whose lease is free or expired.
    * Each lease has its own fence: the one a run had before stops working, also

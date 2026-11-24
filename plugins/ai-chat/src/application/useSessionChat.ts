@@ -59,6 +59,12 @@ export interface UseSessionChatOptions {
   firstMessage?: string;
   /** Called after a run changed the session (a title, the order of the list). */
   onChanged?(): void;
+  /**
+   * The activity of this session from the list (B-05). A change to `running`
+   * while this view is not streaming follows the run. A run that was active
+   * and is gone is read again, so a new reply shows up.
+   */
+  liveActivity?: 'running' | 'waiting_approval';
 }
 
 const ENDED_WITHOUT_ANSWER: ChatRunStatus[] = [
@@ -394,6 +400,39 @@ export function useSessionChat(options: UseSessionChatOptions) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
+
+  // The list says this session's run changed, and this view is not already
+  // on its stream. The first value is the run we opened on: `useChat` follows
+  // that one itself.
+  const liveActivity = options.liveActivity;
+  const sawActivity = useRef(false);
+  const activityBefore = useRef(liveActivity);
+  const openedRunning = useRef(initial.detail.run?.status === 'running');
+  useEffect(() => {
+    const before = activityBefore.current;
+    activityBefore.current = liveActivity;
+    if (!sawActivity.current) {
+      sawActivity.current = true;
+      return;
+    }
+    const current = chatRef.current.status;
+    if (current === 'streaming' || current === 'submitted') return;
+    if (liveActivity === 'running' && before !== 'running') {
+      if (openedRunning.current) {
+        openedRunning.current = false;
+        return;
+      }
+      void chatRef.current.resumeStream();
+      return;
+    }
+    if (
+      (before === 'running' || before === 'waiting_approval') &&
+      liveActivity === undefined
+    ) {
+      openedRunning.current = false;
+      void reload();
+    }
+  }, [liveActivity, reload]);
 
   // Opening the session: carry on a run whose decisions are all stored, or
   // send the first message of a new session. Once.

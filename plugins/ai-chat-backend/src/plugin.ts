@@ -38,7 +38,9 @@ import {
 } from './adapters/persistence';
 import { SystemClock, UuidGenerator } from './adapters/system';
 import { readAiChatConfig } from './config';
+import { DelegatingNotifier } from './application/ports';
 import { createHost } from './host';
+import { aiChatSignalsExtensionPoint } from './signals';
 
 /** How often the runs whose lease expired are marked `expired`. */
 const EXPIRE_STALE_RUNS_EVERY = { seconds: 30 };
@@ -65,6 +67,12 @@ const PURGE_EXPIRED_SESSIONS_EVERY = { hours: 1 };
 export const aiChatPlugin = createBackendPlugin({
   pluginId: 'ai-chat',
   register(env) {
+    const notifier = new DelegatingNotifier();
+    env.registerExtensionPoint(aiChatSignalsExtensionPoint, {
+      setNotifier(next) {
+        notifier.use(next);
+      },
+    });
     env.registerInit({
       deps: {
         logger: coreServices.logger,
@@ -160,6 +168,7 @@ export const aiChatPlugin = createBackendPlugin({
             },
           },
           retentionDays: aiChat.retentionDays,
+          notifier,
         });
         lifecycle.addShutdownHook(() => host.supervisor.shutdown());
         await scheduler.scheduleTask({

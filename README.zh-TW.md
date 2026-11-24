@@ -29,6 +29,19 @@ yarn --cwd packages/app add @kwkevinchan/backstage-plugin-ai-chat
 backend.add(import('@kwkevinchan/backstage-plugin-ai-chat-backend'));
 ```
 
+對話清單會顯示 Run 正在處理或等核准。沒有 Signals 時，畫面大約每秒讀一次
+`GET /sessions`。要改成推送，依這個 Backstage 版本的方式安裝
+`@backstage/plugin-signals-backend` 和 `@backstage/plugin-signals`，並加上
+這個 module。前端有裝 Signals 外掛時畫面才訂閱；否則繼續輪詢。
+
+```ts
+import { aiChatSignalsModule } from '@kwkevinchan/backstage-plugin-ai-chat-backend';
+
+backend.add(import('@kwkevinchan/backstage-plugin-ai-chat-backend'));
+backend.add(aiChatSignalsModule);
+backend.add(import('@backstage/plugin-signals-backend'));
+```
+
 前端（新前端系統）：`import aiChatPlugin from '@kwkevinchan/backstage-plugin-ai-chat/alpha'`，
 頁面在 `/ai-chat`，每一段對話有自己的網址 `/ai-chat/<session id>`。
 `/ai-chat?entityRef=component:default/my-service` 會以那個 entity 開啟對話。
@@ -132,8 +145,12 @@ Run 的狀態在資料庫，不在行程裡，所以可以部署多台，也可�
 
 ## 已知限制
 
-- 打開正在跑 Run 的對話時，只有跑那個 Run 的那一台能接回串流；別台的
-  `GET /sessions/:id/stream` 回 `204`，畫面顯示目前存下的內容。
+- 正在跑的 Run 在任何一台都能接回。跑那個迴圈的一台先送已經寫下的文字，再送後面的內容。
+  別台大約每秒送一個已完成的 Item（整段，沒有逐字片段），Run 離開 `running` 時結束串流。
+  等核准、已結束、或沒有 Run 時，`GET /sessions/:id/stream` 仍回 `204`。
+- 清單在 Run 進行時顯示 Processing，等核准時顯示 Waiting for approval。剛有回覆、
+  而且不是目前開著的對話，顯示 New reply，打開後消失。沒有 Signals 時大約每秒讀一次清單；
+  有 Signals 時，通知到了才重新讀取。
 - 摘要涵蓋最新使用者訊息之前的步驟；同一個 Run 裡的舊步驟只縮短和省略，不做摘要。
 - 對話列表在 P1 沒有自動標題，每一段都顯示 `New conversation`。
 

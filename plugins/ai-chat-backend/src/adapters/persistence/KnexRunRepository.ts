@@ -104,6 +104,14 @@ export class KnexRunRepository implements RunRepository {
     return row ? toRun(row) : undefined;
   }
 
+  async findActiveForSessions(sessionIds: readonly string[]): Promise<Run[]> {
+    if (sessionIds.length === 0) return [];
+    const rows = await this.knex<RunRow>('runs').whereIn('active_session_id', [
+      ...sessionIds,
+    ]);
+    return rows.map(row => toRun(row));
+  }
+
   async acquireLease(runId: string): Promise<LeasedRun | undefined> {
     const now = this.clock.now();
     const [row] = await this.knex<RunRow>('runs')

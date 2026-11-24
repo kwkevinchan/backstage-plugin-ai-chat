@@ -70,7 +70,9 @@ export class SessionsController {
       }),
       ...(limit !== undefined && { limit }),
     });
-    return { items: sessions.map(toChatSession) };
+    return {
+      items: sessions.map(session => toChatSession(session, session.activity)),
+    };
   }
 
   async create(principal: Principal, body: unknown): Promise<ChatSession> {

@@ -39,6 +39,15 @@ export class EventChannel<T> implements AsyncIterable<T> {
     }
   }
 
+  /**
+   * The events that are queued and not yet read. A caller that subscribed and
+   * has not started reading uses this to see what arrived while it did
+   * something else (the read of the log, for a client that joins a run).
+   */
+  buffered(): T[] {
+    return [...this.queue];
+  }
+
   /** No more events: the reader gets what is queued, then the end. */
   end(): void {
     if (this.closed) return;

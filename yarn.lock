@@ -2846,6 +2846,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@backstage/plugin-signals-node@npm:0.2.6":
+  version: 0.2.6
+  resolution: "@backstage/plugin-signals-node@npm:0.2.6"
+  dependencies:
+    "@backstage/backend-plugin-api": "npm:^1.11.0"
+    "@backstage/plugin-events-node": "npm:^0.4.27"
+    "@backstage/types": "npm:^1.2.2"
+  checksum: 10c0/47697f12ff50f87e7ec24691f10fde8cffbea72c719df7a46fb54a1ea7a042e747edd8fd4bdb3ec8dcf11882db0a12fa27f8c1e50dce29bf28f0822ab08727cc
+  languageName: node
+  linkType: hard
+
 "@backstage/plugin-signals-react@npm:0.0.27":
   version: 0.0.27
   resolution: "@backstage/plugin-signals-react@npm:0.0.27"
@@ -5098,6 +5109,7 @@ __metadata:
     "@backstage/cli": "backstage:^"
     "@backstage/config": "backstage:^"
     "@backstage/errors": "backstage:^"
+    "@backstage/plugin-signals-node": "backstage:^"
     "@backstage/types": "backstage:^"
     "@kwkevinchan/ai-chat-harness": "workspace:^"
     "@kwkevinchan/backstage-plugin-ai-chat-common": "workspace:^"
@@ -5144,6 +5156,7 @@ __metadata:
     "@backstage/errors": "backstage:^"
     "@backstage/frontend-plugin-api": "backstage:^"
     "@backstage/frontend-test-utils": "backstage:^"
+    "@backstage/plugin-signals-react": "backstage:^"
     "@backstage/test-utils": "backstage:^"
     "@backstage/theme": "backstage:^"
     "@backstage/ui": "backstage:^"

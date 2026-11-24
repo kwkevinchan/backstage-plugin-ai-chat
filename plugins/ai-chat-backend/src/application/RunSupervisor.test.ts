@@ -636,3 +636,122 @@ describe('RunSupervisor with inserted messages and the queue (PI-03)', () => {
     );
   });
 });
+
+describe('RunSupervisor activity (B-05)', () => {
+  const storedRun = {
+    id: 'r1',
+    sessionId: 's1',
+    cancelRequested: false,
+  };
+
+  async function activities(outcome: RunOutcome): Promise<string[]> {
+    const seen: string[] = [];
+    const { supervisor } = setup(
+      () => ending(outcome),
+      { transition: jest.fn(async () => storedRun) },
+      {
+        notify: async (_sessionId, activity) => {
+          seen.push(activity);
+        },
+      },
+    );
+    const handle = supervisor.launch(leased('r1', 'lease-1'), request);
+    for await (const _event of handle.events) {
+      // Reads the run to its end.
+    }
+    await handle.done;
+    await new Promise(resolve => setImmediate(resolve));
+    return seen;
+  }
+
+  it('tells the notifier when a run starts, waits, completes, or ends without a reply', async () => {
+    expect(await activities({ status: 'completed' })).toEqual([
+      'running',
+      'replied',
+    ]);
+    expect(
+      await activities({ status: 'waiting_approval', pending: [] }),
+    ).toEqual(['running', 'waiting_approval']);
+    expect(
+      await activities({ status: 'failed', message: 'The run stopped.' }),
+    ).toEqual(['running', 'idle']);
+    expect(await activities({ status: 'cancelled' })).toEqual([
+      'running',
+      'idle',
+    ]);
+
+    const notify = jest.fn(async () => {});
+    const expired = setup(
+      (_fence, signal) => blocked(signal),
+      {
+        transition: jest.fn(async () => storedRun),
+      },
+      { notify },
+    );
+    const expiring = expired.supervisor.launch(
+      leased('r1', 'lease-1'),
+      request,
+    );
+    await new Promise(resolve => setImmediate(resolve));
+    expect(notify).toHaveBeenCalledWith('s1', 'running');
+    await expired.supervisor.shutdown(10);
+    await expiring.done;
+    await new Promise(resolve => setImmediate(resolve));
+    expect(notify).toHaveBeenCalledWith('s1', 'idle');
+
+    const failing = jest.fn(async () => {
+      throw new Error('signals down');
+    });
+    const { supervisor, logger } = setup(
+      () => ending({ status: 'completed' }),
+      { transition: jest.fn(async () => storedRun) },
+      { notify: failing },
+    );
+    const handle = supervisor.launch(leased('r1', 'lease-1'), request);
+    for await (const _event of handle.events) {
+      // The run ends even though the notifier throws.
+    }
+    await expect(handle.done).resolves.toBeUndefined();
+    await new Promise(resolve => setImmediate(resolve));
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Could not notify the activity of a session',
+      expect.objectContaining({ sessionId: 's1' }),
+    );
+  });
+
+  it('keeps the text of the open agent message until that item is stored', async () => {
+    let releaseDraft!: () => void;
+    let releaseEnd!: () => void;
+    const draftOpen = new Promise<void>(resolve => (releaseDraft = resolve));
+    const endOpen = new Promise<void>(resolve => (releaseEnd = resolve));
+    let stage = 0;
+    const { supervisor } = setup(async function* openDraftLoop() {
+      yield { type: 'run.started', runId: 'r1' };
+      yield { type: 'item.started', draftId: 'd1', kind: 'agent_message' };
+      yield { type: 'item.delta', draftId: 'd1', text: 'Hel' };
+      stage = 1;
+      await draftOpen;
+      yield {
+        type: 'item.completed',
+        draftId: 'd1',
+        item: { kind: 'agent_message', text: 'Hello', seq: 2 } as any,
+      };
+      stage = 2;
+      await endOpen;
+      const outcome: RunOutcome = { status: 'completed' };
+      yield { type: 'run.ended', outcome };
+      return outcome;
+    });
+    const handle = supervisor.launch(leased('r1', 'lease-1'), request);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(stage).toBe(1);
+    expect(supervisor.openDraft('r1')).toEqual({ draftId: 'd1', text: 'Hel' });
+    releaseDraft();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(stage).toBe(2);
+    expect(supervisor.openDraft('r1')).toBeUndefined();
+    releaseEnd();
+    await handle.done;
+    expect(supervisor.openDraft('r1')).toBeUndefined();
+  });
+});

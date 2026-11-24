@@ -8,4 +8,7 @@ import { BackendFeature } from '@backstage/backend-plugin-api';
 // @public
 const aiChatPlugin: BackendFeature;
 export default aiChatPlugin;
+
+// @public
+export const aiChatSignalsModule: BackendFeature;
 ```

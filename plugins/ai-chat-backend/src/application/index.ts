@@ -42,6 +42,7 @@ export { InsertMessage } from './usecases/InsertMessage';
 export { ListQueue, queueViewOf } from './usecases/ListQueue';
 export type { QueueView } from './usecases/ListQueue';
 export { ListSessions } from './usecases/ListSessions';
+export type { ListedSession } from './usecases/ListSessions';
 export { ListSessionTools } from './usecases/ListSessionTools';
 export type { SessionTool } from './usecases/ListSessionTools';
 export { ListToolsets } from './usecases/ListToolsets';

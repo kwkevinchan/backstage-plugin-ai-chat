@@ -487,6 +487,135 @@ describe('useSessionChat', () => {
     expect(api.resume).not.toHaveBeenCalled();
   });
 
+  it('shows the text so far after a reload and continues it without duplicating the message', async () => {
+    const api = mockApi();
+    api.follow.mockResolvedValue(
+      streamResponse([
+        { type: 'start', messageId: 'run_r-1' },
+        runChunks('running'),
+        { type: 'start-step' },
+        { type: 'text-start', id: 'd1' },
+        { type: 'text-delta', id: 'd1', delta: 'Hel' },
+        { type: 'text-delta', id: 'd1', delta: 'lo' },
+        { type: 'text-end', id: 'd1' },
+        { type: 'finish-step' },
+        runChunks('completed'),
+        { type: 'finish', finishReason: 'stop' },
+      ]),
+    );
+    const running = detail({
+      run: run('running'),
+      items: items(user('hi')),
+    });
+    const { result } = render(api, running);
+
+    await waitFor(() =>
+      expect(api.follow).toHaveBeenCalledWith('s-1', expect.anything()),
+    );
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    const users = result.current.messages.filter(m => m.role === 'user');
+    const assistants = result.current.messages.filter(
+      m => m.role === 'assistant',
+    );
+    expect(users).toHaveLength(1);
+    expect(assistants).toHaveLength(1);
+    expect(assistants[0].parts.filter(part => part.type === 'text')).toEqual([
+      expect.objectContaining({ type: 'text', text: 'Hello' }),
+    ]);
+  });
+
+  it('follows a run that becomes active while the session is open and idle', async () => {
+    const api = mockApi();
+    api.follow.mockResolvedValue(
+      streamResponse([
+        { type: 'start', messageId: 'run_r-1' },
+        runChunks('running'),
+        runChunks('completed'),
+        { type: 'finish', finishReason: 'stop' },
+      ]),
+    );
+    const { rerender } = renderHook(
+      ({ liveActivity }: { liveActivity?: 'running' | 'waiting_approval' }) =>
+        useSessionChat({ api, detail: detail(), page, liveActivity }),
+      {
+        initialProps: {
+          liveActivity: undefined as 'running' | 'waiting_approval' | undefined,
+        },
+      },
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.follow).not.toHaveBeenCalled();
+
+    rerender({ liveActivity: 'running' });
+    await waitFor(() => expect(api.follow).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not follow again a run that was already running when the page opened', async () => {
+    const api = mockApi();
+    api.follow.mockResolvedValue(
+      streamResponse([
+        { type: 'start', messageId: 'run_r-1' },
+        runChunks('running'),
+        runChunks('completed'),
+        { type: 'finish', finishReason: 'stop' },
+      ]),
+    );
+    const running = detail({
+      run: run('running'),
+      items: items(user('hi')),
+    });
+    const { rerender } = renderHook(
+      ({ liveActivity }: { liveActivity?: 'running' }) =>
+        useSessionChat({ api, detail: running, page, liveActivity }),
+      { initialProps: { liveActivity: undefined as 'running' | undefined } },
+    );
+    await waitFor(() => expect(api.follow).toHaveBeenCalledTimes(1));
+
+    rerender({ liveActivity: 'running' });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.follow).toHaveBeenCalledTimes(1);
+  });
+
+  it('reloads once when an open run leaves running or waiting', async () => {
+    const api = mockApi();
+    api.getSession.mockResolvedValue(
+      detail({
+        items: items(user('hi'), { kind: 'agent_message', text: 'Done' }),
+      }),
+    );
+    const { rerender } = renderHook(
+      ({ liveActivity }: { liveActivity?: 'running' | 'waiting_approval' }) =>
+        useSessionChat({
+          api,
+          detail: detail({ items: items(user('hi')) }),
+          page,
+          liveActivity,
+        }),
+      {
+        initialProps: {
+          liveActivity: 'running' as 'running' | 'waiting_approval' | undefined,
+        },
+      },
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.getSession).not.toHaveBeenCalled();
+
+    rerender({ liveActivity: undefined });
+    await waitFor(() => expect(api.getSession).toHaveBeenCalledTimes(1));
+
+    rerender({ liveActivity: undefined });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.getSession).toHaveBeenCalledTimes(1);
+  });
+
   it('follows a run that goes on when the session opens, without afterSeq', async () => {
     const api = mockApi();
     api.follow.mockResolvedValue(

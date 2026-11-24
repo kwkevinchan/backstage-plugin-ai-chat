@@ -63,6 +63,7 @@
     "@backstage/backend-plugin-api": "backstage:^",
     "@backstage/config": "backstage:^",
     "@backstage/errors": "backstage:^",
+    "@backstage/plugin-signals-node": "backstage:^",
     "@backstage/types": "backstage:^",
     "@kwkevinchan/ai-chat-harness": "workspace:^",
     "@kwkevinchan/backstage-plugin-ai-chat-common": "workspace:^",

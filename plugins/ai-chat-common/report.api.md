@@ -275,6 +275,7 @@ export type ChatRunStatus =
 
 // @public
 export interface ChatSession {
+  activity?: 'running' | 'waiting_approval';
   // (undocumented)
   agentId: string;
   // (undocumented)

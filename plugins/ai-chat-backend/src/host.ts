@@ -55,14 +55,16 @@ import {
   type ImageSettings,
   type RunSettings,
 } from './application';
-import type {
-  AgentCatalog,
-  AttachmentStore,
-  AuditLog,
-  Logger,
-  QueuedMessageRepository,
-  RunRepository,
-  SessionRepository,
+import {
+  NoopNotifier,
+  type AgentCatalog,
+  type AttachmentStore,
+  type AuditLog,
+  type Logger,
+  type Notifier,
+  type QueuedMessageRepository,
+  type RunRepository,
+  type SessionRepository,
 } from './application/ports';
 import {
   DEFAULT_IMAGE_LIMITS,
@@ -95,6 +97,11 @@ export type HostPorts = {
   images?: ImageSettings;
   /** How often the supervisor renews the lease of a run; 10 seconds by default. */
   heartbeatMs?: number;
+  /**
+   * Tells the owner when a run starts, waits, completes, or ends without an
+   * answer. Defaults to a notifier that does nothing.
+   */
+  notifier?: Notifier;
   /**
    * `aiChat.retention.days`. Sessions last changed longer ago than this are
    * deleted. 0 keeps every session. Defaults to 90.
@@ -136,12 +143,21 @@ export function createHost(ports: HostPorts) {
   // The supervisor calls `afterRun` for the queue, and the queue starts runs
   // on the supervisor: the function is set once both exist.
   const afterRun: { current?: AfterRun } = {};
+  const notifier = ports.notifier ?? new NoopNotifier();
   const supervisor = new RunSupervisor({
     advance,
     runs,
     logger,
     heartbeatMs: ports.heartbeatMs,
     afterRun: info => afterRun.current!(info),
+    notify: (sessionId, activity) =>
+      sessions.get(sessionId).then(session =>
+        notifier.notify({
+          ownerRef: session.ownerRef,
+          sessionId,
+          activity,
+        }),
+      ),
   });
   const startNext = new StartNextQueued({
     sessions,
@@ -166,7 +182,7 @@ export function createHost(ports: HostPorts) {
     useCases: {
       createSession: new CreateSession({ sessions, agents }),
       getSession: new GetSession({ sessions, runs, items, queue }),
-      listSessions: new ListSessions({ sessions }),
+      listSessions: new ListSessions({ sessions, runs }),
       updateSession: new UpdateSession({ sessions, agents }),
       deleteSession: new DeleteSession({ sessions, runs }),
       sendMessage: new SendMessage({

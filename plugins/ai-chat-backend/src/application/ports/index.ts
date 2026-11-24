@@ -24,6 +24,8 @@ export type {
   ToolAuditEvent,
 } from './AuditLog';
 export type { Logger } from './Logger';
+export type { Notifier, SessionActivity } from './Notifier';
+export { DelegatingNotifier, NoopNotifier } from './Notifier';
 export type { QueuedMessageRepository } from './QueuedMessageRepository';
 export type { RunRepository, RunTransitionTarget } from './RunRepository';
 export type { SessionRepository } from './SessionRepository';

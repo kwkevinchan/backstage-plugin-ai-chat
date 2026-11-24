@@ -14,16 +14,35 @@
  * limitations under the License.
  */
 
-import type { Item, ItemLog } from '@kwkevinchan/ai-chat-harness';
-import { assertOwner, type Principal, type Run } from '../../domain';
+import type {
+  Item,
+  ItemLog,
+  RunOutcome,
+  StopReason,
+} from '@kwkevinchan/ai-chat-harness';
+import {
+  assertOwner,
+  callsAwaitingDecision,
+  type Principal,
+  type Run,
+} from '../../domain';
 import type { HostEvent } from '../hostEvents';
 import type { RunSupervisor } from '../RunSupervisor';
 import type { RunRepository, SessionRepository } from '../ports';
 
+/** How often a run on another backend is read. The spec says one second. */
+const DEFAULT_POLL_MS = 1000;
+
+const STOP_REASONS: readonly StopReason[] = [
+  'max_steps',
+  'max_tool_calls',
+  'timeout',
+];
+
 /**
  * What a client that joins a run needs: the items of the run so far, and the
  * events from then on. Read `events` to the end, or call `return()` on its
- * iterator, so the subscription goes away.
+ * iterator, so the subscription or the poll goes away. The run keeps going.
  */
 export type FollowHandle = {
   run: Run;
@@ -40,14 +59,28 @@ export type FollowHandle = {
    * presenter sends each before the output that read it.
    */
   inserted: Item[];
+  /**
+   * Text of an agent message that was open on this backend when the client
+   * subscribed, and that the log does not contain yet. Absent when the item
+   * completed while the log was read, and when the run is on another backend
+   * (that text is sent whole once the item is stored).
+   */
+  resumeText?: { draftId: string; text: string };
   events: AsyncIterable<HostEvent>;
 };
 
 /**
  * A client joins the run that is under way, for example after a reload (A-07):
- * it gets the run from its first item, then what comes next. Only a run that
- * is `running` has anything to follow; one that waits for an approval has no
- * loop, and one that ended is in the log.
+ * it gets the run from its first item, then what comes next.
+ *
+ * - The run is `running` on this backend: subscribe first, then read the log.
+ *   `resumeText` is the draft at subscribe time.
+ * - The run is `running` on another backend: replay the stored items, then
+ *   read the log once a second. Only completed items are sent. When the run
+ *   leaves `running`, the same end as this backend is sent, and the poll stops.
+ * - No run, a run that ended, or a run that waits for an approval: nothing to
+ *   follow. A stream kept open on a run that waits would leave `useChat` in
+ *   `streaming`, and an approval would not be sent.
  */
 export class FollowSession {
   constructor(
@@ -56,13 +89,16 @@ export class FollowSession {
       runs: RunRepository;
       items: ItemLog;
       supervisor: RunSupervisor;
+      /** Waits between reads of a run on another backend. One second by default. */
+      sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+      /** The wait. One second by default, so a test does not really wait. */
+      pollIntervalMs?: number;
     },
   ) {}
 
   /**
-   * Returns `undefined` when there is nothing to follow: no run, a run that
-   * does not run, or a run that another backend runs (following a run across
-   * backends is not there yet). Throws `NotSessionOwner`.
+   * Returns `undefined` when there is nothing to follow: no run, or a run that
+   * is not `running`. Throws `NotSessionOwner`.
    */
   async execute(input: {
     principal: Principal;
@@ -70,7 +106,7 @@ export class FollowSession {
     /** Leaves out the items up to this `seq`. */
     afterSeq?: number;
   }): Promise<FollowHandle | undefined> {
-    const { sessions, runs, items, supervisor } = this.deps;
+    const { sessions, runs, supervisor } = this.deps;
     const session = await sessions.get(input.sessionId);
     assertOwner(session, input.principal);
     const run = await runs.findActive(session.id);
@@ -78,34 +114,199 @@ export class FollowSession {
 
     // Subscribe before reading: an item that is written in between is in the
     // log and in the events, and the presenter skips it the second time.
+    // The draft is taken in this turn, before the read, so a delta that is
+    // only queued for this subscriber is not part of the prefix.
     const events = supervisor.subscribe(run.id);
-    if (!events) return undefined;
-    try {
-      const log = (await items.read(session.id)).filter(
-        item => item.runId === run.id,
-      );
-      const afterSeq = input.afterSeq ?? 0;
-      return {
-        inserted: log.filter(
-          item =>
-            item.kind === 'user_message' &&
-            item.delivery === 'inserted' &&
-            !log.some(
-              output =>
-                (output.kind === 'agent_message' ||
-                  output.kind === 'tool_call') &&
-                output.seq <= afterSeq &&
-                (output.readUpToSeq ?? output.seq) >= item.seq,
-            ),
-        ),
-        run,
-        items: log.filter(item => item.seq > afterSeq),
-        upToSeq: log.reduce((max, item) => Math.max(max, item.seq), 0),
-        events,
-      };
-    } catch (error) {
-      await events[Symbol.asyncIterator]().return?.();
-      throw error;
+    if (events) {
+      const draft = supervisor.openDraft?.(run.id);
+      try {
+        const log = await this.logOf(session.id, run.id);
+        const resumeText = prefixOf(draft, bufferedOf(events));
+        return {
+          ...viewOf(log, input.afterSeq ?? 0),
+          run,
+          events,
+          ...(resumeText && { resumeText }),
+        };
+      } catch (error) {
+        await events[Symbol.asyncIterator]().return?.();
+        throw error;
+      }
     }
+
+    const log = await this.logOf(session.id, run.id);
+    const view = viewOf(log, input.afterSeq ?? 0);
+    return {
+      ...view,
+      run,
+      events: this.remoteEvents(session.id, run.id, view.upToSeq),
+    };
   }
+
+  private logOf(sessionId: string, runId: string): Promise<Item[]> {
+    return this.deps.items
+      .read(sessionId)
+      .then(log => log.filter(item => item.runId === runId));
+  }
+
+  /**
+   * The events of a run this process does not run: completed items only, one
+   * read per interval, then the end stored for the run. `return()` stops the
+   * poll and does not read again. The run is left running (A-06). No
+   * `queue.state`: the queue is told by the backend that runs the loop.
+   */
+  private remoteEvents(
+    sessionId: string,
+    runId: string,
+    fromSeq: number,
+  ): AsyncIterable<HostEvent> {
+    const interval = this.deps.pollIntervalMs ?? DEFAULT_POLL_MS;
+    const sleep = this.deps.sleep ?? abortableSleep;
+    const abort = new AbortController();
+    let cursor = fromSeq;
+    let stopped = false;
+    const waiting: Item[] = [];
+
+    return {
+      [Symbol.asyncIterator]: () => {
+        const pending: HostEvent[] = [];
+        return {
+          next: async (): Promise<IteratorResult<HostEvent>> => {
+            for (;;) {
+              if (pending.length > 0) {
+                return { value: pending.shift() as HostEvent, done: false };
+              }
+              if (stopped || abort.signal.aborted) {
+                return { value: undefined, done: true };
+              }
+              await sleep(interval, abort.signal);
+              if (stopped || abort.signal.aborted) {
+                return { value: undefined, done: true };
+              }
+              const run = await this.deps.runs.get(runId);
+              const log = await this.logOf(sessionId, runId);
+              const after = cursor;
+              const fresh = log
+                .filter(item => item.seq > after)
+                .sort((a, b) => a.seq - b.seq);
+              for (const item of fresh) {
+                cursor = item.seq;
+                if (
+                  item.kind === 'user_message' &&
+                  item.delivery === 'inserted'
+                ) {
+                  waiting.push(item);
+                }
+                if (
+                  item.kind === 'agent_message' ||
+                  item.kind === 'tool_call'
+                ) {
+                  const mark = item.readUpToSeq ?? item.seq;
+                  for (const message of waiting.filter(m => m.seq <= mark)) {
+                    pending.push({ type: 'message.read', item: message });
+                  }
+                  for (let i = waiting.length - 1; i >= 0; i -= 1) {
+                    if (waiting[i].seq <= mark) waiting.splice(i, 1);
+                  }
+                }
+                pending.push({ type: 'item.completed', item });
+              }
+              if (run.status !== 'running') {
+                pending.push({
+                  type: 'run.ended',
+                  outcome: outcomeOfStoredRun(run, log),
+                });
+                stopped = true;
+              }
+            }
+          },
+          return: async () => {
+            stopped = true;
+            abort.abort();
+            return { value: undefined, done: true };
+          },
+        };
+      },
+    };
+  }
+}
+
+function viewOf(log: Item[], afterSeq: number) {
+  return {
+    inserted: log.filter(
+      item =>
+        item.kind === 'user_message' &&
+        item.delivery === 'inserted' &&
+        !log.some(
+          output =>
+            (output.kind === 'agent_message' || output.kind === 'tool_call') &&
+            output.seq <= afterSeq &&
+            (output.readUpToSeq ?? output.seq) >= item.seq,
+        ),
+    ),
+    items: log.filter(item => item.seq > afterSeq),
+    upToSeq: log.reduce((max, item) => Math.max(max, item.seq), 0),
+  };
+}
+
+/**
+ * The prefix to send, or nothing when the item already completed in the
+ * events that are queued: the replay or that completion sends the whole text.
+ * Deltas that are only queued are not added; the live stream sends them.
+ */
+function prefixOf(
+  draft: { draftId: string; text: string } | undefined,
+  buffered: readonly HostEvent[],
+): { draftId: string; text: string } | undefined {
+  if (!draft) return undefined;
+  const completed = buffered.some(
+    event => event.type === 'item.completed' && event.draftId === draft.draftId,
+  );
+  return completed ? undefined : draft;
+}
+
+function bufferedOf(events: AsyncIterable<HostEvent>): HostEvent[] {
+  const buffered = (events as { buffered?: () => HostEvent[] }).buffered;
+  return typeof buffered === 'function' ? buffered.call(events) : [];
+}
+
+/** What the presenter already sends when a run on this backend ends. */
+function outcomeOfStoredRun(run: Run, log: readonly Item[]): RunOutcome {
+  switch (run.status) {
+    case 'completed': {
+      const endReason = STOP_REASONS.find(reason => reason === run.endReason);
+      return endReason
+        ? { status: 'completed', endReason }
+        : { status: 'completed' };
+    }
+    case 'waiting_approval':
+      return {
+        status: 'waiting_approval',
+        pending: callsAwaitingDecision(log, run.id),
+      };
+    case 'cancelled':
+      return { status: 'cancelled' };
+    case 'failed':
+    case 'expired':
+      return { status: 'failed', message: 'The run stopped.' };
+    default:
+      return { status: 'failed', message: 'The run stopped.' };
+  }
+}
+
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise(resolve => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const pending: { timer?: ReturnType<typeof setTimeout> } = {};
+    const finish = () => {
+      clearTimeout(pending.timer);
+      signal.removeEventListener('abort', finish);
+      resolve();
+    };
+    pending.timer = setTimeout(finish, ms);
+    signal.addEventListener('abort', finish, { once: true });
+  });
 }

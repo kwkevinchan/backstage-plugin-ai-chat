@@ -215,6 +215,10 @@ components:
           type: string
         updatedAt:
           type: string
+        activity:
+          type: string
+          enum: [running, waiting_approval]
+          description: Set when a run of the session has not ended. Absent when there is no such run.
       required:
         [id, ownerRef, agentId, enabledToolsets, pinned, createdAt, updatedAt]
     ChatRun:
@@ -1110,7 +1114,7 @@ paths:
       operationId: followSession
       tags: [Runs]
       summary: Join the run that is under way.
-      description: 'The stream starts with `start` (the same message ID as the run), `data-run`, and the items of the run from its first one; then it goes on with the new events until the run ends. Each text arrives whole, when it is complete. Only a run that is `running` is streamed, and only by the backend that runs it; for a run that waits for an approval, a run that ended, no run, or a run of another backend the answer is 204. `afterSeq` leaves out the items up to it, for a client that does not use the AI SDK.'
+      description: 'The stream starts with `start` (the same message ID as the run), `data-run`, and the items of the run from its first one; then it goes on until the run ends. On the backend that runs the loop, text that was already written is sent with `text-start` and the later deltas follow. On another backend each finished item is sent about once a second, as one piece of text, with no deltas, and the stream ends when the run leaves `running`. A run that waits for an approval, a run that ended, or no run answers 204. `afterSeq` leaves out the items up to it, for a client that does not use the AI SDK.'
       parameters:
         - $ref: '#/components/parameters/afterSeq'
       responses:

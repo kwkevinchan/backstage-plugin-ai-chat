@@ -553,7 +553,7 @@ plugins/ai-chat-backend/
         AccessControl.ts               P2：能不能讀這段 Session、能不能用這個 Toolset。P1 只檢查擁有者（domain 的 assertOwner）
         AuditLog.ts                    begin() 回傳 AuditSpan（success、fail）
         Logger.ts
-        Notifier.ts                    P2：通知畫面「狀態變了」
+        Notifier.ts                    通知擁有者處理中、等核准、有新回覆。沒有 Signals 時不做事
         AgentCatalog.ts                agent()、defaultAgentId()、toolsets()、policy()
         Scheduler.ts                   P2：定期工作。P1 的 `plugin.ts` 直接用 `coreServices.scheduler` 排 ExpireStaleRuns
       usecases/
@@ -566,7 +566,7 @@ plugins/ai-chat-backend/
         DecideApproval.ts
         ResumeRun.ts                   全部已決定但迴圈沒有啟動時接續（不帶新的決定）
         CancelRun.ts
-        FollowSession.ts               接回（從目前 Run 的第一個 Item 重送）。P1-09 只接這一台 backend 跑的 Run；跨 backend 是 P2
+        FollowSession.ts               接回（從目前 Run 的第一個 Item 重送）。這一台即時；別台每秒讀已完成的 Item
         ListToolsets.ts                管理者定義的 Toolset 清單
         ShareSession.ts                P2
         UpdateShare.ts                 P2：更新快照、開關工具輸出、停止
@@ -601,7 +601,7 @@ plugins/ai-chat-backend/
         ActionsToolGateway.ts          Actions Registry 轉成 ToolGateway
         PermissionAccessControl.ts
         AuditorAuditLog.ts
-        SignalsNotifier.ts
+        SignalsNotifier.ts             頻道 `ai-chat`。由 `ai-chat` 的 signals module 裝上，plugin 本身不依賴 Signals
         ConfigAgentCatalog.ts
         principalFromRequest.ts        httpAuth、userInfo、auth（getLimitedUserToken 取 token 的到期時間）轉成 Principal
         BackstageScheduler.ts
@@ -655,25 +655,25 @@ export function enabledTools(
 
 每個 use case 一個類別，只有一個 `execute` 方法。
 
-| Use case                             | 做什麼                                                                      | 用到的 port                                                                                 | 規格                   |
-| ------------------------------------ | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------- |
-| `CreateSession`                      | 建立 Session，套用 Toolset 的預設值                                         | SessionRepository、AgentCatalog                                                             | SE-01、T-01            |
-| `GetSession`                         | 檢查權限，回傳 Session、進行中的 Run、看得到的 Item                         | SessionRepository、RunRepository、ItemLog、（P2：AccessControl、ShareRepository）           | SH-02、SH-05           |
-| `UpdateSession`                      | 改名、釘選、封存、開關 Toolset                                              | SessionRepository、AgentCatalog                                                             | SE-03、T-11            |
-| `SendMessage`                        | 建立 Run、寫入使用者訊息、啟動迴圈、回傳事件串流                            | SessionRepository、RunRepository、ItemLog、RunSupervisor、AgentCatalog（P2：AccessControl） | H-01、H-03、B-01       |
-| `DecideApproval`                     | 寫入 `approval`。全部決定後重新啟動迴圈                                     | SessionRepository、ItemLog、RunRepository、RunSupervisor、AgentCatalog、AuditLog            | D-05、T-06、T-07、P-04 |
-| `ResumeRun`                          | 全部已決定但 Run 還在等核准時接續，不帶新的決定                             | SessionRepository、RunRepository、ItemLog、RunSupervisor、AgentCatalog                      | P-04                   |
-| `CancelRun`                          | 設定停止要求。Run 在這一台就直接中止                                        | RunRepository、RunSupervisor                                                                | H-06                   |
-| `FollowSession`                      | 從目前 Run 的第一個 Item 重送，再接上即時事件。只接這一台跑的 `running` Run | SessionRepository、RunRepository、ItemLog、RunSupervisor（P2：AccessControl）               | A-07                   |
-| `ShareSession`、`UpdateShare`        | 建立和修改分享                                                              | ShareRepository、ItemLog、AuditLog、Notifier                                                | SH-01、SH-06 到 SH-11  |
-| `ForkSession`                        | 複製成自己的 Session                                                        | SessionRepository、ItemLog、AccessControl、AuditLog、AttachmentStore                        | SH-04                  |
-| `ExpireStaleRuns`                    | 租約過期的 Run 標成 `expired`                                               | RunRepository                                                                               | H-04                   |
-| `PurgeExpiredSessions`               | 刪除超過保存期限的 Session                                                  | SessionRepository                                                                           | SE-05                  |
-| `UploadAttachment`、`ReadAttachment` | 上傳和讀取圖片附件（PI，13.3）                                              | SessionRepository、AttachmentStore                                                          | IN-01 到 IN-04、IN-08  |
-| `InsertMessage`                      | Run 進行中插入訊息（PI，13.4）                                              | SessionRepository、ItemLog、AttachmentStore、AgentCatalog                                   | IN-10、IN-11、IN-17    |
-| `QueueMessage` 等                    | 排隊、修改、刪除、重排、列出（PI，13.6）                                    | SessionRepository、QueuedMessageRepository、AttachmentStore                                 | IN-13                  |
-| `StartNextQueued`、`ResumeQueue`     | 用最前面的排隊訊息開新的 Run（PI，13.6）                                    | QueuedMessageRepository、RunSupervisor、AgentCatalog、AuditLog                              | IN-14 到 IN-17         |
-| `PurgeUnusedAttachments`             | 刪除沒用到的附件（PI）                                                      | AttachmentStore                                                                             | IN-04                  |
+| Use case                             | 做什麼                                                                                                               | 用到的 port                                                                                 | 規格                   |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------- |
+| `CreateSession`                      | 建立 Session，套用 Toolset 的預設值                                                                                  | SessionRepository、AgentCatalog                                                             | SE-01、T-01            |
+| `GetSession`                         | 檢查權限，回傳 Session、進行中的 Run、看得到的 Item                                                                  | SessionRepository、RunRepository、ItemLog、（P2：AccessControl、ShareRepository）           | SH-02、SH-05           |
+| `UpdateSession`                      | 改名、釘選、封存、開關 Toolset                                                                                       | SessionRepository、AgentCatalog                                                             | SE-03、T-11            |
+| `SendMessage`                        | 建立 Run、寫入使用者訊息、啟動迴圈、回傳事件串流                                                                     | SessionRepository、RunRepository、ItemLog、RunSupervisor、AgentCatalog（P2：AccessControl） | H-01、H-03、B-01       |
+| `DecideApproval`                     | 寫入 `approval`。全部決定後重新啟動迴圈                                                                              | SessionRepository、ItemLog、RunRepository、RunSupervisor、AgentCatalog、AuditLog            | D-05、T-06、T-07、P-04 |
+| `ResumeRun`                          | 全部已決定但 Run 還在等核准時接續，不帶新的決定                                                                      | SessionRepository、RunRepository、ItemLog、RunSupervisor、AgentCatalog                      | P-04                   |
+| `CancelRun`                          | 設定停止要求。Run 在這一台就直接中止                                                                                 | RunRepository、RunSupervisor                                                                | H-06                   |
+| `FollowSession`                      | 從目前 Run 的第一個 Item 重送，再接上新的。這一台送未完成的文字；別台每秒送已完成的 Item。沒有 `running` 的 Run 不接 | SessionRepository、RunRepository、ItemLog、RunSupervisor（P2：AccessControl）               | A-07                   |
+| `ShareSession`、`UpdateShare`        | 建立和修改分享                                                                                                       | ShareRepository、ItemLog、AuditLog、Notifier                                                | SH-01、SH-06 到 SH-11  |
+| `ForkSession`                        | 複製成自己的 Session                                                                                                 | SessionRepository、ItemLog、AccessControl、AuditLog、AttachmentStore                        | SH-04                  |
+| `ExpireStaleRuns`                    | 租約過期的 Run 標成 `expired`                                                                                        | RunRepository                                                                               | H-04                   |
+| `PurgeExpiredSessions`               | 刪除超過保存期限的 Session                                                                                           | SessionRepository                                                                           | SE-05                  |
+| `UploadAttachment`、`ReadAttachment` | 上傳和讀取圖片附件（PI，13.3）                                                                                       | SessionRepository、AttachmentStore                                                          | IN-01 到 IN-04、IN-08  |
+| `InsertMessage`                      | Run 進行中插入訊息（PI，13.4）                                                                                       | SessionRepository、ItemLog、AttachmentStore、AgentCatalog                                   | IN-10、IN-11、IN-17    |
+| `QueueMessage` 等                    | 排隊、修改、刪除、重排、列出（PI，13.6）                                                                             | SessionRepository、QueuedMessageRepository、AttachmentStore                                 | IN-13                  |
+| `StartNextQueued`、`ResumeQueue`     | 用最前面的排隊訊息開新的 Run（PI，13.6）                                                                             | QueuedMessageRepository、RunSupervisor、AgentCatalog、AuditLog                              | IN-14 到 IN-17         |
+| `PurgeUnusedAttachments`             | 刪除沒用到的附件（PI）                                                                                               | AttachmentStore                                                                             | IN-04                  |
 
 `SendMessage` 的樣子（P1 沒有 `AccessControl`，擁有者檢查是 domain 的 `assertOwner`）：
 
@@ -769,7 +769,7 @@ export class SendMessage {
 | `ModelClient`                                                      | `OpenAiCompatibleModelClient`  | 沒有。包住 `llm/` 裡用 `fetch` 的 client                                          |
 | `AccessControl`                                                    | `PermissionAccessControl`      | `coreServices.permissions`（P2。P1 只檢查擁有者，是 domain 的 `assertOwner`）     |
 | `AuditLog`                                                         | `AuditorAuditLog`              | `coreServices.auditor`                                                            |
-| `Notifier`                                                         | `SignalsNotifier`              | `signalsServiceRef`。沒有安裝時用不做事的版本                                     |
+| `Notifier`                                                         | `SignalsNotifier`              | `signalsServiceRef`，由 signals module 裝上。沒有安裝時不做事，畫面改為輪詢       |
 | `AgentCatalog`                                                     | `ConfigAgentCatalog`           | `coreServices.rootConfig`，加上擴充點註冊的內容                                   |
 | `Scheduler`                                                        | `BackstageScheduler`           | `coreServices.scheduler`                                                          |
 | `Clock`、`IdGenerator`                                             | `SystemClock`、`UuidGenerator` | 沒有                                                                              |
@@ -1017,7 +1017,7 @@ PI 加兩種寫入：插入的 `user_message` 要求 Run 是 `running` 而且租
 
 | 方法和路徑                                                                    | Use case                  | 回應                                                                    | 分期                      |
 | ----------------------------------------------------------------------------- | ------------------------- | ----------------------------------------------------------------------- | ------------------------- |
-| `GET /sessions`                                                               | ListSessions              | JSON                                                                    | P1                        |
+| `GET /sessions`                                                               | ListSessions              | JSON；進行中的 Run 帶 `activity`                                        | P1、P2-06                 |
 | `POST /sessions`                                                              | CreateSession             | JSON                                                                    | P1                        |
 | `GET /sessions/:id`                                                           | GetSession                | JSON：Session、Run 狀態、Item                                           | P1                        |
 | `PATCH /sessions/:id`                                                         | UpdateSession             | JSON                                                                    | P1（Toolset）、P2（其他） |
@@ -1026,7 +1026,7 @@ PI 加兩種寫入：插入的 `user_message` 要求 Run 是 `running` 而且租
 | `POST /sessions/:id/runs/:runId/cancel`                                       | CancelRun                 | 202；Run 已結束時 409                                                   | P1                        |
 | `POST /sessions/:id/tool-calls/:callId/decision`                              | DecideApproval            | 還有別的要決定：JSON。全部決定了：SSE                                   | P1                        |
 | `POST /sessions/:id/resume`                                                   | ResumeRun                 | SSE；沒有東西可接續時 204                                               | P1                        |
-| `GET /sessions/:id/stream?afterSeq=`（`afterSeq` 選用）                       | FollowSession             | SSE；這一台跑的 Run 是 running 時才串流，否則 204                       | P1（跨 backend 是 P2）    |
+| `GET /sessions/:id/stream?afterSeq=`（`afterSeq` 選用）                       | FollowSession             | SSE；`running` 才串流（別台每秒送已完成的 Item），否則 204              | P1、P2-06                 |
 | `GET/POST /sessions/:id/shares`、`PATCH/DELETE /sessions/:id/shares/:shareId` | ShareSession、UpdateShare | JSON                                                                    | P2                        |
 | `POST /sessions/:id/fork`                                                     | ForkSession               | JSON                                                                    | P2                        |
 | `GET /toolsets`                                                               | ListToolsets              | JSON                                                                    | P1                        |
@@ -1105,7 +1105,7 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 
 「停在核准上」用協定原生的 `tool-approval-request`。核准是另一個請求（`decision`），它的回應用同一個 `messageId`，從 `tool-approval-response` 開始，接在同一則訊息上。不用 `signature`：歷史在伺服器的紀錄裡，用戶端不送歷史。
 
-重新整理後接回（A-07，`GET /sessions/:id/stream`）：重送的 `approval` Item 前面先補一個 `tool-approval-request`（`approvalId` 等於 `callId`），不然 SDK 找不到那個決定的 part 而丟錯；佇列裡屬於已重送的 Step 的 `step.started`、`step.ended` 略過，不多送空的 Step。Step 的編號取重送的 `tool_call` 的 `step` 和重送時開的 Step 數兩者的較大者，所以只有 `agent_message` 的 Step 也算已重送（`agent_message` 本身沒有 `step` 欄位）。先訂閱 Run 的事件，再讀紀錄，所以兩者之間寫入的 Item 不會漏；紀錄裡已有的 Item 再來一次時，presenter 用 `seq` 略過。回應先送 `start`（同一個 `messageId`）和 `data-run`，從目前 Run 的第一個 Item（包含它的 `user_message`）重送，再接著送新的事件。接回的串流不送逐字片段：每則 `agent_message` 在完成時整段送（`text-start`、一個 `text-delta`、`text-end`），不送缺開頭的 `text-delta`（`useChat` 會報錯）。只送缺的 Item 時，`useChat` 會蓋掉已載入的部分訊息。`afterSeq` 給不用 `useChat` 的用戶端當下限（略過的 Item 的事件也不會再來）。Run 是 `running` 而且在這一台跑時才串流；`waiting_approval`、已結束、沒有 Run、或 Run 在別台 backend 時回 204（停在核准上的 Session 開著串流，`useChat` 會停在 `streaming`，按核准不會自動送出；跨 backend 接回要等 P2）。客戶端離開只取消訂閱，Run 照跑（A-06）。
+重新整理後接回（A-07，`GET /sessions/:id/stream`）：重送的 `approval` Item 前面先補一個 `tool-approval-request`（`approvalId` 等於 `callId`），不然 SDK 找不到那個決定的 part 而丟錯；佇列裡屬於已重送的 Step 的 `step.started`、`step.ended` 略過，不多送空的 Step。Step 的編號取重送的 `tool_call` 的 `step` 和重送時開的 Step 數兩者的較大者，所以只有 `agent_message` 的 Step 也算已重送（`agent_message` 本身沒有 `step` 欄位）。先訂閱 Run 的事件，再讀紀錄，所以兩者之間寫入的 Item 不會漏；紀錄裡已有的 Item 再來一次時，presenter 用 `seq` 略過。回應先送 `start`（同一個 `messageId`）和 `data-run`，從目前 Run 的第一個 Item（包含它的 `user_message`）重送，再接著送新的事件。已完成的 `agent_message` 整段送（`text-start`、一個 `text-delta`、`text-end`），不送缺開頭的 `text-delta`（`useChat` 會報錯）。這一台還有沒寫進紀錄的文字時，重送之後補 `text-start` 和訂閱當下已累積的文字，之後的 `text-delta` 只送新的部分。別台沒有逐字片段，每秒讀一次紀錄，只送新的已完成 Item。只送缺的 Item 時，`useChat` 會蓋掉已載入的部分訊息。`afterSeq` 給不用 `useChat` 的用戶端當下限（略過的 Item 的事件也不會再來）。Run 是 `running` 時才串流（這一台或別台）；`waiting_approval`、已結束、沒有 Run 回 204（停在核准上的 Session 開著串流，`useChat` 會停在 `streaming`，按核准不會自動送出）。客戶端離開只取消訂閱或停止輪詢，Run 照跑（A-06）。
 
 `data-plan` 的「後送的取代先送的」只在同一則訊息裡成立。前一個 Run 的計畫留在舊訊息，畫面取最新的。
 
@@ -1165,7 +1165,9 @@ plugins/ai-chat/src/
 
 **接續**。開啟 Session 時（只有這個時機）`resumable` 為真，送 `sendMessage(undefined, { body: { resume: true } })`，transport 打 `POST /sessions/:id/resume`。串流不重送前面的內容，要帶著還原的訊息（核准是 `approval-requested` 或 `approval-responded`）。`resume` 回 204（兩個分頁同時接續，另一邊搶到）：改用 `GET /stream` 接，接完重新讀取。自己剛送出決定之後不看 `resumable`：那個決定的回應自己會接續（決定請求失敗的例外見「決定」）。
 
-**接回**。`useChat({ resume })` 在載入時 Run 是 `running` 才為真，`reconnectToStream` 打 `GET /sessions/:id/stream`（204 回 `null`），不帶 `afterSeq`（帶了 SDK 找不到前面的 tool part）；`resumeStreamIsReplay` 為真，SDK 在第一個 `start` 把訊息重置，所以重送不會讓文字重複。
+**接回**。`useChat({ resume })` 在載入時 Run 是 `running` 才為真，`reconnectToStream` 打 `GET /sessions/:id/stream`（204 回 `null`），不帶 `afterSeq`（帶了 SDK 找不到前面的 tool part）；`resumeStreamIsReplay` 為真，SDK 在第一個 `start` 把訊息重置，所以重送不會讓文字重複。逐字到一半時，這一台先送已累積的文字，後面的字接在同一則訊息上。
+
+**即時狀態（B-05）**。`GET /sessions` 在有進行中的 Run 時帶 `activity`（`running` 或 `waiting_approval`）。沒有 Signals 時畫面每秒讀一次清單；有 Signals 時 backend 的 signals module 把 `{ sessionId, activity }` 發給擁有者（頻道 `ai-chat`），畫面收到才重新讀取，不輪詢。開著的對話若不在串流中，活動變成 `running` 就接回；從進行中變成沒有活動就重新讀取一次。不是目前開著的、上一輪在處理或等核准、這一輪沒有進行中的 Run，顯示 New reply，打開後消失。失敗、取消、過期通知 `idle`，清單不帶這個值。
 
 **停止**。畫面有進行中的 Run（載入時的 `run`，之後由 `data-run` 更新）就顯示 Stop，也包含停在等核准的 Run（新訊息要等 Run 結束）。Stop 呼叫 `POST …/runs/:runId/cancel`（409 忽略），不呼叫 `useChat.stop()`：後端結束 Run 時串流自己以 `abort` 結束。沒有串流開著（Run 在等核准）時，畫面自己重新讀取。`data-run` 是 `failed`、`cancelled`、`expired`，或串流出錯時，結束後重新讀取 `GET /sessions/:id`，畫面以紀錄為準。
 
@@ -1653,7 +1655,7 @@ controller 依序做（`controllers/attachments.ts`；`route()` 先取出身分�
 - 一個串流只有一則 assistant 訊息，所以插入的訊息不能是另一則 `user` 訊息。它是那則 assistant 訊息裡的 `data-inserted` part，出現在它被讀到的那一步之前。
 - 接回（A-07）和 `GET /sessions/:id` 還原畫面時，同一個位置用 `readUpToSeq` 決定：插入的訊息放在第一個 `readUpToSeq` 大於等於它的序號的 `agent_message` 或 `tool_call` 之前。還沒讀到的：Run 還在進行時不顯示在對話裡（畫面把它放在輸入框上方），Run 已結束時顯示成使用者訊息，帶「Agent 沒有讀到」。
 - `data-queue` 是 `{ items, paused, pausedReason?, nextRunId? }`，送在 `data-run` 之前。`nextRunId`：自動送出開了新的 Run，而且是這一台。畫面收到後，在 `finish` 之後用 `GET /sessions/:id/stream` 接上新的 Run（重送從那個 Run 的第一個 Item 開始，A-07）。沒有 `nextRunId` 而且 `paused` 為真，畫面顯示暫停。
-- 佇列被別的分頁改動時，這個分頁不會即時知道。畫面在這幾個時機重新讀取：自己改完之後（回應帶清單）、Run 結束（`data-queue`）、操作得到 404 或 409、視窗重新取得焦點。P2 的即時狀態（B-05）可以補上推送。
+- 佇列被別的分頁改動時，這個分頁不會即時知道。畫面在這幾個時機重新讀取：自己改完之後（回應帶清單）、Run 結束（`data-queue`）、操作得到 404 或 409、視窗重新取得焦點。B-05 通知的是 Run 的活動（處理中、等核准、有新回覆），不是佇列的內容；佇列仍在這些時機重新讀取。
 
 ### 13.8 資料庫
 
