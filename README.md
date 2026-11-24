@@ -182,7 +182,7 @@ aiChat:
       maxBytes: 5242880 # largest image; default 5 MB
       maxBytesPerInput: 20971520 # image bytes in one run and in one model call; default 20 MB, at least maxPerMessage times maxBytes
       maxPendingPerSession: 12 # uploaded images that are in no message yet; default 12
-      tokensPerImage: 1600 # what an image counts in the context budget; default 1600
+      tokensPerImage: 1600 # estimated tokens per image in the budget; default 1600
 
 backend:
   actions:
@@ -207,6 +207,12 @@ of the message, so they leave your organization when the server is outside it.
 Leave `images` off (the default) when they must not. The backend stores the
 images in its database, per session; only the owner of the session reads them,
 and an image that no message uses is deleted after 24 hours.
+
+`input.images.tokensPerImage` (default 1600) is how many tokens one image
+counts in the context budget. It is an estimate, and it has not been measured
+against a real model. Set it for the model you use. Too low, and the input can
+pass the context limit of the model; too high, and older images are left out
+sooner.
 
 | Setting                   | Meaning                                                                                                                                                                                                                                                                                                                     |
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
