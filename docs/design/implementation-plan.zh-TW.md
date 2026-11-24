@@ -414,6 +414,37 @@ flowchart LR
 - 持續更新的分享，被分享的人用接回的端點（P2-06）也只收到他能看的內容。
 - `summary` 含工具輸出的內容，所以分享和複製（SH-04、SH-09、D-21）時，`summary` 跟工具輸出用同樣的規則：超過 `outputs_up_to_seq` 的摘要不給看，複製時不帶。
 
+### P2-03 Permission 和分享的資料模型
+
+- **範圍**：`shares` 表和 `KnexShareRepository`（程式架構第 7 節）。domain 的 `Share`、`visibleItems`（第 5.2 節的規則表）、持續更新時工具輸出範圍的預設（SH-09）。`ai-chat-common` 放讀取 Session 的 permission 定義；backend 用 Backstage permission 的條件規則實作「是擁有者」「有分享給我或我的群組」，`PermissionAccessControl` 實作 `AccessControl`（SH-05）。`GetSession` 改走 `AccessControl`：擁有者看到的和現在一樣；有有效分享的人只拿到 `visibleItems` 的結果；沒有權限的人得到 `NotSessionOwner`（HTTP 仍是 404，文字和找不到相同）。設定 `aiChat.sharing.live`。分享沒有寫入權限欄位：`subject_ref` 是 `user:…` 或 `group:…`，表達唯讀（SH-01）。
+- **不做**：`ShareSession`、`UpdateShare`、`ForkSession`、`POST`／`PATCH`／`DELETE /sessions/:id/shares`、`POST /sessions/:id/fork`、附件讀取放行、複製、接回。其他 use case 仍只查擁有者（`assertOwner`）。送訊息和核准的拒絕是 P2-04，這裡不改那些路由。
+- **依賴**：P1 的 Session、Item、`GetSession`。不依賴 P2-01、P2-02、PI-06。
+- **驗收**（domain 的每一列是表格式單元測試，不靠整合測試）：
+  - `shares` 的欄位就是第 7 節那一組（`id`、`session_id`、`subject_ref`、`up_to_seq`、`outputs_up_to_seq`、`expires_at`、`created_by`、`created_at`、`revoked_at`），沒有寫入權限或角色欄位。`subject_ref` 有索引，存得下 `user:…` 和 `group:…`。`up_to_seq`、`outputs_up_to_seq`、`expires_at`、`revoked_at` 可以是空值。
+  - 刪除 Session 時，它的分享列連帶刪除。Session 不存在時不能寫入分享。`down` 只拿掉 `shares`，其他表還在。SQLite 和 PostgreSQL 都跑。
+  - `KnexShareRepository` 把一列原樣寫入再讀出（含空值）。依 `subject_ref` 列出時，只含這些對象、而且 `revoked_at` 是空值的列；已取消的、別人的不在裡面。
+  - 擁有者：全部 Item、全部工具輸出都在，即使這段 Session 已有分享。
+  - 快照（`up_to_seq` 有值）：序號大於 `up_to_seq` 的 Item 不在；等於的在。
+  - 持續更新（`up_to_seq` 空值）且未到期：全部 Item 都在。
+  - 工具輸出：序號不大於 `outputs_up_to_seq` 的 `tool_result` 保留輸出；大於的保留 `status`，輸出換成固定文字 `not shared`（文件裡的「沒有分享」；跟宿主其他存下來的說明一樣用英文，例如 `tool call limit`），`message` 和 `truncated` 拿掉，避免內容從那裡漏出。`tool_call` 的工具 id 和參數仍在（SH-09）。
+  - `outputs_up_to_seq` 空值：看得到的範圍裡，工具輸出都保留。`0`：範圍裡每一筆 `tool_result` 都只有狀態。序號剛好等於界線的保留輸出，大 1 的換成 `not shared`。
+  - `summary` 跟工具輸出同一條界線：`seq` 或 `coversUpToSeq` 大於 `outputs_up_to_seq` 的摘要整筆不在（摘要正文含工具輸出，不能只塗掉幾個字）。界線是空值時，看得到的範圍裡的摘要保留；界線是 `0` 時摘要都不在。
+  - 其餘種類（`user_message`、`agent_message`、`approval`、`tool_started`、`plan_update`、`note`）在序號範圍內整筆保留。
+  - 過了到期時間（`now` 晚於 `expires_at`；剛好等於還沒過）：當成快照，停在 `createdAt` 不大於 `expires_at` 的最後一筆序號。分享本來就有 `up_to_seq` 時，取兩者較小的，到期不會多露出快照以外的 Item。工具輸出仍用 `outputs_up_to_seq`。`expires_at` 空值不會因為時間被凍住。到期只縮小看得到的內容，不取消讀取。
+  - 持續更新的預設（SH-09，domain 算出要存的兩個序號，不經 HTTP）：沒有另外指定工具輸出界線時，`outputs_up_to_seq` 是分享當下的序號，`up_to_seq` 是空值。明確給空值表示範圍內都給看（擁有者打開）；明確給數字就用那個數字。快照的 `up_to_seq` 是分享當下的序號；工具輸出界線沒給時是空值（範圍內都給看，也就是快照裡已有的輸出，D-13）。
+  - 同一個人同時有多筆有效分享時，看得到的範圍是各筆的聯集：任一筆是未到期的持續更新，Item 就全部看得到；否則序號上界取各筆有效上界的最大；任一筆的 `outputs_up_to_seq` 是空值，範圍內的工具輸出和摘要都給看，否則界線取最大。文件的 `visibleItems` 收一筆分享，多筆先收成這一筆再套規則。
+  - 條件規則「是擁有者」：`ownerRef` 等於這個人的 user entity ref 才成立。群組 ref 不是擁有者。
+  - 條件規則「有分享給我或我的群組」：有一筆 `revoked_at` 為空、`subject_ref` 是這個人或他的群組（`ownershipRefs`）的分享才成立。不在群組裡不成立；把群組從 `ownershipRefs` 拿掉（離開群組）後不成立；只剩已取消的分享不成立。直接分享給這個人時，離開群組仍成立。已到期的分享仍算數（內容被凍住，讀取還在）。
+  - `PermissionAccessControl`：permission 服務回 `DENY` 時，連擁有者也不准讀。回 `ALLOW`（這個 app 預設沒有打開 permission 框架時就是這樣）時，改套上面兩條規則，所以陌生人還是不能讀。回 `CONDITIONAL` 時，只套政策交回來的條件。permission 和這兩條規則向 permission registry 註冊。
+  - `GetSession`：擁有者（沒有分享、或已有分享）的 Item 和現在一樣。快照分享的人只拿到序號以內的 Item。持續更新的人拿到全部 Item，超過工具輸出界線的只有狀態。沒有分享、只有已取消的分享、不在群組裡、離開群組後，都是 `NotSessionOwner`。被分享的人看得到進行中的 Run，但佇列是空的、`awaitingDecision` 是空的、`resumable` 是假：那些是擁有者的操作。
+- **設定**（規格範例是 `enabled: true`、`defaultHours: 24`、`maxHours: 72`。沒寫的預設對齊 `config.ts`：選用區塊用規格範例的值，不合格就 `InputError`，後端不起來）：
+  - 沒有 `sharing`，或沒有 `live`：`enabled` 為真、`defaultHours` 為 24、`maxHours` 為 72。
+  - `enabled: false` 讀成假。這一項沒有建立分享的 use case，所以這個旗標只進設定；P2-04 用它拒絕建立持續更新。
+  - `defaultHours`、`maxHours` 必須是正整數，而且 `defaultHours` 不大於 `maxHours`。超過、零、小數都啟動失敗。
+  - README（英文和繁中）的設定範例含這個區塊，`config.test.ts` 照既有方式接受它。
+- **第 5 節的安全測試，這一項測的**：超過 `up_to_seq` 的 Item 不在 `visibleItems`（也就是 `GetSession` 回給被分享的人的內容）。超過 `outputs_up_to_seq` 的工具輸出只有狀態。`summary` 同一條規則。不在群組、離開群組、`revoked_at` 已填，都讀不到。
+- **留給後面的安全測試**：被分享的人直接打 HTTP（含用序號把 Item 再讀一次）是 P2-04，這一項不加分享路由。附件位元組的 HTTP 讀取是 P2-04 的 IN-19，`ReadAttachment` 仍只允許擁有者。複製是 P2-05。接回端點是 P2-06，`FollowSession` 仍只允許擁有者。
+
 ## 6. P3 和 P4
 
 ### P3：Harness
@@ -562,3 +593,4 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-24 | 1.1  | PI 審查後：暫停時直接送出的順序寫進 IN-15、IN-18；複製帶走圖片（IN-19，P2-05 驗收）；模型輸出的 `append` 取 `FOR NO KEY UPDATE`、取鎖順序表；`readUpToSeq` 定義為這一輪開始讀紀錄時的最大序號；`afterRun` 對 `waiting_approval` 不送出；已結束 Run 的 `unread` 插入訊息不再送給模型；`message.read` 不走 `seq` 去重；插入 409 的三種處理；圖片位元組上限 `maxBytesPerInput`；`Cache-Control` 改 `private, no-cache`；`ModelClient.stream` 帶 `sessionId`；設定統一用 `aiChat.llm.images`；SQLite 的理由改寫                                                                                                                                                                                          |
 | 2026-11-24 | 1.1  | PI-05 後續：刪除 Session 先鎖 `runs`（`FOR UPDATE`，依 `id`）再鎖 `sessions`，和 13.8 的取鎖順序一致，並加 PostgreSQL 的並行測試。SQLite 多連線實測是 `SQLITE_BUSY` 而不是「插入先」或「結束先」，啟動時要求 pool `max` 是 1。上傳路由的 OpenAPI 說明錯字改正；二進位 `requestBody` 仍不寫進規格（repo-tools 的 lint 仍要求 `application/json`）                                                                                                                                                                                                                                                                                                                                                     |
 | 2026-11-25 | 1.1  | P2-02 完成（SE-05）：`aiChat.retention.days` 預設 90，`0` 不刪。每小時刪除 `updated_at` 早於期限的 Session（runs、items、queued messages、attachments 連帶刪除）。進行中的 Run 不刪；釘選和封存不例外。稽核在 Auditor，刪除不碰它。PostgreSQL 用 `FOR UPDATE SKIP LOCKED`，兩台同時跑不重複刪、也不等已鎖的列。程式架構第 5.3 節和第 13.8 節照實作更新                                                                                                                                                                                                                                                                                                                                               |
+| 2026-11-25 | 1.1  | P2-03 補上範圍、依賴和驗收清單（`shares`、`visibleItems` 每一列、兩條 permission 條件、`GetSession` 的讀取、`aiChat.sharing.live` 的預設）。表上的 PR 和狀態在 PR 開出後再填。第 5 節裡屬於附件 HTTP、複製、接回的安全測試留到 P2-04、P2-05、P2-06                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
