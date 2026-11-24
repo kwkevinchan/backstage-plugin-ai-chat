@@ -783,7 +783,7 @@ export class SendMessage {
 - `execute`：先用現在的 action 和政策檢查這筆存下來的呼叫（T-06）。政策在提出呼叫時和執行前各檢查一次。工具已經不在清單裡、呼叫存成唯讀但 action 現在不是唯讀、`schemaHash` 變了而存下的輸入不符合新 schema、現在的政策是 `deny`、或存下時不需核准而現在政策要 `ask`（例如事後改成 `egress`），都不執行，回傳 `error` 結果。存下時要核准的呼叫，核准之後現在的政策仍是 `ask` 就照常執行。通過就把 `CallContext.principal` 的 `credentials` 交給 `actions.invoke`。`invoke` 沒有 signal 參數，所以 signal 中止時不再等它並丟出例外（核心看到 signal 已中止就不寫結果）；action 本身可能仍會跑完。action 丟出的例外轉成 `error` 結果。回傳值一律整理成 `ToolOutput` 物件：沒有值是 `{ status: 'ok' }`，字串、數字、`null`、陣列放進 `output`；序列化後超過 `maxOutputChars` 的，`output` 換成 `{ text, originalLength }`（序列化後不超過 `maxOutputChars`），`truncated: true`。
 - 政策的警告：政策把不是唯讀或屬於 `egress` Toolset 的 action 設成 `allow` 時，第一次在 `list` 看到它就記一筆警告，同一個工具只記一次。執行時 `decidePolicy` 仍然算出 `ask`。Actions Registry 要用憑證才能列出 action，所以啟動時沒有清單可查。
 
-`ConfigAgentCatalog` 在建構時讀取並檢查 `aiChat.toolsets` 和 `aiChat.policy`，值不對就丟 `InputError`，後端啟動失敗。它實作 `AgentCatalog { agent(); defaultAgentId(); toolsets(); policy() }`：現在只有 `default` 這一個 Agent（內建的系統提示加 `aiChat.systemPrompt`），設定檔裡的 Agent 留到 P3。
+`ConfigAgentCatalog` 在建構時讀取並檢查 `aiChat.toolsets`、`aiChat.policy` 和 `aiChat.agents`，值不對就丟 `InputError`，後端啟動失敗。它實作 `AgentCatalog { agent(); defaultAgentId(); toolsets(); policy() }`。沒有人定義 `default` 時，只有內建的那一個（內建的系統提示加 `aiChat.systemPrompt`）。設定檔的 `agents.default` 取代它。其他 id 來自設定檔或擴充點。擴充點註冊的 Agent 使用 module 傳入的系統提示原文。`toolsets`、`skills`、`model`、`limits`、`planning` 記在定義上；迴圈還不使用它們。同一個 id 出現兩次就丟 `InputError`。
 
 - Toolset 的欄位：`actions`（樣式，不可為空）、`exclude`（不屬於這組的樣式）、`title`、`default`（預設 `false`）、`egress`（預設 `false`）。id 以字母開頭，只能是字母、數字，以及夾在中間的 `-`、`_`。`policy` 的鍵只接受完整的 action id，含 `*` 會丟 `InputError`。
 - `policy` 在設定檔是平的 `{ toolId: allow|ask|deny }`，轉成 domain 的 `PolicySettings { byTool }`。
@@ -797,6 +797,9 @@ export class SendMessage {
 export const aiChatPlugin = createBackendPlugin({
   pluginId: 'ai-chat',
   register(env) {
+    // 模組的 init 比這裡的 init 早。擴充點要在 register() 裡就交出去。
+    const harness = new AiChatHarnessRegistry();
+    env.registerExtensionPoint(aiChatHarnessExtensionPoint, harness);
     env.registerInit({
       deps: {
         /* logger、rootConfig、database、httpAuth、userInfo、auth、httpRouter、
@@ -808,7 +811,12 @@ export const aiChatPlugin = createBackendPlugin({
         const ids = new UuidGenerator();
 
         // 第 3 圈
-        const catalog = new ConfigAgentCatalog(d.rootConfig, d.logger); // P3 再加 extensions
+        // 擴充點在 register() 裡註冊（aiChatHarnessExtensionPoint）。模組的 init 先跑完。
+        const catalog = new ConfigAgentCatalog(
+          d.rootConfig,
+          d.logger,
+          harness.agents(),
+        );
         const sessions = new KnexSessionRepository(db, clock, ids);
         const host = createHost({
           items: new KnexItemLog(db, clock),
@@ -834,6 +842,7 @@ export const aiChatPlugin = createBackendPlugin({
             limits: { maxSteps, maxToolCallsPerRun, runTimeoutSeconds },
             budget: config.context,
           },
+          extensions: harness.extensions(),
         });
 
         d.lifecycle.addShutdownHook(() => host.supervisor.shutdown());
@@ -900,6 +909,8 @@ export default createBackendModule({
 ```
 
 擴充點在這個架構裡的位置：它們是核心 application 那一圈的 port。別的團隊寫的是 adapter。所以擴充的程式碼天生不能繞過政策，它只拿得到 port 給它的東西。
+
+範例 module 在 `plugins/ai-chat-backend-module-example`。它只 import `ai-chat-node` 和 Backstage 的公開 API，註冊一個 Agent（`guide`）和一個 Context provider，說明用 `example.com`。示範 backend（`packages/backend`）掛上它。迴圈收到這些註冊，這一項還不呼叫。
 
 ### 6.2 Frontend：`ai-chat-react`
 

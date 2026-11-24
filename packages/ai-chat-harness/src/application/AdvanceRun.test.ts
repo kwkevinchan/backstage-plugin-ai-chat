@@ -21,6 +21,7 @@ import { callTool, say, waitForAbort } from '../testing';
 import type { FakeTool } from '../testing';
 import { kit, fence, sessionId } from '../testing/fixture';
 import { AdvanceRun } from './AdvanceRun';
+import { emptyExtensions } from './ports/extensions';
 import { executeTools } from './steps/executeTools';
 
 const readTool: FakeTool = {
@@ -1043,7 +1044,7 @@ describe('executeTools: agreement 5', () => {
         run: t.run,
         clock: t.clock,
         ids: t.ids,
-        extensions: {},
+        extensions: emptyExtensions(),
       },
       t.request(),
       items,
@@ -1581,7 +1582,7 @@ describe('AdvanceRun: follow-ups of the review', () => {
         run: t.run,
         clock: t.clock,
         ids: t.ids,
-        extensions: {},
+        extensions: emptyExtensions(),
       }).execute(t.request());
       await generator.next();
       await generator.next();

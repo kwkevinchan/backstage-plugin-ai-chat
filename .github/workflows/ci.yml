@@ -120,6 +120,10 @@ jobs:
         if: steps.workspace.outputs.present == 'true'
         run: yarn constraints
 
+      - name: Workspace dependency directions
+        if: steps.workspace.outputs.present == 'true'
+        run: node --test scripts/workspace-deps.test.mjs
+
       - name: Backstage release pin
         if: steps.workspace.outputs.present == 'true'
         run: node scripts/pin-backstage-release.mjs --check

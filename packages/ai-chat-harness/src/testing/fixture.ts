@@ -19,7 +19,9 @@
 
 import {
   AdvanceRun,
+  emptyExtensions,
   type AdvanceRunRequest,
+  type Extensions,
   type HarnessEvent,
   type ItemDraft,
   type RunFence,
@@ -57,6 +59,8 @@ export async function kit(options: {
   capabilities?: ConstructorParameters<typeof ScriptedModel>[1];
   /** The log before the run: the first item is normally a user message. */
   log?: ItemBody[];
+  /** Registrations the loop receives and does not call. */
+  extensions?: Extensions;
 }) {
   const clock = new FakeClock();
   const items = new InMemoryItemLog({ clock });
@@ -74,7 +78,7 @@ export async function kit(options: {
     run,
     clock,
     ids,
-    extensions: {},
+    extensions: options.extensions ?? emptyExtensions(),
   });
 
   const append = (...bodies: ItemBody[]): Promise<Item[]> =>

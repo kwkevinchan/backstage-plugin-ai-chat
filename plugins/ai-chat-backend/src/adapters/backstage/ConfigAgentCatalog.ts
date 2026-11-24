@@ -26,16 +26,35 @@ import type { AgentCatalog } from '../../application/ports/AgentCatalog';
 import { AgentNotFound } from '../../domain/errors';
 import { buildSystemPrompt } from '../../domain/systemPrompt';
 import type { Toolset } from '../../domain/toolset';
+import {
+  assertExtensionId,
+  assertKnownToolsets,
+  definitionFrom,
+  readAgentBody,
+  readExtensionAgent,
+} from './agentShape';
 
 const TOOLSET_ID = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/i;
 const DEFAULT_AGENT_ID = 'default';
 const POLICY_NAMES: readonly string[] = ['allow', 'ask', 'deny'];
 
 /**
- * The toolsets and the policy from the `aiChat` section of the configuration,
- * and the one agent, `default`: the built-in system prompt plus
- * `aiChat.systemPrompt`. It reads and checks them when it is created, so a mistake stops the backend
- * at startup.
+ * The toolsets, the policy and the agents from the `aiChat` section of the
+ * configuration, plus the agents a backend module registered. It reads and
+ * checks them when it is created, so a mistake stops the backend at startup.
+ *
+ * Without `aiChat.agents`, and with no module defining `default`, the only
+ * agent is `default`: the built-in system prompt plus `aiChat.systemPrompt`.
+ * `aiChat.agents.default` replaces that agent. A module that also registers
+ * `default` is a duplicate and stops the backend.
+ *
+ * The system prompt of a configured agent is the built-in rules plus that
+ * agent's `systemPrompt`, or plus `aiChat.systemPrompt` when the agent omits
+ * it. The two extra texts are not combined. An agent from a module keeps the
+ * system prompt the module passed.
+ *
+ * `toolsets`, `skills`, `model`, `limits` and `planning` are recorded. The
+ * loop does not apply them yet.
  *
  * Without `aiChat.toolsets` it builds one toolset, `default`, switched on for
  * every session, from the deprecated `aiChat.actions.include` and
@@ -45,9 +64,13 @@ const POLICY_NAMES: readonly string[] = ['allow', 'ask', 'deny'];
 export class ConfigAgentCatalog implements AgentCatalog {
   private readonly toolsetList: readonly Toolset[];
   private readonly policySettings: PolicySettings;
-  private readonly defaultAgent: AgentDefinition;
+  private readonly agents = new Map<string, AgentDefinition>();
 
-  constructor(root: Config, logger: LoggerService) {
+  constructor(
+    root: Config,
+    logger: LoggerService,
+    registeredAgents: readonly AgentDefinition[] = [],
+  ) {
     const config = root.getOptionalConfig('aiChat');
     const include = config?.getOptionalStringArray('actions.include') ?? [];
     const exclude = config?.getOptionalStringArray('actions.exclude') ?? [];
@@ -73,12 +96,30 @@ export class ConfigAgentCatalog implements AgentCatalog {
           },
         ];
     this.policySettings = readPolicy(config?.getOptional('policy'));
-    this.defaultAgent = {
-      id: DEFAULT_AGENT_ID,
-      systemPrompt: buildSystemPrompt(
-        config?.getOptionalString('systemPrompt'),
-      ),
-    };
+
+    const knownToolsets = new Set(this.toolsetList.map(toolset => toolset.id));
+    const globalPrompt = config?.getOptionalString('systemPrompt');
+    for (const agent of readConfiguredAgents(
+      config,
+      knownToolsets,
+      globalPrompt,
+    )) {
+      this.agents.set(agent.id, agent);
+    }
+    if (!this.agents.has(DEFAULT_AGENT_ID)) {
+      this.agents.set(DEFAULT_AGENT_ID, {
+        id: DEFAULT_AGENT_ID,
+        systemPrompt: buildSystemPrompt(globalPrompt),
+      });
+    }
+    for (const registered of registeredAgents) {
+      const agent = readExtensionAgent(registered);
+      assertKnownToolsets(agent.toolsets, knownToolsets, `agent ${agent.id}`);
+      if (this.agents.has(agent.id)) {
+        throw new InputError(`agent ${agent.id} is already defined`);
+      }
+      this.agents.set(agent.id, agent);
+    }
   }
 
   defaultAgentId(): string {
@@ -86,8 +127,9 @@ export class ConfigAgentCatalog implements AgentCatalog {
   }
 
   async agent(agentId: string): Promise<AgentDefinition> {
-    if (agentId !== DEFAULT_AGENT_ID) throw new AgentNotFound(agentId);
-    return this.defaultAgent;
+    const found = this.agents.get(agentId);
+    if (!found) throw new AgentNotFound(agentId);
+    return found;
   }
 
   async toolsets(): Promise<readonly Toolset[]> {
@@ -97,6 +139,38 @@ export class ConfigAgentCatalog implements AgentCatalog {
   async policy(): Promise<PolicySettings> {
     return this.policySettings;
   }
+}
+
+/**
+ * `aiChat.agents`, or nothing when the block is absent. A value that is not a
+ * map of agent objects throws, and so does an agent that names a toolset the
+ * installation does not have.
+ */
+function readConfiguredAgents(
+  config: Config | undefined,
+  knownToolsets: ReadonlySet<string>,
+  globalPrompt: string | undefined,
+): AgentDefinition[] {
+  if (!config) return [];
+  const raw = config.getOptional('agents');
+  if (raw === undefined) return [];
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new InputError('aiChat.agents must be a map of agent ids');
+  }
+  const agents = config.getOptionalConfig('agents');
+  if (!agents) {
+    throw new InputError('aiChat.agents must be a map of agent ids');
+  }
+  return agents.keys().map(id => {
+    assertExtensionId(id, `aiChat.agents.${id}`);
+    const body = readAgentBody(agents.get(id), `aiChat.agents.${id}`);
+    assertKnownToolsets(body.toolsets, knownToolsets, `aiChat.agents.${id}`);
+    return definitionFrom(
+      id,
+      body,
+      buildSystemPrompt(body.systemPrompt ?? globalPrompt),
+    );
+  });
 }
 
 function readToolsets(config: Config): Toolset[] {

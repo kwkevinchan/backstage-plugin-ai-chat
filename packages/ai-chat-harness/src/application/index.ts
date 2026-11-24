@@ -18,7 +18,20 @@ export { AdvanceRun } from './AdvanceRun';
 export type { AdvanceRunDeps, AdvanceRunRequest } from './types';
 export type { HarnessEvent, RunOutcome } from './events';
 export type { Clock } from './ports/Clock';
-export type { Extensions } from './ports/extensions';
+export {
+  emptyExtensions,
+  type AiChatHarnessExtensionPoint,
+  type BeforeToolCallResult,
+  type ContextProvider,
+  type Extensions,
+  type HookName,
+  type Hooks,
+  type RunSummary,
+  type Skill,
+  type StepContext,
+  type ToolCall,
+  type ToolResult,
+} from './ports/extensions';
 export type { IdGenerator } from './ports/IdGenerator';
 export type { ItemDraft, ItemLog, RunFence } from './ports/ItemLog';
 export type { ModelChunk, ModelClient } from './ports/ModelClient';

@@ -15,17 +15,29 @@
  */
 
 import { mockServices } from '@backstage/backend-test-utils';
-import { decidePolicy } from '@kwkevinchan/ai-chat-harness';
+import {
+  decidePolicy,
+  type AgentDefinition,
+} from '@kwkevinchan/ai-chat-harness';
 import { ConfigAgentCatalog } from './ConfigAgentCatalog';
 
-function catalogFor(aiChat: unknown) {
+function catalogFor(
+  aiChat: unknown,
+  registered: readonly AgentDefinition[] = [],
+) {
   const logger = mockServices.logger.mock();
   const catalog = new ConfigAgentCatalog(
     mockServices.rootConfig({ data: { aiChat } as any }),
     logger,
+    registered,
   );
   return { catalog, logger };
 }
+
+const catalogToolsets = {
+  catalog: { actions: ['catalog:*'] },
+  web: { actions: ['web:*'] },
+};
 
 describe('ConfigAgentCatalog', () => {
   it('reads the toolsets (T-01, D-24)', async () => {
@@ -172,6 +184,196 @@ describe('ConfigAgentCatalog', () => {
       await expect(catalog.agent('other')).rejects.toMatchObject({
         code: 'AGENT_NOT_FOUND',
       });
+    });
+
+    it('reads an agent from aiChat.agents, and keeps the built-in default', async () => {
+      const { catalog } = catalogFor({
+        systemPrompt: 'Be brief.',
+        toolsets: catalogToolsets,
+        agents: {
+          sre: {
+            title: 'SRE Agent',
+            systemPrompt: 'Cite the source for example.com.',
+            toolsets: ['catalog'],
+            skills: ['deploy-failure', 'rollback'],
+            model: 'default',
+            planning: 'required',
+            limits: {
+              maxSteps: 8,
+              maxToolCallsPerRun: 20,
+              runTimeoutSeconds: 300,
+            },
+          },
+        },
+      });
+      const sre = await catalog.agent('sre');
+      expect(sre).toEqual({
+        id: 'sre',
+        title: 'SRE Agent',
+        systemPrompt: expect.stringContaining(
+          'Cite the source for example.com.',
+        ),
+        toolsets: ['catalog'],
+        skills: ['deploy-failure', 'rollback'],
+        model: 'default',
+        planning: 'required',
+        limits: { maxSteps: 8, maxToolCallsPerRun: 20, runTimeoutSeconds: 300 },
+      });
+      expect(sre.systemPrompt).toContain('Rules that always apply');
+      expect(sre.systemPrompt).not.toContain('Be brief.');
+      const fallback = await catalog.agent('default');
+      expect(fallback.systemPrompt).toContain('Rules that always apply');
+      expect(fallback.systemPrompt).toContain('Be brief.');
+      expect(fallback.title).toBeUndefined();
+      expect(fallback.toolsets).toBeUndefined();
+      expect(catalog.defaultAgentId()).toBe('default');
+    });
+
+    it('uses the global system prompt when the configured agent omits its own', async () => {
+      const { catalog } = catalogFor({
+        systemPrompt: 'Be brief.',
+        agents: { sre: { title: 'SRE Agent' } },
+      });
+      const sre = await catalog.agent('sre');
+      expect(sre.title).toBe('SRE Agent');
+      expect(sre.systemPrompt).toContain('Be brief.');
+      expect(sre.systemPrompt).toContain('Rules that always apply');
+      expect(sre.toolsets).toBeUndefined();
+      expect(sre.skills).toBeUndefined();
+      expect(sre.model).toBeUndefined();
+      expect(sre.limits).toBeUndefined();
+      expect(sre.planning).toBeUndefined();
+    });
+
+    it('uses the configured default agent, and not the installation system prompt when the agent has its own', async () => {
+      const { catalog } = catalogFor({
+        systemPrompt: 'Global only.',
+        toolsets: catalogToolsets,
+        agents: {
+          default: {
+            title: 'Custom',
+            systemPrompt: 'Agent only.',
+            toolsets: ['catalog'],
+          },
+        },
+      });
+      const agent = await catalog.agent('default');
+      expect(agent).toMatchObject({
+        id: 'default',
+        title: 'Custom',
+        toolsets: ['catalog'],
+      });
+      expect(agent.systemPrompt).toContain('Agent only.');
+      expect(agent.systemPrompt).toContain('Rules that always apply');
+      expect(agent.systemPrompt).not.toContain('Global only.');
+      expect(agent.skills).toBeUndefined();
+      expect(agent.model).toBeUndefined();
+      expect(agent.limits).toBeUndefined();
+      expect(agent.planning).toBeUndefined();
+    });
+
+    it('stores a limit of 0', async () => {
+      const { catalog } = catalogFor({
+        agents: {
+          sre: {
+            limits: {
+              maxSteps: 0,
+              maxToolCallsPerRun: 0,
+              runTimeoutSeconds: 0,
+            },
+          },
+        },
+      });
+      expect((await catalog.agent('sre')).limits).toEqual({
+        maxSteps: 0,
+        maxToolCallsPerRun: 0,
+        runTimeoutSeconds: 0,
+      });
+    });
+
+    it.each<[string, unknown]>([
+      ['a bad id', { agents: { 'bad id': { systemPrompt: 'x' } } }],
+      ['an unknown toolset', { agents: { sre: { toolsets: ['missing'] } } }],
+      ['an agent that is not an object', { agents: { sre: 'no' } }],
+      ['agents that are not a map', { agents: ['sre'] }],
+      ['a model that is not an id', { agents: { sre: { model: '1bad' } } }],
+      [
+        'a planning mode that is not required',
+        { agents: { sre: { planning: 'optional' } } },
+      ],
+      ['a limit below zero', { agents: { sre: { limits: { maxSteps: -1 } } } }],
+      [
+        'a limit that is not an integer',
+        { agents: { sre: { limits: { maxToolCallsPerRun: 1.5 } } } },
+      ],
+      [
+        'a timeout above 600',
+        { agents: { sre: { limits: { runTimeoutSeconds: 601 } } } },
+      ],
+      [
+        'a repeated skill',
+        { agents: { sre: { skills: ['deploy-failure', 'deploy-failure'] } } },
+      ],
+      [
+        'a skill id that is not valid',
+        { agents: { sre: { skills: ['Bad Skill'] } } },
+      ],
+      [
+        'toolsets that are not ids',
+        { agents: { sre: { toolsets: 'catalog' } } },
+      ],
+    ])('rejects an agent the configuration gets wrong: %s', (_name, aiChat) => {
+      expect(() => catalogFor(aiChat)).toThrow(/aiChat\.agents/);
+    });
+
+    it('keeps an extension agent next to the configured agents, with the prompt the module gave', async () => {
+      const { catalog } = catalogFor(
+        {
+          toolsets: catalogToolsets,
+          agents: { sre: { title: 'SRE Agent' } },
+        },
+        [
+          {
+            id: 'guide',
+            title: 'Guide',
+            systemPrompt: 'You help people on example.com.',
+            skills: ['getting-started'],
+            planning: 'required',
+          },
+        ],
+      );
+      const guide = await catalog.agent('guide');
+      expect(guide.systemPrompt).toBe('You help people on example.com.');
+      expect(guide.systemPrompt).not.toContain('Rules that always apply');
+      expect(guide).toMatchObject({
+        title: 'Guide',
+        skills: ['getting-started'],
+        planning: 'required',
+      });
+      expect((await catalog.agent('sre')).title).toBe('SRE Agent');
+      expect((await catalog.agent('default')).id).toBe('default');
+    });
+
+    it('rejects an agent id that the configuration and an extension both define', () => {
+      expect(() =>
+        catalogFor({ agents: { guide: { title: 'From the file' } } }, [
+          { id: 'guide', systemPrompt: 'From the module.' },
+        ]),
+      ).toThrow(/agent guide is already defined/);
+    });
+
+    it('rejects an extension that registers the default agent', () => {
+      expect(() =>
+        catalogFor({}, [{ id: 'default', systemPrompt: 'no' }]),
+      ).toThrow(/agent default is already defined/);
+    });
+
+    it('rejects an extension agent that names an unknown toolset', () => {
+      expect(() =>
+        catalogFor({}, [
+          { id: 'guide', systemPrompt: 'x', toolsets: ['missing'] },
+        ]),
+      ).toThrow(/agent guide\.toolsets: unknown toolset missing/);
     });
   });
 });

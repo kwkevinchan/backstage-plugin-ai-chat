@@ -57,6 +57,21 @@ aiChat:
   policy: # 用完整的 action ID：allow、ask 或 deny
     'catalog:get-entity': allow
     'temporal:terminate-workflow': deny
+  agents: # 選用；沒有這一段時只有 default 這一個 Agent
+    default:
+      title: Backstage Agent
+      toolsets: [catalog]
+    sre:
+      title: SRE Agent
+      systemPrompt: 你協助 example.com 的值班工程師排查問題。動手前先寫計畫，回答附上來源。
+      toolsets: [catalog]
+      skills: [deploy-failure, rollback]
+      model: default
+      planning: required
+      limits:
+        maxSteps: 8
+        maxToolCallsPerRun: 20
+        runTimeoutSeconds: 300
   maxTurns: 10 # 一次 Run 的模型呼叫數；預設 10
   maxToolCallsPerRun: 30 # 一次 Run 的工具呼叫數；預設 30
   runTimeoutSeconds: 300 # 一次 Run 的工作時間（不含等核准）；預設 300，最大 600
@@ -104,8 +119,18 @@ backend:
   畫面會提示較早的內容被省略。紀錄本身不變。
 - `actions.include`、`actions.exclude` 已淘汰：沒設定 `toolsets` 時它們組成預設的那一組，
   有設定時被忽略，啟動時會記警告。
+- **Agent**：沒有 `aiChat.agents` 時只有 `default`（內建規則加上 `aiChat.systemPrompt`）。
+  設定檔裡的 Agent，系統提示是內建規則再加上該 Agent 的 `systemPrompt`；沒寫就改用全站的
+  `aiChat.systemPrompt`，兩段額外說明不疊加。`toolsets` 必須是已經定義的工具組。
+  `skills`、`model`、`limits`、`planning: required` 會記在 Agent 上。迴圈仍用全站的上限和
+  唯一的模型；這些欄位、以及 module 註冊的 Context provider、Skill、Hook、模型，這一版還不執行。
+  值不對會讓後端無法啟動。
+- 別的 backend module 透過 `@kwkevinchan/backstage-plugin-ai-chat-node` 註冊 Agent 和
+  Context provider，不必 import 宿主。範例是
+  `@kwkevinchan/backstage-plugin-ai-chat-backend-module-example`（Agent id 是 `guide`）。
+  設定檔和 module 用了同一個 id 時，後端無法啟動。
 
-細節見[英文 README](README.md#toolsets-and-policy)。
+細節見[英文 README](README.md#agents)。
 
 ## 核准的規則
 
