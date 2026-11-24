@@ -23,6 +23,9 @@ describe('isEntityRef', () => {
     'Component:default/Example_Payments',
     'example-payments',
     'default/example',
+    'component:default/my--service',
+    'component:default/a__b',
+    'component:team--a/x',
     `component:default/${'a'.repeat(63)}`,
   ])('accepts %s', value => {
     expect(isEntityRef(value)).toBe(true);

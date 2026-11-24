@@ -15,13 +15,14 @@
  */
 
 const KIND = /^[A-Za-z][A-Za-z0-9]*$/;
-const NAMESPACE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const NAME = /^[A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)*$/;
+// The rules of `KubernetesValidatorFunctions` of `@backstage/catalog-model`.
+const NAMESPACE = /^[a-z0-9]+(?:-+[a-z0-9]+)*$/;
+const NAME = /^([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]$/;
 
 /**
  * Whether a text is an entity reference in the form of the catalog:
  * `[kind:][namespace/]name`, each part with the characters and the length (63)
- * that Backstage allows. The page of a message is given by the client and read
+ * that `@backstage/catalog-model` allows (`KubernetesValidatorFunctions`). The page of a message is given by the client and read
  * by the model, so both sides check it with this and with `isPagePath`.
  *
  * @public

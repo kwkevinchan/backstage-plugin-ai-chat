@@ -113,13 +113,13 @@ components:
           minLength: 1
           maxLength: 2000
           pattern: '^/[^\s\x00-\x1f\x7f]*$'
-          description: A path that starts with `/`; no blank and no control character.
+          description: A path that starts with `/`; no blank and no control character. The server also refuses Unicode control and format characters (category C), which the pattern does not show.
         entityRef:
           type: string
           minLength: 1
           maxLength: 255
-          pattern: '^(?:[A-Za-z][A-Za-z0-9]*:)?(?:[a-z0-9]+(?:-[a-z0-9]+)*/)?[A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)*$'
-          description: An entity reference, `[kind:][namespace/]name`, with the characters and the lengths (63 for each part) that Backstage allows. The client gives it, and the backend checks the form before the model reads it.
+          pattern: '^(?:[A-Za-z][A-Za-z0-9]*:)?(?:[a-z0-9]+(?:-+[a-z0-9]+)*/)?(?:[A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]$'
+          description: An entity reference, `[kind:][namespace/]name`, with the characters and the lengths (63 for each part) that `@backstage/catalog-model` allows. The client gives it, and the backend checks the form before the model reads it.
       required: [path]
     ChatSession:
       type: object
