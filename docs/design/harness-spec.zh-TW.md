@@ -1,0 +1,447 @@
+# AI Chat Harness 設計規格
+
+| 欄位     | 內容                                                                                                                                                                             |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 狀態     | 已定案，進入實作                                                                                                                                                                 |
+| 版本     | 1.0（2026-11-24）                                                                                                                                                                |
+| 範圍     | `ai-chat-harness`（核心）、`ai-chat-backend`（宿主）、`ai-chat`（前端），以及它們的 `-common`、`-node`、`-react` 套件                                                            |
+| 相關文件 | 程式架構：[architecture.zh-TW.md](architecture.zh-TW.md)。實作規劃：[implementation-plan.zh-TW.md](implementation-plan.zh-TW.md)。用途說明：[usage.zh-TW.html](usage.zh-TW.html) |
+| 實作現況 | PR #1 是第 0 版，已合併。對照見第 9 節                                                                                                                                           |
+
+這份文件記錄設計決策和需求。需求有編號，實作的 PR 要寫明它完成哪幾條。決策改變時，改第 3 節並在第 11 節記一筆。
+
+三份文件的分工：
+
+- **這份（規格）**：做什麼，為什麼。
+- **程式架構**：程式怎麼分層，每一層放什麼，介面長什麼樣。
+- **實作規劃**：照什麼順序做，每一項怎麼驗收。
+
+## 1. 目的
+
+讓 Backstage 的使用者用對話查詢資料和啟動工作，並讓其他團隊在同一套框架上做自己的 Agent，不用自己寫迴圈。
+
+設計原則：
+
+1. **核心很小。** 迴圈只做四件事：組上下文、呼叫模型、檢查政策、執行工具。
+2. **能力都是掛上去的。** 計畫、文件搜尋、排查手冊都經由擴充點加入，不寫死成流程。
+3. **模型不握有決定權。** 能不能執行由政策和核准決定。
+4. **Chat 只做秒到分鐘的事。** 更久、更重、要執行程式碼的工作，離開 Backstage backend。
+5. **不引進 agent 框架，不加新的基礎設施。** 狀態只放在 plugin 自己的資料庫。
+6. **依賴只往內。** 核心不知道 Backstage、HTTP、資料庫、使用者（見 D-15、D-23）。
+
+不做的事：
+
+- 在 Chat 裡執行程式碼的互動沙箱（D-12）。
+- 多人在同一段對話裡發言。
+- 跨對話的長期記憶。
+- 向量搜尋。先用 Backstage Search。
+- 同時接多家模型做比較。
+- 「同一段 Session、同一組參數只問一次」的自動核准。
+
+## 2. 名詞
+
+| 名詞             | 意思                                                                                      |
+| ---------------- | ----------------------------------------------------------------------------------------- |
+| 核心             | `ai-chat-harness` 套件。迴圈、政策、上下文、計畫。不 import 任何 Backstage 套件           |
+| 宿主             | `ai-chat-backend` 套件。Backstage backend plugin。管身分、Session、Run、儲存、對外的 HTTP |
+| Agent            | 一份定義：系統提示、工具組、Skills、模型、上限、規劃模式                                  |
+| Session          | 一段對話。有擁有者，綁定一個 Agent，可以綁定一個 entity                                   |
+| Run              | 一則使用者訊息觸發的一次執行，到完成、等核准或碰到上限為止                                |
+| Step             | Run 裡的一輪：一次模型呼叫，加上它要求的工具呼叫                                          |
+| Item             | Session 紀錄裡的一筆。有序號，寫入後不修改                                                |
+| Tool             | 模型可以呼叫的能力。來源是 Actions Registry 的 action，或核心的內建工具                   |
+| Toolset          | 一組工具。管理員設定，使用者在自己的 Session 裡開關                                       |
+| Policy           | 每個工具的處理方式：`allow` 直接執行、`ask` 等核准、`deny` 不提供                         |
+| Skill            | 一份做事方法，格式是 `SKILL.md`。上下文只放名稱和說明，模型需要時才載入全文               |
+| Context provider | 每一步都加進上下文的資訊來源                                                              |
+| Hook             | 在工具呼叫或模型呼叫前後執行的規則                                                        |
+| 子任務           | 由 `delegate` 工具啟動的子迴圈，有自己的上下文，只能用唯讀工具                            |
+| 分享             | 把 Session 給別人唯讀檢視。分成「快照」和「持續更新」兩種模式                             |
+
+## 3. 設計決策
+
+所有決策在 1.0 版都是**已定**。「取代」表示這條不再有效。
+
+| 編號 | 決策                                                                                                                                                                     | 理由                                                                                         |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| D-01 | Chat 放在獨立的 repo，不依賴任何特定的 action 來源                                                                                                                       | Temporal 只是其中一個工具來源；兩邊的使用者和發版節奏不同                                    |
+| D-02 | 工具的唯一來源是 Actions Registry，加上少數內建工具                                                                                                                      | 註冊一次，Chat 和 MCP client 都能用                                                          |
+| D-03 | （已由 D-16 取代）Run 在送出訊息的那個請求裡執行                                                                                                                         | —                                                                                            |
+| D-04 | Run 是資料庫裡的一筆紀錄，有狀態和租約。一段 Session 同時只有一個進行中的 Run，由資料庫保證                                                                              | 多台 backend 時不靠記憶體鎖，也不靠猜逾時                                                    |
+| D-05 | 核准是 Run 的分段點：存好參數就停下來；Allow 是新的請求，帶新的身分                                                                                                      | 使用者 token 約一小時過期；核准可以隔很久                                                    |
+| D-06 | 唯讀與否只看 Actions Registry 的屬性。不是唯讀的工具永遠不能設成 `allow`                                                                                                 | 這是防 prompt injection 的最後一關                                                           |
+| D-07 | 計畫（Todo）是一個工具，不是固定的階段。Agent 可以要求第一步先寫計畫                                                                                                     | 模型查到新資訊後能改計畫；小模型也能強制先規劃                                               |
+| D-08 | 內建工具只有需要核心自己狀態的那幾個：`update_plan`、`load_skill`、`delegate`。其他能力（包括 TechDocs 搜尋）都做成 action                                               | 不把能力綁死在 Chat 上                                                                       |
+| D-09 | 同一步裡，唯讀工具平行執行；寫入工具核准後照順序一個一個執行                                                                                                             | 讀沒有副作用；寫的先後順序有意義                                                             |
+| D-10 | 子任務只能用唯讀工具、不能再分派、只回傳摘要。排在最後一期                                                                                                               | 用途是隔離上下文；模型呼叫量會變成好幾倍，成本最難預估                                       |
+| D-11 | Backstage backend 程序不執行任何模型產生的程式碼或指令                                                                                                                   | 這個程序握有資料庫連線和所有 plugin 的金鑰                                                   |
+| D-12 | 不做互動沙箱。要執行程式碼的工作一律走 Temporal workflow                                                                                                                 | 隔離、憑證、網路的處理範圍太大；Temporal worker 已經涵蓋這類工作                             |
+| D-13 | 分享是唯讀檢視。分享當下已有的工具輸出預設看得到，由分享的人把關。要接手就複製成自己的 Session，複製不帶工具輸出                                                         | 分享的人最清楚內容能不能給對方看；複製出去的收不回來                                         |
+| D-14 | 管理員看不到對話內容，只看稽核紀錄                                                                                                                                       | 對話可能有個人的問題                                                                         |
+| D-15 | 分成核心和宿主兩個套件。核心不知道 Backstage、HTTP、資料庫、使用者；宿主把身分放進每次呼叫的 context，核心不解讀它                                                       | 對照的九個專案，核心都不認得使用者和畫面。核心能單獨測，宿主能換                             |
+| D-16 | Run 在 backend 行程裡執行，不綁連線。斷線後跑完並存檔。不另開 worker                                                                                                     | OpenHands、LibreChat、backstage-assistants 都這樣做                                          |
+| D-17 | Session 的紀錄是一條只增不改、有序號的 Item。逐字的串流片段不存                                                                                                          | 斷線接回、分享、複製都用序號。Codex、opencode、Pi、OpenHands 都是只增不改                    |
+| D-18 | 迴圈在記憶體裡不留狀態。每一步先讀紀錄再決定下一步：有已核准但還沒執行的工具呼叫就執行，否則呼叫模型                                                                     | 核准後由哪一台 backend 接手都可以，不需要快照                                                |
+| D-19 | 給畫面的介面是 HTTP 加 SSE，事件格式用 AI SDK 的 UI message stream。不依賴 backstage-assistants 的路由和資料表，也不用它的前端                                           | 依賴協定，前端可以換。它的前端綁定它 backend 的二十多個路由（見第 12 節）                    |
+| D-20 | 前端有四個擴充點：頁面上下文、入口、結果顯示元件、client tool                                                                                                            | 這是放在 Backstage 裡面、而不是只當 MCP 的理由                                               |
+| D-21 | 分享有兩種模式，分享時選。預設是快照。可以選「持續更新」，它有三條保護：之後才產生的工具輸出預設不給看；Session 上方一直顯示分享對象和停止按鈕；有到期時間，預設 24 小時 | 團隊一起排查需要即時。持續更新時，分享的人沒辦法對還沒出現的內容把關，所以那一段的預設反過來 |
+| D-22 | Skill 用公開的 `SKILL.md` 格式。政策名稱用 `allow`、`ask`、`deny`                                                                                                        | 幾個主要的 harness 都用這個格式和這組名稱。別人寫好的 Skill 可以直接用                       |
+| D-23 | 程式照 Clean Architecture 分四圈：domain、application、adapters、框架。依賴只能往內。用 lint 規則檢查                                                                    | 規則和流程可以不啟動 Backstage 就測；換資料庫、換協定、換模型只動最外面兩圈                  |
+| D-24 | Toolset 的預設值和可用範圍由管理員在設定檔決定。使用者只能在自己的 Session 裡，在可用範圍內開關                                                                          | 管理員管上限，使用者管自己這段對話要用什麼                                                   |
+| D-25 | 不是唯讀的工具，執行前先寫一筆「開始執行」的 Item。重新接手時，有「開始」但沒有結果的呼叫標成「結果不明」，不重新執行                                                    | backend 在執行中當掉時，不能讓同一個寫入跑兩次                                               |
+| D-26 | Agent 和 Skill 先放設定檔和 backend module。做成 catalog entity 留到 P3 之後再評估                                                                                       | 先把擴充點的介面定下來                                                                       |
+
+## 4. 需求
+
+每條需求後面的 P1 到 P4 是分期，見第 8 節。
+
+### 4.1 核心迴圈（H）
+
+| 編號 | 需求                                                                                                        | 分期 |
+| ---- | ----------------------------------------------------------------------------------------------------------- | ---- |
+| H-01 | 送出訊息的請求建立 Run 並啟動迴圈。回應用 SSE 串流文字、工具呼叫和工具結果                                  | P1   |
+| H-02 | Run 的狀態：`running`、`waiting_approval`、`completed`、`failed`、`cancelled`、`expired`                    | P1   |
+| H-03 | 同一段 Session 已有進行中的 Run（`running` 或 `waiting_approval`）時，新的 Run 被拒絕。用資料庫的唯一性實作 | P1   |
+| H-04 | 執行中的 backend 持有租約並定期續約。租約過期的 Run 標成 `expired`，畫面可以重送                            | P1   |
+| H-05 | Run 的上限：Step 數、工具呼叫數、總時間。總時間短於使用者 token 的有效期                                    | P1   |
+| H-06 | 停止：使用者可以取消進行中的 Run。已完成的工具結果保留                                                      | P1   |
+| H-07 | 瀏覽器斷線時，後端把目前這段跑完並存檔。重新打開看到已存的結果                                              | P1   |
+| H-08 | 串流給使用者的工具結果，和存進資料庫的是同一份（遮蔽、裁切之後）                                            | P1   |
+| H-09 | 上下文有 token 預算。超過時：舊的 Step 換成摘要，舊的工具輸出換成一行說明                                   | P1   |
+| H-10 | 系統提示不會出現在任何給瀏覽器的回應裡                                                                      | P1   |
+| H-11 | backend 關機時：不再接新的 Run，給進行中的 Run 一段時間跑完，沒跑完的釋放租約並標成 `expired`               | P1   |
+
+### 4.2 工具與政策（T）
+
+| 編號 | 需求                                                                              | 分期                             |
+| ---- | --------------------------------------------------------------------------------- | -------------------------------- |
+| T-01 | Toolset：管理員在設定檔把工具分組，並設定哪些組預設開啟                           | P1                               |
+| T-02 | 每一步只把這段 Session 開啟的工具送給模型                                         | P1                               |
+| T-03 | Policy：`allow` 只能設在唯讀工具；不是唯讀的工具預設 `ask`；任何工具可以設 `deny` | P1                               |
+| T-04 | 會把資料送到組織外的工具，即使是唯讀也要設成 `ask`。由管理員在 Toolset 標記       | P1                               |
+| T-05 | 核准前用 JSON Schema 驗證參數。不合格直接退回給模型，不產生核准卡片               | P1                               |
+| T-06 | 存下呼叫時記錄 schema 雜湊。核准時 schema 變了就重新驗證，不合格就不執行          | P1                               |
+| T-07 | 核准只執行存下來的參數；只有擁有者能決定；同一個呼叫只算一次，由資料庫保證        | P1（PR #1 已有，改用資料庫保證） |
+| T-08 | Permission：決定誰能用哪個 Toolset。用不了的工具不送給模型                        | P3                               |
+| T-09 | 每個工具可以設輸出上限和要遮蔽的欄位                                              | P3                               |
+| T-10 | 配額：每個人每分鐘的寫入次數                                                      | P3                               |
+| T-11 | 使用者可以在自己的 Session 裡開關 Toolset，範圍不超過管理員的設定                 | P1                               |
+
+### 4.3 擴充點（X）
+
+| 編號 | 需求                                                                                                                           | 分期 |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------ | ---- |
+| X-01 | Agent 定義：系統提示、Toolsets、Skills、模型、上限、規劃模式。放在設定檔                                                       | P3   |
+| X-02 | `aiChatHarnessExtensionPoint`：backend module 可以加 Context provider、Skill、Hook、Agent                                      | P3   |
+| X-03 | Context provider：每一步回傳一段要加進上下文的文字，有長度上限。內建：使用者身分、綁定的 entity、目前的計畫                    | P3   |
+| X-04 | Skill：格式是 `SKILL.md`。上下文只放名稱和一句說明。`load_skill` 載入全文，唯讀，`allow`                                       | P3   |
+| X-05 | Hook 的時機：`beforeModelCall`、`beforeToolCall`、`afterToolCall`、`onRunEnd`。`beforeToolCall` 可以拒絕或把政策調嚴，不能調鬆 | P3   |
+| X-06 | `update_plan`：模型寫入或更新計畫。計畫是一筆 Item，每一步放進上下文，畫面顯示成清單                                           | P3   |
+| X-07 | Agent 的 `planning: required`：第一步只提供 `update_plan`                                                                      | P3   |
+| X-08 | TechDocs 搜尋和讀取做成 action，透過 Backstage Search，用使用者的身分。回答要附來源連結                                        | P3   |
+| X-09 | 模型轉接可以替換。每個模型可以宣告能力，例如是否支援平行工具呼叫                                                               | P3   |
+
+### 4.4 平行（P）
+
+| 編號 | 需求                                                                                | 分期             |
+| ---- | ----------------------------------------------------------------------------------- | ---------------- |
+| P-01 | 模型在一步裡要求多個工具時，唯讀的同時執行，同時數有上限（預設 4）                  | P3               |
+| P-02 | 每個工具呼叫有逾時。失敗或逾時是一筆結果，不讓整步失敗                              | P3               |
+| P-03 | 結果照模型原本的順序交回                                                            | P3               |
+| P-04 | 同一步有多個要核准的呼叫時，每個各自決定。全部決定後，核准的照順序一個一個執行      | P1（PR #1 已有） |
+| P-05 | 上限：每步的工具呼叫數（預設 8）、每個人同時進行的 Run 數（預設 3）                 | P3               |
+| P-06 | 模型呼叫有全站共用的限流，配合 gateway 的速率限制                                   | P3               |
+| P-07 | `delegate`：啟動最多 3 個子任務。每個有自己的上下文和上限，只有唯讀工具，不能再分派 | P4               |
+| P-08 | 子任務只把摘要和來源交回主對話。過程存起來，畫面可以點開看                          | P4               |
+| P-09 | 子任務的模型呼叫和工具呼叫算在主 Run 的上限裡                                       | P4               |
+
+### 4.5 執行界線（S）
+
+| 編號 | 需求                                                                                            | 分期             |
+| ---- | ----------------------------------------------------------------------------------------------- | ---------------- |
+| S-01 | 核心沒有執行程式碼、shell 指令或讀寫檔案系統的能力。唯一的作用管道是工具                        | P1               |
+| S-02 | Markdown 顯示不載入圖片或任何外部資源，連結只允許 http、https、mailto                           | P1（PR #1 已有） |
+| S-03 | 工具輸出一律標成不可信的資料。它不能讓不是唯讀的工具跳過核准                                    | P1（PR #1 已有） |
+| S-04 | 長的、要改東西的工作：經由 action 啟動 Temporal workflow，在獨立的 worker 裡執行。Chat 只留連結 | 已具備           |
+
+S-05 到 S-07（`SandboxProvider`）在 0.2 版移除。編號不重用。
+
+### 4.6 Session 管理（SE）
+
+| 編號  | 需求                                                              | 分期 |
+| ----- | ----------------------------------------------------------------- | ---- |
+| SE-01 | 每段 Session 有自己的網址                                         | P1   |
+| SE-02 | 可以綁定一個 entity。從 entity 頁面開的 Session 自動綁定          | P3   |
+| SE-03 | 列表可以搜尋、釘選、改名、封存                                    | P2   |
+| SE-04 | 第一輪結束後自動產生標題                                          | P2   |
+| SE-05 | 保存期限：到期自動刪除。稽核紀錄不受影響                          | P2   |
+| SE-06 | entity 頁面的分頁列出跟這個 entity 有關、而且自己看得到的 Session | P3   |
+
+### 4.7 分享（SH）
+
+| 編號  | 需求                                                                                                                       | 分期 |
+| ----- | -------------------------------------------------------------------------------------------------------------------------- | ---- |
+| SH-01 | 擁有者可以把 Session 分享給使用者或群組，唯讀                                                                              | P2   |
+| SH-02 | 被分享的人看得到訊息、計畫、用了哪些工具和參數、工具輸出。擁有者分享時可以取消「包含工具輸出」                             | P2   |
+| SH-03 | 被分享的人不能送訊息，不能核准                                                                                             | P2   |
+| SH-04 | 被分享的人可以複製成自己的 Session：帶走他看得到的範圍裡的訊息文字和計畫，不帶工具呼叫、工具輸出和等核准的卡片             | P2   |
+| SH-05 | 用 Backstage permission 實作，條件規則是「是擁有者」或「有分享給我或我的群組」                                             | P2   |
+| SH-06 | 分享、改分享設定、取消分享、複製都寫進 Auditor                                                                             | P2   |
+| SH-07 | 分享對話框寫明「對方會看到用你的權限查到的工具輸出」。分享給群組時，提醒之後加入群組的人也看得到                           | P2   |
+| SH-08 | 分享模式有兩種。**快照**（預設）：對方看到分享當下為止的內容；擁有者按「更新」才往後移。**持續更新**：對方一直看到最新內容 | P2   |
+| SH-09 | 持續更新時，分享之後才產生的工具輸出預設不給看。對方仍然看得到訊息、計畫、用了哪些工具和參數。擁有者可以打開               | P2   |
+| SH-10 | Session 有持續更新的分享時，擁有者的畫面上方一直顯示分享對象，旁邊有停止按鈕                                               | P2   |
+| SH-11 | 持續更新的分享有到期時間，預設 24 小時，上限由管理員設定。到期後變成停在到期當下的快照                                     | P2   |
+| SH-12 | 被分享的人的畫面寫明這是快照（附時間）還是持續更新                                                                         | P2   |
+
+### 4.8 觀測與測試（O）
+
+| 編號 | 需求                                                                                | 分期             |
+| ---- | ----------------------------------------------------------------------------------- | ---------------- |
+| O-01 | 每一步記錄：上下文的組成和大小、token 用量、每個工具的耗時和結果狀態                | P3               |
+| O-02 | 核准、拒絕、不是唯讀的工具的執行寫進 Auditor                                        | P1（PR #1 已有） |
+| O-03 | 題組測試：每個 Agent 配一組題目，檢查用了哪些工具和答案要點。用假模型或真模型都能跑 | P4               |
+
+### 4.9 整體結構（A）
+
+| 編號 | 需求                                                                                                                          | 分期 |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------- | ---- |
+| A-01 | 核心套件不 import 任何 `@backstage/*`、HTTP 或資料庫的套件。用假模型和記憶體裡的紀錄就能測                                    | P1   |
+| A-02 | 核心的介面：輸入（使用者訊息、核准的回覆、停止）進去，有型別的事件出來                                                        | P1   |
+| A-03 | 事件分三層：Run 的開始和結束、Item 的開始和完成、逐字片段。只有完成的 Item 寫進紀錄                                           | P1   |
+| A-04 | 每段 Session 的 Item 有遞增的序號。Item 寫入後不修改                                                                          | P1   |
+| A-05 | 送給模型的內容由紀錄算出來。摘要和截斷只改送出去的內容，不改紀錄                                                              | P1   |
+| A-06 | Run 不因為連線中斷而停止。是否還活著由租約判斷（H-04）                                                                        | P1   |
+| A-07 | 斷線後可以用序號接回：先送缺的 Item，再接著送新的                                                                             | P2   |
+| A-08 | 不是唯讀的工具執行前先寫「開始執行」。重新接手時不重新執行，結果標成不明（D-25）                                              | P1   |
+| A-09 | 依賴方向由 lint 規則檢查，CI 會擋：domain 不 import application，application 不 import adapters，核心不 import `@backstage/*` | P1   |
+| A-10 | 每個 port 有一組共用的測試。記憶體版和資料庫版都要通過同一組                                                                  | P1   |
+
+### 4.10 跟 Backstage 的結合（B）
+
+| 編號 | 需求                                                                           | 分期 |
+| ---- | ------------------------------------------------------------------------------ | ---- |
+| B-01 | 頁面上下文：前端每則訊息帶上路徑和 entity。宿主加進這一步的上下文，不存進紀錄  | P1   |
+| B-02 | 入口：側邊面板；其他 plugin 可以用一個元件開啟對話並帶入上下文                 | P2   |
+| B-03 | 結果顯示元件：前端 plugin 可以為某個 action 註冊顯示元件。沒有註冊的用預設顯示 | P3   |
+| B-04 | Client tool：前端 plugin 註冊在瀏覽器執行的工具。不是唯讀的每次都要核准        | P4   |
+| B-05 | 即時狀態：用 Signals 通知「處理中、等核准、有新回覆」。沒有 Signals 時輪詢     | P2   |
+
+## 5. 資料模型
+
+四張表。欄位型別和索引見程式架構文件的第 7 節。
+
+```
+sessions   id, owner_ref, agent_id, title, entity_ref, enabled_toolsets (JSON),
+           next_seq, forked_from_session, forked_from_seq,
+           pinned, archived_at, created_at, updated_at
+runs       id, session_id, parent_run_id, status, active_session_id,
+           lease_owner, lease_expires_at, steps_used, tool_calls_used,
+           cancel_requested, end_reason, started_at, ended_at
+items      session_id, seq, run_id, kind, payload (JSON), dedupe_key, created_at
+shares     id, session_id, subject_ref, up_to_seq, outputs_up_to_seq,
+           expires_at, created_by, created_at, revoked_at
+```
+
+Item 的 `kind`：
+
+| kind            | 內容                                          | 誰寫入 |
+| --------------- | --------------------------------------------- | ------ |
+| `user_message`  | 使用者的文字                                  | 宿主   |
+| `agent_message` | 模型的文字                                    | 核心   |
+| `tool_call`     | 工具、參數、schema 雜湊、政策、第幾步、第幾個 | 核心   |
+| `approval`      | 哪個呼叫、Allow 或 Deny、誰決定               | 宿主   |
+| `tool_started`  | 哪個呼叫開始執行。只有不是唯讀的工具才寫      | 核心   |
+| `tool_result`   | 哪個呼叫、狀態、輸出（遮蔽和裁切之後）        | 核心   |
+| `plan_update`   | 整份計畫                                      | 核心   |
+| `summary`       | 涵蓋到第幾筆、摘要文字                        | 核心   |
+| `note`          | 給讀的人看的說明，例如「這段對話複製自分享」  | 宿主   |
+
+規則：
+
+- **一段 Session 同時只有一個進行中的主 Run。** 進行中的 Run 把 `active_session_id` 設成 Session 的 id，結束時清成空值。這一欄有唯一索引。
+- **同一個呼叫只算一次。** `approval`、`tool_started`、`tool_result` 的 `dedupe_key` 是「種類加呼叫 id」。`(session_id, dedupe_key)` 有唯一索引。
+- **序號。** 寫入 Item 時，在同一個 transaction 裡遞增 `sessions.next_seq`。
+- **分享的範圍是兩個序號。** `up_to_seq` 是看得到第幾筆為止，空值表示持續更新。`outputs_up_to_seq` 是工具輸出看得到第幾筆為止，空值表示範圍內都看得到，0 表示都看不到。
+- **計畫不另外存。** 目前的計畫就是最後一筆 `plan_update`。
+- **子任務**是 `parent_run_id` 不是空值的 Run，不佔 `active_session_id`。
+- PR #1 的 `conversations`、`messages`、`tool_calls` 直接刪除，資料不搬。套件還沒發佈，沒有要保留的對話。
+
+## 6. 設定
+
+```yaml
+aiChat:
+  models:
+    default:
+      baseUrl: https://llm.example.com/v1
+      apiKey: ${AI_CHAT_API_KEY}
+      model: some-model
+      parallelToolCalls: true
+  limits:
+    maxSteps: 10
+    maxToolCallsPerStep: 8
+    maxToolCallsPerRun: 30
+    runTimeoutSeconds: 300
+    readConcurrency: 4
+    runsPerUser: 3
+  context:
+    tokenBudget: 24000
+    keepRecentSteps: 6
+  toolsets:
+    catalog: { actions: ['catalog:*'], default: true }
+    techdocs: { actions: ['search:*'], default: true }
+    temporal:
+      actions: ['temporal:*']
+      default: false
+    web:
+      actions: ['web:*']
+      default: false
+      egress: true # 會把資料送到組織外：唯讀也要 ask（T-04）
+  policy:
+    'temporal:terminate-workflow': deny
+  agents:
+    default:
+      title: Backstage Agent
+      toolsets: [catalog, techdocs]
+    sre:
+      title: SRE Agent
+      systemPrompt: 你協助值班工程師排查服務問題。動手前先寫計畫，回答附上來源。
+      toolsets: [catalog, techdocs, temporal]
+      skills: [deploy-failure, rollback]
+      planning: required
+  skills:
+    directories: ['./skills'] # 每個子目錄一份 SKILL.md
+  sharing:
+    live:
+      enabled: true
+      defaultHours: 24
+      maxHours: 72
+  retention:
+    days: 90
+```
+
+各區塊生效的分期：`models`、`limits`、`context`、`toolsets`、`policy` 是 P1。`sharing`、`retention` 是 P2。`agents`、`skills` 是 P3。
+
+## 7. 擴充點介面
+
+backend 的擴充點放在 `ai-chat-node` 套件，型別來自核心。前端的擴充點放在 `ai-chat-react` 套件。介面的完整版本在程式架構文件的第 6 節。
+
+```ts
+interface AiChatHarnessExtensionPoint {
+  addAgent(agent: AgentDefinition): void;
+  addContextProvider(provider: ContextProvider): void;
+  addSkill(skill: Skill): void;
+  addHook<K extends HookName>(name: K, hook: Hooks[K]): void;
+  setModelClient(id: string, client: ModelClient): void;
+}
+
+interface ContextProvider {
+  id: string;
+  provide(ctx: StepContext): Promise<string | undefined>; // 有長度上限
+}
+
+interface Skill {
+  id: string;
+  description: string; // 一句話，放進上下文
+  load(ctx: StepContext): Promise<string>; // 全文，load_skill 時才取
+}
+
+interface Hooks {
+  beforeModelCall(ctx: StepContext): Promise<void>;
+  beforeToolCall(
+    call: ToolCall,
+    ctx: StepContext,
+  ): Promise<
+    | { action: 'continue' }
+    | { action: 'ask' }
+    | { action: 'deny'; reason: string }
+  >;
+  afterToolCall(call: ToolCall, result: ToolResult): Promise<ToolResult>;
+  onRunEnd(run: RunSummary): Promise<void>;
+}
+```
+
+`beforeToolCall` 的回傳只能維持或調嚴政策。把 `ask` 變成 `continue` 的回傳會被忽略。
+
+## 8. 分期
+
+| 分期       | 內容                                                                                                                              | 完成後看得到什麼                                                |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| P1 核心    | 核心和宿主分開；Item 紀錄；Run、租約、停止、上限；Toolset 和 Policy；參數驗證；上下文預算；新的串流協定；Session 網址；頁面上下文 | 多台 backend 可以部署；斷線不會丟結果；工具多了也不會塞爆上下文 |
+| P2 Session | 列表管理、保存期限、分享（快照和持續更新）、複製、斷線接回、即時狀態、側邊面板                                                    | 可以把排查過程交給同事，或是一起看                              |
+| P3 Harness | Agent 定義、擴充點、計畫、Skills、TechDocs 搜尋、平行唯讀呼叫、權限和配額、觀測、結果顯示元件                                     | 其他團隊可以做自己的 Agent                                      |
+| P4 擴大    | 子任務、題組測試、client tool                                                                                                     | 大範圍的探索                                                    |
+
+每一期拆成哪些 PR、怎麼驗收，見實作規劃文件。
+
+## 9. 和 PR #1 的對照
+
+| 項目                       | PR #1                                              | 這份設計                                    |
+| -------------------------- | -------------------------------------------------- | ------------------------------------------- |
+| 程式結構                   | 一個 backend plugin，`ChatService` 一個檔案 800 行 | 核心和宿主兩個套件，各分四圈（D-15、D-23）  |
+| 迴圈和連線                 | 迴圈在請求裡執行，斷線就停                         | 迴圈不綁連線（D-16）                        |
+| 紀錄                       | `messages` 和 `tool_calls` 兩張表，會更新狀態欄    | 一條只增不改的 Item（D-17）                 |
+| 串流格式                   | 自己定的 SSE 事件                                  | AI SDK 的 UI message stream（D-19）         |
+| 核准卡片、存下的參數、稽核 | 有                                                 | 保留                                        |
+| 同一個呼叫只算一次         | 程式裡檢查狀態欄                                   | 資料庫的唯一索引（T-07）                    |
+| 一段對話同時一個執行       | 記憶體鎖，每台各自                                 | 資料庫唯一性加租約（H-03、H-04）            |
+| 判斷執行中斷               | 10 分鐘沒更新就當作失敗                            | 租約過期（H-04）                            |
+| 工具的選擇                 | include、exclude 兩個清單                          | Toolset、Policy、Permission（T-01 到 T-11） |
+| 對話變長                   | 整段歷史都送                                       | token 預算和摘要（H-09）                    |
+| 一步多個唯讀工具           | 一個一個執行                                       | 平行（P-01）                                |
+| Agent、Skill、Hook、計畫   | 沒有                                               | P3                                          |
+| 分享                       | 沒有                                               | P2                                          |
+
+## 10. 問題的結論
+
+所有問題在 1.0 版結案。
+
+| 編號 | 問題                                       | 結論                                                      |
+| ---- | ------------------------------------------ | --------------------------------------------------------- |
+| Q-01 | 要不要做「重新整理後接回串流」？           | 做，分兩步。P1：斷線後跑完並存檔。P2：用序號接回（A-07）  |
+| Q-02 | Toolset 誰可以開關？                       | 管理員定預設和範圍，使用者在自己的 Session 裡開關（D-24） |
+| Q-03 | 要不要有「同一組參數只問一次」？           | 不做，列入不做的事                                        |
+| Q-04 | Agent 和 Skill 要不要做成 catalog entity？ | P3 先用設定檔和 module，之後再評估（D-26）                |
+| Q-05 | 分享時工具輸出預設給不給看？               | 給，由分享的人把關（D-13）                                |
+| Q-06 | 子任務要不要提前？                         | 不要，留在 P4（D-10）                                     |
+| Q-07 | 互動沙箱                                   | 不做（D-12）                                              |
+| Q-08 | Harness 擴充點和分享哪個先？               | 分享先（P2）                                              |
+| Q-09 | 分享是快照還是即時？                       | 兩種都給，預設快照（D-21）                                |
+| Q-10 | 要不要用 backstage-assistants 當前端？     | 不用。只依賴它用的協定（D-19）                            |
+| Q-11 | 核心和宿主要不要拆？                       | 拆（D-15）                                                |
+| Q-12 | Run 要不要改成不綁連線？                   | 改（D-16）                                                |
+| Q-13 | 紀錄要不要改成只增不改？                   | 改（D-17、D-18）                                          |
+| Q-14 | `SKILL.md` 和 allow、ask、deny             | 採用（D-22）                                              |
+| Q-15 | 前端的四個擴充點                           | 補。頁面上下文放 P1（D-20）                               |
+
+實作時還要驗證的技術問題列在實作規劃文件的第 6 節。
+
+## 11. 變更紀錄
+
+| 日期       | 版本 | 變更                                                                                                                                                                                                                                                                |
+| ---------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-11-24 | 0.1  | 第一版草案                                                                                                                                                                                                                                                          |
+| 2026-11-24 | 0.2  | 拿掉互動沙箱：D-12 改成「不做」，移除 S-05 到 S-07、`SandboxProvider` 介面、Q-07。執行界線（D-11、S-01 到 S-04）不變                                                                                                                                                |
+| 2026-11-24 | 0.3  | 分期重新編號：Session 和分享改成 P2，Harness 擴充點改成 P3。D-13：分享時工具輸出預設看得到。新增 SH-07、Q-09、Q-10；Q-05、Q-08 結案                                                                                                                                 |
+| 2026-11-24 | 0.4  | 對照開源專案後新增：D-15 到 D-20、需求 4.9 和 4.10、Q-11 到 Q-15、第 12 節。名詞統一：「助手」一律改成 Agent                                                                                                                                                        |
+| 2026-11-24 | 1.0  | 定案。所有決策改成已定，D-03 由 D-16 取代。新增 D-21 到 D-26。政策名稱 `auto` 改成 `allow`。新增需求 H-11、T-11、SH-08 到 SH-12、A-08 到 A-10。資料模型改成四張表。SE-06 從 P2 移到 P3（它需要 SE-02 的 entity 綁定）。所有問題結案。新增程式架構和實作規劃兩份文件 |
+| 2026-11-24 | 1.0  | 第 5 節：PR #1 的三張表直接刪除，資料不搬                                                                                                                                                                                                                           |
+
+## 12. 對照的開源專案
+
+資料來源：2026-11-23 到 24 日讀各專案預設分支的原始碼和官方文件。沒有實際執行。repo 位置已確認。
+
+| 專案                  | 位置                                                                                    | 整體設計                                                                                                                       | 我們採用的                                     |
+| --------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| Codex                 | https://github.com/openai/codex                                                         | 核心收指令、送事件；app-server 用 JSON-RPC 對外；Thread、Turn、Item 三層；JSONL 紀錄                                           | 三層資料模型；核准是跟訊息同等級的輸入         |
+| opencode              | https://github.com/anomalyco/opencode                                                   | Schema、Core、Protocol、Server 四個套件，依賴方向寫在規範裡；SQLite 事件表加投影；可存的事件和逐字片段分開；執行前先寫認領紀錄 | 序號和重播；片段不存；每一步從紀錄讀歷史；D-25 |
+| Goose                 | https://github.com/aaif-goose/goose                                                     | 很小的狀態機加約 30 個 Operation；每一步重新載入 session                                                                       | 每一步從狀態決定下一步                         |
+| Pi                    | https://github.com/earendil-works/pi                                                    | 模型層、迴圈、應用三個套件；迴圈不做持久化和壓縮，靠 callback 掛進來                                                           | 核心要小；上下文用掛的                         |
+| OpenHands             | https://github.com/OpenHands/software-agent-sdk                                         | SDK（對話、事件紀錄）加 agent-server；核准後掃出還沒有結果的工具呼叫再執行；租約                                               | 核准後的恢復方式                               |
+| LangGraph、deepagents | https://github.com/langchain-ai/langgraph 、 https://github.com/langchain-ai/deepagents | graph 加 checkpoint；伺服器用 Postgres 佇列和 worker；能力用 middleware 堆疊                                                   | Run 是資料庫裡的一等資源                       |
+| LibreChat             | https://github.com/danny-avila/LibreChat 、 https://github.com/LibreChat-AI/agents      | 主程式管身分和串流；迴圈是另一個函式庫；生成工作不綁連線；分享是快照                                                           | 宿主和核心分開；斷線後繼續                     |
+| Claude Agent SDK      | https://code.claude.com/docs/en/agent-sdk/overview                                      | 函式庫；身分放在外面的 gateway；權限依序經過 hooks、規則、callback                                                             | 權限判定的順序；唯讀平行                       |
+| Vercel AI SDK         | https://github.com/vercel/ai                                                            | 迴圈是一個 do-while；訊息陣列就是狀態；定義了給畫面的串流協定                                                                  | 串流協定                                       |
+| backstage-assistants  | https://github.com/drewswiredin/backstage-assistants                                    | Backstage plugin；Vercel AI SDK 加 assistant-ui；頁面上下文、面板、client tool                                                 | 跟 Backstage 的結合方式                        |
+
+backstage-assistants 的前端為什麼不直接用（讀 commit 4ae97c7 的原始碼確認）：前端約 18,600 行，透過 `assistantsApiRef` 呼叫它 backend 的二十多個路由（`/chat`、`/chat/resume/:id`、`/chat/cancel/:id`、`/threads`、`/threads/status`、`/capabilities`、`/preview`、`/manage/assistants` 等），請求另外帶 `assistantId`、`modelId`。要用它的前端，就要整套採用，或是照這組路由實作一遍並跟著它改版。
