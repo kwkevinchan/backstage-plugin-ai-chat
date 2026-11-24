@@ -51,3 +51,55 @@ export class RunAlreadyActive extends ChatDomainError {
     this.sessionId = sessionId;
   }
 }
+
+/** The caller is not the owner of the session. */
+export class NotSessionOwner extends ChatDomainError {
+  constructor(sessionId: string) {
+    super('NOT_SESSION_OWNER', `Not the owner of session ${sessionId}`);
+  }
+}
+
+/** The session has no tool call with this id. */
+export class ToolCallNotFound extends ChatDomainError {
+  constructor(callId: string) {
+    super('TOOL_CALL_NOT_FOUND', `There is no tool call ${callId}`);
+  }
+}
+
+/** The tool call does not wait for a decision: it has a result, or needs none. */
+export class ToolCallNotWaiting extends ChatDomainError {
+  constructor(callId: string) {
+    super(
+      'TOOL_CALL_NOT_WAITING',
+      `Tool call ${callId} does not wait for a decision`,
+    );
+  }
+}
+
+/** The run does not wait for an approval (any more). */
+export class RunNotWaiting extends ChatDomainError {
+  constructor(runId: string) {
+    super('RUN_NOT_WAITING', `Run ${runId} does not wait for an approval`);
+  }
+}
+
+/** There is no agent with this id. */
+export class AgentNotFound extends ChatDomainError {
+  constructor(agentId: string) {
+    super('AGENT_NOT_FOUND', `There is no agent ${agentId}`);
+  }
+}
+
+/** A toolset id that the administrator did not define (T-11). */
+export class UnknownToolset extends ChatDomainError {
+  constructor(toolsetId: string) {
+    super('UNKNOWN_TOOLSET', `There is no toolset ${toolsetId}`);
+  }
+}
+
+/** This backend is shutting down and takes no new runs (H-11). */
+export class ShuttingDown extends ChatDomainError {
+  constructor() {
+    super('SHUTTING_DOWN', 'The backend is shutting down');
+  }
+}

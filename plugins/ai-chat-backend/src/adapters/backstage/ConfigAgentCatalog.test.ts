@@ -156,4 +156,24 @@ describe('ConfigAgentCatalog', () => {
       catalogFor({ toolsets: { [id]: { actions: ['x'] } } }),
     ).toThrow('the id must start with a letter');
   });
+
+  describe('the agent', () => {
+    it('is the default agent, with the built-in rules and the instructions of the operator', async () => {
+      const { catalog } = catalogFor({ systemPrompt: 'Be brief.' });
+      expect(catalog.defaultAgentId()).toBe('default');
+      const agent = await catalog.agent('default');
+      expect(agent.id).toBe('default');
+      expect(agent.systemPrompt).toContain('Be brief.');
+      expect(agent.systemPrompt).toContain(
+        'Rules that always apply',
+      );
+    });
+
+    it('throws AgentNotFound for another id', async () => {
+      const { catalog } = catalogFor({});
+      await expect(catalog.agent('other')).rejects.toMatchObject({
+        code: 'AGENT_NOT_FOUND',
+      });
+    });
+  });
 });

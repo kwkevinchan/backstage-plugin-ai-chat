@@ -14,5 +14,8 @@
  * limitations under the License.
  */
 
+export type { AgentCatalog } from './AgentCatalog';
+export type { AuditEvent, AuditLog, AuditSpan } from './AuditLog';
+export type { Logger } from './Logger';
 export type { RunRepository, RunTransitionTarget } from './RunRepository';
 export type { SessionRepository } from './SessionRepository';

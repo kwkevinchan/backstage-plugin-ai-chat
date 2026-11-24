@@ -14,11 +14,32 @@
  * limitations under the License.
  */
 
+export { callsAwaitingDecision, findToolCall, hasResult } from './approval';
 export {
+  AgentNotFound,
   ChatDomainError,
+  NotSessionOwner,
   RunAlreadyActive,
   RunNotFound,
+  RunNotWaiting,
   SessionNotFound,
+  ShuttingDown,
+  ToolCallNotFound,
+  ToolCallNotWaiting,
+  UnknownToolset,
 } from './errors';
+export type { Principal } from './principal';
+export { CREDENTIALS_MARGIN_SECONDS, runLimits } from './runLimits';
 export type { LeasedRun, Run } from './run';
+export { assertOwner } from './session';
 export type { NewSession, Session, SessionPatch } from './session';
+export { buildSystemPrompt } from './systemPrompt';
+export {
+  defaultToolsetIds,
+  enabledTools,
+  isEgress,
+  matchesActionPattern,
+  toolsetsOf,
+  unsafeAllows,
+} from './toolset';
+export type { Toolset } from './toolset';

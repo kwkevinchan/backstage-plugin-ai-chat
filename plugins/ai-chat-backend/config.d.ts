@@ -41,6 +41,18 @@ export interface Config {
      */
     maxTurns?: number;
     /**
+     * Most tool calls the model may request in one run. A run is one message
+     * of the user, with the approvals that follow it. Defaults to 30.
+     */
+    maxToolCallsPerRun?: number;
+    /**
+     * Seconds a run may work, not counting the time it waits for an approval.
+     * The tools run with the token of the user, and a run also stops before
+     * that token expires. At most 600, which is the shortest life of a token
+     * that `auth.backstageTokenExpiration` allows. Defaults to 300.
+     */
+    runTimeoutSeconds?: number;
+    /**
      * Instructions added to the built-in system prompt. They cannot remove
      * the built-in rules.
      */

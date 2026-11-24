@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 
+import { NotSessionOwner } from './errors';
+import type { Principal } from './principal';
+
 /**
  * A conversation of one owner. The items of the session are in the log (see
  * `ItemLog`); the session keeps what is around them.
@@ -54,3 +57,13 @@ export type SessionPatch = {
   archived?: boolean;
   enabledToolsets?: string[];
 };
+
+/** Throws `NotSessionOwner` unless the principal owns the session. */
+export function assertOwner(
+  session: Pick<Session, 'id' | 'ownerRef'>,
+  principal: Pick<Principal, 'userRef'>,
+): void {
+  if (session.ownerRef !== principal.userRef) {
+    throw new NotSessionOwner(session.id);
+  }
+}

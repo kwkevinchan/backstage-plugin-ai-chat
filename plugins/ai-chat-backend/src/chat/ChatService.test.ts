@@ -48,6 +48,8 @@ function baseConfig(overrides: Partial<AiChatConfig> = {}): AiChatConfig {
   return {
     llm: { baseUrl: 'http://llm.test/v1', model: 'm', timeoutMs: 1000 },
     maxTurns: 10,
+    maxToolCallsPerRun: 30,
+    runTimeoutSeconds: 300,
     actions: { include: [], exclude: [] },
     maxToolOutputChars: 20000,
     ...overrides,
