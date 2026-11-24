@@ -6,7 +6,7 @@
 | 版本     | 1.0（2026-11-24）                                                                                                                                                                |
 | 範圍     | `ai-chat-harness`（核心）、`ai-chat-backend`（宿主）、`ai-chat`（前端），以及它們的 `-common`、`-node`、`-react` 套件                                                            |
 | 相關文件 | 程式架構：[architecture.zh-TW.md](architecture.zh-TW.md)。實作規劃：[implementation-plan.zh-TW.md](implementation-plan.zh-TW.md)。用途說明：[usage.zh-TW.html](usage.zh-TW.html) |
-| 實作現況 | P1 完成（P1-01 到 P1-11，PR #3 到 #16 和 P1-11）。P2 以後尚未開始。PR #1 是第 0 版，對照見第 9 節                                                                                |
+| 實作現況 | P1 完成（P1-01 到 P1-11，PR #3 到 #17）。P2 以後尚未開始。PR #1 是第 0 版，對照見第 9 節                                                                                         |
 
 這份文件記錄設計決策和需求。需求有編號，實作的 PR 要寫明它完成哪幾條。決策改變時，改第 3 節並在第 11 節記一筆。
 
