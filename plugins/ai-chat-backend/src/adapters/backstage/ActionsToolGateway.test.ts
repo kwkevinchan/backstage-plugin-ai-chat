@@ -613,4 +613,50 @@ describe('ActionsToolGateway.execute, more checks', () => {
       valid: true,
     });
   });
+
+  it.each([
+    ['backslashes', '\\'.repeat(3000), 1000],
+    ['quotes', '"'.repeat(500), 1000],
+    ['plain text', 'a'.repeat(5000), 1000],
+  ])('keeps the longest text that fits for %s', async (_name, text, max) => {
+    const s = setup({ maxOutputChars: max });
+    s.actions.actions = [action('catalog:get')];
+    const [tool] = await s.gateway.list(ctx);
+    s.actions.invoke.mockResolvedValueOnce({ output: text });
+    const result = await s.gateway.execute(
+      callOf('catalog:get', tool.schemaHash),
+      ctx,
+      { signal: signal() },
+    );
+    const stored = JSON.stringify(result.output);
+    expect(stored.length).toBeLessThanOrEqual(max);
+    // One more character of the text would no longer fit.
+    const json = JSON.stringify(text);
+    const kept = (result.output as { text: string }).text.length;
+    const longer = JSON.stringify({
+      text: json.slice(0, kept + 1),
+      originalLength: json.length,
+    });
+    expect(longer.length).toBeGreaterThan(max);
+  });
+
+  it('does not invoke when the signal aborts while the policy is read', async () => {
+    const { actions, gateway, hash, state } = await prepared();
+    const controller = new AbortController();
+    let reads = 0;
+    // `list` reads the policy once; the second read is the check before the run.
+    (gateway as any).deps.catalog.policy = async () => {
+      reads += 1;
+      if (reads > 1) await new Promise(resolve => setTimeout(resolve, 30));
+      return state.policy ?? {};
+    };
+    const pending = gateway.execute(callOf('catalog:get', hash), ctx, {
+      signal: controller.signal,
+    });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+    expect(reads).toBe(2);
+    expect(actions.invoke).not.toHaveBeenCalled();
+  });
 });
