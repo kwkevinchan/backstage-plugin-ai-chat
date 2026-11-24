@@ -17,6 +17,7 @@
 import {
   buildModelInput,
   decidePolicy,
+  planSummary,
   type Item,
   type ItemBody,
   type JsonObject,
@@ -30,12 +31,17 @@ import type { HarnessEvent, RunOutcome } from '../events';
 import type { ItemDraft } from '../ports/ItemLog';
 import type { ValidationResult } from '../ports/ToolGateway';
 import type { AdvanceRunDeps, AdvanceRunRequest } from '../types';
+import { summarize } from './summarize';
 
 /** What one model call left: how many calls the model asked for, or an end. */
 export type CallModelResult = {
   toolCallsRequested: number;
   /** Set when the run ends here. */
   outcome?: RunOutcome;
+  /** The summary failed: the loop does not try again in this call. */
+  summaryFailed?: true;
+  /** The call ended while it made the summary, before a step began. */
+  noStep?: true;
 };
 
 type RequestedCall = {
@@ -64,13 +70,17 @@ type RequestedCall = {
  *   has no `deny`; the result closes it.
  * - A model call with neither text nor calls writes nothing and fails the
  *   run: asking again would give the same input.
- *
+ * - When the input would be over the budget even with the old tool outputs
+ *   shortened, the old steps are summarized first (`summarize`; H-09), unless
+ *   `summarize` is false. The summary is not a step. If it fails, the model is
+ *   called anyway with the old steps left out, and the result says so.
  */
 export async function* callModel(
   deps: AdvanceRunDeps,
   req: AdvanceRunRequest,
   items: readonly Item[],
   usage: RunUsage,
+  opts: { summarize: boolean },
 ): AsyncGenerator<HarnessEvent, CallModelResult> {
   // `usage.stepsUsed` already counts the steps the log shows for this run.
   const step = usage.stepsUsed + 1;
@@ -80,13 +90,27 @@ export async function* callModel(
   const offered = available.filter(
     tool => decidePolicy(tool, req.policy) !== 'deny',
   );
-  const input = buildModelInput(
-    items,
-    req.agent,
-    // Context providers come with the extension points (P3).
-    { context: [], tools: offered },
-    req.budget,
-  );
+  // Context providers come with the extension points (P3).
+  const extra = { context: [], tools: offered };
+
+  let current = items;
+  let summaryFailed = false;
+  const plan = opts.summarize
+    ? planSummary(items, req.agent, extra, req.budget)
+    : undefined;
+  if (plan) {
+    const made = yield* summarize(deps, req, plan);
+    if (made.status === 'aborted') {
+      return {
+        toolCallsRequested: 0,
+        outcome: { status: 'cancelled' },
+        noStep: true,
+      };
+    }
+    if (made.status === 'written') current = [...items, made.item];
+    else summaryFailed = true;
+  }
+  const input = buildModelInput(current, req.agent, extra, req.budget);
 
   yield { type: 'step.started', step };
 
@@ -200,7 +224,10 @@ export async function* callModel(
     };
   }
   yield { type: 'step.ended', step };
-  return { toolCallsRequested: requested.length };
+  return {
+    toolCallsRequested: requested.length,
+    ...(summaryFailed ? { summaryFailed: true as const } : {}),
+  };
 }
 
 async function classify(

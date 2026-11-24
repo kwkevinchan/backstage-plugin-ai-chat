@@ -183,6 +183,41 @@ export function itemLogContract(
       expect(await log.read(sessionId, { afterSeq: 0 })).toHaveLength(3);
     });
 
+    it('reads from the newest summary on with fromLatestSummary', async () => {
+      const { log, newSession } = subject;
+      const { sessionId, fence } = await newSession();
+      const summary = (coversUpToSeq: number): ItemBody => ({
+        kind: 'summary',
+        coversUpToSeq,
+        text: `up to ${coversUpToSeq}`,
+      });
+      await log.append(sessionId, [user('a'), user('b')], fence);
+      // No summary: every item.
+      expect(
+        await log.read(sessionId, { fromLatestSummary: true }),
+      ).toHaveLength(2);
+
+      await log.append(
+        sessionId,
+        [user('c'), user('d'), summary(2), user('e')],
+        fence,
+      );
+      const first = await log.read(sessionId, { fromLatestSummary: true });
+      expect(first.map(item => item.seq)).toEqual([3, 4, 5, 6]);
+
+      await log.append(sessionId, [summary(4), user('f')], fence);
+      const second = await log.read(sessionId, { fromLatestSummary: true });
+      expect(second.map(item => item.seq)).toEqual([5, 6, 7, 8]);
+
+      // With both options the larger bound counts.
+      const both = await log.read(sessionId, {
+        fromLatestSummary: true,
+        afterSeq: 6,
+      });
+      expect(both.map(item => item.seq)).toEqual([7, 8]);
+      expect(await log.read(sessionId)).toHaveLength(8);
+    });
+
     it('does not change what it read when the caller changes it', async () => {
       const { log, newSession } = subject;
       const { sessionId, fence } = await newSession();

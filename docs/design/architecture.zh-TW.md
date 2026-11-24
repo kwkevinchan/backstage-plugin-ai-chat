@@ -107,7 +107,7 @@ packages/ai-chat-harness/src/
     agent.ts                   AgentDefinition、Limits
     plan.ts                    Plan、currentPlan()
     nextAction.ts              decideNextAction()：從紀錄算出下一步
-    modelInput.ts              buildModelInput()：從紀錄算出送給模型的內容
+    modelInput.ts              buildModelInput()、planSummary()、buildSummaryInput()、estimateTokens()：從紀錄算出送給模型的內容，套用 token 預算
     errors.ts
   application/                 第 2 圈
     ports/
@@ -123,8 +123,9 @@ packages/ai-chat-harness/src/
     steps/
       callModel.ts
       executeTools.ts
+      summarize.ts             用模型產生摘要，寫成 summary Item
     events.ts                  HarnessEvent、RunOutcome
-    （還沒有：steps/summarize.ts（P1-07）、builtins/（updatePlan、loadSkill 是 P3，delegate 是 P4）、extensions 的內容（P3））
+    （還沒有：builtins/（updatePlan、loadSkill 是 P3，delegate 是 P4）、extensions 的內容（P3））
   testing/                     另一個入口：ai-chat-harness/testing
     ScriptedModel.ts           照劇本回答的假模型
     InMemoryItemLog.ts
@@ -213,9 +214,40 @@ export function buildModelInput(
   items: readonly Item[],
   agent: AgentDefinition,
   extra: { context: string[]; tools: ToolDescriptor[] },
+  budget: ContextBudget, // { tokenBudget, keepRecentSteps }
+): ModelInput;
+
+// 規格 H-09：舊的 Step 該不該換成摘要，換哪一段。不需要時回傳 undefined
+export function planSummary(/* 同 buildModelInput 的參數 */):
+  | SummaryPlan
+  | undefined;
+export type SummaryPlan = {
+  coversUpToSeq: number;
+  previousSummary?: string;
+  items: Item[]; // 上一份摘要之後，到 coversUpToSeq 為止
+};
+
+// 產生摘要的那次模型呼叫的輸入：舊的 Step 轉成一段文字，沒有工具
+export function buildSummaryInput(
+  plan: SummaryPlan,
   budget: ContextBudget,
 ): ModelInput;
+
+// 規格 V-04：用字數估計 token
+export function estimateTokens(text: string): number;
 ```
+
+**上下文預算**（H-09）。四個函式都是純函式，沒有 async；產生摘要的模型呼叫在 application（`steps/summarize.ts`）。
+
+- **大小**用 `estimateTokens`：ASCII 字元算 1/4 個 token，其他字元（中日韓）算 1 個，無條件進位。`ModelClient` 的串流不回傳用量，所以一律用估計。系統提示、工具清單、摘要訊息、每則訊息都算進去。
+- **分段**：紀錄分成「一則使用者訊息」和「一個 Step」（agent 的文字、同一步的工具呼叫、每個呼叫的回答）。預算只整段增減，所以工具呼叫和它的結果不會被拆開。
+- **保留最近的 Step**：最近 `keepRecentSteps` 個 Step（至少 1 個）和它們前面連著的使用者訊息不會被縮短、省略或摘要。只有這些就超過預算時，送出的內容會超過預算。
+- **超過預算時依序處理**：
+  1. 舊的 Step 的工具輸出換成一行（保留 `status`，`message` 是 `The output was left out to keep the context short.`），從最舊的開始，夠了就停。
+  2. 還是超過，`planSummary` 回傳要摘要的範圍：從上一份摘要之後，到最近的 Step 之前。`AdvanceRun` 產生摘要，寫成 `summary` Item。
+  3. 沒有摘要可用（摘要失敗，或沒有舊的 Step 可以摘要），`buildModelInput` 從最舊的 Step 起整段省略，直到符合預算。
+- **有摘要之後**：最新的 `summary`（`seq` 最大的）取代 `seq <= coversUpToSeq` 的 Item。它的文字加上說明（`This is a summary of the earlier part ...`）是第一則訊息，角色是 `user`。新的摘要包含上一份摘要的文字，所以每一份都涵蓋從頭到 `coversUpToSeq`。
+- **摘要的輸入**：`buildSummaryInput` 把要摘要的 Item 轉成一則 `user` 訊息（`User:`、`Agent:`、`Agent called`、`Result of`），每個工具輸出最多 1500 字元，整段不超過 `tokenBudget`（超過時留下最新的部分）。上一份摘要放在最前面。
 
 `decideNextAction` 的規則，由上往下，先符合的先用：
 
@@ -237,7 +269,16 @@ Step 數和工具呼叫數的上限只擋新的模型呼叫，不會讓最後一
 
 ```ts
 export interface ItemLog {
-  read(sessionId: string, opts?: { afterSeq?: number }): Promise<Item[]>;
+  /**
+   * `afterSeq`：只回傳 `seq` 比它大的 Item。
+   * `fromLatestSummary`：只回傳最新的 `summary` 涵蓋範圍之後的 Item
+   * （`seq` 大於它的 `coversUpToSeq`，包含摘要本身）；沒有摘要就回傳全部。
+   * 兩個都有時取較大的界線。
+   */
+  read(
+    sessionId: string,
+    opts?: { afterSeq?: number; fromLatestSummary?: boolean },
+  ): Promise<Item[]>;
   /**
    * 一次寫入多筆，序號連續（Session 的第一筆是 1）。
    * - `dedupeKeyOf` 和紀錄裡的 Item 相同，或同一批裡有兩筆相同，都丟 DuplicateItem，整批不寫入。
@@ -344,7 +385,7 @@ export type AdvanceRunDeps = {
 export type AdvanceRunRequest = {
   agent: AgentDefinition;
   limits: Limits;
-  budget: ContextBudget; // P1-07 才套用
+  budget: ContextBudget;
   policy: PolicySettings; // 每個呼叫的政策都用它算
   fence: RunFence;
   ctx: CallContext;
@@ -361,8 +402,8 @@ export class AdvanceRun {
     yield { type: 'run.started', runId: req.fence.runId };
     // 每一輪：
     //   1. heartbeat；cancelRequested 或 signal 中止 → cancelled
-    //   2. 讀紀錄，decideNextAction(items, usage, limits)
-    //   3. call_model     → callModel(deps, req, items, usage)
+    //   2. 讀紀錄（只讀最新的摘要涵蓋範圍之後），decideNextAction(items, usage, limits)
+    //   3. call_model     → callModel(deps, req, items, usage)（需要時先 summarize）
     //      execute_tools  → executeTools(deps, req, items, action)
     //      wait_approval  → waiting_approval（pending 是還沒決定的呼叫）
     //      complete       → completed
@@ -400,7 +441,7 @@ function executeTools(
 - **用量不從紀錄算。** 模型的回答是空的時候不寫任何 Item，步數算不出來。步數、工具呼叫數、已用時間由 request 帶入，迴圈每一輪之後呼叫 `recordUsage`。時間 = 帶入的 `elapsedSeconds` 加這次呼叫內經過的時間（用 `Clock`）。
 - **步驟編號** = max(`usage.stepsUsed`，紀錄裡這個 Run 的 `tool_call` 最大的 `step`) + 1。這樣在 `recordUsage` 之前當掉，接手的 backend 也不會重複編號，或超過 `maxSteps`。
 - **`callModel`**：
-  - 呼叫 `buildModelInput`，Context provider 的輸出 P3 才有。
+  - 先用 `planSummary` 判斷輸入會不會超過預算。會的話先 `summarize`（見下），再呼叫 `buildModelInput`；Context provider 的輸出 P3 才有。
   - 被政策 `deny` 的工具不給模型看。
   - 把模型的串流轉成事件，完成後把 `agent_message` 和所有 `tool_call` 用同一次 `append` 寫入，文字在前；空白文字不寫。
   - 每個呼叫的 `callId` 在收到呼叫時由 `IdGenerator` 產生，不用模型的 id。
@@ -413,6 +454,12 @@ function executeTools(
   - 模型沒有文字也沒有呼叫：什麼都不寫，Run 結束成 `failed`。再問一次輸入相同。
   - 模型呼叫失敗：Run 結束成 `failed`，`message` 是固定文字 `The model call failed.`，供應商的原文放 `cause`。`cause` 只給宿主記 log，不給使用者看。
   - 寫入之前再檢查一次 `signal`（驗證會 `await`）。中止的話什麼都不寫。
+- **`summarize`**（H-09、A-05）：
+  - 在需要它的那一步的模型呼叫之前跑，不是獨立的一輪，也不算 Step：不增加 `stepsUsed`，不發 `step.started`。一次 `callModel` 最多做一份摘要；一個 Run 裡 Step 變多、又超過預算時，後面的 `callModel` 可以再做。
+  - 用 Run 的 `ModelClient`、不給工具、用 Run 的 `signal`（所以截止時間也會中止它）。回答的文字去掉前後空白，寫成 `summary` Item（`coversUpToSeq` 來自 `planSummary`）。寫入是在紀錄最後新增一筆，舊的 Item 一個字都不改（A-05）。
+  - 模型呼叫失敗，或回答沒有文字：不寫任何 Item，回報 `summary.failed`（`cause` 放原始錯誤，只給宿主記 log），Run **不會**失敗，照常呼叫模型，只是舊的 Step 被省略。同一次 `execute()` 不再試。下一次 `execute()`（下一則訊息或核准後）會再試。
+  - `signal` 中止：不寫任何 Item，也不發 `summary.failed`。使用者中止是 `cancelled`，截止時間是 `completed`（`endReason: 'timeout'`），跟模型呼叫一樣。
+  - 紀錄的例外（`LeaseLost`）照常丟出來。
 - **`executeTools`**：
   - 先把 `interrupted` 的呼叫寫成 `unknown`，不執行。
   - 呼叫分成批次：連續的唯讀呼叫一批，每個不是唯讀的呼叫自己一批。P1 每個呼叫依序執行；P3 的平行唯讀（D-09）只要改批次內的執行方式，結果照 `position` 寫入（P-03）。
@@ -439,12 +486,15 @@ export type HarnessEvent =
   | { type: 'item.delta'; draftId: string; text: string } // 不存
   | { type: 'item.completed'; draftId?: string; item: Item } // 已經寫進紀錄
   | { type: 'step.ended'; step: number }
+  | { type: 'summary.started'; coversUpToSeq: number }
+  | { type: 'summary.failed'; cause?: unknown }
   | { type: 'run.ended'; outcome: RunOutcome };
 ```
 
 - 寫進紀錄的每一筆 Item 都回報一次 `item.completed`，依序號，包含 `tool_started` 和迴圈自己寫的結果。`approval` 由宿主寫，由宿主回報。
 - `draftId`：`agent_message` 是迴圈產生的 id；`tool_call` 就是它在紀錄裡的 `callId`（同一步裡模型的 id 可能重複，所以不用模型的 id）。結果沒有 `draftId`。
 - 一個 step 是一次模型呼叫：`step.started` 在呼叫之前，`step.ended` 在這次的 Item 寫完之後。工具的結果在 `step.ended` 之後。
+- 摘要在需要它的 Step 之前：`summary.started`，然後 `summary` Item 的 `item.completed`；失敗時是 `summary.failed`。摘要不是 Step，沒有 `step.started`。
 - 模型呼叫失敗或中止時，已送出的 `item.started` 沒有對應的 `item.completed`。畫面要能忽略它們。
 
 ## 5. 宿主：`ai-chat-backend`

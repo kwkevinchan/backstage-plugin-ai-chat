@@ -51,6 +51,11 @@ export type RunOutcome =
  *   model gave.
  * - A step is one model call: `step.started` before it, `step.ended` after
  *   its items are written. The results of the tools come after it.
+ * - A summary of the old steps (H-09) is made before the step that needs it:
+ *   `summary.started`, then the `summary` item as `item.completed`, or
+ *   `summary.failed` when the model call failed or gave no text. A failed
+ *   summary does not fail the run. `cause` is the original error: the host
+ *   logs it and never shows it. A summary is not a step.
  *
  * @public
  */
@@ -67,4 +72,6 @@ export type HarnessEvent =
   | { type: 'item.delta'; draftId: string; text: string }
   | { type: 'item.completed'; draftId?: string; item: Item }
   | { type: 'step.ended'; step: number }
+  | { type: 'summary.started'; coversUpToSeq: number }
+  | { type: 'summary.failed'; cause?: unknown }
   | { type: 'run.ended'; outcome: RunOutcome };
