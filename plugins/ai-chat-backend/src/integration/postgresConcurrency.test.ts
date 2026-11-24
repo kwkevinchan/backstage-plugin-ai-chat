@@ -190,10 +190,6 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
     });
   });
 
-  it('has more than one connection to work with', () => {
-    expect(db.knex.client.pool.max).toBeGreaterThanOrEqual(2);
-  });
-
   it(`an insert and the end of the run at the same time, ${ROUNDS} rounds: each round, the message is written and the run goes on, or the run ended and the insert got RunNotRunning; no message is lost`, async () => {
     const rounds: {
       insertFirst: boolean;

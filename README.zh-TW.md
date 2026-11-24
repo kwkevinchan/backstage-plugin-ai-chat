@@ -63,6 +63,11 @@ aiChat:
     tokenBudget: 100000 # 送給模型的內容的 token 預算（估計值）；預設 100000
     keepRecentSteps: 6 # 最近幾步一律保留；預設 6
   maxToolOutputChars: 20000 # 工具輸出存下並送給模型的字元上限；預設 20000，最小 100
+  input: # Run 進行中使用者可以加的訊息
+    insert:
+      maxPerRun: 5 # 一次 Run 最多插入幾則；預設 5
+    queue:
+      maxMessages: 5 # 一段對話的佇列最多幾則；預設 5
 backend:
   actions:
     pluginSources: [catalog] # 對話只看得到這些外掛的 action

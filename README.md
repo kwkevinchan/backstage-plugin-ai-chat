@@ -170,6 +170,12 @@ aiChat:
     tokenBudget: 100000 # estimated tokens of the model input; default 100000
     keepRecentSteps: 6 # newest steps that are never shortened; default 6
   maxToolOutputChars: 20000 # output stored and sent to the model; default 20000, at least 100
+  # What the user may add while a run goes on
+  input:
+    insert:
+      maxPerRun: 5 # messages inserted into one run; default 5
+    queue:
+      maxMessages: 5 # queued messages in one session; default 5
 
 backend:
   actions:
@@ -188,14 +194,16 @@ sees only the actions that the actions service lists for the user. The
 the chat. An action that declares `secrets` is not offered: a chat cannot
 supply them.
 
-| Setting                   | Meaning                                                                                                                                                                                       |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maxTurns`                | Most model calls in one run.                                                                                                                                                                  |
-| `maxToolCallsPerRun`      | Most tool calls the model may ask for in one run. A call beyond the limit is answered with "tool call limit" and does not run.                                                                |
-| `runTimeoutSeconds`       | Most seconds of work in one run, at most 600. The tools run with the token of the user, so a run also ends before that token expires (the shortest life that Backstage allows is 10 minutes). |
-| `context.tokenBudget`     | Size of the model input in estimated tokens (one token is a quarter of an ASCII character or one other character). Set it well below the context window of the model.                         |
-| `context.keepRecentSteps` | The newest steps that are never shortened or left out.                                                                                                                                        |
-| `maxToolOutputChars`      | The output of an action is cut here, and the cut is stated.                                                                                                                                   |
+| Setting                   | Meaning                                                                                                                                                                                                                                                                                                                     |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxTurns`                | Most model calls in one run.                                                                                                                                                                                                                                                                                                |
+| `maxToolCallsPerRun`      | Most tool calls the model may ask for in one run. A call beyond the limit is answered with "tool call limit" and does not run.                                                                                                                                                                                              |
+| `runTimeoutSeconds`       | Most seconds of work in one run, at most 600. The tools run with the token of the user, so a run also ends before that token expires (the shortest life that Backstage allows is 10 minutes).                                                                                                                               |
+| `context.tokenBudget`     | Size of the model input in estimated tokens (one token is a quarter of an ASCII character or one other character). Set it well below the context window of the model.                                                                                                                                                       |
+| `context.keepRecentSteps` | The newest steps that are never shortened or left out.                                                                                                                                                                                                                                                                      |
+| `input.insert.maxPerRun`  | Most messages the user may insert into one run that is going on. The model reads an inserted message in its next call, and a run that is about to end reads it first. A run that stops without reading it (a limit, an error, Stop) leaves it marked as not read.                                                           |
+| `input.queue.maxMessages` | Most messages in the queue of one session. A queued message waits for the run to end; when the run ends the normal way (the model answered, no limit stopped it) and the credentials of the user last for another run, the first message starts a new run. After any other end the queue waits until the user continues it. |
+| `maxToolOutputChars`      | The output of an action is cut here, and the cut is stated.                                                                                                                                                                                                                                                                 |
 
 When the input is over `tokenBudget`, the old outputs of tools are shortened
 to one line first. If that is not enough, the old steps are replaced by a

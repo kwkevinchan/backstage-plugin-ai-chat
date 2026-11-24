@@ -233,7 +233,7 @@ flowchart LR
 | ----- | ---------------- | ---- | ----------------------------------- | --- | ------ |
 | PI-01 | 規格和設計文件   | S    | D-27 到 D-30；IN-01 到 IN-19 的定義 |     | 進行中 |
 | PI-02 | 核心：插入       | M    | IN-10、IN-11、IN-17（核心的部分）   | #25 | 進行中 |
-| PI-03 | 宿主：插入和排隊 | L    | IN-10 到 IN-17                      |     |        |
+| PI-03 | 宿主：插入和排隊 | L    | IN-10 到 IN-17                      | #26 | 進行中 |
 | PI-04 | 前端：插入和排隊 | M    | IN-12、IN-13、IN-15、IN-18          |     |        |
 | PI-05 | 核心和宿主：圖片 | L    | IN-01 到 IN-07                      |     |        |
 | PI-06 | 前端：圖片       | M    | IN-08、IN-09                        |     |        |
@@ -279,7 +279,9 @@ flowchart LR
   - use case：`InsertMessage`、`QueueMessage`、`UpdateQueuedMessage`、`DeleteQueuedMessage`、`ReorderQueue`、`ListQueue`、`StartNextQueued`、`ResumeQueue`；`GetSession` 回傳佇列和 `insertState`。
   - 路由、zod、錯誤對應、OpenAPI、presenter（`data-inserted`、`data-queue`；`message.read` 不走 `seq` 去重，改用已送過的插入序號集合）、設定（`input.insert`、`input.queue`）。
   - 稽核：自動送出寫 `queued-message-send`。
-- **依賴**：PI-02。V-07、V-10 要在開始前確認。
+  - 核心的型別 `InsertState`（`read`、`unread`）改名為 `ReadState`：`GetSession` 的 `insertState` 另外有 `pending`，兩者不同值，不再同名。
+  - 不在這個 PR（PI-05）：附件。`attachment_ids` 一律是空陣列，`attachments` 表、附件的 `FOR UPDATE` 和保留、`GET /input-config` 都沒有；下面驗收裡「附件的中繼資料」那幾處等 PI-05。migration `20260104000000_input.js` 只有 `runs.read_up_to_seq` 和 `queued_messages`；`attachments` 在 PI-05 自己的 migration。
+- **依賴**：PI-02。V-07、V-10 要在開始前確認（結論見 V 表下面）。
 - **驗收**（SQLite 和 PostgreSQL 都跑）：
   - **插入先於結束**：用同步點讓插入的 transaction 在迴圈的 `complete` 判斷之後、`transition` 之前 commit。`transition` 丟 `UnreadMessages`，Run 維持 `running`；supervisor 再跑一次迴圈，模型讀到訊息，之後 `completed`；訂閱者只收到一個 `run.ended`、一個 `run.started`。
   - **結束先於插入**：`transition` 先 commit；之後的插入得到 409，紀錄裡沒有那則訊息。
@@ -438,10 +440,10 @@ P4 開始之前要重新評估：先看 P3-07 的平行唯讀呼叫在實際使�
 | V-04 | 模型的 token 計算。OpenAI 相容的端點不一定回傳用量                                                                                                                                                                                                      | 上下文預算的準確度            | P1-07。沒有用量時用字數估計                                   |
 | V-05 | Backstage 有沒有官方的 search 或 TechDocs action                                                                                                                                                                                                        | P3-06 的範圍                  | P3-06 開始前                                                  |
 | V-06 | 使用者 token 的有效期在各種登入方式下是多少                                                                                                                                                                                                             | `runTimeoutSeconds` 的上限    | P1-08 已確認（見下）                                          |
-| V-07 | `auditor` 在沒有 HTTP 請求時（自動送出排隊的訊息）能不能記事件，要帶什麼身分                                                                                                                                                                            | 自動送出的稽核寫法            | PI-03 開始前                                                  |
+| V-07 | `auditor` 在沒有 HTTP 請求時（自動送出排隊的訊息）能不能記事件，要帶什麼身分                                                                                                                                                                            | 自動送出的稽核寫法            | PI-03 已確認（見下）                                          |
 | V-08 | OpenAI 相容的端點是否接受 `image_url` 的 data URL；各家對圖片大小和型別的限制                                                                                                                                                                           | 模型 adapter 的圖片格式       | PI-05 開始前                                                  |
 | V-09 | `express.raw` 的 `limit` 在沒有 `Content-Length` 時是否讀到上限就停；Backstage 的錯誤處理怎麼處理 body 太大的錯誤（要轉成 413）                                                                                                                         | 上傳的大小檢查                | PI-05 開始前                                                  |
-| V-10 | 插入和 Run 結束的 transaction 同時進行時的結果：PostgreSQL 的 `FOR SHARE`、`FOR NO KEY UPDATE`、`FOR UPDATE` 的排序和不死結；SQLite 靠連線池只有一條連線排隊（knex 把鎖編成空字串），連線池開到多條時的行為（要「插入先」或「結束先」，不能是錯的結果） | 插入和結束的競爭（IN-11）     | PI-03 的測試                                                  |
+| V-10 | 插入和 Run 結束的 transaction 同時進行時的結果：PostgreSQL 的 `FOR SHARE`、`FOR NO KEY UPDATE`、`FOR UPDATE` 的排序和不死結；SQLite 靠連線池只有一條連線排隊（knex 把鎖編成空字串），連線池開到多條時的行為（要「插入先」或「結束先」，不能是錯的結果） | 插入和結束的競爭（IN-11）     | PI-03 已確認（見下）                                          |
 
 V-06 的確認結果（P1-08，Backstage 1.56.2，讀 `plugin-auth-backend` 0.30.2 和 `backend-defaults` 的程式）：
 
@@ -449,6 +451,20 @@ V-06 的確認結果（P1-08，Backstage 1.56.2，讀 `plugin-auth-backend` 0.30
 - Actions Registry 的 `invoke` 對使用者憑證呼叫 `auth.getPluginRequestToken({ onBehalfOf })`，發出新的 plugin token，到期時間是 `min(plugin token 壽命, 使用者 token 的到期時間)`（`DefaultPluginTokenHandler.issueToken`）。所以每次工具呼叫的 token 是新的，但不會比使用者 token 活得久；使用者 token 過期後，工具呼叫會因認證失敗而失敗。
 - Run 開始時，使用者 token 已經用掉一部分壽命，宿主無法假設還有完整的一小時，但可以用 `auth.getLimitedUserToken(credentials).expiresAt` 取得確切的到期時間。
 - 採用的做法：(1) `aiChat.runTimeoutSeconds` 預設 300、上限 600（最短的合法 token 壽命）。(2) `principalFromRequest` 把到期時間放進 `Principal.credentialsExpireAt`，`runLimits` 把 Run 的工作時間再限制在「距離到期減 30 秒」以內，所以 Run 在 token 過期之前結束（`completed`，`endReason: 'timeout'`），不會跑到一半沒有憑證。(3) 工具用「啟動或接續迴圈的那個請求」的憑證：等核准之後，由最後一個 `decision` 請求的新 token 接續，所以等核准的時間不受 token 壽命限制。(4) 取不到到期時間時只用設定值；工具呼叫在 token 過期後失敗，會是 `error` 結果，Run 繼續。沒有驗證的部分：還沒有在 `auth.backstageTokenExpiration` 設成 600 的環境實際跑過，這份結論來自讀程式。
+
+V-07 的確認結果（PI-03，讀 `backend-defaults` 的 `DefaultAuditorService`）：
+
+- `auditor.createEvent` 沒有 `request` 也能記：`getActorId` 沒有 request 時用外掛自己的服務身分（`auth.getOwnServiceCredentials()`），不丟錯；`ip`、`hostname`、`userAgent`、`request` 都是空的。已經有一處這樣用：迴圈裡的 `tool-call-invoke`。
+- 所以自動送出的稽核事件 `queued-message-send` 用同一個 `AuditorAuditLog`：事件的 `meta` 帶 `actor`（使用者的 entity ref，來自 `afterRun` 收到的 `principal`）、`sessionId`、`runId`（新的 Run）、`queuedMessageId`。auditor 自己記的 actor 是外掛的服務身分，使用者在 `meta.actor`，跟 `tool-call-invoke` 一致。不需要備案。
+- 使用者按「繼續」（`ResumeQueue`）也走 `StartNextQueued`，同樣寫 `queued-message-send`，因為訊息也是從佇列送出的；它有 HTTP 請求，但 auditor 讀到的 actor 同樣不用，一律放 `meta.actor`，兩條路徑的事件長一樣。
+- 稽核在 `supervisor.launch` 之前開始（`begin`），之後 `success`；`begin` 丟錯時 Run 以 `not_started` 結束，不送沒有紀錄的訊息。
+
+V-10 的確認結果（PI-03）：
+
+- PostgreSQL（兩條連線，CI 的 `Backend tests (PostgreSQL 16)`，`postgresConcurrency.test.ts`）：插入（`FOR SHARE`）和 Run 結束（`FOR UPDATE`）同時開始 100 輪，每一輪不是「訊息寫入、結束被 `UnreadMessages` 擋下、Run 仍是 `running`」，就是「Run 先結束、插入得到 `RunNotRunning`」；沒有「兩者都成功」的輪次，正常結束的 Run 沒有 `seq` 大於 `read_up_to_seq` 的 `user_message`。插入對模型輸出的 `append`（`FOR NO KEY UPDATE`，第一步更新 `runs.read_up_to_seq`）、排隊的 `add` 對模型輸出的 `append` 各 100 輪：兩邊都完成，沒有 `deadlock detected`，`read_up_to_seq` 只增不減。再加 30 組插入、排隊、輸出同時進行，`seq` 連續。
+- 把模型輸出的 `append` 改成 `FOR SHARE` 再升級（並且在 `sessions` 之後才更新 `runs`）時，這些測試失敗：見 PR 說明的破壞測試。
+- SQLite：knex 把 `forShare`、`forUpdate`、`forNoKeyUpdate` 編成空字串；測試用的 SQLite 資料庫只有一條連線（`min: 1, max: 1`，`databasePool.test.ts` 檢查），所有 transaction 排隊，結果仍是「插入先」或「結束先」。`inputFlows.test.ts` 用 `aroundTransition` 把兩種順序各做一次。
+- 連線池開到多條的 SQLite 檔案資料庫：沒有測試，只有推理（後到的 transaction 收到 `SQLITE_BUSY`，請求失敗，不會寫出錯的結果）。Backstage 的 SQLite 只用在開發，正式環境用 PostgreSQL。
 
 V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `ActionsService` 有 `list({ credentials })`，回傳 `{ actions }`；和 `invoke({ id, input?, secrets?, credentials })`，回傳 `{ output }`，沒有 signal 參數。`ActionsServiceAction` 有 `id`、`title`、`description`、`schema.input`、`schema.secrets?` 和 `attributes.readOnly`、`destructive`、`idempotent`。`ActionsToolGateway` 只用這些。
 

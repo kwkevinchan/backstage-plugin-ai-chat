@@ -9,11 +9,15 @@ import type { JsonValue } from '@backstage/types';
 // @public
 export interface ChatDataParts {
   // (undocumented)
+  inserted: ChatInsertedData;
+  // (undocumented)
   item: ChatItemData;
   // (undocumented)
   notice: ChatNoticeData;
   // (undocumented)
   plan: ChatPlan;
+  // (undocumented)
+  queue: ChatQueueData;
   // (undocumented)
   run: ChatRunData;
 }
@@ -23,6 +27,22 @@ export interface ChatDecisionResponse {
   // (undocumented)
   approved: boolean;
 }
+
+// @public
+export type ChatDelivery = 'direct' | 'inserted' | 'queued';
+
+// @public
+export interface ChatInsertedData {
+  // (undocumented)
+  page?: ChatPageContext;
+  // (undocumented)
+  seq: number;
+  // (undocumented)
+  text: string;
+}
+
+// @public
+export type ChatInsertState = 'read' | 'pending' | 'unread';
 
 // @public
 export type ChatItem = ChatItemBody & {
@@ -38,10 +58,13 @@ export type ChatItemBody =
       kind: 'user_message';
       text: string;
       page?: ChatPageContext;
+      delivery?: ChatDelivery;
+      insertState?: ChatInsertState;
     }
   | {
       kind: 'agent_message';
       text: string;
+      readUpToSeq?: number;
     }
   | {
       kind: 'tool_call';
@@ -53,6 +76,7 @@ export type ChatItemBody =
       readOnly: boolean;
       step: number;
       position: number;
+      readUpToSeq?: number;
     }
   | {
       kind: 'approval';
@@ -120,6 +144,11 @@ export const chatPaths: {
   runs: (id: string) => string;
   cancelRun: (id: string, runId: string) => string;
   decision: (id: string, callId: string) => string;
+  insertMessage: (id: string, runId: string) => string;
+  queue: (id: string) => string;
+  queuedMessage: (id: string, queuedId: string) => string;
+  queueOrder: (id: string) => string;
+  queueResume: (id: string) => string;
   resume: (id: string) => string;
   stream: (id: string) => string;
   tools: (id: string) => string;
@@ -137,6 +166,43 @@ export interface ChatPlan {
 
 // @public (undocumented)
 export type ChatPlanItemStatus = 'pending' | 'in_progress' | 'completed';
+
+// @public
+export interface ChatQueue {
+  // (undocumented)
+  items: ChatQueuedMessage[];
+  // (undocumented)
+  paused: boolean;
+}
+
+// @public
+export interface ChatQueueData extends ChatQueue {
+  // (undocumented)
+  nextRunId?: string;
+  // (undocumented)
+  pausedReason?: ChatQueuePausedReason;
+}
+
+// @public
+export interface ChatQueuedMessage {
+  // (undocumented)
+  createdAt: string;
+  // (undocumented)
+  id: string;
+  // (undocumented)
+  page?: ChatPageContext;
+  position: number;
+  // (undocumented)
+  text: string;
+  // (undocumented)
+  updatedAt: string;
+}
+
+// @public
+export type ChatQueuePausedReason =
+  | 'run_not_completed'
+  | 'credentials'
+  | 'shutting_down';
 
 // @public
 export interface ChatRun {
@@ -201,6 +267,7 @@ export interface ChatSessionDetail {
   awaitingDecision: string[];
   // (undocumented)
   items: ChatItem[];
+  queue: ChatQueue;
   resumable: boolean;
   run?: ChatRun;
   // (undocumented)
@@ -274,6 +341,14 @@ export interface DecideToolCallRequest {
 }
 
 // @public
+export interface InsertChatMessageRequest {
+  // (undocumented)
+  page?: ChatPageContext;
+  // (undocumented)
+  text: string;
+}
+
+// @public
 export function isEntityRef(value: string): boolean;
 
 // @public
@@ -287,6 +362,20 @@ export const MAX_TITLE_LENGTH = 200;
 
 // @public
 export function messageIdOfRun(runId: string): string;
+
+// @public
+export interface QueueChatMessageRequest {
+  // (undocumented)
+  page?: ChatPageContext;
+  // (undocumented)
+  text: string;
+}
+
+// @public
+export interface ReorderQueueRequest {
+  // (undocumented)
+  ids: string[];
+}
 
 // @public
 export interface ResumeChatRunRequest {
@@ -315,5 +404,13 @@ export interface UpdateChatSessionRequest {
   pinned?: boolean;
   // (undocumented)
   title?: string | null;
+}
+
+// @public
+export interface UpdateQueuedMessageRequest {
+  // (undocumented)
+  page?: ChatPageContext | null;
+  // (undocumented)
+  text?: string;
 }
 ```
