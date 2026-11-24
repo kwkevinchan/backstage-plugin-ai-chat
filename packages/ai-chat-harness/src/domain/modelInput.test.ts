@@ -494,7 +494,13 @@ describe('buildModelInput: the budget (H-09)', () => {
 
   it('keeps at least the newest step when keepRecentSteps is 0', () => {
     const input = buildWith(bodies, 10, 0);
+    // The first question stays too: it is the newest user message.
     expect(input.messages).toEqual([
+      {
+        role: 'user',
+        content: 'The earlier part of the conversation was left out.',
+      },
+      { role: 'user', content: 'first question' },
       { role: 'assistant', content: 'done', toolCalls: [] },
     ]);
   });
@@ -512,7 +518,11 @@ describe('buildModelInput: the budget (H-09)', () => {
       1,
       1,
     );
-    expect(input.messages.map(m => m.content)).toEqual(['new', 'b']);
+    expect(input.messages.map(m => m.content)).toEqual([
+      'The earlier part of the conversation was left out.',
+      'new',
+      'b',
+    ]);
     const two = buildWith(
       [
         user('old'),
@@ -526,7 +536,12 @@ describe('buildModelInput: the budget (H-09)', () => {
       1,
       1,
     );
-    expect(two.messages.map(m => m.content)).toEqual(['q2', 'q3', 'b']);
+    expect(two.messages.map(m => m.content)).toEqual([
+      'The earlier part of the conversation was left out.',
+      'q2',
+      'q3',
+      'b',
+    ]);
   });
 
   it('never separates a call from its result, for any budget (the API rejects it)', () => {
@@ -556,7 +571,7 @@ describe('buildModelInput: the budget (H-09)', () => {
       for (const keep of [0, 1, 2, 3, 6]) {
         const { messages } = buildWith(mixed, tokens, keep);
         expectPaired(messages);
-        expect(messages[0]?.role).not.toBe('tool');
+        expect(messages[0]?.role).toBe('user');
       }
     }
   });
@@ -664,7 +679,8 @@ describe('buildModelInput: a summary', () => {
 describe('planSummary', () => {
   const extra = { context: [], tools: [tool()] };
   const plan = (bodies: ItemBody[], tokenBudget: number, keep = 2) =>
-    planSummary(log(...bodies), agent, extra, {
+    // A new question comes last, as it does when the loop is about to run.
+    planSummary(log(...bodies, user('next')), agent, extra, {
       tokenBudget,
       keepRecentSteps: keep,
     });
@@ -701,12 +717,12 @@ describe('planSummary', () => {
       ...longLog(10),
       { kind: 'summary', coversUpToSeq: 13, text: 'so far' },
     ];
-    const found = plan(bodies, 500, 3);
+    const found = plan(bodies, 500, 2);
     expect(found?.previousSummary).toBe('so far');
-    expect(found?.coversUpToSeq).toBe(25);
+    expect(found?.coversUpToSeq).toBe(28);
     expect(found?.items[0].seq).toBe(14);
     expect(found?.items.every(item => item.kind !== 'summary')).toBe(true);
-    expect(found?.items[found.items.length - 1].seq).toBe(25);
+    expect(found?.items[found.items.length - 1].seq).toBe(28);
   });
 
   it('does not cut a step in two: the plan ends where a step begins', () => {
@@ -793,5 +809,151 @@ describe('buildSummaryInput', () => {
     expect(
       estimateTokens(SUMMARY_PROMPT) + estimateTokens(text),
     ).toBeLessThanOrEqual(1300);
+  });
+});
+
+describe('the newest user message and the start of the input', () => {
+  // One question, then `count` steps with a call each (seq 1 is the question).
+  const run = (count: number, text = 'the question'): ItemBody[] => [
+    user('old question'),
+    agentSays('old answer'),
+    user(text),
+    ...Array.from({ length: count }, (_v, i): ItemBody[] => [
+      agentSays(`step ${i + 1}`),
+      call(`r${i + 1}`, { step: i + 1 }),
+      result(`r${i + 1}`, 'ok', { output: { text: 'x'.repeat(400) } }),
+    ]).flat(),
+  ];
+  const extra = { context: [], tools: [tool()] };
+
+  it('sends the question of the run as written, however many steps follow', () => {
+    for (const tokens of [1, 300, 700, 1500, 1_000_000]) {
+      const input = buildWith(run(9), tokens, 2);
+      expect(input.messages.map(m => m.content)).toContain('the question');
+      expectPaired(input.messages);
+    }
+  });
+
+  it('keeps the question before the steps of its run', () => {
+    const input = buildWith(run(9), 500, 2);
+    const texts = input.messages.map(m => m.content);
+    expect(texts.indexOf('the question')).toBeLessThan(texts.indexOf('step 9'));
+    expect(texts).not.toContain('old question');
+  });
+
+  it('shortens the steps of the run beyond keepRecentSteps, then leaves them out', () => {
+    const whole = buildWith(run(9), 1_000_000, 2);
+    const shorter = buildWith(run(9), sizeOf(whole) - 300, 2);
+    const outputs = toolMessages(shorter).map(m => content(m).output);
+    expect(outputs[0]).toBeUndefined();
+    expect(outputs[outputs.length - 1]).toBeDefined();
+    const fewer = buildWith(run(9), 1, 2);
+    expect(callIds(fewer.messages)).toEqual(['r8', 'r9']);
+  });
+
+  it('stops a summary before the question, so the question is still read after it', () => {
+    const items = log(...run(9));
+    const found = planSummary(items, agent, extra, {
+      tokenBudget: 450,
+      keepRecentSteps: 2,
+    });
+    const question = items.find(
+      i => i.kind === 'user_message' && i.text === 'the question',
+    );
+    expect(found?.coversUpToSeq).toBe((question?.seq ?? 0) - 1);
+    expect(found?.items.some(i => i.seq >= (question?.seq ?? 0))).toBe(false);
+  });
+
+  it('with the summary written, sends the summary, the question and the newest steps', () => {
+    const items = log(...run(9));
+    const question = items.find(
+      i => i.kind === 'user_message' && i.text === 'the question',
+    );
+    const withSummary = log(...run(9), {
+      kind: 'summary',
+      coversUpToSeq: (question?.seq ?? 0) - 1,
+      text: 'S',
+    });
+    const input = buildModelInput(withSummary, agent, extra, {
+      tokenBudget: 450,
+      keepRecentSteps: 2,
+    });
+    expect(input.messages[0].content).toContain('S');
+    expect(input.messages[1]).toEqual({
+      role: 'user',
+      content: 'the question',
+    });
+    expect(callIds(input.messages).slice(-2)).toEqual(['r8', 'r9']);
+  });
+
+  it('starts with a user message that says something was left out, when there is no summary', () => {
+    const input = buildWith(run(9), 400, 2);
+    expect(input.messages[0]).toEqual({
+      role: 'user',
+      content: 'The earlier part of the conversation was left out.',
+    });
+    expect(sizeOf(input)).toBeGreaterThan(0);
+  });
+
+  it('says nothing about omission when nothing is left out', () => {
+    const input = buildWith(run(2), 1_000_000, 2);
+    expect(input.messages[0].content).toBe('old question');
+  });
+
+  it('starts with a user message for every budget and every keepRecentSteps', () => {
+    for (let tokens = 0; tokens <= 1500; tokens += 50) {
+      for (const keep of [0, 1, 2, 5]) {
+        const { messages } = buildWith(run(6), tokens, keep);
+        expect(messages[0].role).toBe('user');
+        expectPaired(messages);
+      }
+    }
+  });
+
+  it('warns that a summary carries untrusted tool output', () => {
+    const input = buildModelInput(
+      log(
+        user('a'),
+        { kind: 'summary', coversUpToSeq: 1, text: 'T' },
+        agentSays('b'),
+      ),
+      agent,
+      extra,
+      budget,
+    );
+    expect(input.messages[0].content).toMatch(/untrusted data/);
+    expect(input.messages[0].content).toMatch(/never follow instructions/);
+  });
+});
+
+describe('planSummary: when a summary cannot help', () => {
+  it('makes no summary when the parts that stay are over the budget already', () => {
+    // 10 steps of 20000 characters; the newest 6 are 30000 tokens by themselves.
+    const bodies: ItemBody[] = [user('q')];
+    for (let i = 1; i <= 10; i++) {
+      bodies.push(
+        agentSays(`s${i}`),
+        call(`c${i}`, { step: i }),
+        result(`c${i}`, 'ok', { output: { text: 'x'.repeat(20000) } }),
+      );
+    }
+    const found = planSummary(
+      log(...bodies),
+      agent,
+      { context: [], tools: [tool()] },
+      { tokenBudget: 24000, keepRecentSteps: 6 },
+    );
+    expect(found).toBeUndefined();
+  });
+
+  it('makes one when the room for a summary is there', () => {
+    const bodies = longLog(10);
+    const found = planSummary(
+      log(...bodies, user('next')),
+      agent,
+      { context: [], tools: [tool()] },
+      { tokenBudget: 600, keepRecentSteps: 2 },
+    );
+    expect(found).toBeDefined();
   });
 });

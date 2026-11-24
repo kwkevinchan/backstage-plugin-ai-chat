@@ -107,8 +107,20 @@ export async function* callModel(
         noStep: true,
       };
     }
-    if (made.status === 'written') current = [...items, made.item];
-    else summaryFailed = true;
+    if (made.status === 'written') {
+      current = [...items, made.item];
+      // The summary took time: a stop request that came in meanwhile counts.
+      const { cancelRequested } = await deps.run.heartbeat(req.fence);
+      if (cancelRequested) {
+        return {
+          toolCallsRequested: 0,
+          outcome: { status: 'cancelled' },
+          noStep: true,
+        };
+      }
+    } else {
+      summaryFailed = true;
+    }
   }
   const input = buildModelInput(current, req.agent, extra, req.budget);
 

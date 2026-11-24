@@ -464,6 +464,9 @@ export type StopReason = 'max_steps' | 'max_tool_calls' | 'timeout';
 export const SUMMARY_PROMPT: string;
 
 // @public
+export const SUMMARY_RESERVE_TOKENS = 600;
+
+// @public
 export type SummaryBody = {
   kind: 'summary';
   coversUpToSeq: number;

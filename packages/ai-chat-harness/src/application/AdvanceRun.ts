@@ -44,7 +44,7 @@ import type { AdvanceRunDeps, AdvanceRunRequest } from './types';
  * `completed` with `endReason` `timeout`. The user stopping the run, by the
  * request of `heartbeat` or by the signal of the request, ends it as
  * `cancelled`. `heartbeat` is asked once per round of the loop and before each
- * call that is not read-only.
+ * call that is not read-only, and once after a summary is written.
  *
  * The deadline timer is `unref`ed, so it does not keep the process alive. The
  * host keeps the process alive until the generator ends. A host with no HTTP

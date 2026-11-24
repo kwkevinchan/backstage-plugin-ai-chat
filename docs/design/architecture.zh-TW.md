@@ -242,11 +242,14 @@ export function estimateTokens(text: string): number;
 - **大小**用 `estimateTokens`：ASCII 字元算 1/4 個 token，其他字元（中日韓）算 1 個，無條件進位。`ModelClient` 的串流不回傳用量，所以一律用估計。系統提示、工具清單、摘要訊息、每則訊息都算進去。
 - **分段**：紀錄分成「一則使用者訊息」和「一個 Step」（agent 的文字、同一步的工具呼叫、每個呼叫的回答）。預算只整段增減，所以工具呼叫和它的結果不會被拆開。
 - **保留最近的 Step**：最近 `keepRecentSteps` 個 Step（至少 1 個）和它們前面連著的使用者訊息不會被縮短、省略或摘要。只有這些就超過預算時，送出的內容會超過預算。
+- **最新的使用者訊息永遠原文送出**：它不被摘要涵蓋（`coversUpToSeq` 最多到它的 `seq` 減 1，所以 `fromLatestSummary` 讀得到它），也不被省略。同一個 Run 裡超過 `keepRecentSteps` 的 Step（在這則訊息之後、最近的 Step 之前）照規則先縮短、再省略，但不摘要：摘要只涵蓋這則訊息之前的部分。
 - **超過預算時依序處理**：
   1. 舊的 Step 的工具輸出換成一行（保留 `status`，`message` 是 `The output was left out to keep the context short.`），從最舊的開始，夠了就停。
   2. 還是超過，`planSummary` 回傳要摘要的範圍：從上一份摘要之後，到最近的 Step 之前。`AdvanceRun` 產生摘要，寫成 `summary` Item。
-  3. 沒有摘要可用（摘要失敗，或沒有舊的 Step 可以摘要），`buildModelInput` 從最舊的 Step 起整段省略，直到符合預算。
-- **有摘要之後**：最新的 `summary`（`seq` 最大的）取代 `seq <= coversUpToSeq` 的 Item。它的文字加上說明（`This is a summary of the earlier part ...`）是第一則訊息，角色是 `user`。新的摘要包含上一份摘要的文字，所以每一份都涵蓋從頭到 `coversUpToSeq`。
+  3. 沒有摘要可用（摘要失敗，或沒有舊的 Step 可以摘要），`buildModelInput` 從最舊的 Step 起整段省略，直到符合預算。有東西被省略而且沒有摘要訊息時，最前面放一則固定的 `user` 訊息 `The earlier part of the conversation was left out.`，所以送出的第一則訊息一定是 `user`。
+- **摘要沒有用時不做**：不會被省略的部分（系統提示、工具清單、最新的使用者訊息、最近的 Step）加上摘要預留（`min(600, tokenBudget 的十分之一)` token）已經超過預算時，`planSummary` 回傳 `undefined`，不然每一步都會重做一次摘要而大小不變。
+- **有摘要之後**：最新的 `summary`（`seq` 最大的）取代 `seq <= coversUpToSeq` 的 Item。它的文字加上說明（`This is a summary of the earlier part ...`，並註明內容含工具輸出，是不可信的資料）是第一則訊息，角色是 `user`。新的摘要包含上一份摘要的文字，所以每一份都涵蓋從頭到 `coversUpToSeq`。
+- **預算是估計**：`estimateTokens` 對 JSON 和程式碼可能低估（每字元的 token 比文字多），`tokenBudget` 要設得比模型的上下文視窗小很多。
 - **摘要的輸入**：`buildSummaryInput` 把要摘要的 Item 轉成一則 `user` 訊息（`User:`、`Agent:`、`Agent called`、`Result of`），每個工具輸出最多 1500 字元，整段不超過 `tokenBudget`（超過時留下最新的部分）。上一份摘要放在最前面。
 
 `decideNextAction` 的規則，由上往下，先符合的先用：
@@ -458,6 +461,8 @@ function executeTools(
   - 在需要它的那一步的模型呼叫之前跑，不是獨立的一輪，也不算 Step：不增加 `stepsUsed`，不發 `step.started`。一次 `callModel` 最多做一份摘要；一個 Run 裡 Step 變多、又超過預算時，後面的 `callModel` 可以再做。
   - 用 Run 的 `ModelClient`、不給工具、用 Run 的 `signal`（所以截止時間也會中止它）。回答的文字去掉前後空白，寫成 `summary` Item（`coversUpToSeq` 來自 `planSummary`）。寫入是在紀錄最後新增一筆，舊的 Item 一個字都不改（A-05）。
   - 模型呼叫失敗，或回答沒有文字：不寫任何 Item，回報 `summary.failed`（`cause` 放原始錯誤，只給宿主記 log），Run **不會**失敗，照常呼叫模型，只是舊的 Step 被省略。同一次 `execute()` 不再試。下一次 `execute()`（下一則訊息或核准後）會再試。
+  - 摘要文字最多 4000 字元，超過的截掉，避免模型不守長度時每一步都觸發。
+  - 摘要寫入後呼叫一次 `heartbeat`，`cancelRequested` 就結束成 `cancelled`（摘要留著，不算 Step）。
   - `signal` 中止：不寫任何 Item，也不發 `summary.failed`。使用者中止是 `cancelled`，截止時間是 `completed`（`endReason: 'timeout'`），跟模型呼叫一樣。
   - 紀錄的例外（`LeaseLost`）照常丟出來。
 - **`executeTools`**：
@@ -467,7 +472,7 @@ function executeTools(
   - 不是唯讀的工具：先 `heartbeat`，看到 `cancelRequested` 就停止（回傳 `'cancelled'`，這個呼叫和後面的都不開始）；再寫 `tool_started`；再檢查 `signal`；才執行（D-25）。
   - 工具丟例外，或沒有回傳結果，寫成 `error`。`signal` 中止時什麼都不寫。
   - 每個 Item 準備好就寫，當掉時已完成的不會丟。
-- **停止**：使用者按停止時，`heartbeat` 回 `cancelRequested`。迴圈在每一輪開頭和每個不是唯讀的呼叫之前呼叫 `heartbeat`，所以一步裡的第二個寫入工具在停止之後不會開始。
+- **停止**：使用者按停止時，`heartbeat` 回 `cancelRequested`。迴圈在每一輪開頭、每個不是唯讀的呼叫之前、摘要寫入之後呼叫 `heartbeat`，所以一步裡的第二個寫入工具在停止之後不會開始。
 - **一步之內的時間上限**：迴圈從 `limits.runTimeoutSeconds` 減去 `usage.elapsedSeconds` 算出剩餘時間，設一個計時器，到時候中止傳給模型和工具的 `signal`。因此執行中的模型呼叫或工具在截止時間結束。這時 Run 結束成 `completed`，`endReason: 'timeout'`，不是 `cancelled`。使用者的 `signal` 先中止則是 `cancelled`。每一輪開頭仍用 `Clock` 檢查總時間。計時器已 `unref`，不會讓程序保持運作；宿主要自己讓程序活著，直到 generator 結束。沒有 HTTP server 的宿主（CLI、worker、demo 腳本）要注意：沒有別的 I/O 時，程序會直接結束，Run 沒有收尾。
 - **例外**：port 丟的例外（例如 `LeaseLost`）直接丟出來，沒有 `run.ended`。宿主要自己更新 Run 的狀態。
 
@@ -890,6 +895,9 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 | `item.completed`（tool_result，成功）                           | `tool-output-available`                                                                  |
 | `item.completed`（tool_result，失敗）                           | `tool-output-error`                                                                      |
 | `item.completed`（tool_result，被拒絕）                         | `tool-output-denied`                                                                     |
+| `summary.started`                                               | 可選的 `data-notice`（`transient`，「整理較早的內容」）                                  |
+| `summary.failed`                                                | `data-notice`（`transient`，「較早的內容已省略」）。不含 `cause`                         |
+| `item.completed`（summary）                                     | 忽略：摘要不是訊息，只給模型看（還原畫面時也略過）。`data-item` 照送                     |
 | `item.completed`（plan_update）                                 | `data-plan`（固定 `id`，同一則訊息內後送的取代先送的）                                   |
 | 每一筆完成的 Item                                               | `data-item`（`transient`，序號和 kind），給 A-07 接回用                                  |
 | `run.ended`（等核准）                                           | `data-run`（`transient`），然後 `finish`（`finishReason: 'tool-calls'`）                 |

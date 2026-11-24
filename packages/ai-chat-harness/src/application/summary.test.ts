@@ -250,15 +250,15 @@ describe('AdvanceRun: the context budget (H-09)', () => {
         [say('Answer two.')],
       ],
       tools: [readTool],
-      budget,
+      budget: { tokenBudget: 700, keepRecentSteps: 1 },
       limits: { maxSteps: 100 },
-      log: longSession(8),
+      log: longSession(20),
     });
     await t.execute();
     const first = (await t.read()).filter(i => i.kind === 'summary');
     expect(first).toHaveLength(1);
 
-    await t.append(...longSession(6, 9));
+    await t.append(...longSession(8, 21));
     await t.execute({ stepsUsed: 0, toolCallsUsed: 0, elapsedSeconds: 0 });
     const summaries = (await t.read()).filter(
       (i): i is Extract<Item, { kind: 'summary' }> => i.kind === 'summary',
@@ -279,44 +279,47 @@ describe('AdvanceRun: the context budget (H-09)', () => {
     );
   });
 
-  it('summarizes again inside a run when the steps of the run fill the budget', async () => {
+  it('does not summarize again inside a run: the steps of the run are shortened, then left out', async () => {
+    let summaries = 0;
+    let calls = 0;
+    // The model writes a summary when asked for one, calls a tool five times,
+    // then answers.
+    const model = (input: ModelInput) => {
+      if (input.system === SUMMARY_PROMPT) {
+        summaries += 1;
+        return [say(`Summary ${summaries}.`)];
+      }
+      calls += 1;
+      return calls <= 5
+        ? [callTool(`m${calls}`, 'catalog:get-entity')]
+        : [say('Answer.')];
+    };
     const t = await kit({
-      script: [
-        [say('Summary one.')],
-        [callTool('m1', 'catalog:get-entity')],
-        [callTool('m2', 'catalog:get-entity')],
-        [say('Summary two.')],
-        [say('Answer.')],
-      ],
+      script: Array.from({ length: 20 }, () => model),
       tools: [
         {
           ...readTool,
           execute: () => ({ status: 'ok', output: { text: 'r'.repeat(1000) } }),
         },
       ],
-      budget: { tokenBudget: 650, keepRecentSteps: 2 },
+      budget: { tokenBudget: 600, keepRecentSteps: 1 },
       limits: { maxSteps: 100 },
-      log: longSession(8),
+      log: longSession(20),
     });
     const { outcome } = await t.execute();
     expect(outcome).toEqual({ status: 'completed' });
-    const summaries = (await t.read()).filter(
-      (i): i is Extract<Item, { kind: 'summary' }> => i.kind === 'summary',
-    );
-    expect(summaries.map(s => s.text)).toEqual([
-      'Summary one.',
-      'Summary two.',
-    ]);
-    expect(summaries[1].coversUpToSeq).toBeGreaterThan(
-      summaries[0].coversUpToSeq,
-    );
-    expect(t.model.inputs[3].messages[0].content).toContain(
-      'Summary so far:\nSummary one.',
-    );
-    const last = t.model.inputs[4];
-    expect(last.messages[0].content).toContain('Summary two.');
-    expect(last.messages[0].content).not.toContain('Summary one.');
-    expectPaired(last);
+    const written = (await t.read()).filter(i => i.kind === 'summary');
+    expect(written).toHaveLength(1);
+    // Every call of the model after the summary: the question of the run as
+    // written, calls paired, and within the budget.
+    for (const input of t.model.inputs.slice(1)) {
+      expect(input.messages.map(m => m.content)).toContain(
+        'question after step 20',
+      );
+      expect(sizeOf(input)).toBeLessThanOrEqual(600);
+      expectPaired(input);
+    }
+    expect(t.model.inputs).toHaveLength(7);
   });
 
   describe('when the summary does not come', () => {
@@ -435,6 +438,113 @@ describe('AdvanceRun: the context budget (H-09)', () => {
       ).rejects.toBeInstanceOf(LeaseLost);
       expect(await t.kinds()).not.toContain('summary');
     });
+  });
+
+  describe('the question of the run', () => {
+    // An old question, then the question of this run and 9 steps.
+    const nineSteps = (): ItemBody[] => [
+      user('an old question'),
+      agentSays('an old answer'),
+      user('the question of the run'),
+      ...Array.from({ length: 9 }, (_v, i): ItemBody[] => [
+        agentSays(`looking at ${i + 1}`),
+        call(`c${i + 1}`, { step: i + 1 }),
+        result(`c${i + 1}`, 'ok', { output: { text: `${i + 1}`.repeat(800) } }),
+      ]).flat(),
+    ];
+    const texts = (input: ModelInput) => input.messages.map(m => m.content);
+
+    it('is sent as written when the summary is made, and the summary stops before it', async () => {
+      const t = await kit({
+        script: [[say('The summary.')], [say('The answer.')]],
+        tools: [readTool],
+        budget,
+        log: nineSteps(),
+      });
+      await t.execute();
+      const log = await t.read();
+      const summary = log.find(i => i.kind === 'summary') as Extract<
+        Item,
+        { kind: 'summary' }
+      >;
+      const question = log.find(
+        i => i.kind === 'user_message' && i.text === 'the question of the run',
+      );
+      expect(summary.coversUpToSeq).toBe((question?.seq ?? 0) - 1);
+      expect(texts(t.model.inputs[1])).toContain('the question of the run');
+      expect(texts(t.model.inputs[0])[0]).not.toContain(
+        'the question of the run',
+      );
+    });
+
+    it('is sent as written when the summary fails', async () => {
+      const t = await kit({
+        script: [new Error('down'), [say('The answer.')]],
+        tools: [readTool],
+        budget,
+        log: nineSteps(),
+      });
+      const { outcome } = await t.execute();
+      expect(outcome).toEqual({ status: 'completed' });
+      const input = t.model.inputs[1];
+      expect(texts(input)).toContain('the question of the run');
+      expect(input.messages[0].role).toBe('user');
+      expect(sizeOf(input)).toBeLessThanOrEqual(budget.tokenBudget);
+    });
+  });
+
+  it('writes no summary when the newest steps alone fill the budget, and asks the model once per step', async () => {
+    const bodies: ItemBody[] = [user('q')];
+    for (let i = 1; i <= 10; i++) {
+      bodies.push(
+        agentSays(`s${i}`),
+        call(`c${i}`, { step: i }),
+        result(`c${i}`, 'ok', { output: { text: 'x'.repeat(20000) } }),
+      );
+    }
+    bodies.push(user('next'));
+    const t = await kit({
+      script: [[say('The answer.')]],
+      tools: [readTool],
+      budget: { tokenBudget: 24000, keepRecentSteps: 6 },
+      limits: { maxSteps: 100 },
+      log: bodies,
+    });
+    await t.execute();
+    expect(t.model.inputs).toHaveLength(1);
+    expect((await t.kinds()).includes('summary')).toBe(false);
+  });
+
+  it('cuts a summary that is longer than 4000 characters', async () => {
+    const t = await kit({
+      script: [[say('y'.repeat(10000))], [say('The answer.')]],
+      tools: [readTool],
+      budget,
+      log: longSession(8),
+    });
+    await t.execute();
+    const summary = (await t.read()).find(i => i.kind === 'summary') as Extract<
+      Item,
+      { kind: 'summary' }
+    >;
+    expect(summary.text).toHaveLength(4000);
+  });
+
+  it('ends as cancelled when the user asks to stop while the summary is made, and still keeps the summary', async () => {
+    const t = await kit({
+      script: [[say('The summary.')], [say('never')]],
+      tools: [readTool],
+      budget,
+      log: longSession(8),
+    });
+    // Heartbeat 1 opens the round; 2 comes right after the summary is written.
+    t.run.cancelAtHeartbeat(2);
+    const { events, outcome } = await t.execute();
+    expect(outcome).toEqual({ status: 'cancelled' });
+    expect(t.model.inputs).toHaveLength(1);
+    expect(types(events)).not.toContain('step.started');
+    expect(t.lastUsage().stepsUsed).toBe(8);
+    expect((await t.kinds()).filter(k => k === 'summary')).toHaveLength(1);
   });
 
   describe('a session of 500 items', () => {

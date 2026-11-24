@@ -29,6 +29,12 @@ export type SummarizeResult =
   | { status: 'aborted' };
 
 /**
+ * The longest summary that is written, in characters. A model that does not
+ * keep to the length would otherwise make every step need a new summary.
+ */
+export const SUMMARY_MAX_CHARS = 4000;
+
+/**
  * Makes the summary of the old steps in `plan` with a model call (H-09) and
  * writes it as a `summary` item: a new item at the end of the log, so the
  * items it covers stay as they are (A-05).
@@ -63,7 +69,7 @@ export async function* summarize(
   }
   if (req.signal.aborted) return { status: 'aborted' };
 
-  const summary = text.trim();
+  const summary = text.trim().slice(0, SUMMARY_MAX_CHARS);
   if (summary.length === 0) {
     yield { type: 'summary.failed' };
     return { status: 'failed' };
