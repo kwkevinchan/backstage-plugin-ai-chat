@@ -30,8 +30,13 @@ import {
   type ChatRequestBody,
 } from '../adapters/AiChatTransport';
 import { describeError } from '../adapters/describeError';
-import { awaitingCalls, isLastDecision } from '../domain/approval';
 import {
+  awaitingCalls,
+  decidedCalls,
+  isLastDecision,
+} from '../domain/approval';
+import {
+  decisionsOf,
   itemsToMessages,
   lastRunInterrupted,
   lastUserText,
@@ -62,7 +67,7 @@ const EVENT_STREAM = 'text/event-stream';
  * messages restored from the log, and the rules around it. Create it for one
  * session only (give the component the session id as its key).
  *
- * - The decisions: every Allow or Reject is stored at once. The last one that
+ * - The decisions: every Allow or Deny is stored at once. The last one that
  *   the run waits for is sent through the chat (the response is the stream of
  *   the run); any other goes straight to the backend.
  * - Opening a session follows a run that goes on, and carries on a run whose
@@ -93,6 +98,10 @@ export function useSessionChat(options: UseSessionChatOptions) {
   );
   const [notice, setNotice] = useState<ChatNoticeData['code']>();
   const [failure, setFailure] = useState<string>();
+  const [decisions, setDecisions] = useState(() =>
+    decisionsOf(initial.detail.items),
+  );
+  const askedForDecisions = useRef(new Set<string>());
   const [deciding, setDeciding] = useState(false);
   const decidingRef = useRef(false);
   const mounted = useRef(true);
@@ -165,6 +174,7 @@ export function useSessionChat(options: UseSessionChatOptions) {
       setActiveRun(detail.run);
       setInterrupted(lastRunInterrupted(detail));
       setResendText(lastUserText(detail.items));
+      setDecisions(decisionsOf(detail.items));
     } catch (error) {
       if (mounted.current) setFailure(describeError(error));
     }
@@ -180,6 +190,22 @@ export function useSessionChat(options: UseSessionChatOptions) {
     }
     if (status !== 'ready' && status !== 'error') return;
     onChanged?.();
+    // A decision made on this page is known to the log, not to the stream:
+    // read who decided it and when.
+    const missing = decidedCalls(chatRef.current.messages).filter(
+      id => !decisions[id] && !askedForDecisions.current.has(id),
+    );
+    if (missing.length > 0) {
+      missing.forEach(id => askedForDecisions.current.add(id));
+      api
+        .getSession(sessionId)
+        .then(detail => {
+          if (mounted.current) setDecisions(decisionsOf(detail.items));
+        })
+        .catch(() => {
+          // The cards show the result without who decided it.
+        });
+    }
     if (followAfter.current) {
       followAfter.current = false;
       chatRef.current.resumeStream().then(reload, reload);
@@ -289,6 +315,7 @@ export function useSessionChat(options: UseSessionChatOptions) {
     busy: chat.status === 'submitted' || chat.status === 'streaming',
     activeRun,
     awaiting,
+    decisions,
     deciding,
     notice,
     interrupted,

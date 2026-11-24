@@ -77,7 +77,7 @@ export interface ChatPlan {
 
 /** @public */
 export type ChatItemBody =
-  | { kind: 'user_message'; text: string }
+  | { kind: 'user_message'; text: string; page?: ChatPageContext }
   | { kind: 'agent_message'; text: string }
   | {
       kind: 'tool_call';
@@ -214,6 +214,22 @@ export interface ChatToolset {
   default: boolean;
   /** Whether its tools send data out of the organization. */
   egress: boolean;
+}
+
+/** A tool that a session offers to the model, as the screen shows a call. @public */
+export interface ChatTool {
+  /** The id of the action in the actions registry; the name of a call. */
+  id: string;
+  title?: string;
+  /** What the tool does. */
+  description: string;
+  /** Whether the tool only reads. Any other tool asks for approval. */
+  readOnly: boolean;
+}
+
+/** The answer of `GET /sessions/:id/tools`. @public */
+export interface ChatToolList {
+  items: ChatTool[];
 }
 
 /** The answer of `GET /toolsets`. @public */

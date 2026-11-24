@@ -229,6 +229,28 @@ describe('ChatPageContent', () => {
     expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull();
   });
 
+  it('shows the title and the description of the tool, and that it changes something', async () => {
+    const api = mockApi({
+      getSession: jest.fn().mockResolvedValue(waitingDetail),
+      listSessionTools: jest.fn().mockResolvedValue([
+        {
+          id: 'dev-actions:restart-service',
+          title: 'Restart a service',
+          description: 'Restarts one of the example services.',
+          readOnly: false,
+        },
+      ]),
+    });
+    await renderPage(api, '/ai-chat/s-1');
+
+    const card = await screen.findByRole('region', {
+      name: 'Approval: Restart a service',
+    });
+    expect(card).toHaveTextContent('Restarts one of the example services.');
+    expect(card).toHaveTextContent('This action changes something');
+    expect(api.listSessionTools).toHaveBeenCalledWith('s-1');
+  });
+
   it('asks the backend to cancel the run with Stop', async () => {
     const api = mockApi({
       getSession: jest.fn().mockResolvedValue(waitingDetail),

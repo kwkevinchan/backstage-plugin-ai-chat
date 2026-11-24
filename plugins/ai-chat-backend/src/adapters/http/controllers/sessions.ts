@@ -18,12 +18,14 @@ import type {
   ChatSession,
   ChatSessionDetail,
   ChatSessionList,
+  ChatToolList,
   ChatToolsetList,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type {
   CreateSession,
   DeleteSession,
   GetSession,
+  ListSessionTools,
   ListSessions,
   ListToolsets,
   UpdateSession,
@@ -49,6 +51,7 @@ export type SessionUseCases = {
   updateSession: Pick<UpdateSession, 'execute'>;
   deleteSession: Pick<DeleteSession, 'execute'>;
   listToolsets: Pick<ListToolsets, 'execute'>;
+  listSessionTools: Pick<ListSessionTools, 'execute'>;
 };
 
 /**
@@ -108,6 +111,15 @@ export class SessionsController {
 
   async delete(principal: Principal, sessionId: string): Promise<void> {
     await this.useCases.deleteSession.execute({ principal, sessionId });
+  }
+
+  async tools(principal: Principal, sessionId: string): Promise<ChatToolList> {
+    return {
+      items: await this.useCases.listSessionTools.execute({
+        principal,
+        sessionId,
+      }),
+    };
   }
 
   async toolsets(): Promise<ChatToolsetList> {

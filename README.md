@@ -85,7 +85,30 @@ The page is on `/ai-chat`, and the app lists it in the sidebar. Move it with
 session has its own URL, `/ai-chat/<session id>`. A link to
 `/ai-chat?entityRef=component:default/my-service` opens the chat for that
 entity: every message of it carries the entity (and the path of the page) to
-the backend.
+the backend, which stores it with the message and tells the model in one line
+before the text ("The user is on the page of component:default/my-service
+(/ai-chat/…).").
+
+To open the chat from an entity page, add a link there that names the entity,
+for example in a card or a context menu of the entity page:
+
+```tsx
+import { useEntity } from '@backstage/plugin-catalog-react';
+import { stringifyEntityRef } from '@backstage/catalog-model';
+import { Link } from '@backstage/core-components';
+
+function AskAboutThis() {
+  const { entity } = useEntity();
+  const entityRef = stringifyEntityRef(entity);
+  return (
+    <Link to={`/ai-chat?entityRef=${encodeURIComponent(entityRef)}`}>
+      Ask the AI chat
+    </Link>
+  );
+}
+```
+
+The side panel that opens the chat on every page (P2) will replace this link.
 
 ### Frontend: legacy frontend system
 
@@ -283,6 +306,7 @@ The routes are under `/api/ai-chat`; the spec is
 | `POST /sessions/:id/resume`                      | Carry on a run whose decisions are all stored (`204` if none)                       |
 | `GET /sessions/:id/stream`                       | Join a run that is under way (`204` if none)                                        |
 | `GET /toolsets`                                  | The toolsets the user can switch on in a session                                    |
+| `GET /sessions/:id/tools`                        | The tools a session offers now: title, description, `readOnly` (the owner only)     |
 
 The streams are the [AI SDK UI message stream](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol)
 (`ai@7`): a call that needs approval is a `tool-approval-request`, and the

@@ -16,7 +16,12 @@
 
 import { useEffect, useRef } from 'react';
 import { isToolUIPart } from 'ai';
-import type { ChatNoticeData } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type {
+  ChatNoticeData,
+  ChatTool,
+} from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { DecisionInfo } from '../domain/itemsToMessages';
+import { toolIdOf } from '../domain/toolView';
 import type { ChatUiMessage, ToolPart } from '../domain/types';
 import { Markdown } from './Markdown';
 import { cx } from './styles';
@@ -35,6 +40,9 @@ export interface MessageListProps {
   /** Set while a decision is being sent: the cards cannot be used. */
   disabled: boolean;
   notice?: ChatNoticeData['code'];
+  /** The tools of the session by id, and who decided which call. */
+  tools?: Record<string, ChatTool>;
+  decisions?: Record<string, DecisionInfo>;
   error?: string;
   /** The last run stopped before it gave an answer. */
   interrupted?: boolean;
@@ -44,10 +52,14 @@ export interface MessageListProps {
 
 function MessageParts({
   message,
+  tools,
+  decisions,
   disabled,
   onDecide,
 }: {
   message: ChatUiMessage;
+  tools?: Record<string, ChatTool>;
+  decisions?: Record<string, DecisionInfo>;
   disabled: boolean;
   onDecide(callId: string, approved: boolean): void;
 }) {
@@ -76,11 +88,17 @@ function MessageParts({
             <ApprovalCard
               key={tool.toolCallId}
               part={tool}
+              tool={tools?.[toolIdOf(tool)]}
+              decision={decisions?.[tool.toolCallId]}
               disabled={disabled}
               onDecide={onDecide}
             />
           ) : (
-            <ToolCallRow key={tool.toolCallId} part={tool} />
+            <ToolCallRow
+              key={tool.toolCallId}
+              part={tool}
+              tool={tools?.[toolIdOf(tool)]}
+            />
           );
         }
         return null;
@@ -117,6 +135,8 @@ export function MessageList(props: MessageListProps) {
         <div key={message.id} style={{ display: 'contents' }}>
           <MessageParts
             message={message}
+            tools={props.tools}
+            decisions={props.decisions}
             disabled={props.disabled || props.busy}
             onDecide={props.onDecide}
           />

@@ -55,3 +55,12 @@ export function isLastDecision(
 export function hasWaitingCall(messages: readonly ChatUiMessage[]): boolean {
   return awaitingCalls(messages).length > 0;
 }
+
+/** The ids of the calls that have a decision, in any step of any message. */
+export function decidedCalls(messages: readonly ChatUiMessage[]): string[] {
+  return messages
+    .flatMap(message => message.parts)
+    .filter(isToolUIPart)
+    .filter(part => (part as ToolPart).approval?.approved !== undefined)
+    .map(part => (part as ToolPart).toolCallId);
+}

@@ -32,6 +32,7 @@ import {
   FollowSession,
   GetSession,
   ListSessions,
+  ListSessionTools,
   ListToolsets,
   ResumeRun,
   RunSupervisor,
@@ -126,6 +127,7 @@ export function createHost(ports: HostPorts) {
       cancelRun: new CancelRun({ sessions, runs, supervisor }),
       followSession: new FollowSession({ sessions, runs, items, supervisor }),
       listToolsets: new ListToolsets({ agents }),
+      listSessionTools: new ListSessionTools({ sessions, tools: ports.tools }),
       expireStaleRuns: new ExpireStaleRuns({ runs, logger }),
     },
   };

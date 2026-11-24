@@ -235,6 +235,28 @@ describe('the HTTP routes', () => {
       });
     });
 
+    it('lists the tools of a session for its owner only', async () => {
+      const b = backend([]);
+      const id = await newSession(b);
+      const res = await as(
+        JANE,
+        request(b.app).get(`/sessions/${id}/tools`),
+      ).expect(200);
+      expect(res.body.items).toContainEqual({
+        id: 'demo:write',
+        title: 'demo:write',
+        description: 'The action demo:write',
+        readOnly: false,
+      });
+      expect(res.body.items).toContainEqual(
+        expect.objectContaining({ id: 'demo:read', readOnly: true }),
+      );
+      await as(MALLORY, request(b.app).get(`/sessions/${id}/tools`)).expect(
+        404,
+      );
+      await as(JANE, request(b.app).get('/sessions/nope/tools')).expect(404);
+    });
+
     it('does not delete a session while a run has not ended (409)', async () => {
       const b = backend([waitForAbort]);
       const id = await newSession(b);

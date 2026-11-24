@@ -226,3 +226,19 @@ export function lastUserText(items: readonly ChatItem[]): string | undefined {
   }
   return undefined;
 }
+
+/** Who decided a call, and when. */
+export type DecisionInfo = { by: string; at: string };
+
+/** The decisions of the log by call id, as the `approval` items say. */
+export function decisionsOf(
+  items: readonly ChatItem[],
+): Record<string, DecisionInfo> {
+  const decisions: Record<string, DecisionInfo> = {};
+  for (const item of items) {
+    if (item.kind === 'approval') {
+      decisions[item.callId] = { by: item.decidedBy, at: item.createdAt };
+    }
+  }
+  return decisions;
+}

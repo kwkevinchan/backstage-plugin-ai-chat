@@ -37,6 +37,7 @@ export type ChatItemBody =
   | {
       kind: 'user_message';
       text: string;
+      page?: ChatPageContext;
     }
   | {
       kind: 'agent_message';
@@ -121,6 +122,7 @@ export const chatPaths: {
   decision: (id: string, callId: string) => string;
   resume: (id: string) => string;
   stream: (id: string) => string;
+  tools: (id: string) => string;
   toolsets: () => string;
 };
 
@@ -209,6 +211,21 @@ export interface ChatSessionDetail {
 export interface ChatSessionList {
   // (undocumented)
   items: ChatSession[];
+}
+
+// @public
+export interface ChatTool {
+  description: string;
+  id: string;
+  readOnly: boolean;
+  // (undocumented)
+  title?: string;
+}
+
+// @public
+export interface ChatToolList {
+  // (undocumented)
+  items: ChatTool[];
 }
 
 // @public (undocumented)

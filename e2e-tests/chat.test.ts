@@ -121,7 +121,7 @@ test('read-only call, approval, rejection', async ({ page }) => {
   // An action that changes something waits for the user.
   await say(page, 'restart payments');
   const card = page.getByRole('region', {
-    name: 'Approval: Restart service',
+    name: 'Approval: Restart a service',
   });
   await expect(card).toBeVisible();
   await expect(card.getByText('Waiting for approval')).toBeVisible();
@@ -130,7 +130,7 @@ test('read-only call, approval, rejection', async ({ page }) => {
   await shot('03-approval-card');
 
   await card.getByRole('button', { name: 'Allow' }).click();
-  await expect(card.getByText('Allowed.')).toBeVisible();
+  await expect(card.getByText(ALLOWED)).toBeVisible();
   await expect(card.getByText('Done')).toBeVisible();
   await expect(card.getByRole('button', { name: 'Allow' })).toHaveCount(0);
   await card.locator('summary').click();
@@ -145,11 +145,13 @@ test('read-only call, approval, rejection', async ({ page }) => {
   await page.getByRole('button', { name: 'New chat' }).click();
   await say(page, 'restart search');
   const second = page.getByRole('region', {
-    name: 'Approval: Restart service',
+    name: 'Approval: Restart a service',
   });
-  await expect(second.getByRole('button', { name: 'Reject' })).toBeVisible();
-  await second.getByRole('button', { name: 'Reject' }).click();
-  await expect(second.getByText('Rejected.')).toBeVisible();
+  await expect(second.getByRole('button', { name: 'Deny' })).toBeVisible();
+  await second.getByRole('button', { name: 'Deny' }).click();
+  await expect(
+    second.getByText(/Denied by user:default\/guest at .+\./),
+  ).toBeVisible();
   await expect(page.getByText('I did not run that action')).toBeVisible();
   await shot('05-rejected');
 
@@ -168,13 +170,16 @@ test('read-only call, approval, rejection', async ({ page }) => {
   await page.getByRole('button', { name: 'New chat' }).click();
   await say(page, 'catalog entities');
   const catalogRow = page.locator('details', {
-    hasText: 'Query catalog entities',
+    hasText: 'Query Catalog Entities',
   });
   await expect(catalogRow.getByText('Done')).toBeVisible();
   await shot('07-catalog-action');
 });
 
-const card = (page: Page, title = 'Restart service') =>
+/** The line of a card after Allow, with who decided it when the page knows. */
+const ALLOWED = /^Allowed( by .+ at .+)?\.$/;
+
+const card = (page: Page, title = 'Restart a service') =>
   page.getByRole('region', { name: `Approval: ${title}` });
 
 test('reload keeps the stored result, and the session has its own URL', async ({
@@ -228,7 +233,7 @@ test('two approvals: one decision survives a reload and is not sent again', asyn
 
   // Deciding one call stores the decision; the other still waits.
   await cards.first().getByRole('button', { name: 'Allow' }).click();
-  await expect(cards.first().getByText('Allowed.')).toBeVisible();
+  await expect(cards.first().getByText(ALLOWED)).toBeVisible();
   await expect(cards.getByRole('button', { name: 'Allow' })).toHaveCount(1);
   expect(decisions).toHaveLength(1);
 
@@ -269,15 +274,15 @@ test('reload while an allowed call runs: the page follows the run to the result'
   await signIn(page);
 
   await say(page, 'slow restart payments');
-  const slow = card(page, 'Restart service slowly');
+  const slow = card(page, 'Restart a service, slowly');
   await expect(slow).toBeVisible();
   await slow.getByRole('button', { name: 'Allow' }).click();
-  await expect(slow.getByText('Allowed.')).toBeVisible();
+  await expect(slow.getByText(ALLOWED)).toBeVisible();
 
   // The action takes a few seconds: the run goes on while the page reloads.
   await page.reload();
   await expect(
-    card(page, 'Restart service slowly').getByText('Done'),
+    card(page, 'Restart a service, slowly').getByText('Done'),
   ).toBeVisible();
   await expect(
     page.getByText('Here is the result of the action'),
@@ -336,14 +341,14 @@ test('Stop ends a run that streams and a run that waits for a decision', async (
   await page.getByRole('button', { name: 'Stop' }).click();
   await expect(
     page
-      .locator('details', { hasText: 'Restart service' })
+      .locator('details', { hasText: 'Restart a service' })
       .getByText('Did not run'),
   ).toBeVisible();
   await expect(page.getByRole('button', { name: 'Allow' })).toHaveCount(0);
   await shot('13-stopped-while-waiting');
 });
 
-test('opened for an entity: every message carries the entity', async ({
+test('opened for an entity: the model is told which entity', async ({
   page,
 }) => {
   await signIn(page);
@@ -355,20 +360,30 @@ test('opened for an entity: every message carries the entity', async ({
   });
 
   await page.goto('/ai-chat?entityRef=component:default/example-payments');
+  await say(page, 'where am i');
+  // The scripted model repeats what it was told about the page.
+  await expect(
+    page.getByText(
+      /The user is on the page of component:default\/example-payments \(\/ai-chat\/[\w-]+\)\./,
+    ),
+  ).toBeVisible();
   await say(page, 'list services');
   await expect(
     page.locator('details', { hasText: 'List services' }).getByText('Done'),
   ).toBeVisible();
-  await say(page, 'list services');
-  await expect(page.getByText('Here is the result of the action')).toHaveCount(
-    2,
-  );
 
   expect(bodies).toHaveLength(2);
   for (const body of bodies) {
     expect(body.page?.entityRef).toBe('component:default/example-payments');
     expect(body.page?.path).toMatch(/^\/ai-chat\/[\w-]+$/);
   }
+
+  // Without an entity the model is told the page only.
+  await page.goto('/ai-chat');
+  await say(page, 'where am i');
+  await expect(
+    page.getByText(/The user is on the page \/ai-chat\/[\w-]+\./),
+  ).toBeVisible();
 });
 
 test('switching off a toolset takes its tools away from the session', async ({

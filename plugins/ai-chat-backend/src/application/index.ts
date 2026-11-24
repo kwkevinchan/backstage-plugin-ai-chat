@@ -34,6 +34,8 @@ export type { FollowHandle } from './usecases/FollowSession';
 export { GetSession } from './usecases/GetSession';
 export type { SessionView } from './usecases/GetSession';
 export { ListSessions } from './usecases/ListSessions';
+export { ListSessionTools } from './usecases/ListSessionTools';
+export type { SessionTool } from './usecases/ListSessionTools';
 export { ListToolsets } from './usecases/ListToolsets';
 export { ResumeRun } from './usecases/ResumeRun';
 export { SendMessage } from './usecases/SendMessage';

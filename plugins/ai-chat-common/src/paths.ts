@@ -33,6 +33,7 @@ export const chatPaths = {
     )}/decision`,
   resume: (id: string) => `/sessions/${encodeURIComponent(id)}/resume`,
   stream: (id: string) => `/sessions/${encodeURIComponent(id)}/stream`,
+  tools: (id: string) => `/sessions/${encodeURIComponent(id)}/tools`,
   toolsets: () => '/toolsets',
 };
 

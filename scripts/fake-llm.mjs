@@ -24,6 +24,7 @@
  *   user: "restart <name>"    -> calls the tool that ends in `restart-service`
  *   user: "restart both"      -> calls `restart-service` for two services in one answer
  *   user: "slow restart <n>"  -> calls the tool that ends in `restart-service-slowly`
+ *   user: "where ..."         -> says what the model was told about the page of the user
  *   user: "story"             -> a long text that arrives word by word
  *   user: "catalog ..."       -> calls the tool that ends in `query-catalog-entities`
  *   user: "loop ..."          -> calls `list-services` again after every result
@@ -41,6 +42,17 @@ import { fileURLToPath } from 'node:url';
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const STORY = Array.from({ length: 60 }, (_, i) => `word${i + 1}`).join(' ');
+
+/**
+ * A message of the user may start with one line that says where the user is
+ * ("The user is on the page of ..."), then an empty line, then the text.
+ */
+function splitContext(content) {
+  const match = /^(The user is on [^\n]*)\n\n([\s\S]*)$/.exec(content);
+  return match
+    ? { context: match[1], text: match[2] }
+    : { context: undefined, text: content };
+}
 
 function findTool(tools, suffix) {
   return (tools ?? []).find(t => t.function?.name?.endsWith(suffix))?.function
@@ -78,7 +90,7 @@ export function scriptedReply(body) {
       return { text: `The action failed. ${content.slice(0, 200)}` };
     }
     const lastUser = [...messages].reverse().find(m => m.role === 'user');
-    if (/^loop/i.test(String(lastUser?.content ?? ''))) {
+    if (/^loop/i.test(splitContext(String(lastUser?.content ?? '')).text)) {
       return call('list-services', {});
     }
     return {
@@ -86,7 +98,14 @@ export function scriptedReply(body) {
     };
   }
 
-  const text = String(last?.content ?? '');
+  const { context, text } = splitContext(String(last?.content ?? ''));
+  if (/^where/i.test(text)) {
+    return {
+      text: context
+        ? `You asked where you are. ${context}`
+        : 'I do not know where you are.',
+    };
+  }
   if (/^list/i.test(text)) return call('list-services', {});
   if (/^restart both/i.test(text)) {
     return call('restart-service', { name: 'search' }, { name: 'billing' });

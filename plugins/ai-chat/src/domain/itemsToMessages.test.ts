@@ -17,6 +17,7 @@
 import { messageIdOfRun } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import { call, detail, items, run, user } from '../testData';
 import {
+  decisionsOf,
   lastRunInterrupted,
   lastUserText,
   itemsToMessages,
@@ -258,6 +259,23 @@ describe('lastRunInterrupted', () => {
       ),
     ).toBe(false);
     expect(lastRunInterrupted(detail())).toBe(false);
+  });
+});
+
+describe('decisionsOf', () => {
+  it('names who decided each call and when', () => {
+    expect(
+      decisionsOf(
+        items(user('a'), call('c1'), {
+          kind: 'approval',
+          callId: 'c1',
+          decision: 'deny',
+          decidedBy: 'user:default/guest',
+        }),
+      ),
+    ).toEqual({
+      c1: { by: 'user:default/guest', at: '2026-01-01T10:00:00.000Z' },
+    });
   });
 });
 

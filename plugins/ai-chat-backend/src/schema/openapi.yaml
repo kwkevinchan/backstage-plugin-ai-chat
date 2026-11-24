@@ -106,7 +106,7 @@ components:
       required: [error]
     ChatPageContext:
       type: object
-      description: The page the user is on; the model gets it with the message.
+      description: The page the user is on; the model gets it as one line before the text of the message, and the log keeps it with the message.
       properties:
         path:
           type: string
@@ -200,6 +200,8 @@ components:
               const: user_message
             text:
               type: string
+            page:
+              $ref: '#/components/schemas/ChatPageContext'
           required: [kind, text]
     AgentMessageItem:
       allOf:
@@ -359,6 +361,20 @@ components:
           type: boolean
           description: The run waits for an approval and no call is left to decide, so the loop did not start after the last decision. `POST /sessions/{id}/resume` carries it on.
       required: [session, items, awaitingDecision, resumable]
+    ChatTool:
+      type: object
+      properties:
+        id:
+          type: string
+          description: The ID of the action in the actions registry; it names a call.
+        title:
+          type: string
+        description:
+          type: string
+        readOnly:
+          type: boolean
+          description: Whether the tool only reads. Any other tool asks for approval.
+      required: [id, description, readOnly]
     ChatToolset:
       type: object
       properties:
@@ -672,6 +688,31 @@ paths:
           $ref: '#/components/responses/NoContent'
         '400':
           $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /sessions/{id}/tools:
+    parameters:
+      - $ref: '#/components/parameters/sessionId'
+    get:
+      operationId: listSessionTools
+      tags: [Sessions]
+      summary: List the tools that the session offers to the model.
+      description: Listed with the credentials of the signed-in user, from the toolsets that are switched on in the session. Only the owner reads it; anyone else gets 404. The screen uses it to show a call with its title, its description and whether it changes anything.
+      responses:
+        '200':
+          description: The tools.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChatTool'
+                required: [items]
         '403':
           $ref: '#/components/responses/Error'
         '404':

@@ -101,6 +101,7 @@ export function mockApi(
     updateSession: jest.fn().mockResolvedValue(session),
     deleteSession: jest.fn().mockResolvedValue(undefined),
     listToolsets: jest.fn().mockResolvedValue([]),
+    listSessionTools: jest.fn().mockResolvedValue([]),
     sendMessage: jest.fn(),
     decide: jest.fn(),
     resume: jest.fn(),

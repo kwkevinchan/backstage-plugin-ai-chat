@@ -68,7 +68,13 @@ export class SendMessage {
       );
       await items.append(
         session.id,
-        [{ kind: 'user_message', text: input.text }],
+        [
+          {
+            kind: 'user_message',
+            text: input.text,
+            ...(input.page && { page: input.page }),
+          },
+        ],
         run.fence,
       );
       return supervisor.launch(run, request);

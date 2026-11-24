@@ -22,6 +22,7 @@ import type {
 import type { AiChatApi } from '../api';
 import { describeError } from '../adapters/describeError';
 import { useSessionChat } from '../application/useSessionChat';
+import { useSessionTools } from '../application/useSessionTools';
 import { usePageContext } from '../application/usePageContext';
 import { Composer } from './Composer';
 import { MessageList } from './MessageList';
@@ -49,6 +50,7 @@ export function SessionView(props: SessionViewProps) {
     onChanged: props.onChanged,
   });
   const [enabled, setEnabled] = useState(detail.session.enabledToolsets);
+  const tools = useSessionTools(api, detail.session.id, enabled.join(','));
   const [toolsetError, setToolsetError] = useState<string>();
 
   const changeToolsets = useCallback(
@@ -95,6 +97,8 @@ export function SessionView(props: SessionViewProps) {
         busy={chat.busy}
         disabled={chat.deciding}
         notice={chat.notice}
+        tools={tools}
+        decisions={chat.decisions}
         error={chat.error}
         interrupted={chat.interrupted && chat.canResend}
         onDecide={chat.decide}

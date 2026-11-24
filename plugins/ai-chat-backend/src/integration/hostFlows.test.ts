@@ -94,6 +94,29 @@ describe('the host on a real database', () => {
       expect(a.supervisor.activeRunIds()).toEqual([]);
     });
 
+    it('keeps the page of the message with it, and the model reads where the user is (B-01)', async () => {
+      const a = backend([[say('Hello')]]);
+      const session = await world.newSession();
+      const page = { path: '/ai-chat/x', entityRef: 'component:default/shop' };
+      const handle = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'Hi',
+        page,
+      });
+      await drain(handle);
+      const [message] = await world.items.read(session.id);
+      expect(message).toMatchObject({ kind: 'user_message', text: 'Hi', page });
+      expect(a.model.inputs[0].messages[0]).toEqual({
+        role: 'user',
+        content:
+          'The user is on the page of component:default/shop (/ai-chat/x).\n\nHi',
+      });
+      expect(JSON.stringify(a.model.inputs[0].system)).not.toContain(
+        'component:default/shop',
+      );
+    });
+
     it('is refused for a user who is not the owner, and writes nothing', async () => {
       const a = backend([[say('Hello')]]);
       const session = await world.newSession();

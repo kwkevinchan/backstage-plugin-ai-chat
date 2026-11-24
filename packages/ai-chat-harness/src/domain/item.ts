@@ -48,8 +48,25 @@ export type ToolResultStatus =
   | 'invalid'
   | 'unknown';
 
-/** @public */
-export type UserMessageBody = { kind: 'user_message'; text: string };
+/**
+ * The page the user was on when they sent a message (B-01): the path, and the
+ * entity when the page is the page of one.
+ *
+ * @public
+ */
+export type PageContext = { path: string; entityRef?: string };
+
+/**
+ * The message of the user. `page` is where the user was; `buildModelInput`
+ * tells the model with one line before the text.
+ *
+ * @public
+ */
+export type UserMessageBody = {
+  kind: 'user_message';
+  text: string;
+  page?: PageContext;
+};
 
 /**
  * The text of the model in one step. It is written in the same append as the

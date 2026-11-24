@@ -174,6 +174,52 @@ describe('useSessionChat', () => {
     expect(api.resume).not.toHaveBeenCalled();
   });
 
+  it('reads who decided a call from the log: the decisions of the stored items, and one made here', async () => {
+    const api = mockApi();
+    api.decide.mockResolvedValue(
+      streamResponse([
+        { type: 'start', messageId: 'run_r-1' },
+        { type: 'tool-approval-response', approvalId: 'c2', approved: true },
+        { type: 'tool-output-available', toolCallId: 'c2', output: 1 },
+        runChunks('completed'),
+        { type: 'finish', finishReason: 'stop' },
+      ]),
+    );
+    api.getSession.mockResolvedValue(
+      detail({
+        items: items(
+          user('go'),
+          call('c1'),
+          call('c2'),
+          {
+            ...approver,
+            callId: 'c1',
+            decision: 'allow',
+          },
+          {
+            ...approver,
+            callId: 'c2',
+            decision: 'allow',
+          },
+        ),
+      }),
+    );
+    const { result } = render(api, twoCalls(true));
+    // The stored decision is known at once.
+    expect(result.current.decisions).toEqual({
+      c1: { by: 'user:default/guest', at: '2026-01-01T10:00:00.000Z' },
+    });
+
+    await act(() => result.current.decide('c2', true));
+
+    await waitFor(() =>
+      expect(Object.keys(result.current.decisions).sort()).toEqual([
+        'c1',
+        'c2',
+      ]),
+    );
+  });
+
   it('follows the run through the stream when the last decision got JSON', async () => {
     const api = mockApi();
     api.decide.mockResolvedValue(jsonResponse({ approved: true }));

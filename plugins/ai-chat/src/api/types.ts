@@ -18,6 +18,7 @@ import { createApiRef } from '@backstage/core-plugin-api';
 import type {
   ChatSession,
   ChatSessionDetail,
+  ChatTool,
   ChatToolset,
   CreateChatSessionRequest,
   DecideToolCallRequest,
@@ -43,6 +44,8 @@ export interface AiChatApi {
   ): Promise<ChatSession>;
   deleteSession(id: string): Promise<void>;
   listToolsets(): Promise<ChatToolset[]>;
+  /** The tools the session offers now, to show a call with its title and what it does. */
+  listSessionTools(id: string): Promise<ChatTool[]>;
   /** Starts a run: the response is its stream. */
   sendMessage(
     id: string,

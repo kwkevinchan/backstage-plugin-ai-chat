@@ -43,14 +43,76 @@ describe('ApprovalCard', () => {
       JSON.stringify({ name: 'payments', force: true }, null, 2),
     );
     expect(screen.getByRole('button', { name: 'Allow' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Reject' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeEnabled();
+  });
+
+  it('shows the title and the description of the tool, and why it asks', () => {
+    const tool = {
+      id: 'dev-actions:restart-service',
+      title: 'Restart a service',
+      description: 'Restarts one of the example services.',
+      readOnly: false,
+    };
+    const { rerender } = render(
+      <ApprovalCard part={waiting} tool={tool} onDecide={jest.fn()} />,
+    );
+    expect(screen.getByText('Restart a service')).toBeInTheDocument();
+    expect(
+      screen.getByRole('region', { name: 'Approval: Restart a service' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Restarts one of the example services.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /This action changes something. It runs only after you approve/,
+      ),
+    ).toBeInTheDocument();
+
+    rerender(
+      <ApprovalCard
+        part={waiting}
+        tool={{ ...tool, readOnly: true }}
+        onDecide={jest.fn()}
+      />,
+    );
+    expect(
+      screen.getByText(/policy of your administrator asks/),
+    ).toBeInTheDocument();
+  });
+
+  it('says nothing about why it asks when the tool is not known', () => {
+    render(<ApprovalCard part={waiting} onDecide={jest.fn()} />);
+    expect(screen.queryByText(/changes something/)).toBeNull();
+    expect(screen.queryByText(/policy of your administrator/)).toBeNull();
+  });
+
+  it('shows who decided and when, when the log says', () => {
+    render(
+      <ApprovalCard
+        part={part({
+          state: 'output-available',
+          output: 1,
+          approval: { id: 'c1', approved: true },
+        })}
+        decision={{ by: 'user:default/guest', at: '2026-01-01T10:00:00.000Z' }}
+        onDecide={jest.fn()}
+      />,
+    );
+    expect(
+      screen.getByText(
+        `Allowed by user:default/guest at ${new Date(
+          '2026-01-01T10:00:00.000Z',
+        ).toLocaleString()}.`,
+      ),
+    ).toBeInTheDocument();
   });
 
   it('calls the handler with the call id and the decision', async () => {
     const onDecide = jest.fn();
     render(<ApprovalCard part={waiting} onDecide={onDecide} />);
     await userEvent.click(screen.getByRole('button', { name: 'Allow' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Reject' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Deny' }));
     expect(onDecide.mock.calls).toEqual([
       ['c1', true],
       ['c1', false],
@@ -60,7 +122,7 @@ describe('ApprovalCard', () => {
   it('disables the buttons while a decision is being sent', () => {
     render(<ApprovalCard part={waiting} disabled onDecide={jest.fn()} />);
     expect(screen.getByRole('button', { name: 'Allow' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Reject' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeDisabled();
   });
 
   it('shows what was decided, and no buttons, after the decision', () => {
@@ -89,8 +151,8 @@ describe('ApprovalCard', () => {
         onDecide={jest.fn()}
       />,
     );
-    expect(screen.getByText('Rejected')).toBeInTheDocument();
-    expect(screen.getByText('Rejected.')).toBeInTheDocument();
+    expect(screen.getByText('Denied')).toBeInTheDocument();
+    expect(screen.getByText('Denied.')).toBeInTheDocument();
   });
 
   it('shows a call that was allowed and has no result yet', () => {

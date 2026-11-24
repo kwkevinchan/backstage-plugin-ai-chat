@@ -226,6 +226,7 @@ function describe(
   const inputSchema = toInputSchema(action.schema.input);
   return {
     id: action.id,
+    title: action.title,
     description: `${action.title}: ${action.description}`,
     inputSchema,
     schemaHash: hashOf(inputSchema),

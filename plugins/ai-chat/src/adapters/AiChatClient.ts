@@ -20,6 +20,7 @@ import {
   chatPaths,
   type ChatSession,
   type ChatSessionDetail,
+  type ChatTool,
   type ChatToolset,
   type CreateChatSessionRequest,
   type DecideToolCallRequest,
@@ -87,6 +88,11 @@ export class AiChatClient implements AiChatApi {
 
   async listToolsets(): Promise<ChatToolset[]> {
     const response = await this.request(chatPaths.toolsets());
+    return (await response.json()).items;
+  }
+
+  async listSessionTools(id: string): Promise<ChatTool[]> {
+    const response = await this.request(chatPaths.tools(id));
     return (await response.json()).items;
   }
 

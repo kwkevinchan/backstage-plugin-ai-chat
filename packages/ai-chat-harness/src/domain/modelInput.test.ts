@@ -77,6 +77,48 @@ const content = (message: ModelMessage | undefined) =>
   message && JSON.parse(message.content);
 
 describe('buildModelInput', () => {
+  describe('page of the user (B-01)', () => {
+    it('puts one line before the text of a message that has a page, not in the system prompt', () => {
+      const input = build([
+        {
+          ...user('restart it'),
+          page: { path: '/ai-chat/s1', entityRef: 'component:default/shop' },
+        } as ItemBody,
+      ]);
+      expect(input.messages[0]).toEqual({
+        role: 'user',
+        content:
+          'The user is on the page of component:default/shop (/ai-chat/s1).\n\nrestart it',
+      });
+      expect(input.system).not.toContain('component:default/shop');
+    });
+
+    it('names only the path when the page has no entity', () => {
+      const input = build([
+        { ...user('hi'), page: { path: '/catalog' } } as ItemBody,
+      ]);
+      expect(input.messages[0].content).toBe(
+        'The user is on the page /catalog.\n\nhi',
+      );
+    });
+
+    it('leaves a message without a page as written, and gives each message its own page', () => {
+      const input = build([
+        user('plain'),
+        agentSays('ok'),
+        {
+          ...user('second'),
+          page: { path: '/x', entityRef: 'component:default/b' },
+        } as ItemBody,
+      ]);
+      expect(input.messages.map(m => m.content)).toEqual([
+        'plain',
+        'ok',
+        'The user is on the page of component:default/b (/x).\n\nsecond',
+      ]);
+    });
+  });
+
   describe('system and tools', () => {
     it('puts the prompt of the agent first, then the notice, then the context', () => {
       expect(build([user()], ['Context A', 'Context B']).system).toBe(

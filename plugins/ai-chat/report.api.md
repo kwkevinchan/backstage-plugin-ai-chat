@@ -7,6 +7,7 @@ import { ApiRef } from '@backstage/frontend-plugin-api';
 import { BackstagePlugin } from '@backstage/core-plugin-api';
 import type { ChatSession } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ChatSessionDetail } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { ChatTool } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ChatToolset } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { CreateChatSessionRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { DecideToolCallRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
@@ -33,6 +34,7 @@ export interface AiChatApi {
   getSession(id: string): Promise<ChatSessionDetail>;
   // (undocumented)
   listSessions(): Promise<ChatSession[]>;
+  listSessionTools(id: string): Promise<ChatTool[]>;
   // (undocumented)
   listToolsets(): Promise<ChatToolset[]>;
   resume(

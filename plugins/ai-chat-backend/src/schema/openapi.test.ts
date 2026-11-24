@@ -103,6 +103,7 @@ describe('the OpenAPI spec', () => {
       chatPaths.decision('{id}', '{callId}'),
       chatPaths.resume('{id}'),
       chatPaths.stream('{id}'),
+      chatPaths.tools('{id}'),
       chatPaths.toolsets(),
     ].map(path => decodeURIComponent(path));
     expect(paths.sort()).toEqual(Object.keys(spec.paths).sort());

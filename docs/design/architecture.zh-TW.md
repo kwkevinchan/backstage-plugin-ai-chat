@@ -142,7 +142,11 @@ packages/ai-chat-harness/src/
 
 ```ts
 export type ItemBody =
-  | { kind: 'user_message'; text: string }
+  | {
+      kind: 'user_message';
+      text: string;
+      page?: { path: string; entityRef?: string };
+    } // 規格 B-01
   | { kind: 'agent_message'; text: string }
   | {
       kind: 'tool_call';
@@ -209,7 +213,9 @@ export type NextAction =
   | { type: 'complete' }
   | { type: 'stop'; reason: 'max_steps' | 'max_tool_calls' | 'timeout' };
 
-// 規格 A-05、H-09
+// 規格 A-05、H-09、B-01：user_message 有 page 時，那則 user 訊息的內容前面加一行
+// 「The user is on the page of <entityRef> (<path>).」（沒有 entity 時「The user is on the page <path>.」），
+// 空一行後是原文；這一行在訊息裡，不在 system prompt。
 export function buildModelInput(
   items: readonly Item[],
   agent: AgentDefinition,
@@ -361,7 +367,7 @@ export interface CallContext {
   sessionId: string;
   runId: string;
   principal: unknown;
-  page?: { path: string; entityRef?: string }; // 規格 B-01，不存進紀錄
+  page?: { path: string; entityRef?: string }; // 規格 B-01：這個請求的頁面。送訊息的請求另外存在 user_message
 }
 
 /** 寫入時帶著，資料庫用它確認「這個 Run 的租約還是我的」。 */
@@ -685,7 +691,13 @@ export class SendMessage {
       const request = await buildRunRequest(/* agent、政策、限制、用量 */);
       await this.deps.items.append(
         session.id,
-        [{ kind: 'user_message', text: input.text }],
+        [
+          {
+            kind: 'user_message',
+            text: input.text,
+            ...(input.page && { page: input.page }),
+          },
+        ],
         run.fence,
       );
       return this.deps.supervisor.launch(run, request);
@@ -961,22 +973,23 @@ SQLite 和 PostgreSQL 對唯一索引裡的空值的行為相同：空值之間�
 
 路徑都在 `/api/ai-chat` 底下。
 
-| 方法和路徑                                                                    | Use case                  | 回應                                              | 分期                      |
-| ----------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------- | ------------------------- |
-| `GET /sessions`                                                               | ListSessions              | JSON                                              | P1                        |
-| `POST /sessions`                                                              | CreateSession             | JSON                                              | P1                        |
-| `GET /sessions/:id`                                                           | GetSession                | JSON：Session、Run 狀態、Item                     | P1                        |
-| `PATCH /sessions/:id`                                                         | UpdateSession             | JSON                                              | P1（Toolset）、P2（其他） |
-| `DELETE /sessions/:id`                                                        | DeleteSession             | 204                                               | P1                        |
-| `POST /sessions/:id/runs`                                                     | SendMessage               | SSE                                               | P1                        |
-| `POST /sessions/:id/runs/:runId/cancel`                                       | CancelRun                 | 202；Run 已結束時 409                             | P1                        |
-| `POST /sessions/:id/tool-calls/:callId/decision`                              | DecideApproval            | 還有別的要決定：JSON。全部決定了：SSE             | P1                        |
-| `POST /sessions/:id/resume`                                                   | ResumeRun                 | SSE；沒有東西可接續時 204                         | P1                        |
-| `GET /sessions/:id/stream?afterSeq=`（`afterSeq` 選用）                       | FollowSession             | SSE；這一台跑的 Run 是 running 時才串流，否則 204 | P1（跨 backend 是 P2）    |
-| `GET/POST /sessions/:id/shares`、`PATCH/DELETE /sessions/:id/shares/:shareId` | ShareSession、UpdateShare | JSON                                              | P2                        |
-| `POST /sessions/:id/fork`                                                     | ForkSession               | JSON                                              | P2                        |
-| `GET /toolsets`                                                               | ListToolsets              | JSON                                              | P1                        |
-| `GET /agents`                                                                 | AgentCatalog              | JSON                                              | P3                        |
+| 方法和路徑                                                                    | Use case                  | 回應                                                                    | 分期                      |
+| ----------------------------------------------------------------------------- | ------------------------- | ----------------------------------------------------------------------- | ------------------------- |
+| `GET /sessions`                                                               | ListSessions              | JSON                                                                    | P1                        |
+| `POST /sessions`                                                              | CreateSession             | JSON                                                                    | P1                        |
+| `GET /sessions/:id`                                                           | GetSession                | JSON：Session、Run 狀態、Item                                           | P1                        |
+| `PATCH /sessions/:id`                                                         | UpdateSession             | JSON                                                                    | P1（Toolset）、P2（其他） |
+| `DELETE /sessions/:id`                                                        | DeleteSession             | 204                                                                     | P1                        |
+| `POST /sessions/:id/runs`                                                     | SendMessage               | SSE                                                                     | P1                        |
+| `POST /sessions/:id/runs/:runId/cancel`                                       | CancelRun                 | 202；Run 已結束時 409                                                   | P1                        |
+| `POST /sessions/:id/tool-calls/:callId/decision`                              | DecideApproval            | 還有別的要決定：JSON。全部決定了：SSE                                   | P1                        |
+| `POST /sessions/:id/resume`                                                   | ResumeRun                 | SSE；沒有東西可接續時 204                                               | P1                        |
+| `GET /sessions/:id/stream?afterSeq=`（`afterSeq` 選用）                       | FollowSession             | SSE；這一台跑的 Run 是 running 時才串流，否則 204                       | P1（跨 backend 是 P2）    |
+| `GET/POST /sessions/:id/shares`、`PATCH/DELETE /sessions/:id/shares/:shareId` | ShareSession、UpdateShare | JSON                                                                    | P2                        |
+| `POST /sessions/:id/fork`                                                     | ForkSession               | JSON                                                                    | P2                        |
+| `GET /toolsets`                                                               | ListToolsets              | JSON                                                                    | P1                        |
+| `GET /sessions/:id/tools`                                                     | ListSessionTools          | JSON：這個 Session 現在給模型的工具（id、title、description、readOnly） | P1                        |
+| `GET /agents`                                                                 | AgentCatalog              | JSON                                                                    | P3                        |
 
 Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use case、把結果交給 presenter。請求內容用 zod 檢查（`requestSchemas.ts`），不合格是 400。回應的型別在 `ai-chat-common`（前後端共用）。
 
@@ -1061,6 +1074,7 @@ plugins/ai-chat/src/
     useSessionChat.ts       一個 Session 的 useChat：還原、決定、接續、停止、重新讀取
     useSessionList.ts       Session 列表
     useToolsets.ts          GET /toolsets
+    useSessionTools.ts      GET /sessions/:id/tools
     usePageContext.ts       B-01：路徑和 entityRef
   ui/
     ChatPage.tsx            路由（SE-01）、Session 列表、新對話
@@ -1099,11 +1113,11 @@ plugins/ai-chat/src/
 
 **`data-notice`**。畫面用 `code` 查表顯示英文（`summarizing`、`context_trimmed`）；`text` 不用。`summary` Item 不顯示。
 
-**頁面上下文（B-01）**。`usePageContext` 從 router 讀路徑，從查詢參數 `entityRef` 讀 entity（entity 頁面連到 `…/ai-chat?entityRef=component:default/x`），每則訊息、決定、接續的請求都帶 `page`。`entityRef` 在導向 Session 網址時保留。
+**頁面上下文（B-01）**。`usePageContext` 從 router 讀路徑，從查詢參數 `entityRef` 讀 entity（entity 頁面連到 `…/ai-chat?entityRef=component:default/x`），每則訊息、決定、接續的請求都帶 `page`。`entityRef` 在導向 Session 網址時保留。後端把送訊息帶的 `page` 存在那則 `user_message`，`buildModelInput` 在那則訊息前加一行讓模型看到（見第 4 節）；決定和接續的 `page` 只給工具的 `CallContext`。
 
 **Toolset（T-11）**。`useToolsets` 讀 `GET /toolsets`；新對話用 `default` 的 Toolset 建立 Session，Session 裡的開關呼叫 `PATCH /sessions/:id`，失敗時還原。進行中的 Run 不能改。
 
-**工具的標題**。串流和紀錄只有 `toolId`（例如 `dev-actions:restart-service`），畫面把最後一段轉成標題（「Restart service」）。核准卡片因此沒有 action 的描述、`destructive` 標記和「誰、何時決定」；要的話，要由後端在 `tool-input-available` 帶 `title`，或加端點。
+**工具的標題、說明和「誰決定的」**。串流和紀錄只有 `toolId`，所以畫面用 `GET /sessions/:id/tools`（擁有者才能讀，用使用者的憑證列出這個 Session 現在給模型的工具）取得標題、說明和 `readOnly`，依 `toolId` 對應；列不到的工具（例如 Toolset 已關掉）把 `toolId` 最後一段轉成標題。卡片顯示標題和說明；等核准時依 `readOnly` 加一行「這個動作會改東西，要你核准才會執行」，唯讀工具（政策要求核准）則說明是管理員的政策。決定之後顯示「Allowed by <誰> at <時間>」，來源是 `approval` Item 的 `decidedBy` 和 `createdAt`；在這個分頁剛做的決定，串流沒有這兩項，Run 結束後讀一次 `GET /sessions/:id` 補上，補不到就只顯示結果。按鈕是 Allow 和 Deny。`destructive` 沒有來源，不顯示。
 
 做法和實測在 [protocol-check.zh-TW.md](protocol-check.zh-TW.md) 第 5 節。在 Backstage CLI 的 jest 裡可以 import `ai` 和 `@ai-sdk/react`，也能處理串流（那份文件的 5.3 節）。
 
