@@ -66,6 +66,11 @@ export {
 } from './queue';
 export { CREDENTIALS_MARGIN_SECONDS, runLimits } from './runLimits';
 export type { LeasedRun, Run } from './run';
+export {
+  DEFAULT_RETENTION_DAYS,
+  isSessionExpired,
+  sessionRetentionCutoff,
+} from './retention';
 export { assertOwner } from './session';
 export type { NewSession, Session, SessionPatch } from './session';
 export { buildSystemPrompt } from './systemPrompt';

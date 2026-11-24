@@ -20,6 +20,7 @@ import {
   DEFAULT_IMAGE_LIMITS,
   DEFAULT_INSERT_MAX_PER_RUN,
   DEFAULT_QUEUE_MAX_MESSAGES,
+  DEFAULT_RETENTION_DAYS,
   type ImageLimits,
 } from './domain';
 
@@ -54,6 +55,10 @@ export interface AiChatConfig {
     exclude: string[];
   };
   maxToolOutputChars: number;
+  /**
+   * Days a session is kept after its last change (SE-05). 0 deletes nothing.
+   */
+  retentionDays: number;
 }
 
 /**
@@ -211,6 +216,13 @@ export function readAiChatConfig(root: Config): AiChatConfig {
       'maxToolOutputChars',
       DEFAULT_MAX_TOOL_OUTPUT_CHARS,
       MIN_MAX_TOOL_OUTPUT_CHARS,
+    ),
+    // 0 keeps every session. Any other integer is a number of days.
+    retentionDays: positiveInt(
+      config,
+      'retention.days',
+      DEFAULT_RETENTION_DAYS,
+      0,
     ),
   };
 }

@@ -37,6 +37,7 @@ import {
   ListSessions,
   ListSessionTools,
   ListToolsets,
+  PurgeExpiredSessions,
   PurgeUnusedAttachments,
   QueueMessage,
   ReadAttachment,
@@ -63,7 +64,11 @@ import type {
   RunRepository,
   SessionRepository,
 } from './application/ports';
-import { DEFAULT_IMAGE_LIMITS, DEFAULT_QUEUE_MAX_MESSAGES } from './domain';
+import {
+  DEFAULT_IMAGE_LIMITS,
+  DEFAULT_QUEUE_MAX_MESSAGES,
+  DEFAULT_RETENTION_DAYS,
+} from './domain';
 
 /** The ports of the host: what the use cases and the supervisor run on. */
 export type HostPorts = {
@@ -90,6 +95,11 @@ export type HostPorts = {
   images?: ImageSettings;
   /** How often the supervisor renews the lease of a run; 10 seconds by default. */
   heartbeatMs?: number;
+  /**
+   * `aiChat.retention.days`. Sessions last changed longer ago than this are
+   * deleted. 0 keeps every session. Defaults to 90.
+   */
+  retentionDays?: number;
 };
 
 /**
@@ -221,6 +231,11 @@ export function createHost(ports: HostPorts) {
       purgeUnusedAttachments: new PurgeUnusedAttachments({
         attachments,
         clock,
+      }),
+      purgeExpiredSessions: new PurgeExpiredSessions({
+        sessions,
+        clock,
+        retentionDays: ports.retentionDays ?? DEFAULT_RETENTION_DAYS,
       }),
       expireStaleRuns: new ExpireStaleRuns({ runs, logger }),
     },
