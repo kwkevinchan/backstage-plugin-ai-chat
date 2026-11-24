@@ -131,16 +131,22 @@ module.exports = defineConfig({
       }
 
       // Published packages: no private workspaces; the core packages
-      // (backend, frontend, harness, common) depend on no other workspace; a module only on the core of its side.
+      // (backend, frontend, harness, common) depend on no other workspace,
+      // except that the backend depends on the harness (it implements the
+      // ports of the harness); a module only on the core of its side.
       if (isPublished && target && dep.type !== 'devDependencies') {
         // The harness and the common package are foundations too.
         const isCore = [BACKEND_CORE, FRONTEND_CORE, HARNESS, COMMON].includes(
           workspace.ident,
         );
+        const isBackendOnHarness =
+          workspace.ident === BACKEND_CORE && dep.ident === HARNESS;
         if (target.manifest.private === true) {
           dep.error(
             `Published packages must not depend on the private package ${dep.ident}`,
           );
+        } else if (isBackendOnHarness) {
+          // Allowed: the direction is backend to harness only.
         } else if (isCore) {
           dep.error(
             `${workspace.ident} must not depend on other packages of this repository (${dep.ident})`,

@@ -5011,7 +5011,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@kwkevinchan/ai-chat-harness@workspace:packages/ai-chat-harness":
+"@kwkevinchan/ai-chat-harness@workspace:^, @kwkevinchan/ai-chat-harness@workspace:packages/ai-chat-harness":
   version: 0.0.0-use.local
   resolution: "@kwkevinchan/ai-chat-harness@workspace:packages/ai-chat-harness"
   dependencies:
@@ -5032,6 +5032,7 @@ __metadata:
     "@backstage/config": "backstage:^"
     "@backstage/errors": "backstage:^"
     "@backstage/types": "backstage:^"
+    "@kwkevinchan/ai-chat-harness": "workspace:^"
     "@types/express": "npm:^4.17.6"
     "@types/json-schema": "npm:^7.0.15"
     "@types/supertest": "npm:^2.0.12"

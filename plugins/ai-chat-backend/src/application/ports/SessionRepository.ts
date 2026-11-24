@@ -1,0 +1,41 @@
+/*
+ * Copyright 2026 The backstage-plugin-ai-chat Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import type { NewSession, Session, SessionPatch } from '../../domain';
+
+/** Where the sessions are kept. */
+export interface SessionRepository {
+  /** Makes a session with a new id and an empty log. */
+  create(input: NewSession): Promise<Session>;
+
+  /** Throws `SessionNotFound` when there is none. */
+  get(sessionId: string): Promise<Session>;
+
+  /**
+   * The sessions of an owner, most recently updated first. Archived ones are
+   * left out unless `includeArchived` is set.
+   */
+  listByOwner(
+    ownerRef: string,
+    opts?: { includeArchived?: boolean; limit?: number },
+  ): Promise<Session[]>;
+
+  /** Throws `SessionNotFound` when there is none. */
+  update(sessionId: string, patch: SessionPatch): Promise<Session>;
+
+  /** Deletes the session with its runs and items. Throws `SessionNotFound` when there is none. */
+  delete(sessionId: string): Promise<void>;
+}
