@@ -41,8 +41,10 @@ export interface RunRepository extends RunControl {
   /**
    * Takes the lease of a run to carry it on: a run that waits for an approval
    * (it becomes `running`), or a running run whose lease is free or expired.
-   * Returns `undefined` when the run has ended or another backend holds a
-   * live lease. Of several callers at the same time, one gets the run.
+   * Each lease has its own fence: the one a run had before stops working, also
+   * when the same backend takes the run again. Returns `undefined` when the
+   * run has ended or a live lease is held (by anyone, the caller included).
+   * Of several callers at the same time, one gets the run.
    */
   acquireLease(runId: string): Promise<LeasedRun | undefined>;
 

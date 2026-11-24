@@ -62,18 +62,16 @@ const ACTIVE: RunStatus[] = ['running', 'waiting_approval'];
  * - One active run per session (H-03): `active_session_id` holds the session
  *   id while the run is active and is null after, and a unique index on it
  *   refuses a second active run.
- * - The lease: `lease_owner` and `lease_expires_at`. `leaseOwner` of this
- *   object names this backend; it takes every lease with that name. Each
- *   change of a lease is one UPDATE with the condition in its WHERE, so the
- *   database decides between callers at the same time.
+ * - The lease: `lease_owner` and `lease_expires_at`. Every `start` and every
+ *   `acquireLease` makes a new owner value with the `IdGenerator`, so each
+ *   lease has its own fence, also when the same backend takes the same run
+ *   again. Taking a lease is one UPDATE with the condition in its WHERE, so
+ *   the database decides between callers at the same time.
  */
 export class KnexRunRepository implements RunRepository {
-  readonly leaseOwner: string;
   private readonly leaseSeconds: number;
 
   /**
-   * @param options.leaseOwner - The name of this backend in the leases. A
-   * new id by default.
    * @param options.leaseSeconds - How long a lease or a heartbeat lasts. 30
    * by default.
    */
@@ -81,9 +79,8 @@ export class KnexRunRepository implements RunRepository {
     private readonly knex: Knex,
     private readonly clock: Clock,
     private readonly ids: IdGenerator,
-    options: { leaseOwner?: string; leaseSeconds?: number } = {},
+    options: { leaseSeconds?: number } = {},
   ) {
-    this.leaseOwner = options.leaseOwner ?? ids.next();
     this.leaseSeconds = options.leaseSeconds ?? 30;
   }
 
@@ -98,7 +95,7 @@ export class KnexRunRepository implements RunRepository {
       parent_run_id: opts.parentRunId ?? null,
       status: 'running',
       active_session_id: sessionId,
-      lease_owner: this.leaseOwner,
+      lease_owner: this.ids.next(),
       lease_expires_at: this.leaseEnd(now),
       steps_used: 0,
       tool_calls_used: 0,
@@ -141,12 +138,11 @@ export class KnexRunRepository implements RunRepository {
         builder
           .where('status', 'waiting_approval')
           .orWhereNull('lease_owner')
-          .orWhere('lease_owner', this.leaseOwner)
           .orWhere('lease_expires_at', '<', now.toISOString()),
       )
       .update({
         status: 'running',
-        lease_owner: this.leaseOwner,
+        lease_owner: this.ids.next(),
         lease_expires_at: this.leaseEnd(now),
       })
       .returning('*');
@@ -242,7 +238,10 @@ export class KnexRunRepository implements RunRepository {
   }
 
   private leased(run: Run): LeasedRun {
-    return { ...run, fence: { runId: run.id, leaseOwner: this.leaseOwner } };
+    if (run.leaseOwner === undefined) {
+      throw new Error(`Run ${run.id} has no lease owner`);
+    }
+    return { ...run, fence: { runId: run.id, leaseOwner: run.leaseOwner } };
   }
 }
 

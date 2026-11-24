@@ -25,23 +25,23 @@ import { KnexSessionRepository } from '../KnexSessionRepository';
 
 /**
  * A migrated database (SQLite, or PostgreSQL 16 when CI sets it; see
- * `createMigratedDb`) with the three repositories on it. `runs` is the
- * backend `backend-a`; `runsOf('backend-b')` is another backend on the same
- * database.
+ * `createMigratedDb`) with the three repositories on it. `newRuns()` is another
+ * backend on the same database.
  */
 export async function createPersistence() {
   const knex = await createMigratedDb();
   const clock = new FakeClock();
   const ids = new SequentialIdGenerator('id');
-  const runsOf = (leaseOwner: string, leaseSeconds?: number) =>
-    new KnexRunRepository(knex, clock, ids, { leaseOwner, leaseSeconds });
+  // Another backend on the same database.
+  const newRuns = (leaseSeconds?: number) =>
+    new KnexRunRepository(knex, clock, ids, { leaseSeconds });
   return {
     knex,
     clock,
     ids,
     sessions: new KnexSessionRepository(knex, clock, ids),
-    runs: runsOf('backend-a'),
-    runsOf,
+    runs: newRuns(),
+    newRuns,
     items: new KnexItemLog(knex, clock),
     cleanup: () => knex.destroy(),
   };

@@ -624,14 +624,15 @@ export class SendMessage {
 - **結束**：依照 `RunOutcome` 更新 Run 的狀態，清掉 `active_session_id`，通知 Notifier。
 - **關機**：停止接新的 Run。等進行中的 Run 最多 20 秒。沒跑完的中止並標成 `expired`（H-11）。
 
-租約在 `KnexRunRepository` 裡的規則（每一項都是一個帶條件的 UPDATE，由資料庫在同時進來的呼叫之間決定）：
+租約在 `KnexRunRepository` 裡的規則。同時進來的呼叫由資料庫決定：`start` 靠唯一索引，`heartbeat`、`recordUsage`、`acquireLease`、`requestCancel`、`expireStale` 各是一個帶條件的 UPDATE，`transition` 在 transaction 裡先 `SELECT … FOR UPDATE` 再 UPDATE：
 
-- `start`：新增 `running` 的 Run，`lease_owner` 是這一台，期限是現在加租約長度。`active_session_id` 的唯一索引擋下第二個進行中的 Run，adapter 把它轉成 `RunAlreadyActive`（H-03）。
+- `start`：INSERT 一個 `running` 的 Run，期限是現在加租約長度。`lease_owner` 是用 `IdGenerator` 產生的新值（UUID），每次 `start` 和每次 `acquireLease` 都產生一個，fence 就是 `{runId, leaseOwner}`；同一台 backend 再接手同一個 Run 也拿到不同的 fence，舊的迴圈寫入、續租都會被拒絕。`active_session_id` 的唯一索引擋下第二個進行中的 Run，adapter 把它轉成 `RunAlreadyActive`（H-03）。
 - `heartbeat`：`lease_owner` 是自己、狀態是 `running` 才更新期限，同時回傳 `cancel_requested`。否則丟 `LeaseLost`。`recordUsage` 的條件相同。
-- `acquireLease`：接手一個 Run。條件是狀態為 `waiting_approval`，或狀態為 `running` 而租約沒有主人、已過期、或本來就是自己的。同時有多台呼叫時只有一台拿到；等核准的 Run 這時改成 `running`。
+- `acquireLease`：接手一個 Run。條件是狀態為 `waiting_approval`，或狀態為 `running` 而租約沒有主人或已過期。有效的租約不能再接手，持有者自己也一樣。同時有多個呼叫（不論同一台或不同台）時只有一個拿到；等核准的 Run 這時改成 `running`。
 - `transition`：`waiting_approval` 和結束的狀態都會清掉租約；結束的狀態同時清掉 `active_session_id`，讓這段 Session 可以開新的 Run。帶 `leaseOwner` 時不是這個持有者就丟 `LeaseLost`；不帶時是宿主替使用者操作（例如取消一個等核准的 Run）。
 - `expireStale`：狀態 `running` 而 `lease_expires_at` 已過的 Run 標成 `expired`，`end_reason` 是 `lease_expired`。等核准的 Run 沒有租約，不在其中。
-- 租約長度預設 30 秒，`leaseOwner` 是這一台 backend 的名字（建構時指定，預設用 `IdGenerator` 產生一個）。
+- 租約長度預設 30 秒（建構時可指定）。
+- 各台 backend 的時鐘要同步：租約期限和過期判斷用的是各台自己的時鐘，誤差要小於租約長度減續租間隔（目前 30 − 10 = 20 秒）。
 
 ### 5.5 Adapters
 
@@ -676,7 +677,7 @@ export const aiChatPlugin = createBackendPlugin({
 
         // 第 3 圈
         const items = new KnexItemLog(knex, clock);
-        const sessions = new KnexSessionRepository(knex, clock);
+        const sessions = new KnexSessionRepository(knex, clock, ids);
         const runs = new KnexRunRepository(knex, clock, ids);
         const agents = new ConfigAgentCatalog(d.rootConfig, extensions);
         const tools = new ActionsToolGateway(d.actions, agents);

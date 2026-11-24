@@ -42,11 +42,11 @@ describe('KnexRunRepository', () => {
       expect(run).toMatchObject({
         sessionId,
         status: 'running',
-        leaseOwner: 'backend-a',
         cancelRequested: false,
         usage: { stepsUsed: 0, toolCallsUsed: 0, elapsedSeconds: 0 },
-        fence: { runId: run.id, leaseOwner: 'backend-a' },
+        fence: { runId: run.id, leaseOwner: run.leaseOwner },
       });
+      expect(run.leaseOwner).toEqual(expect.any(String));
       expect(run.leaseExpiresAt).toBe('2026-01-01T00:00:30.000Z');
       expect(await p.runs.get(run.id)).toEqual(
         (({ fence: _fence, ...rest }) => rest)(run),
@@ -67,9 +67,7 @@ describe('KnexRunRepository', () => {
     });
 
     it('lets only one of several callers at the same time start a run (H-03)', async () => {
-      const backends = ['backend-a', 'backend-b', 'backend-c'].map(name =>
-        p.runsOf(name),
-      );
+      const backends = [p.runs, p.newRuns(), p.newRuns()];
       const results = await Promise.allSettled(
         Array.from({ length: 9 }, (_v, i) => backends[i % 3].start(sessionId)),
       );
@@ -160,30 +158,71 @@ describe('KnexRunRepository', () => {
     it('refuses while another backend holds a live lease', async () => {
       const run = await p.runs.start(sessionId);
       p.clock.advance(29);
-      expect(await p.runsOf('backend-b').acquireLease(run.id)).toBeUndefined();
-      expect((await p.runs.get(run.id)).leaseOwner).toBe('backend-a');
+      expect(await p.newRuns().acquireLease(run.id)).toBeUndefined();
+      expect((await p.runs.get(run.id)).leaseOwner).toBe(run.leaseOwner);
     });
 
     it('takes an expired lease, and the old owner loses it', async () => {
       const run = await p.runs.start(sessionId);
       p.clock.advance(31);
-      const taken = await p.runsOf('backend-b').acquireLease(run.id);
-      expect(taken).toMatchObject({
-        status: 'running',
-        leaseOwner: 'backend-b',
-        fence: { runId: run.id, leaseOwner: 'backend-b' },
-      });
+      const taken = await p.newRuns().acquireLease(run.id);
+      expect(taken).toMatchObject({ status: 'running' });
+      expect(taken?.fence.leaseOwner).not.toBe(run.fence.leaseOwner);
+      expect(taken?.leaseOwner).toBe(taken?.fence.leaseOwner);
       await expect(p.runs.heartbeat(run.fence)).rejects.toBeInstanceOf(
         LeaseLost,
       );
+    });
+
+    it('gives a new fence to the same backend that takes a run again after its lease expired', async () => {
+      const run = await p.runs.start(sessionId);
+      p.clock.advance(31);
+      const again = await p.runs.acquireLease(run.id);
+      expect(again?.fence.runId).toBe(run.id);
+      expect(again?.fence.leaseOwner).not.toBe(run.fence.leaseOwner);
+      // The old loop of this backend, which was stuck, is refused.
+      await expect(p.runs.heartbeat(run.fence)).rejects.toBeInstanceOf(
+        LeaseLost,
+      );
+      await expect(
+        p.runs.recordUsage(run.fence, {
+          stepsUsed: 1,
+          toolCallsUsed: 0,
+          elapsedSeconds: 1,
+        }),
+      ).rejects.toBeInstanceOf(LeaseLost);
+      await expect(
+        p.runs.transition(run.id, 'completed', {
+          leaseOwner: run.fence.leaseOwner,
+        }),
+      ).rejects.toBeInstanceOf(LeaseLost);
+      await expect(p.runs.heartbeat(again!.fence)).resolves.toEqual({
+        cancelRequested: false,
+      });
+    });
+
+    it('refuses the backend that holds a live lease when it asks again', async () => {
+      const run = await p.runs.start(sessionId);
+      expect(await p.runs.acquireLease(run.id)).toBeUndefined();
+      expect((await p.runs.get(run.id)).leaseOwner).toBe(run.leaseOwner);
+      await expect(p.runs.heartbeat(run.fence)).resolves.toBeDefined();
+    });
+
+    it('lets only one of several calls of the same backend at the same time take a run that waits', async () => {
+      const run = await p.runs.start(sessionId);
+      await p.runs.transition(run.id, 'waiting_approval');
+      const results = await Promise.all(
+        Array.from({ length: 4 }, () => p.runs.acquireLease(run.id)),
+      );
+      expect(results.filter(Boolean)).toHaveLength(1);
     });
 
     it('resumes a run that waits for an approval, for one of several callers at the same time', async () => {
       const run = await p.runs.start(sessionId);
       await p.runs.transition(run.id, 'waiting_approval');
       const results = await Promise.all(
-        ['backend-a', 'backend-b', 'backend-c', 'backend-d'].map(name =>
-          p.runsOf(name).acquireLease(run.id),
+        [p.runs, p.newRuns(), p.newRuns(), p.newRuns()].map(runs =>
+          runs.acquireLease(run.id),
         ),
       );
       expect(results.filter(Boolean)).toHaveLength(1);
@@ -204,7 +243,7 @@ describe('KnexRunRepository', () => {
       const run = await p.runs.start(sessionId);
       p.clock.advance(5);
       const ended = await p.runs.transition(run.id, 'completed', {
-        leaseOwner: 'backend-a',
+        leaseOwner: run.fence.leaseOwner,
         endReason: 'done',
       });
       expect(ended).toMatchObject({

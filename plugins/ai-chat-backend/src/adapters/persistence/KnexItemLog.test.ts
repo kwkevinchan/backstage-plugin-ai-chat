@@ -142,13 +142,31 @@ describe('KnexItemLog', () => {
     expect(row.next_seq).toBe(25);
   });
 
-  it('keeps the numbers free after a refused append: next_seq does not move', async () => {
+  it('gives the numbers back when an append is refused after it took them: next_seq does not move', async () => {
+    const { sessionId, fence } = await start();
+    await p.items.append(sessionId, [approval('call-1')], fence);
+    // The duplicate is found after next_seq was increased, in the same
+    // transaction.
+    await expect(
+      p.items.append(
+        sessionId,
+        [agent('b'), agent('c'), approval('call-1')],
+        fence,
+      ),
+    ).rejects.toBeInstanceOf(DuplicateItem);
+    const row = await p.knex('sessions').where({ id: sessionId }).first();
+    expect(row.next_seq).toBe(2);
+    const [next] = await p.items.append(sessionId, [agent('d')], fence);
+    expect(next.seq).toBe(2);
+  });
+
+  it('does not move next_seq for a write that the lease refuses', async () => {
     const { sessionId, fence } = await start();
     await p.items.append(sessionId, [agent('a')], fence);
     await expect(
       p.items.append(sessionId, [agent('b'), agent('c')], {
         ...fence,
-        leaseOwner: 'backend-b',
+        leaseOwner: 'not-the-owner',
       }),
     ).rejects.toBeInstanceOf(LeaseLost);
     const row = await p.knex('sessions').where({ id: sessionId }).first();
@@ -159,14 +177,25 @@ describe('KnexItemLog', () => {
     it('refuses what the loop writes from a backend that took over the lease', async () => {
       const { sessionId, run, fence } = await start();
       p.clock.advance(31);
-      const other = p.runsOf('backend-b');
-      const taken = await other.acquireLease(run.id);
+      const taken = await p.newRuns().acquireLease(run.id);
       expect(taken).toBeDefined();
       await expect(
         p.items.append(sessionId, [agent('late')], fence),
       ).rejects.toBeInstanceOf(LeaseLost);
       await expect(
         p.items.append(sessionId, [agent('now')], taken!.fence),
+      ).resolves.toHaveLength(1);
+    });
+
+    it('refuses the old fence of the same backend after it took the run again', async () => {
+      const { sessionId, run, fence } = await start();
+      p.clock.advance(31);
+      const again = await p.runs.acquireLease(run.id);
+      await expect(
+        p.items.append(sessionId, [agent('late')], fence),
+      ).rejects.toBeInstanceOf(LeaseLost);
+      await expect(
+        p.items.append(sessionId, [agent('now')], again!.fence),
       ).resolves.toHaveLength(1);
     });
 
