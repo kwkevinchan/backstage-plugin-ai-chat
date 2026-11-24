@@ -52,6 +52,11 @@ export interface AiChatTransportOptions {
    * follows the run itself.
    */
   onDecisionStored?(): void;
+  /**
+   * Called when there was nothing to carry on (204 of resume): another request
+   * carries the run on, as in the case above.
+   */
+  onNothingToResume?(): void;
 }
 
 function isEventStream(response: Response): boolean {
@@ -125,7 +130,9 @@ export class AiChatTransport implements ChatTransport<ChatUiMessage> {
         { page },
         request.abortSignal,
       );
-      return response ? chunksOf(response) : emptyStream();
+      if (response) return chunksOf(response);
+      this.options.onNothingToResume?.();
+      return emptyStream();
     }
     const response = await api.sendMessage(
       sessionId,

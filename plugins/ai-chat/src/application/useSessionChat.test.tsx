@@ -352,6 +352,134 @@ describe('useSessionChat', () => {
     expect(api.sendMessage).not.toHaveBeenCalled();
   });
 
+  it('carries a run on once when the last decision failed and the log says all decisions are stored (503)', async () => {
+    const api = mockApi();
+    api.decide.mockRejectedValue(new Error('Service Unavailable'));
+    // The decision was stored; the backend was shutting down and did not start the loop.
+    api.getSession.mockResolvedValue(
+      detail({
+        run: run('waiting_approval'),
+        resumable: true,
+        items: items(user('restart'), call('c1'), {
+          ...approver,
+          callId: 'c1',
+          decision: 'allow',
+        }),
+      }),
+    );
+    api.resume.mockResolvedValue(
+      streamResponse([
+        { type: 'start', messageId: 'run_r-1' },
+        runChunks('running'),
+        { type: 'tool-output-available', toolCallId: 'c1', output: { ok: 1 } },
+        runChunks('completed'),
+        { type: 'finish', finishReason: 'stop' },
+      ]),
+    );
+    const { result } = render(
+      api,
+      detail({
+        run: run('waiting_approval'),
+        awaitingDecision: ['c1'],
+        items: items(user('restart'), call('c1')),
+      }),
+    );
+
+    await act(() => result.current.decide('c1', true));
+
+    await waitFor(() => expect(api.resume).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(toolStates(result)).toEqual([['c1', 'output-available']]),
+    );
+    expect(api.decide).toHaveBeenCalledTimes(1);
+  });
+
+  it('tries to carry on only once when the resume fails as well', async () => {
+    const api = mockApi();
+    api.decide.mockRejectedValue(new Error('Service Unavailable'));
+    api.resume.mockRejectedValue(new Error('Service Unavailable'));
+    api.getSession.mockResolvedValue(
+      detail({
+        run: run('waiting_approval'),
+        resumable: true,
+        items: items(user('restart'), call('c1'), {
+          ...approver,
+          callId: 'c1',
+          decision: 'allow',
+        }),
+      }),
+    );
+    const { result } = render(
+      api,
+      detail({
+        run: run('waiting_approval'),
+        awaitingDecision: ['c1'],
+        items: items(user('restart'), call('c1')),
+      }),
+    );
+
+    await act(() => result.current.decide('c1', true));
+    await waitFor(() => expect(api.resume).toHaveBeenCalledTimes(1));
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(api.resume).toHaveBeenCalledTimes(1);
+  });
+
+  it('follows the run when the resume found nothing to carry on: another tab took it over', async () => {
+    const api = mockApi();
+    api.resume.mockResolvedValue(undefined);
+    api.follow.mockResolvedValue(
+      streamResponse([
+        { type: 'start', messageId: 'run_r-1' },
+        runChunks('running'),
+        {
+          type: 'tool-input-available',
+          toolCallId: 'c1',
+          toolName: 'dev-actions:restart-service',
+          input: { name: 'payments' },
+        },
+        { type: 'tool-approval-request', approvalId: 'c1', toolCallId: 'c1' },
+        { type: 'tool-approval-response', approvalId: 'c1', approved: true },
+        { type: 'tool-output-available', toolCallId: 'c1', output: { ok: 1 } },
+        runChunks('completed'),
+        { type: 'finish', finishReason: 'stop' },
+      ]),
+    );
+    api.getSession.mockResolvedValue(
+      detail({
+        items: items(
+          user('restart'),
+          call('c1'),
+          { ...approver, callId: 'c1', decision: 'allow' },
+          {
+            kind: 'tool_result',
+            callId: 'c1',
+            status: 'ok',
+            output: { ok: 1 },
+          },
+        ),
+      }),
+    );
+    const { result } = render(
+      api,
+      detail({
+        run: run('waiting_approval'),
+        resumable: true,
+        items: items(user('restart'), call('c1'), {
+          ...approver,
+          callId: 'c1',
+          decision: 'allow',
+        }),
+      }),
+    );
+    expect(toolStates(result)).toEqual([['c1', 'approval-responded']]);
+
+    await waitFor(() => expect(api.follow).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(toolStates(result)).toEqual([['c1', 'output-available']]),
+    );
+  });
+
   it('does not carry on by itself when the session is not resumable', async () => {
     const api = mockApi();
     render(api, twoCalls(true));

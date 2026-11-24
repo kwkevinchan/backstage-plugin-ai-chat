@@ -106,16 +106,20 @@ components:
       required: [error]
     ChatPageContext:
       type: object
-      description: The page the user is on; the model gets it as one line before the text of the message, and the log keeps it with the message.
+      description: The page the user is on, as the client says it. The model gets it as one line before the text of the message, and the log keeps it with the message; that is why the form is checked.
       properties:
         path:
           type: string
           minLength: 1
           maxLength: 2000
+          pattern: '^/[^\s\x00-\x1f\x7f]*$'
+          description: A path that starts with `/`; no blank and no control character.
         entityRef:
           type: string
           minLength: 1
           maxLength: 255
+          pattern: '^(?:[A-Za-z][A-Za-z0-9]*:)?(?:[a-z0-9]+(?:-[a-z0-9]+)*/)?[A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)*$'
+          description: An entity reference, `[kind:][namespace/]name`, with the characters and the lengths (63 for each part) that Backstage allows. The client gives it, and the backend checks the form before the model reads it.
       required: [path]
     ChatSession:
       type: object

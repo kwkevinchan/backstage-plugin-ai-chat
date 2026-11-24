@@ -291,3 +291,13 @@ export interface ChatDataParts {
   notice: ChatNoticeData;
   plan: ChatPlan;
 }
+
+/**
+ * The `errorText` of the `tool-output-error` part for a call whose result is
+ * not known: the tool may have run, but its result was lost. The stream sends
+ * it for a result with status `unknown`, and the screen shows "result unknown"
+ * for it, live and after a reload.
+ *
+ * @public
+ */
+export const TOOL_RESULT_NOT_KNOWN = 'The result of the call is not known.';

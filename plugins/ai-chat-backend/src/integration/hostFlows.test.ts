@@ -110,7 +110,7 @@ describe('the host on a real database', () => {
       expect(a.model.inputs[0].messages[0]).toEqual({
         role: 'user',
         content:
-          'The user is on the page of component:default/shop (/ai-chat/x).\n\nHi',
+          'The user is on the page of "component:default/shop" ("/ai-chat/x").\n\nHi',
       });
       expect(JSON.stringify(a.model.inputs[0].system)).not.toContain(
         'component:default/shop',

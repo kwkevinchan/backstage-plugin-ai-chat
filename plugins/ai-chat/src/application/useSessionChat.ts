@@ -124,6 +124,9 @@ export function useSessionChat(options: UseSessionChatOptions) {
         onDecisionStored: () => {
           followAfter.current = true;
         },
+        onNothingToResume: () => {
+          followAfter.current = true;
+        },
       }),
     [api, sessionId],
   );
@@ -165,20 +168,39 @@ export function useSessionChat(options: UseSessionChatOptions) {
   const chatRef = useRef(chat);
   chatRef.current = chat;
 
-  /** Reads the session again and shows what is stored. */
-  const reload = useCallback(async () => {
-    try {
-      const detail = await api.getSession(sessionId);
-      if (!mounted.current) return;
-      chatRef.current.setMessages(itemsToMessages(detail));
-      setActiveRun(detail.run);
-      setInterrupted(lastRunInterrupted(detail));
-      setResendText(lastUserText(detail.items));
-      setDecisions(decisionsOf(detail.items));
-    } catch (error) {
-      if (mounted.current) setFailure(describeError(error));
-    }
-  }, [api, sessionId]);
+  /**
+   * A request of this page that failed (the backend shut down, say) after the
+   * last decision was stored: the loop did not start, and no other request
+   * took it over. One try to carry it on, until the user acts again.
+   */
+  const carryOnTried = useRef(false);
+
+  /**
+   * Reads the session again and shows what is stored. With `carryOn`, a run
+   * that is left with all its decisions stored is carried on, once: the request
+   * that failed is this page's own, so no other request has taken it over.
+   */
+  const reload = useCallback(
+    async (opts?: { carryOn?: boolean }) => {
+      try {
+        const detail = await api.getSession(sessionId);
+        if (!mounted.current) return;
+        chatRef.current.setMessages(itemsToMessages(detail));
+        setActiveRun(detail.run);
+        setInterrupted(lastRunInterrupted(detail));
+        setResendText(lastUserText(detail.items));
+        setDecisions(decisionsOf(detail.items));
+        if (opts?.carryOn && detail.resumable && !carryOnTried.current) {
+          carryOnTried.current = true;
+          const body: ChatRequestBody = { resume: true };
+          chatRef.current.sendMessage(undefined, { body });
+        }
+      } catch (error) {
+        if (mounted.current) setFailure(describeError(error));
+      }
+    },
+    [api, sessionId],
+  );
 
   // A request has ended: follow the run that goes on, or show what is stored
   // when the stream did not end with the answer.
@@ -208,14 +230,17 @@ export function useSessionChat(options: UseSessionChatOptions) {
     }
     if (followAfter.current) {
       followAfter.current = false;
-      chatRef.current.resumeStream().then(reload, reload);
+      chatRef.current.resumeStream().then(
+        () => reload(),
+        () => reload(),
+      );
     } else if (
       status === 'error' ||
       (lastRunStatus.current &&
         ENDED_WITHOUT_ANSWER.includes(lastRunStatus.current))
     ) {
       lastRunStatus.current = undefined;
-      reload();
+      reload({ carryOn: status === 'error' });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
@@ -236,6 +261,7 @@ export function useSessionChat(options: UseSessionChatOptions) {
   }, []);
 
   const send = useCallback(async (text: string) => {
+    carryOnTried.current = false;
     setFailure(undefined);
     setInterrupted(false);
     setResendText(text);
@@ -250,6 +276,7 @@ export function useSessionChat(options: UseSessionChatOptions) {
     async (callId: string, approved: boolean) => {
       if (decidingRef.current) return;
       decidingRef.current = true;
+      carryOnTried.current = false;
       setDeciding(true);
       setFailure(undefined);
       try {
@@ -277,12 +304,16 @@ export function useSessionChat(options: UseSessionChatOptions) {
             id: callId,
             approved,
           });
-          if (carriesOn) chatRef.current.resumeStream().then(reload, reload);
+          if (carriesOn)
+            chatRef.current.resumeStream().then(
+              () => reload(),
+              () => reload(),
+            );
         }
       } catch (error) {
         pendingDecision.current = undefined;
         setFailure(describeError(error));
-        await reload();
+        await reload({ carryOn: true });
       } finally {
         decidingRef.current = false;
         if (mounted.current) setDeciding(false);

@@ -14,10 +14,11 @@
  * limitations under the License.
  */
 
+import { TOOL_RESULT_NOT_KNOWN } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ToolPart } from './types';
 
 /** The text of a call whose result was never stored although it may have run. */
-export const RESULT_NOT_KNOWN = 'The result of the call is not known.';
+export const RESULT_NOT_KNOWN = TOOL_RESULT_NOT_KNOWN;
 
 /** The text of a call that did not run, because its run ended first. */
 export const NOT_RUN = 'The call did not run.';

@@ -4,7 +4,7 @@
 
 Breaking change: the page talks to the new backend API and stream. Release it together with `@kwkevinchan/backstage-plugin-ai-chat-backend` (the page stops working with the old backend, and the old page stops working with the new backend).
 
-- The page uses `useChat` of the AI SDK with a transport for the backend. The stream shows the answer word by word, a tool call as a row, and a call that is not read-only as a card with Allow and Reject.
+- The page uses `useChat` of the AI SDK with a transport for the backend. The stream shows the answer word by word, a tool call as a row, and a call that is not read-only as a card with Allow and Deny.
 - Every session has its own URL, `/ai-chat/<session id>`; opening it loads that session. In the legacy frontend system mount the page with `path="/ai-chat/*"` when you do not use `FlatRoutes`.
 - Every Allow or Reject is stored at once. After a reload the decisions that are stored stay, the other calls still wait, and nothing is sent twice. A run that goes on is followed, and a run whose decisions are all stored is carried on when the session opens.
 - Stop asks the backend to cancel the run, also while it waits for a decision.

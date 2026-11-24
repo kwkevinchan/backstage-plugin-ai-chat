@@ -274,6 +274,12 @@ export interface DecideToolCallRequest {
 }
 
 // @public
+export function isEntityRef(value: string): boolean;
+
+// @public
+export function isPagePath(value: string): boolean;
+
+// @public
 export const MAX_MESSAGE_LENGTH = 8000;
 
 // @public
@@ -295,6 +301,9 @@ export interface SendChatMessageRequest {
   // (undocumented)
   text: string;
 }
+
+// @public
+export const TOOL_RESULT_NOT_KNOWN = 'The result of the call is not known.';
 
 // @public
 export interface UpdateChatSessionRequest {

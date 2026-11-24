@@ -16,6 +16,8 @@
 
 import { InputError } from '@backstage/errors';
 import {
+  isEntityRef,
+  isPagePath,
   MAX_MESSAGE_LENGTH,
   MAX_TITLE_LENGTH,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
@@ -25,9 +27,31 @@ import { z } from 'zod';
 const noNul = (text: string) => !text.includes('\u0000');
 const NUL_MESSAGE = 'must not contain a NUL character';
 
+/**
+ * The page the client says the user is on. The model reads it, so it is not
+ * free text: the path is a path (starts with `/`, no blank, no control
+ * character) and the entity is an entity reference in the form of the catalog:
+ * `[kind:][namespace/]name`, each part with the characters and the length that
+ * Backstage allows.
+ */
 const page = z.object({
-  path: z.string().min(1).max(2000).refine(noNul, NUL_MESSAGE),
-  entityRef: z.string().min(1).max(255).refine(noNul, NUL_MESSAGE).optional(),
+  path: z
+    .string()
+    .min(1)
+    .max(2000)
+    .refine(
+      isPagePath,
+      'must be a path that starts with / and has no blank or control character',
+    ),
+  entityRef: z
+    .string()
+    .min(1)
+    .max(255)
+    .refine(
+      isEntityRef,
+      'must be an entity reference like component:default/name',
+    )
+    .optional(),
 });
 
 const id = z.string().min(1).max(255).refine(noNul, NUL_MESSAGE);
@@ -42,7 +66,15 @@ const title = z
 export const createSessionBody = z.object({
   agentId: id.optional(),
   title: title.optional(),
-  entityRef: z.string().min(1).max(255).refine(noNul, NUL_MESSAGE).optional(),
+  entityRef: z
+    .string()
+    .min(1)
+    .max(255)
+    .refine(
+      isEntityRef,
+      'must be an entity reference like component:default/name',
+    )
+    .optional(),
   enabledToolsets: z.array(id).max(100).optional(),
 });
 

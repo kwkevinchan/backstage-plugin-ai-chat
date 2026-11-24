@@ -138,6 +138,23 @@ describe('AiChatTransport', () => {
     expect(api.resume).toHaveBeenCalledWith('s-1', { page }, undefined);
   });
 
+  it('says so when the resume has nothing to carry on, and ends without chunks', async () => {
+    const onNothingToResume = jest.fn();
+    const { api, transport } = setup({ onNothingToResume });
+    api.resume.mockResolvedValue(undefined);
+
+    const chunks = await read(
+      await transport.sendMessages({
+        messages,
+        abortSignal: undefined,
+        body: { resume: true },
+      } as never),
+    );
+
+    expect(chunks).toEqual([]);
+    expect(onNothingToResume).toHaveBeenCalledTimes(1);
+  });
+
   it('follows the run without afterSeq, and gives null when there is nothing', async () => {
     const { api, transport } = setup();
     expect(await transport.reconnectToStream({})).toBeNull();

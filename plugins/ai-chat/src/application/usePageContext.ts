@@ -16,7 +16,11 @@
 
 import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import type { ChatPageContext } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import {
+  isEntityRef,
+  isPagePath,
+  type ChatPageContext,
+} from '@kwkevinchan/backstage-plugin-ai-chat-common';
 
 /** The query parameter of the chat page that names the entity it opens for. */
 export const ENTITY_REF_PARAM = 'entityRef';
@@ -24,14 +28,27 @@ export const ENTITY_REF_PARAM = 'entityRef';
 /**
  * The page the user is on (B-01): the path, and the entity when the chat was
  * opened for one (`?entityRef=component:default/example`, the link that an
- * entity page gives).
+ * entity page gives). A link can carry any text, and the model reads what the
+ * page sends, so a value that is not an entity reference, or a path that is not
+ * a path, is left out: the chat goes on without it.
  */
 export function usePageContext(): ChatPageContext {
   const { pathname, search } = useLocation();
   const entityRef =
     new URLSearchParams(search).get(ENTITY_REF_PARAM) ?? undefined;
   return useMemo(
-    () => ({ path: pathname, ...(entityRef && { entityRef }) }),
+    () => pageContextOf(pathname, entityRef),
     [pathname, entityRef],
   );
+}
+
+/** The page context for a path and an entity, with what does not pass the check left out. */
+export function pageContextOf(
+  path: string,
+  entityRef?: string,
+): ChatPageContext {
+  return {
+    path: isPagePath(path) ? path : '/',
+    ...(entityRef && isEntityRef(entityRef) && { entityRef }),
+  };
 }

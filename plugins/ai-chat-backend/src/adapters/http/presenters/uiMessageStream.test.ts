@@ -19,6 +19,7 @@ import type {
   Item,
   ToolCallItem,
 } from '@kwkevinchan/ai-chat-harness';
+import { TOOL_RESULT_NOT_KNOWN } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import { readMessage, throughSdk } from '../__testUtils__/uiMessageStream';
 import type { UiMessageChunk } from './uiMessageChunk';
 import { UiMessageStreamPresenter } from './uiMessageStream';
@@ -331,7 +332,9 @@ describe('UiMessageStreamPresenter', () => {
   it.each([
     ['timeout', 'The tool call timed out.', undefined],
     ['invalid', 'The input of the tool call is not valid.', undefined],
-    ['unknown', 'The result of the tool call is not known.', undefined],
+    ['unknown', TOOL_RESULT_NOT_KNOWN, undefined],
+    // The text of the tool never replaces the mark that the screen knows.
+    ['unknown', TOOL_RESULT_NOT_KNOWN, 'lost in a crash'],
     ['error', 'The tool call failed.', undefined],
     [
       'invalid',

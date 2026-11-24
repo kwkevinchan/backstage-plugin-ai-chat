@@ -521,14 +521,17 @@ function toSegments(items: readonly Item[], lookup: Lookup): Segment[] {
 /**
  * What the model reads for a message of the user: the text, and, when the
  * message has a page (B-01), one line before it that says where the user is.
- * The line is in the message, not in the system prompt.
+ * The line is in the message, not in the system prompt. The client gives the
+ * page, so each value is written as a JSON string: a line break or a quote in
+ * it cannot end the line and start text that looks like the user's.
  */
 function userContent(item: UserMessageBody): string {
   const { page } = item;
   if (!page) return item.text;
+  const path = JSON.stringify(page.path);
   const where = page.entityRef
-    ? `the page of ${page.entityRef} (${page.path})`
-    : `the page ${page.path}`;
+    ? `the page of ${JSON.stringify(page.entityRef)} (${path})`
+    : `the page ${path}`;
   return `The user is on ${where}.\n\n${item.text}`;
 }
 
