@@ -1679,13 +1679,13 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 
 **狀態**
 
-| 狀態               | 來源                                                  | 放在哪裡              |
-| ------------------ | ----------------------------------------------------- | --------------------- |
-| 輸入的設定         | `GET /input-config`                                   | `useInputConfig`      |
-| 草稿的附件         | 使用者選的檔案；上傳中、完成（有 id）、失敗           | `useDraftAttachments` |
-| 等待讀取的插入訊息 | 插入請求的回應；`data-inserted` 或重新讀取時移除      | `useSessionChat`      |
-| 佇列、是否暫停     | `GET /sessions/:id`、各個佇列請求的回應、`data-queue` | `useSessionChat`      |
-| 縮圖               | 帶身分的 `fetch`，轉成 object URL，畫面卸載時釋放     | `useAttachmentUrl`    |
+| 狀態               | 來源                                                                             | 放在哪裡              |
+| ------------------ | -------------------------------------------------------------------------------- | --------------------- |
+| 輸入的設定         | `GET /input-config`                                                              | `useInputConfig`      |
+| 草稿的附件         | 使用者選的檔案；上傳中、完成（有 id）、失敗                                      | `useDraftAttachments` |
+| 等待讀取的插入訊息 | 插入請求的回應；`data-inserted` 或重新讀取時移除                                 | `useSessionChat`      |
+| 佇列、是否暫停     | `GET /sessions/:id`、`GET /sessions/:id/queue`、各個佇列請求的回應、`data-queue` | `useSessionChat`      |
+| 縮圖               | 帶身分的 `fetch`，轉成 object URL，畫面卸載時釋放                                | `useAttachmentUrl`    |
 
 **送出方式**（`Composer` 依 Run 的狀態決定）：
 
@@ -1697,7 +1697,7 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 | 佇列暫停（沒有進行中的 Run，佇列不是空的） | 送出，馬上開新的 Run。輸入框提示「送出後，這次結束時會接著送佇列」 | 同 Enter；不顯示「排隊」按鈕       |
 
 - Run 進行中輸入框不再停用。Stop 按鈕照舊。
-- Run 結束到自動送出新 Run 之間有一小段空檔：Run 已經結束、新的還沒開，這時 `GET /sessions/:id` 會短暫回 `paused: true`。畫面不要在這個空檔顯示「排隊已暫停」：收到 `run.ended` 後，等 `data-queue`（有 `nextRunId` 就接上新的 Run，`paused` 為真才顯示暫停）或下一個 `data-run` 再決定；只有重新讀取（沒有串流可等）時才用 `GET` 的 `paused`。
+- Run 結束到自動送出新 Run 之間有一小段空檔：Run 已經結束、新的還沒開，這時 `GET /sessions/:id` 會短暫回 `paused: true`。畫面不要在這個空檔顯示「排隊已暫停」。串流裡 `data-queue` 在這個 Run 的結束 `data-run` 之前，所以畫面以它為準：有 `nextRunId` 就記下「正在接新的 Run」（`useSessionChat` 的 `followingNext`，到那個 Run 的第一個 `data-run` 為止，不顯示暫停，輸入框也暫時停用），串流結束後讀取 Session（畫面上就有那則排隊的訊息）再用 `GET /sessions/:id/stream` 接上；`paused` 為真才顯示暫停。只有重新讀取（沒有串流可等）時才用 `GET` 的 `paused`。重新讀取不知道 `pausedReason`：這一頁自己的流程（Run 結束後的讀取、自己改佇列的回應）保留串流給的那一個；取得焦點、被別的操作的 404 或 409 觸發的重新讀取不保留，因為別的分頁可能已經改過，這時顯示通用文字。連續自動送出時，`followingNext` 只由接那個 Run 的流程清除，串流裡新的 `nextRunId` 不會被上一輪清掉。每一輪的「按鈕」規則：Run 進行中（`activeRun` 或串流開著）時，沒讀到訊息的單則「再送一次」不顯示；排隊的上下移一次只送一個請求，進行中停用。
 - 插入得到 409 時，畫面重新讀取 Session，依結果分三種處理，文字留在輸入框直到成功（現有的 `sent === false` 做法）：
   1. 錯誤是 `InsertLimitReached`，或 Run 是 `waiting_approval`：改成排隊（排隊也得到 409 時，顯示原因，文字保留）。
   2. Run 是 `running`，但 `runId` 和送出時的不同（原來的 Run 結束、自動送出開了新的 Run）：對新的 `runId` 再插入一次。
@@ -1719,17 +1719,31 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 - `lastUserText(items)` 取那一則的文字和附件，不取最後一則 `user_message`。
 - `lastRunInterrupted(detail)` 判斷「紀錄是不是以 agent 的訊息結尾」時，略過插入的訊息。沒有略過的話，Run 以 agent 的回答結束、後面有一則沒讀到的插入訊息時，會被當成中斷，重送會把已經回答的問題再問一次。
 - Run 沒有給出答案就停下來（`lastRunInterrupted` 為真）：只有一個「再送一次」，重送第一則訊息。沒讀到的插入訊息只標「Agent 沒有讀到」，沒有自己的按鈕，文字留在畫面上可以複製。
-- Run 已給出答案（例如因 `maxSteps` 停下來）：不顯示 Run 層級的按鈕；每則沒讀到的插入訊息各有「再送一次」，用同樣的文字和附件 id 送出（`SendMessage`）。
+- Run 已給出答案（例如因 `maxSteps` 停下來）：不顯示 Run 層級的按鈕；每則沒讀到的插入訊息各有「再送一次」，用同樣的文字和附件 id 送出（`SendMessage`）。只有最後一個 Run 的沒讀到的訊息有這個按鈕；更早的 Run 的只有標示。
 - 重送出去的是新的 `direct` 訊息；舊的沒讀到的插入訊息不會再送給模型（13.4），所以模型不會讀到兩次。
 
 **排隊清單**
 
-- 位置：輸入框上方，插入的「等待讀取」區之上。標題「排隊中（2/5）」。
-- 每一列：文字（截斷）、圖片數、上移、下移、修改、刪除。修改是原地的文字框加儲存。上下移送 `PUT …/queue/order`。
-- 操作得到 404 或 409：重新讀取清單，顯示一行說明（例如「這則已經送出了」）。
+- 位置：輸入框上方，插入的「等待讀取」區之上。標題「Queued (2)」。上限（`queue.maxMessages`）要等 `GET /input-config`（PI-05）才拿得到，所以標題先不寫「/5」；滿了時 `QueueFull` 讓畫面顯示「佇列已滿」的說明，文字留在輸入框。
+- 每一列：文字（截斷）、圖片數（PI-06）、上移、下移、修改、刪除。修改是原地的文字框加儲存。上下移送 `PUT …/queue/order`。
+- 操作得到 404 或 409：用 `GET /sessions/:id/queue` 重新讀取清單，顯示一行說明（`QueuedMessageNotFound`：「這則已經送出或刪除了」；`QueueChanged`：「佇列在別處被改過，已更新」）。視窗重新取得焦點、新的 Run 開始時也用同一個呼叫重新讀取。
 - 暫停時，清單上方顯示「排隊已暫停。上一次執行沒有正常結束」和「繼續」按鈕；逐則刪除仍可用。輸入框仍可用：直接送出的新訊息馬上開 Run，清單標題旁寫「新訊息先送，佇列接在後面」，輸入框的提示寫「送出後，這次結束時會接著送佇列」，避免使用者以為要按「繼續」才會送，或以為順序是佇列在前。
 - 身分快過期造成的暫停：同一個畫面，說明改成「登入快過期，按繼續會用新的登入」。這個原因在 `data-queue` 裡有 `pausedReason: 'credentials'`；從 `GET /sessions/:id` 還原時沒有原因，顯示通用文字。
 - Run 結束時 `data-queue` 帶 `nextRunId`：清單更新，並接上新的串流。
+
+**畫面文字（英文，PI-04）**
+
+| 位置                      | 文字                                                                                                                                                                                                                                                                                                                       |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 輸入框的按鈕              | `Send`、`Queue`（`running` 時另一顆）；等核准時只有一顆，名稱是 `Queue`                                                                                                                                                                                                                                                    |
+| 輸入框的提示（`running`） | `Write a message (Enter adds it to the run, Ctrl/Cmd+Enter queues it, Shift+Enter starts a new line)`                                                                                                                                                                                                                      |
+| 輸入框的提示（等核准）    | `Write a message to queue (Enter or Ctrl/Cmd+Enter queues)`；上方 `An action waits for your decision. New messages can only be queued; they are sent when the run ends.`                                                                                                                                                   |
+| 輸入框上方（佇列暫停）    | `After you send, the queue continues when this run ends.`                                                                                                                                                                                                                                                                  |
+| 等待讀取區                | 清單名稱 `Waiting to be read`；每則 `The agent has not read this yet. It will at the next step.`                                                                                                                                                                                                                           |
+| 沒讀到                    | `The agent did not read this message.`；按鈕 `Send this message again`（Run 層級的是 `Send the message again`）                                                                                                                                                                                                            |
+| 排隊清單                  | `Queued (n)`、`Up`、`Down`、`Edit`（`Save`、`Cancel`）、`Delete`                                                                                                                                                                                                                                                           |
+| 暫停                      | `Queue paused. The last run did not end normally.`、`Queue paused. Your sign-in is about to expire; Continue uses your new sign-in.`、`Queue paused. The server was shutting down.`、`Queue paused. Nothing is sent until you continue.`（沒有原因時）；按鈕 `Continue`；標題旁 `New messages go first, the queue follows` |
+| 排隊的說明                | `That message was sent or removed already.`、`The queue was changed somewhere else. It is up to date now.`、`The queue is full. Delete a queued message, or wait until one is sent.`、`The run could not take the message. Send it again when the run has ended.`                                                          |
 
 **圖片**
 

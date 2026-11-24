@@ -15,7 +15,7 @@
  */
 
 import { messageIdOfRun } from '@kwkevinchan/backstage-plugin-ai-chat-common';
-import { call, detail, items, run, user } from '../testData';
+import { answer, call, detail, inserted, items, run, user } from '../testData';
 import {
   decisionsOf,
   lastRunInterrupted,
@@ -283,5 +283,193 @@ describe('lastUserText', () => {
   it('is the text of the last user message', () => {
     expect(lastUserText(items(user('a'), text('x'), user('b')))).toBe('b');
     expect(lastUserText([])).toBeUndefined();
+  });
+});
+
+describe('inserted messages', () => {
+  it('puts a message that was read before the step that read it, as a data-inserted part', () => {
+    // seq: 1 user, 2 answer (read up to 1), 3 inserted, 4 answer (read up to 3)
+    const messages = itemsToMessages(
+      detail({
+        items: items(
+          user('start'),
+          answer('first', 1),
+          inserted('also this', 'read'),
+          answer('second', 3),
+        ),
+      }),
+    );
+    expect(messages.map(m => m.id)).toEqual(['item_1', messageIdOfRun('r-1')]);
+    expect(messages[1].parts).toEqual([
+      { type: 'step-start' },
+      { type: 'text', text: 'first', state: 'done' },
+      {
+        type: 'data-inserted',
+        id: 'inserted-3',
+        data: { seq: 3, text: 'also this' },
+      },
+      { type: 'step-start' },
+      { type: 'text', text: 'second', state: 'done' },
+    ]);
+  });
+
+  it('puts it before the tool call that read it, in the step of the call', () => {
+    const messages = itemsToMessages(
+      detail({
+        items: items(user('start'), inserted('wait, use search', 'read'), {
+          ...call('c1'),
+          readUpToSeq: 2,
+        } as never),
+        run: run('waiting_approval'),
+        awaitingDecision: ['c1'],
+      }),
+    );
+    expect(messages[1].parts.map(p => p.type)).toEqual([
+      'data-inserted',
+      'step-start',
+      'tool-dev-actions:restart-service',
+    ]);
+  });
+
+  it('does not show a pending message in the conversation', () => {
+    const messages = itemsToMessages(
+      detail({
+        run: run('running'),
+        items: items(user('start'), inserted('later', 'pending')),
+      }),
+    );
+    expect(messages.map(m => m.id)).toEqual(['item_1']);
+    expect(JSON.stringify(messages)).not.toContain('later');
+  });
+
+  it('shows an unread message as a user message that says so', () => {
+    const messages = itemsToMessages(
+      detail({
+        items: items(user('start'), inserted('too late', 'unread')),
+      }),
+    );
+    expect(messages.map(m => [m.id, m.role])).toEqual([
+      ['item_1', 'user'],
+      ['item_2', 'user'],
+    ]);
+    expect(messages[1].parts).toEqual([
+      { type: 'text', text: 'too late' },
+      // The run has no answer: the run has the one button.
+      {
+        type: 'data-unread',
+        id: 'unread-2',
+        data: { seq: 2, sendAgain: false },
+      },
+    ]);
+  });
+
+  it('gives an unread message a button of its own when the run answered', () => {
+    const messages = itemsToMessages(
+      detail({
+        items: items(
+          user('start'),
+          answer('done', 1),
+          inserted('too late', 'unread'),
+        ),
+      }),
+    );
+    expect(messages[2].parts[1]).toEqual({
+      type: 'data-unread',
+      id: 'unread-3',
+      data: { seq: 3, sendAgain: true },
+    });
+  });
+
+  it('gives the button to the unread messages of the last run only', () => {
+    const messages = itemsToMessages(
+      detail({
+        items: items(
+          user('one'),
+          answer('a', 1),
+          inserted('old', 'unread'),
+          { ...user('two'), runId: 'r-2' },
+          answer('b', 4, 'r-2'),
+          inserted('new', 'unread', 'r-2'),
+        ),
+      }),
+    );
+    const flags = messages
+      .flatMap(m => m.parts)
+      .filter(p => p.type === 'data-unread')
+      .map(p => (p as any).data.sendAgain);
+    expect(flags).toEqual([false, true]);
+  });
+
+  it('never makes two resend buttons: with no answer the run has one and no message has one', () => {
+    const d = detail({
+      items: items(
+        user('start'),
+        call('c1'),
+        inserted('a', 'unread'),
+        inserted('b', 'unread'),
+      ),
+    });
+    expect(lastRunInterrupted(d)).toBe(true);
+    const flags = itemsToMessages(d)
+      .flatMap(m => m.parts)
+      .filter(p => p.type === 'data-unread')
+      .map(p => (p as any).data.sendAgain);
+    expect(flags).toEqual([false, false]);
+  });
+
+  it('works out the state of an item the backend gave none', () => {
+    const noState = (words: string) => ({
+      ...inserted(words, 'read'),
+      insertState: undefined,
+    });
+    const messages = itemsToMessages(
+      detail({
+        run: run('running'),
+        items: items(
+          user('start'),
+          noState('read one'),
+          answer('x', 2),
+          noState('waits'),
+        ),
+      }),
+    );
+    expect(JSON.stringify(messages)).toContain('"data-inserted"');
+    expect(JSON.stringify(messages)).not.toContain('waits');
+  });
+});
+
+describe('the first message of the run (resend rules)', () => {
+  it('lastUserText skips inserted messages', () => {
+    expect(
+      lastUserText(
+        items(user('first'), answer('x', 1), inserted('b', 'unread')),
+      ),
+    ).toBe('first');
+    expect(lastUserText(items(inserted('only', 'unread')))).toBeUndefined();
+  });
+
+  it('lastRunInterrupted is false when the run ended with its answer and an unread message follows', () => {
+    expect(
+      lastRunInterrupted(
+        detail({
+          items: items(user('a'), answer('b', 1), inserted('c', 'unread')),
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it('lastRunInterrupted is true when the run has no answer, whatever was inserted after', () => {
+    expect(
+      lastRunInterrupted(
+        detail({ items: items(user('a'), inserted('b', 'unread')) }),
+      ),
+    ).toBe(true);
+    expect(
+      lastRunInterrupted(
+        detail({
+          items: items(user('a'), call('c1'), inserted('b', 'unread')),
+        }),
+      ),
+    ).toBe(true);
   });
 });

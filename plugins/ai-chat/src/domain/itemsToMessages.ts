@@ -16,6 +16,7 @@
 
 import {
   messageIdOfRun,
+  type ChatInsertState,
   type ChatItem,
   type ChatPlan,
   type ChatSessionDetail,
@@ -45,6 +46,13 @@ export function userMessageId(seq: number): string {
  * - The run that has not ended is `detail.run`. A call of any other run that
  *   has no result did not finish: it shows as unknown when `tool_started` is
  *   stored (it may have run), otherwise as not run.
+ * - An inserted message (`delivery: inserted`) is shown by its `insertState`.
+ *   `read`: a `data-inserted` part in the message of its run, before the step
+ *   that read it (the first output whose `readUpToSeq` covers it), as the
+ *   stream does. `pending`: not in the conversation (the screen shows it above
+ *   the input box). `unread`: a user message with a `data-unread` part; it has
+ *   its own `sendAgain` only when the run gave an answer (`lastRunInterrupted`
+ *   is false, which has one button for the run), and only in the last run.
  * - `summary`, `note` and `tool_started` items are not messages.
  */
 export function itemsToMessages(
@@ -131,6 +139,14 @@ export function itemsToMessages(
     } as Part;
   };
 
+  const states = insertStatesOf(items, run);
+  const insertedRead = items.filter(
+    item => isInserted(item) && states.get(item.seq) === 'read',
+  ) as InsertedItem[];
+  let nextRead = 0;
+  const interrupted = lastRunInterrupted(detail);
+  const lastRunId = [...items].reverse().find(item => item.runId)?.runId;
+
   const messages: ChatUiMessage[] = [];
   const assistant = new Map<string, ChatUiMessage>();
   /** Whether the next text or call begins a new step of its run. */
@@ -139,6 +155,27 @@ export function itemsToMessages(
 
   for (const item of items) {
     if (item.kind === 'user_message') {
+      if (isInserted(item)) {
+        const state = states.get(item.seq);
+        if (state === 'unread') {
+          messages.push({
+            id: userMessageId(item.seq),
+            role: 'user',
+            parts: [
+              { type: 'text', text: item.text },
+              {
+                type: 'data-unread',
+                id: `unread-${item.seq}`,
+                data: {
+                  seq: item.seq,
+                  sendAgain: !interrupted && item.runId === lastRunId,
+                },
+              },
+            ],
+          });
+        }
+        continue;
+      }
       messages.push({
         id: userMessageId(item.seq),
         role: 'user',
@@ -157,6 +194,28 @@ export function itemsToMessages(
       assistant.set(item.runId, message);
       messages.push(message);
       newStep.add(item.runId);
+    }
+    if (
+      (item.kind === 'agent_message' || item.kind === 'tool_call') &&
+      item.readUpToSeq !== undefined
+    ) {
+      // The messages that this output read come before its step.
+      while (
+        nextRead < insertedRead.length &&
+        insertedRead[nextRead].seq <= item.readUpToSeq
+      ) {
+        const read = insertedRead[nextRead++];
+        message.parts.push({
+          type: 'data-inserted',
+          id: `inserted-${read.seq}`,
+          data: {
+            seq: read.seq,
+            text: read.text,
+            ...(read.page && { page: read.page }),
+          },
+        });
+        newStep.add(item.runId);
+      }
     }
     const beginStep = () => {
       if (newStep.delete(item.runId!)) {
@@ -192,20 +251,78 @@ export function itemsToMessages(
   return messages;
 }
 
+/** A message of the user that was inserted into a run that went on. */
+type InsertedItem = ChatItem & { kind: 'user_message' };
+
+function isInserted(item: ChatItem): boolean {
+  return item.kind === 'user_message' && item.delivery === 'inserted';
+}
+
+/**
+ * Whether the model read each inserted message, by `seq`. The backend says so
+ * in `insertState`; for an item without it, an output of the log that has
+ * read it (`readUpToSeq`) decides, and a message nobody read is `pending`
+ * while its run goes on and `unread` after.
+ */
+function insertStatesOf(
+  items: readonly ChatItem[],
+  run: ChatSessionDetail['run'],
+): Map<number, ChatInsertState> {
+  const states = new Map<number, ChatInsertState>();
+  for (const item of items) {
+    if (!isInserted(item) || item.kind !== 'user_message') continue;
+    if (item.insertState) {
+      states.set(item.seq, item.insertState);
+      continue;
+    }
+    const read = items.some(
+      other =>
+        (other.kind === 'agent_message' || other.kind === 'tool_call') &&
+        other.readUpToSeq !== undefined &&
+        other.readUpToSeq >= item.seq,
+    );
+    const goes = run !== undefined && run.id === item.runId;
+    let state: ChatInsertState = 'unread';
+    if (read) state = 'read';
+    else if (goes) state = 'pending';
+    states.set(item.seq, state);
+  }
+  return states;
+}
+
+/** The inserted messages that wait for the model to read them. */
+export function pendingInserts(
+  detail: Pick<ChatSessionDetail, 'items' | 'run'>,
+): { seq: number; text: string }[] {
+  const states = insertStatesOf(detail.items, detail.run);
+  return detail.items
+    .filter(item => isInserted(item) && states.get(item.seq) === 'pending')
+    .map(item => ({
+      seq: item.seq,
+      text: (item as InsertedItem).text,
+    }));
+}
+
 /**
  * Whether the last run of the session stopped before it gave an answer: no
  * run is active, and the log does not end with a message of the agent. The run
  * expired, was cancelled or failed; the user can send the message again.
+ * Inserted messages do not count: a run that ended with its answer and has an
+ * unread inserted message after it is not interrupted, and sending its first
+ * message again would ask the answered question once more.
  */
 export function lastRunInterrupted(
   detail: Pick<ChatSessionDetail, 'items' | 'run'>,
 ): boolean {
   if (detail.run) return false;
   for (let i = detail.items.length - 1; i >= 0; i--) {
-    switch (detail.items[i].kind) {
+    const item = detail.items[i];
+    switch (item.kind) {
       case 'agent_message':
         return false;
       case 'user_message':
+        if (isInserted(item)) break;
+        return true;
       case 'tool_call':
       case 'approval':
       case 'tool_started':
@@ -218,11 +335,14 @@ export function lastRunInterrupted(
   return false;
 }
 
-/** The text of the last message of the user, to send it again. */
+/**
+ * The text of the first message of the last run, to send it again: the last
+ * message of the user that was not inserted into a run.
+ */
 export function lastUserText(items: readonly ChatItem[]): string | undefined {
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
-    if (item.kind === 'user_message') return item.text;
+    if (item.kind === 'user_message' && !isInserted(item)) return item.text;
   }
   return undefined;
 }

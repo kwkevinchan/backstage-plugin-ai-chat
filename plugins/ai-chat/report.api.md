@@ -5,16 +5,23 @@
 ```ts
 import { ApiRef } from '@backstage/frontend-plugin-api';
 import { BackstagePlugin } from '@backstage/core-plugin-api';
+import type { ChatItem } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { ChatQueue } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { ChatQueuedMessage } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ChatSession } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ChatSessionDetail } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ChatTool } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ChatToolset } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { CreateChatSessionRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { DecideToolCallRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { InsertChatMessageRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { QueueChatMessageRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { ReorderQueueRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ResumeChatRunRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import { RouteRef } from '@backstage/core-plugin-api';
 import type { SendChatMessageRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { UpdateChatSessionRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { UpdateQueuedMessageRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 
 // @public
 export interface AiChatApi {
@@ -28,25 +35,45 @@ export interface AiChatApi {
     signal?: AbortSignal,
   ): Promise<Response>;
   // (undocumented)
+  deleteQueuedMessage(id: string, queuedId: string): Promise<void>;
+  // (undocumented)
   deleteSession(id: string): Promise<void>;
   follow(id: string, signal?: AbortSignal): Promise<Response | undefined>;
+  getQueue(id: string): Promise<ChatQueue>;
   // (undocumented)
   getSession(id: string): Promise<ChatSessionDetail>;
+  insertMessage(
+    id: string,
+    runId: string,
+    request: InsertChatMessageRequest,
+  ): Promise<ChatItem>;
   // (undocumented)
   listSessions(): Promise<ChatSession[]>;
   listSessionTools(id: string): Promise<ChatTool[]>;
   // (undocumented)
   listToolsets(): Promise<ChatToolset[]>;
+  queueMessage(
+    id: string,
+    request: QueueChatMessageRequest,
+  ): Promise<ChatQueuedMessage>;
+  reorderQueue(id: string, request: ReorderQueueRequest): Promise<ChatQueue>;
   resume(
     id: string,
     request: ResumeChatRunRequest,
     signal?: AbortSignal,
   ): Promise<Response | undefined>;
+  resumeQueue(id: string, signal?: AbortSignal): Promise<Response | undefined>;
   sendMessage(
     id: string,
     request: SendChatMessageRequest,
     signal?: AbortSignal,
   ): Promise<Response>;
+  // (undocumented)
+  updateQueuedMessage(
+    id: string,
+    queuedId: string,
+    request: UpdateQueuedMessageRequest,
+  ): Promise<ChatQueuedMessage>;
   // (undocumented)
   updateSession(
     id: string,

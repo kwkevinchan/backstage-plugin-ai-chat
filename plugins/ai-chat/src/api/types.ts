@@ -16,15 +16,22 @@
 
 import { createApiRef } from '@backstage/core-plugin-api';
 import type {
+  ChatItem,
+  ChatQueue,
+  ChatQueuedMessage,
   ChatSession,
   ChatSessionDetail,
   ChatTool,
   ChatToolset,
   CreateChatSessionRequest,
   DecideToolCallRequest,
+  InsertChatMessageRequest,
+  QueueChatMessageRequest,
+  ReorderQueueRequest,
   ResumeChatRunRequest,
   SendChatMessageRequest,
   UpdateChatSessionRequest,
+  UpdateQueuedMessageRequest,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 
 /**
@@ -72,6 +79,35 @@ export interface AiChatApi {
   follow(id: string, signal?: AbortSignal): Promise<Response | undefined>;
   /** Asks the run to stop. A run that has ended is not an error. */
   cancelRun(id: string, runId: string): Promise<void>;
+  /**
+   * Adds a message to a run that goes on. Resolves with the stored item.
+   * A run that is not `running` (any more) answers 409.
+   */
+  insertMessage(
+    id: string,
+    runId: string,
+    request: InsertChatMessageRequest,
+  ): Promise<ChatItem>;
+  /** The messages that wait for the run to end. */
+  getQueue(id: string): Promise<ChatQueue>;
+  /** Queues a message while a run goes on; 409 when no run goes on or the queue is full. */
+  queueMessage(
+    id: string,
+    request: QueueChatMessageRequest,
+  ): Promise<ChatQueuedMessage>;
+  updateQueuedMessage(
+    id: string,
+    queuedId: string,
+    request: UpdateQueuedMessageRequest,
+  ): Promise<ChatQueuedMessage>;
+  deleteQueuedMessage(id: string, queuedId: string): Promise<void>;
+  /** Puts the queue in the order of `ids`, which must be every id of the queue (409 otherwise). */
+  reorderQueue(id: string, request: ReorderQueueRequest): Promise<ChatQueue>;
+  /**
+   * Sends the first queued message as a new run: the response is its stream.
+   * `undefined` when the queue is empty or a run goes on.
+   */
+  resumeQueue(id: string, signal?: AbortSignal): Promise<Response | undefined>;
 }
 
 /**

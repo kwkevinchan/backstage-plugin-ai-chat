@@ -47,8 +47,14 @@ export interface MessageListProps {
   /** The last run stopped before it gave an answer. */
   interrupted?: boolean;
   onDecide(callId: string, approved: boolean): void;
+  /** Sends the first message of the run again (the run gave no answer). */
   onSendAgain?(): void;
+  /** Sends a message that the run did not read again. */
+  onSendTextAgain?(text: string): void;
 }
+
+/** The label of an inserted message that the run ended without reading. */
+export const UNREAD_TEXT = 'The agent did not read this message.';
 
 function MessageParts({
   message,
@@ -56,13 +62,16 @@ function MessageParts({
   decisions,
   disabled,
   onDecide,
+  onSendTextAgain,
 }: {
   message: ChatUiMessage;
   tools?: Record<string, ChatTool>;
   decisions?: Record<string, DecisionInfo>;
   disabled: boolean;
   onDecide(callId: string, approved: boolean): void;
+  onSendTextAgain?(text: string): void;
 }) {
+  const text = message.parts.find(part => part.type === 'text');
   return (
     <>
       {message.parts.map((part, index) => {
@@ -79,6 +88,35 @@ function MessageParts({
               className={cx('chat-message', 'chat-message-assistant')}
             >
               <Markdown text={part.text} />
+            </div>
+          );
+        }
+        if (part.type === 'data-inserted') {
+          // A message that the user added to the run, shown where the model
+          // read it.
+          return (
+            <div key={key} className={cx('chat-message', 'chat-message-user')}>
+              {part.data.text}
+            </div>
+          );
+        }
+        if (part.type === 'data-unread') {
+          return (
+            <div key={key} className={cx('chat-unread')} role="status">
+              {UNREAD_TEXT}
+              {part.data.sendAgain &&
+                onSendTextAgain &&
+                text?.type === 'text' && (
+                  <>
+                    {' '}
+                    <button
+                      type="button"
+                      onClick={() => onSendTextAgain(text.text)}
+                    >
+                      Send this message again
+                    </button>
+                  </>
+                )}
             </div>
           );
         }
@@ -139,6 +177,7 @@ export function MessageList(props: MessageListProps) {
             decisions={props.decisions}
             disabled={props.disabled || props.busy}
             onDecide={props.onDecide}
+            onSendTextAgain={props.onSendTextAgain}
           />
         </div>
       ))}

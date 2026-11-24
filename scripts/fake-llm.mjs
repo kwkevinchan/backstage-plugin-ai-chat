@@ -28,6 +28,11 @@
  *   user: "story"             -> a long text that arrives word by word
  *   user: "catalog ..."       -> calls the tool that ends in `query-catalog-entities`
  *   user: "loop ..."          -> calls `list-services` again after every result
+ *   user: "hold [n]"          -> a text that arrives word by word for n seconds (default 5),
+ *                                then lists the user messages it was given, so a test has
+ *                                time to add a message while the model is still answering
+ *   user: "fail"              -> after 3 seconds, an HTTP 500 (the model call fails)
+ *   user: "also <text>"       -> says that it got the addition
  *   tool result               -> a sentence that repeats part of the result
  *   tool result of a refusal  -> says that nothing was done
  *   anything else             -> a short help text
@@ -59,7 +64,18 @@ function findTool(tools, suffix) {
     ?.name;
 }
 
-/** The scripted reply for a request body: `{ text }` or `{ calls }`. */
+/** The user messages of a request, without the line about the page. */
+function userTexts(messages) {
+  return messages
+    .filter(m => m.role === 'user')
+    .map(m => splitContext(String(m.content ?? '')).text);
+}
+
+/**
+ * The scripted reply for a request body: `{ text }` or `{ calls }`. A reply
+ * may also have `wordDelayMs` (the pause between words) and `failAfterMs` (an
+ * HTTP 500 after that time, instead of a reply).
+ */
 export function scriptedReply(body) {
   const messages = body.messages ?? [];
   const last = messages[messages.length - 1];
@@ -115,6 +131,21 @@ export function scriptedReply(body) {
   const restart = /^restart\s+([\w-]+)/i.exec(text);
   if (restart) return call('restart-service', { name: restart[1] });
   if (/^story/i.test(text)) return { text: STORY };
+  const hold = /^hold(?:\s+(\d+))?/i.exec(text);
+  if (hold) {
+    const seconds = Number(hold[1] ?? 5);
+    const words = Array.from(
+      { length: seconds * 10 },
+      (_, i) => `held${i + 1}`,
+    );
+    return {
+      text: `${words.join(' ')} [saw: ${userTexts(messages).join(' | ')}]`,
+      wordDelayMs: 100,
+    };
+  }
+  if (/^fail/i.test(text)) return { failAfterMs: 3000 };
+  const also = /^also\s+(.*)$/is.exec(text);
+  if (also) return { text: `Got your addition: ${also[1]}` };
   if (/^catalog/i.test(text))
     return call('query-catalog-entities', { limit: 3 });
   if (/^loop/i.test(text)) return call('list-services', {});
@@ -146,6 +177,15 @@ async function handle(req, res) {
   for await (const part of req) raw += part;
   const body = JSON.parse(raw || '{}');
   const reply = scriptedReply(body);
+
+  if (reply.failAfterMs) {
+    await wait(reply.failAfterMs);
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({ error: { message: 'The scripted model failed.' } }),
+    );
+    return;
+  }
 
   if (body.stream === false) {
     const message = reply.calls
@@ -199,7 +239,7 @@ async function handle(req, res) {
   } else {
     for (const word of reply.text.split(/(?<= )/)) {
       send(chunk({ content: word }));
-      await wait(reply.text === STORY ? 40 : 25);
+      await wait(reply.wordDelayMs ?? (reply.text === STORY ? 40 : 25));
     }
     send(chunk({}, 'stop'));
   }

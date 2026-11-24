@@ -20,6 +20,8 @@ import { lastAssistantMessageIsCompleteWithApprovalResponses } from 'ai';
 import type {
   ChatNoticeData,
   ChatPageContext,
+  ChatQueue,
+  ChatQueuePausedReason,
   ChatRun,
   ChatRunStatus,
   ChatSessionDetail,
@@ -29,7 +31,11 @@ import {
   AiChatTransport,
   type ChatRequestBody,
 } from '../adapters/AiChatTransport';
-import { describeError } from '../adapters/describeError';
+import {
+  describeError,
+  errorNameOf,
+  statusOf,
+} from '../adapters/describeError';
 import {
   awaitingCalls,
   decidedCalls,
@@ -40,6 +46,7 @@ import {
   itemsToMessages,
   lastRunInterrupted,
   lastUserText,
+  pendingInserts,
 } from '../domain/itemsToMessages';
 import type { ChatUiMessage } from '../domain/types';
 
@@ -62,6 +69,21 @@ const ENDED_WITHOUT_ANSWER: ChatRunStatus[] = [
 
 const EVENT_STREAM = 'text/event-stream';
 
+/** The queue of the session, and why it is paused when the stream said so. */
+type QueueState = ChatQueue & { pausedReason?: ChatQueuePausedReason };
+
+/** What the screen says when a change of the queue found it changed. */
+export const QUEUE_CHANGED_TEXT =
+  'The queue was changed somewhere else. It is up to date now.';
+export const QUEUED_GONE_TEXT = 'That message was sent or removed already.';
+export const QUEUE_FULL_TEXT =
+  'The queue is full. Delete a queued message, or wait until one is sent.';
+export const RUN_CANNOT_TAKE_TEXT =
+  'The run could not take the message. Send it again when the run has ended.';
+
+/** The time that a direct send waits for the stream of an ended run to close. */
+const IDLE_WAIT_MS = 3000;
+
 /**
  * The chat of one session: `useChat` with the transport of the backend, the
  * messages restored from the log, and the rules around it. Create it for one
@@ -70,6 +92,13 @@ const EVENT_STREAM = 'text/event-stream';
  * - The decisions: every Allow or Deny is stored at once. The last one that
  *   the run waits for is sent through the chat (the response is the stream of
  *   the run); any other goes straight to the backend.
+ * - A message written while a run goes on is inserted into the run (Enter)
+ *   or queued (Ctrl or Cmd with Enter; the only way while the run waits for a
+ *   decision). Neither goes through `useChat`: its stream of the run is open
+ *   already. A refused insert is read again and then queued, inserted into
+ *   the new run, or sent as a new message (architecture, "frontend").
+ * - The queue: the stream tells its state when a run ends (`data-queue`);
+ *   when it started the next run, the screen follows that run.
  * - Opening a session follows a run that goes on, and carries on a run whose
  *   decisions are all stored. After a decision made here nothing carries on by
  *   itself: the response of that decision does it.
@@ -87,6 +116,10 @@ export function useSessionChat(options: UseSessionChatOptions) {
   /** The run goes on without this request: follow it when the request ends. */
   const followAfter = useRef(false);
   const lastRunStatus = useRef<ChatRunStatus>();
+  /** The run that the queue started: follow it when the stream ends. */
+  const nextRun = useRef<string>();
+  /** The stream of that run has told its state. */
+  const nextRunSeen = useRef(false);
   const [activeRun, setActiveRun] = useState<ChatRun | undefined>(
     initial.detail.run,
   );
@@ -96,12 +129,35 @@ export function useSessionChat(options: UseSessionChatOptions) {
   const [resendText, setResendText] = useState(() =>
     lastUserText(initial.detail.items),
   );
+  const [pending, setPending] = useState(() => pendingInserts(initial.detail));
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+  /** The inserted messages that the stream said the model read. */
+  const readSeqs = useRef(new Set<number>());
+  const [queue, setQueue] = useState<QueueState>(initial.detail.queue);
+  const queueRef = useRef(queue);
+  queueRef.current = queue;
+  const movingRef = useRef(false);
+  const [moving, setMoving] = useState(false);
+  const [queueNotice, setQueueNotice] = useState<string>();
+  /** The run that the queue started and this page is about to follow. */
+  const [followingNext, setFollowingNext] = useState<string>();
+  const followingNextRef = useRef<string>();
+  /** Sets both at once: the stream says it several times before a render. */
+  const following = useCallback((runId: string | undefined) => {
+    followingNextRef.current = runId;
+    setFollowingNext(runId);
+  }, []);
+  /** The run that ended had messages that were not read: read the session again. */
+  const reloadAfterEnd = useRef(false);
   const [notice, setNotice] = useState<ChatNoticeData['code']>();
   const [failure, setFailure] = useState<string>();
   const [decisions, setDecisions] = useState(() =>
     decisionsOf(initial.detail.items),
   );
   const askedForDecisions = useRef(new Set<string>());
+  const activeRunRef = useRef(activeRun);
+  activeRunRef.current = activeRun;
   const [deciding, setDeciding] = useState(false);
   const decidingRef = useRef(false);
   const mounted = useRef(true);
@@ -110,6 +166,40 @@ export function useSessionChat(options: UseSessionChatOptions) {
     return () => {
       mounted.current = false;
     };
+  }, []);
+
+  const applyQueue = useCallback(
+    (next: ChatQueue, keepReason = false) =>
+      setQueue(current => ({
+        items: next.items,
+        paused: next.paused,
+        // A read does not know the reason; only the stream of this page
+        // does. Another tab may have changed the queue since, so a read that
+        // is not part of this page's own flow drops it.
+        ...(keepReason &&
+          next.paused &&
+          current.pausedReason && { pausedReason: current.pausedReason }),
+      })),
+    [],
+  );
+
+  /** Reads the queue again: what a run that ended or another tab did to it. */
+  const refreshQueue = useCallback(async () => {
+    try {
+      const next = await api.getQueue(sessionId);
+      if (mounted.current) applyQueue(next);
+    } catch {
+      // The queue shows what it showed.
+    }
+  }, [api, applyQueue, sessionId]);
+  const refreshQueueRef = useRef(refreshQueue);
+  refreshQueueRef.current = refreshQueue;
+
+  // Another tab may have changed the queue.
+  useEffect(() => {
+    const onFocus = () => refreshQueueRef.current();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
   }, []);
 
   const transport = useMemo(
@@ -144,6 +234,26 @@ export function useSessionChat(options: UseSessionChatOptions) {
       if (part.type === 'data-run') {
         const { runId, status } = part.data;
         lastRunStatus.current = status;
+        if (runId === followingNextRef.current) {
+          nextRunSeen.current = true;
+          following(undefined);
+        }
+        if (
+          status === 'running' &&
+          activeRunRef.current?.id !== runId &&
+          !followingNextRef.current
+        ) {
+          // A run began (this page's message, or the queue's): the queue
+          // changed with it.
+          refreshQueueRef.current();
+        }
+        if (
+          status !== 'running' &&
+          status !== 'waiting_approval' &&
+          pendingRef.current.length > 0
+        ) {
+          reloadAfterEnd.current = true;
+        }
         setActiveRun(current =>
           status === 'running' || status === 'waiting_approval'
             ? {
@@ -158,6 +268,17 @@ export function useSessionChat(options: UseSessionChatOptions) {
         );
       } else if (part.type === 'data-notice') {
         setNotice(part.data.code);
+      } else if (part.type === 'data-inserted') {
+        readSeqs.current.add(part.data.seq);
+        setPending(current => current.filter(m => m.seq !== part.data.seq));
+      } else if (part.type === 'data-queue') {
+        const { nextRunId, ...next } = part.data;
+        setQueue(next);
+        setQueueNotice(undefined);
+        if (nextRunId) {
+          nextRun.current = nextRunId;
+          following(nextRunId);
+        }
       }
     },
     onError: error => {
@@ -187,6 +308,8 @@ export function useSessionChat(options: UseSessionChatOptions) {
         if (!mounted.current) return;
         chatRef.current.setMessages(itemsToMessages(detail));
         setActiveRun(detail.run);
+        applyQueue(detail.queue, true);
+        setPending(pendingInserts(detail));
         setInterrupted(lastRunInterrupted(detail));
         setResendText(lastUserText(detail.items));
         setDecisions(decisionsOf(detail.items));
@@ -199,8 +322,28 @@ export function useSessionChat(options: UseSessionChatOptions) {
         if (mounted.current) setFailure(describeError(error));
       }
     },
-    [api, sessionId],
+    [api, applyQueue, sessionId],
   );
+
+  /**
+   * The queue started the next run on this backend: read the session, which
+   * has its message and the queue without it, and follow the run from its
+   * first item. The stream of the run before has ended.
+   */
+  const followNextRun = async (runId: string) => {
+    nextRunSeen.current = false;
+    try {
+      await reload();
+      await chatRef.current.resumeStream();
+    } finally {
+      // The stream of this run may have named the next one: keep that.
+      if (mounted.current && followingNextRef.current === runId) {
+        following(undefined);
+      }
+    }
+    // Nothing streamed (the run was over already): show what is stored.
+    if (!nextRunSeen.current && !nextRun.current) await reload();
+  };
 
   // A request has ended: follow the run that goes on, or show what is stored
   // when the stream did not end with the answer.
@@ -228,7 +371,12 @@ export function useSessionChat(options: UseSessionChatOptions) {
           // The cards show the result without who decided it.
         });
     }
-    if (followAfter.current) {
+    if (nextRun.current) {
+      // The queue started a run: show its message, and follow it.
+      const runId = nextRun.current;
+      nextRun.current = undefined;
+      followNextRun(runId);
+    } else if (followAfter.current) {
       followAfter.current = false;
       chatRef.current.resumeStream().then(
         () => reload(),
@@ -236,10 +384,12 @@ export function useSessionChat(options: UseSessionChatOptions) {
       );
     } else if (
       status === 'error' ||
+      reloadAfterEnd.current ||
       (lastRunStatus.current &&
         ENDED_WITHOUT_ANSWER.includes(lastRunStatus.current))
     ) {
       lastRunStatus.current = undefined;
+      reloadAfterEnd.current = false;
       reload({ carryOn: status === 'error' });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -260,17 +410,232 @@ export function useSessionChat(options: UseSessionChatOptions) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const send = useCallback(async (text: string) => {
-    carryOnTried.current = false;
-    setFailure(undefined);
-    setInterrupted(false);
-    setResendText(text);
-    await chatRef.current.sendMessage({ text });
+  /** Waits for the stream of a run that ended to close; `sendMessage` needs it. */
+  const waitUntilIdle = useCallback(async () => {
+    const until = Date.now() + IDLE_WAIT_MS;
+    while (
+      Date.now() < until &&
+      (chatRef.current.status === 'streaming' ||
+        chatRef.current.status === 'submitted')
+    ) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
   }, []);
 
+  /** Starts a run with the text (no run goes on). */
+  const sendDirect = useCallback(
+    async (text: string): Promise<boolean> => {
+      carryOnTried.current = false;
+      setFailure(undefined);
+      setQueueNotice(undefined);
+      setInterrupted(false);
+      setResendText(text);
+      await waitUntilIdle();
+      await chatRef.current.sendMessage({ text });
+      return true;
+    },
+    [waitUntilIdle],
+  );
+
+  /** Sends a message that was not read again; not while a run goes on. */
+  const sendTextAgain = useCallback(
+    async (text: string): Promise<boolean> =>
+      activeRunRef.current ? false : sendDirect(text),
+    [sendDirect],
+  );
+
+  /** Queues the text. A queue that cannot take it leaves the text with the user (`false`). */
+  const queueText = useCallback(
+    async (text: string): Promise<boolean> => {
+      setFailure(undefined);
+      setQueueNotice(undefined);
+      try {
+        const item = await api.queueMessage(sessionId, {
+          text,
+          page: pageRef.current,
+        });
+        setQueue(current => ({
+          ...current,
+          items: [...current.items.filter(m => m.id !== item.id), item],
+        }));
+        return true;
+      } catch (error) {
+        const name = errorNameOf(error);
+        if (name === 'NoActiveRun') {
+          // The run ended before the message got there: nothing to wait for.
+          await refreshQueue();
+          setActiveRun(undefined);
+          return sendDirect(text);
+        }
+        if (name === 'QueueFull') {
+          await refreshQueue();
+          setFailure(QUEUE_FULL_TEXT);
+        } else {
+          setFailure(describeError(error));
+        }
+        return false;
+      }
+    },
+    [api, refreshQueue, sendDirect, sessionId],
+  );
+
+  /**
+   * Inserts the text into the run. A 409 means that the run is not what the
+   * screen thought: read the session, and take the way that fits.
+   */
+  const insertText = useCallback(
+    async (runId: string, text: string, retry = true): Promise<boolean> => {
+      setFailure(undefined);
+      setQueueNotice(undefined);
+      try {
+        const item = await api.insertMessage(sessionId, runId, {
+          text,
+          page: pageRef.current,
+        });
+        // The stream may have said the model read it before this answer came.
+        if (!readSeqs.current.has(item.seq)) {
+          setPending(current => [...current, { seq: item.seq, text }]);
+        }
+        return true;
+      } catch (error) {
+        if (statusOf(error) !== 409) {
+          setFailure(describeError(error));
+          return false;
+        }
+        let detail: ChatSessionDetail;
+        try {
+          detail = await api.getSession(sessionId);
+        } catch (reading) {
+          setFailure(describeError(reading));
+          return false;
+        }
+        if (!mounted.current) return false;
+        setActiveRun(detail.run);
+        applyQueue(detail.queue);
+        setPending(pendingInserts(detail));
+        const current = detail.run;
+        if (
+          errorNameOf(error) === 'InsertLimitReached' ||
+          current?.status === 'waiting_approval'
+        ) {
+          return queueText(text);
+        }
+        if (current?.status === 'running' && current.id !== runId && retry) {
+          return insertText(current.id, text, false);
+        }
+        if (!current) return sendDirect(text);
+        setFailure(RUN_CANNOT_TAKE_TEXT);
+        return false;
+      }
+    },
+    [api, applyQueue, queueText, sendDirect, sessionId],
+  );
+
+  /**
+   * The text of the box with Enter: a new run when none goes on, an insert
+   * into the run, or, while the run waits for a decision, the queue.
+   * Resolves with `false` when the text was not taken.
+   */
+  const send = useCallback(
+    async (text: string): Promise<boolean> => {
+      const run = activeRunRef.current;
+      if (!run) return sendDirect(text);
+      if (run.status === 'waiting_approval') return queueText(text);
+      return insertText(run.id, text);
+    },
+    [insertText, queueText, sendDirect],
+  );
+
+  /** The text with Ctrl or Cmd and Enter, or the Queue button. */
+  const queueMessage = useCallback(
+    async (text: string): Promise<boolean> =>
+      activeRunRef.current ? queueText(text) : sendDirect(text),
+    [queueText, sendDirect],
+  );
+
   const sendAgain = useCallback(async () => {
-    if (resendText) await send(resendText);
-  }, [resendText, send]);
+    if (resendText) await sendDirect(resendText);
+  }, [resendText, sendDirect]);
+
+  /** Shows what a change of the queue found, and reads the queue again. */
+  const queueChangeFailed = useCallback(
+    async (error: unknown) => {
+      const name = errorNameOf(error);
+      if (name === 'QueuedMessageNotFound') setQueueNotice(QUEUED_GONE_TEXT);
+      else if (name === 'QueueChanged') setQueueNotice(QUEUE_CHANGED_TEXT);
+      else setFailure(describeError(error));
+      await refreshQueue();
+    },
+    [refreshQueue],
+  );
+
+  const editQueued = useCallback(
+    async (id: string, text: string): Promise<boolean> => {
+      setQueueNotice(undefined);
+      try {
+        const item = await api.updateQueuedMessage(sessionId, id, { text });
+        setQueue(current => ({
+          ...current,
+          items: current.items.map(m => (m.id === id ? item : m)),
+        }));
+        return true;
+      } catch (error) {
+        await queueChangeFailed(error);
+        return false;
+      }
+    },
+    [api, queueChangeFailed, sessionId],
+  );
+
+  const removeQueued = useCallback(
+    async (id: string) => {
+      setQueueNotice(undefined);
+      try {
+        await api.deleteQueuedMessage(sessionId, id);
+        setQueue(current => ({
+          ...current,
+          items: current.items.filter(m => m.id !== id),
+        }));
+      } catch (error) {
+        await queueChangeFailed(error);
+      }
+    },
+    [api, queueChangeFailed, sessionId],
+  );
+
+  const moveQueued = useCallback(
+    async (id: string, direction: -1 | 1) => {
+      // One move at a time: the next one starts from the order this one made.
+      if (movingRef.current) return;
+      setQueueNotice(undefined);
+      const ids = queueRef.current.items.map(m => m.id);
+      const from = ids.indexOf(id);
+      const to = from + direction;
+      if (from < 0 || to < 0 || to >= ids.length) return;
+      [ids[from], ids[to]] = [ids[to], ids[from]];
+      movingRef.current = true;
+      setMoving(true);
+      try {
+        applyQueue(await api.reorderQueue(sessionId, { ids }), true);
+      } catch (error) {
+        await queueChangeFailed(error);
+      } finally {
+        movingRef.current = false;
+        if (mounted.current) setMoving(false);
+      }
+    },
+    [api, applyQueue, queueChangeFailed, sessionId],
+  );
+
+  /** Sends the first queued message as a new run (the queue is paused). */
+  const continueQueue = useCallback(async () => {
+    carryOnTried.current = false;
+    setFailure(undefined);
+    setQueueNotice(undefined);
+    await waitUntilIdle();
+    const body: ChatRequestBody = { resumeQueue: true };
+    await chatRef.current.sendMessage(undefined, { body });
+  }, [waitUntilIdle]);
 
   const decide = useCallback(
     async (callId: string, approved: boolean) => {
@@ -352,8 +717,24 @@ export function useSessionChat(options: UseSessionChatOptions) {
     interrupted,
     canResend: Boolean(resendText),
     error: failure ?? (chat.error ? describeError(chat.error) : undefined),
+    pending,
+    queue: queue.items,
+    /** The queue waits for the user: no run goes on, and none is about to start. */
+    queuePaused:
+      queue.paused && queue.items.length > 0 && !activeRun && !followingNext,
+    queuePausedReason: queue.pausedReason,
+    queueNotice,
+    /** The queue started a run that this page is about to follow. */
+    followingNext: Boolean(followingNext),
     send,
+    queueMessage,
     sendAgain,
+    sendTextAgain,
+    queueMoving: moving,
+    editQueued,
+    removeQueued,
+    moveQueued,
+    continueQueue,
     decide,
     stop,
   };

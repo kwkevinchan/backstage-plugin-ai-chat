@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { ResponseError } from '@backstage/errors';
 import type {
   ChatItem,
   ChatItemBody,
@@ -62,6 +63,37 @@ export const user = (text: string): ChatItemBody & { runId: string } => ({
   runId: 'r-1',
 });
 
+/** A message that the user added to the run while it went on. */
+export const inserted = (
+  text: string,
+  insertState: 'read' | 'pending' | 'unread',
+  runId = 'r-1',
+): ChatItemBody & { runId: string } => ({
+  kind: 'user_message',
+  text,
+  delivery: 'inserted',
+  insertState,
+  runId,
+});
+
+/** The item that an insert answers with. */
+export const insertedItem = (seq: number, text: string): ChatItem => ({
+  ...items(inserted(text, 'pending'))[0],
+  seq,
+});
+
+/** An answer of the model that had read the log up to `readUpToSeq`. */
+export const answer = (
+  text: string,
+  readUpToSeq?: number,
+  runId = 'r-1',
+): ChatItemBody & { runId: string } => ({
+  kind: 'agent_message',
+  text,
+  runId,
+  ...(readUpToSeq !== undefined && { readUpToSeq }),
+});
+
 export const call = (
   callId: string,
   toolId = 'dev-actions:restart-service',
@@ -108,6 +140,13 @@ export function mockApi(
     resume: jest.fn(),
     follow: jest.fn().mockResolvedValue(undefined),
     cancelRun: jest.fn().mockResolvedValue(undefined),
+    insertMessage: jest.fn(),
+    getQueue: jest.fn().mockResolvedValue({ items: [], paused: false }),
+    queueMessage: jest.fn(),
+    updateQueuedMessage: jest.fn(),
+    deleteQueuedMessage: jest.fn().mockResolvedValue(undefined),
+    reorderQueue: jest.fn(),
+    resumeQueue: jest.fn().mockResolvedValue(undefined),
     ...overrides,
   } as jest.Mocked<AiChatApi>;
 }
@@ -127,4 +166,52 @@ export function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { 'content-type': 'application/json' },
   });
+}
+
+/** The error that a request of the chat backend throws for a refusal with this name. */
+export async function refusal(
+  status: number,
+  name: string,
+): Promise<ResponseError> {
+  return ResponseError.fromResponse(
+    jsonResponse(
+      {
+        error: { name, message: `${name} happened` },
+        request: { method: 'POST', url: '/x' },
+        response: { statusCode: status },
+      },
+      status,
+    ),
+  );
+}
+
+/**
+ * A response of a stream that stays open: chunks are pushed when the test
+ * says so, and `end` closes it.
+ */
+export function openStream() {
+  const encoder = new TextEncoder();
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const body = new ReadableStream<Uint8Array>({
+    start: c => {
+      controller = c;
+    },
+  });
+  return {
+    response: new Response(body, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    }),
+    push(...chunks: object[]) {
+      for (const chunk of chunks) {
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`),
+        );
+      }
+    },
+    end() {
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+      controller.close();
+    },
+  };
 }

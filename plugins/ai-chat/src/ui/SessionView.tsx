@@ -26,6 +26,8 @@ import { useSessionTools } from '../application/useSessionTools';
 import { usePageContext } from '../application/usePageContext';
 import { Composer } from './Composer';
 import { MessageList } from './MessageList';
+import { PendingInserts } from './PendingInserts';
+import { QueuePanel } from './QueuePanel';
 import { cx } from './styles';
 import { ToolsetPanel } from './ToolsetPanel';
 
@@ -71,12 +73,21 @@ export function SessionView(props: SessionViewProps) {
     [api, detail.session.id, enabled],
   );
 
-  const waiting = chat.awaiting.length > 0;
   const running = Boolean(chat.activeRun);
+  const waiting = chat.activeRun?.status === 'waiting_approval';
+  // While a run goes on the box takes messages: Enter inserts, Ctrl or Cmd
+  // with Enter queues, and a run that waits for a decision only queues.
   let hint: string | undefined;
+  let placeholder: string | undefined;
   if (waiting) {
     hint =
-      'An action waits for your decision. Decide, or stop the run, to send a new message.';
+      'An action waits for your decision. New messages can only be queued; they are sent when the run ends.';
+    placeholder = 'Write a message to queue (Enter or Ctrl/Cmd+Enter queues)';
+  } else if (running) {
+    placeholder =
+      'Write a message (Enter adds it to the run, Ctrl/Cmd+Enter queues it, Shift+Enter starts a new line)';
+  } else if (chat.queuePaused) {
+    hint = 'After you send, the queue continues when this run ends.';
   }
 
   return (
@@ -103,11 +114,27 @@ export function SessionView(props: SessionViewProps) {
         interrupted={chat.interrupted && chat.canResend}
         onDecide={chat.decide}
         onSendAgain={chat.sendAgain}
+        onSendTextAgain={running || chat.busy ? undefined : chat.sendTextAgain}
       />
+      <QueuePanel
+        items={chat.queue}
+        paused={chat.queuePaused}
+        pausedReason={chat.queuePausedReason}
+        notice={chat.queueNotice}
+        onContinue={chat.continueQueue}
+        onEdit={chat.editQueued}
+        onRemove={chat.removeQueued}
+        moving={chat.queueMoving}
+        onMove={chat.moveQueued}
+      />
+      <PendingInserts items={chat.pending} />
       <Composer
         onSend={chat.send}
-        disabled={chat.busy || running}
+        onQueue={running && !waiting ? chat.queueMessage : undefined}
+        sendLabel={waiting ? 'Queue' : undefined}
+        disabled={(chat.busy && !running) || chat.followingNext}
         hint={hint}
+        placeholder={placeholder}
         onStop={running ? chat.stop : undefined}
       />
     </div>
