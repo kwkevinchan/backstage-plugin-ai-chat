@@ -174,6 +174,8 @@ function deadlineOf(req: AdvanceRunRequest): Deadline {
     expired = true;
     controller.abort();
   }, Math.min(leftMs, MAX_TIMER_MS));
+  // A host that drops the generator must not be kept alive until the deadline.
+  timer.unref?.();
   return {
     signal: AbortSignal.any([req.signal, controller.signal]),
     expired: () => expired,
