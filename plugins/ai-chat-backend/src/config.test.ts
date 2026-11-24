@@ -47,7 +47,7 @@ describe('readAiChatConfig', () => {
             maxTurns: 3,
             systemPrompt: 'Be brief.',
             actions: { include: ['a:*'], exclude: ['a:b'] },
-            maxToolOutputChars: 50,
+            maxToolOutputChars: 150,
           },
         },
       }),
@@ -57,7 +57,7 @@ describe('readAiChatConfig', () => {
       maxTurns: 3,
       systemPrompt: 'Be brief.',
       actions: { include: ['a:*'], exclude: ['a:b'] },
-      maxToolOutputChars: 50,
+      maxToolOutputChars: 150,
     });
   });
 
@@ -77,5 +77,12 @@ describe('readAiChatConfig', () => {
         mockServices.rootConfig({ data: { aiChat: { llm, maxTurns: 0 } } }),
       ),
     ).toThrow(/maxTurns/);
+    expect(() =>
+      readAiChatConfig(
+        mockServices.rootConfig({
+          data: { aiChat: { llm, maxToolOutputChars: 99 } },
+        }),
+      ),
+    ).toThrow(/maxToolOutputChars must be an integer of at least 100/);
   });
 });

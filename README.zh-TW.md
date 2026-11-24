@@ -36,12 +36,19 @@ aiChat:
     apiKey: ${AI_CHAT_API_KEY}
     model: gpt-4o-mini
   maxTurns: 10
-  actions:
+  actions: # 已淘汰，改用 toolsets；啟動時會記警告
     include: ['catalog:*']
 backend:
   actions:
     pluginSources: [catalog] # 對話只看得到這些外掛的 action
 ```
+
+`aiChat.toolsets`（工具分組，`default: true` 的組在新對話預設開啟，`egress: true`
+的組即使唯讀也要核准）和 `aiChat.policy`（`{action id: allow|ask|deny}`）取代
+`actions.include`、`actions.exclude`。啟動時會讀取並檢查，值不對會讓後端無法啟動。
+`allow` 只對標了 `readOnly: true` 的 action 有效；沒標的當成不是唯讀，仍然要核准，
+並在 log 記一筆警告。這一版的對話仍然使用 `include`、`exclude`，新設定在新的
+agent 迴圈接上之後生效。細節見[英文 README](README.md#toolsets-and-policy)。
 
 ## 核准的規則
 
