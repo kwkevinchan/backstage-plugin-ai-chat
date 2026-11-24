@@ -385,6 +385,26 @@ flowchart LR
 
 順序：P2-01 和 P2-02 互相獨立。P2-03 之後才能做 P2-04 和 P2-05。P2-06 和 P2-07 跟分享無關，可以平行。
 
+### P2-01 列表管理和自動標題
+
+- **範圍**：SE-03、SE-04。列表可以搜尋、釘選、改名、封存。第一輪正常結束後自動產生標題，產生失敗不影響對話。改名、釘選、封存沿用 `UpdateSession`、`PATCH /sessions/:id` 和既有欄位。不做保存期限、分享、複製、斷線接回、側邊面板。
+- **依賴**：P1 的 Session、`UpdateSession`，以及 `RunSupervisor` 寫完 Run 狀態的那條路徑。
+- **決定**（規格和架構沒有寫死的部分）：
+  - **搜尋**：`GET /sessions?q=`。比對存下的 `title`，不分大小寫的子字串（ASCII 的大小寫）。沒有標題的 Session 對不上。空白和沒給 `q` 一樣。`%` 和 `_` 是字面字，不是萬用字元。仍只列出自己的；預設不含已封存。`includeArchived` 和 `limit` 照舊，`limit` 算的是符合條件的筆數。不搜訊息內容。
+  - **排序**：釘選的在前。同一組裡 `updated_at` 新的在前，再以 `id` 排，順序才穩定。
+  - **封存**：`archived: true` 封存，`archived: false` 恢復。畫面有「顯示已封存」；打開才列出已封存的，並可以恢復。
+  - **改名**：`PATCH` 的 `title`。空白不送出，也不把標題清掉。使用者設過的標題（含第一輪結束前就改的）不會被自動標題蓋掉。
+  - **自動標題**：掛在 `RunSupervisor` 已把 Run 狀態寫入之後、把 `run.ended` 交給訂閱者之前，排在佇列的 `afterRun` 後面，不另做一條生命週期。用這台已經在用的 `ModelClient`，沒有第二個模型。提示詞要求只回一行、最多 80 字元、不要引號；對話內容當資料，不當指示。送給模型的只有該輪的使用者文字和助理文字，各最多 500 字元，不含工具輸出、不含圖片。回答取第一行、去掉一層引號、空白折成一行，超過 80 字元就截斷；空的就當作沒產生。寫入條件是 `title` 仍是空的，所以和手動改名同時發生時，手動的留下。
+  - **第一輪**：這段 Session 第一次正常結束的 Run。正常結束和佇列相同（`isNormalEnd`：`completed` 而且沒有 `endReason`）。更早的 Run 若是失敗、取消、過期或因上限結束，不算這一輪，下一次正常結束仍會產生。這一次產生失敗（模型錯誤、逾時、空的回答）就不為後來的 Run 再產生，標題維持沒有。
+  - **失敗不影響對話**：錯誤只記 log。Run 的狀態已經寫好，不改；串流仍送出 `run.ended`。模型呼叫最多等 8 秒，逾時當作沒產生。對話可以繼續，列表照常。
+- **驗收**：
+  - domain（`sessionList.test.ts`）：搜尋的比對（大小寫、沒有標題、空白、`%` 是字面字）；排序（釘選在前、同組依更新時間、`id` 穩定）；`titleFromModelAnswer`（第一行、引號、80 字元、空的）；`shouldAutoTitle`（沒有標題、正常結束、沒有更早的正常結束才產生；已有標題、不是正常結束、已經正常結束過，都不產生）。
+  - application：`NameSession.test.ts` 在該產生時呼叫模型並寫入；模型丟錯、逾時、空回答都不寫、也不丟出；已有標題或不是第一次正常結束時不呼叫模型。`RunSupervisor.test.ts`：只有正常結束才呼叫；呼叫丟錯時 Run 仍是 `completed`，訂閱者仍收到 `run.ended`。
+  - persistence：`KnexSessionRepository.test.ts` 搜尋、釘選排序、`setTitleIfAbsent` 不蓋掉已有標題、`%` 不是萬用字元。`KnexRunRepository.test.ts` 的 `hasOtherNormalEnd`。
+  - HTTP（`http.test.ts`）：`GET /sessions?q=`、釘選排在較新的未釘選之前、已封存要 `includeArchived` 才列出。
+  - 前端元件（`ChatPage.test.tsx`）：搜尋、釘選、改名、封存、顯示已封存並恢復。
+  - 整合（`hostFlows.test.ts`）：第一輪正常結束後寫入標題；Run 失敗沒有標題；手動標題留著。產生失敗不讓 Run 失敗，由 application 和 `RunSupervisor` 的測試保證。
+
 分享的安全測試單獨列出來，因為這一期最容易出錯的地方在這裡：
 
 - 被分享的人直接呼叫 API 讀取序號超過 `up_to_seq` 的 Item：讀不到。
@@ -542,3 +562,4 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-24 | 1.1  | 新增 PI 輸入（第 4 節）：PI-01 到 PI-07，每項有範圍、依賴和驗收情境；P2 以後的節號順延一號；新增 V-07 到 V-10 和五條風險；P2-04、P2-05 加 IN-19（分享時圖片的讀取和複製）。PI-01 只改文件                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | 2026-11-24 | 1.1  | PI 審查後：暫停時直接送出的順序寫進 IN-15、IN-18；複製帶走圖片（IN-19，P2-05 驗收）；模型輸出的 `append` 取 `FOR NO KEY UPDATE`、取鎖順序表；`readUpToSeq` 定義為這一輪開始讀紀錄時的最大序號；`afterRun` 對 `waiting_approval` 不送出；已結束 Run 的 `unread` 插入訊息不再送給模型；`message.read` 不走 `seq` 去重；插入 409 的三種處理；圖片位元組上限 `maxBytesPerInput`；`Cache-Control` 改 `private, no-cache`；`ModelClient.stream` 帶 `sessionId`；設定統一用 `aiChat.llm.images`；SQLite 的理由改寫                                                                                                                                                                                          |
 | 2026-11-24 | 1.1  | PI-05 後續：刪除 Session 先鎖 `runs`（`FOR UPDATE`，依 `id`）再鎖 `sessions`，和 13.8 的取鎖順序一致，並加 PostgreSQL 的並行測試。SQLite 多連線實測是 `SQLITE_BUSY` 而不是「插入先」或「結束先」，啟動時要求 pool `max` 是 1。上傳路由的 OpenAPI 說明錯字改正；二進位 `requestBody` 仍不寫進規格（repo-tools 的 lint 仍要求 `application/json`）                                                                                                                                                                                                                                                                                                                                                     |
+| 2026-11-25 | 1.1  | P2-01 驗收清單：搜尋是標題的子字串（ASCII 不分大小寫，沒有標題的對不上，`%` 和 `_` 是字面字）；釘選的排在前面，同組依 `updated_at`；封存可從畫面恢復；自動標題用同一個模型，在第一次正常結束（`isNormalEnd`）後產生，最多 80 字元，只在 `title` 仍空時寫入，失敗或逾時（8 秒）不改 Run。更早失敗的 Run 不算這一輪；產生失敗不為後來的 Run 再產生                                                                                                                                                                                                                                                                                                                                                     |
