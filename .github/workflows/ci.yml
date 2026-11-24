@@ -175,6 +175,52 @@ jobs:
             exit 1
           fi
 
+  postgres:
+    name: Backend tests (PostgreSQL 16)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CI: true
+      NODE_OPTIONS: --max-old-space-size=8192
+      # The tests of the backend plugin use this database instead of SQLite
+      # (see src/__testUtils__).
+      BACKSTAGE_TEST_DATABASE_POSTGRES16_CONNECTION_STRING: postgresql://postgres:postgres@localhost:5432
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Cache yarn
+        uses: actions/cache@v4
+        with:
+          path: ~/.yarn/berry/cache
+          key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
+          restore-keys: yarn-${{ runner.os }}-
+
+      - name: Install
+        run: yarn install --immutable
+        env:
+          HUSKY: 0
+
+      - name: Test the backend plugin on PostgreSQL
+        run: yarn workspace @kwkevinchan/backstage-plugin-ai-chat-backend test --maxWorkers=2
+
   e2e:
     name: Smoke (${{ matrix.app }})
     runs-on: ubuntu-latest
