@@ -153,7 +153,7 @@ data-run, error (新)             status= error onData= [ 'data-run:failed' ] on
 Received text-delta for missing text part with ID "t". Ensure a "text-start" chunk is sent before any "text-delta" chunks.
 ```
 
-所以接回串流重送時，還沒完成的 Item 不能只轉送缺開頭的 `text-delta`。要補送 `text-start` 加已累積的文字，或等它完成再整段送。實測補送 `text-start` 加累積文字，後面的 `text-delta` 接得上：
+所以接回串流重送時，還沒完成的 Item 不能只轉送缺開頭的 `text-delta`。要補送 `text-start` 加已累積的文字，或等它完成再整段送。Run 在別台 backend 時拿不到逐字片段，只能等它完成再整段送。實測補送 `text-start` 加累積文字，後面的 `text-delta` 接得上：
 
 ```
 [ 'step-start', 'text:"Let me check."', 'text:"Partial so far, and the rest."' ]
@@ -331,7 +331,7 @@ Tests:       2 passed, 2 total
   - 不是最後一個要決定的呼叫：先呼叫 `AiChatClient` 的 decision 端點（回應是 JSON），成功後再呼叫 `addToolApprovalResponse` 讓畫面更新。`sendAutomaticallyWhen` 要求 `pendingDecision != null`，所以這時不會自動送出。這個分支不設 `pendingDecision`。
   - 最後一個要決定的呼叫：設 `pendingDecision`，然後呼叫 `addToolApprovalResponse({ id, approved, options: { body: pendingDecision } })`。
   - `sendAutomaticallyWhen` 是 `pendingDecision != null && lastAssistantMessageIsCompleteWithApprovalResponses({ messages })`。
-  - transport 的 `sendMessages` 只讀 `body.callId` 和 `body.approved`，打那個呼叫的 decision 端點，收 SSE 接續執行，用完把 `pendingDecision` 清空。
+  - transport 的 `sendMessages` 一開始就讀 `body.callId` 和 `body.approved`，並立刻把 `pendingDecision` 清空，然後打那個呼叫的 decision 端點，收 SSE 接續執行。
   - 接續串流結束後，`useChat` 會再判斷一次是否自動送出（`ai/src/ui/chat.ts` 約 1228 到 1242 行，帶同一個 `body`）。`pendingDecision` 已清空，所以不會重送。伺服器用 `abort` 結束時，`useChat` 不會當成中斷，同樣要靠這一點擋住。
   - 載入已存的訊息時，已決定的呼叫轉成 `approval-responded`，還沒決定的是 `approval-requested`。所以只決定一個就重新整理，那個決定還在，另一個仍在等。
   - 連按：有決定請求還在處理時，鎖住其他核准卡片（按鈕停用）。否則按 A 的 JSON 請求還沒回來就按 B，B 會誤判自己不是最後一個。
@@ -343,14 +343,23 @@ Tests:       2 passed, 2 total
     [ 'step-start', 'tool-a:approval-responded', 'tool-b:output-available', 'step-start', 'text:"Done."' ]
     ```
 
-    B 的決定只送出一次，A 沒有重送，串流用 `abort` 結束也沒有再送。
+    B 的決定只送出一次，A 沒有重送。
+
+    `abort` 結束後不會再送，用另一支腳本（`check-abort.mjs`）對照：串流只有 `start`、`tool-approval-response`、`abort`，沒有 `start-step`，所以結束時所有核准都有回應。
+
+    ```
+    with pendingDecision condition: true   status=ready  posts=1 [ '{"callId":"call_b","approved":true}' ]
+    with pendingDecision condition: false  status=error  posts=2 [ same decision twice ]
+    ```
+
+    有 `pendingDecision` 條件時只送一次；拿掉條件，`useChat` 在 `abort` 結束後又送了一次。
 
   - 沒有實測：兩個核准在畫面上連按的鎖，以及 JSON 回應的分支。這兩項在 P1-10 的端對端測試驗收。
 
 - **停止。** `useChat.stop()` 只會中斷 fetch。文件把這種中斷視為斷線，不是取消（見 Chatbot Resume Streams 的警告）。要取消 Run，transport 的 `abortSignal` 不能直接取消伺服器的工作，要由使用者按「停止」時另外呼叫 `POST .../cancel`。
 - **接回（A-07）。** 規格的 A-07 已改成「從目前 Run 的第一個 Item 重送，再接著送新的」。重送要先送 `start`（同一個 `messageId`）。還沒完成的 Item 要補送 `text-start` 加已累積的文字，不能只送缺開頭的 `text-delta`（3.4）。`afterSeq` 留作其他用戶端的下限。
 - **`data-plan`。** 固定 `id` 取代先前的，只在同一則訊息裡成立。前一個 Run 的計畫留在舊訊息，畫面要取最新的那一個。
-- **P1 沒有 `GET /stream`。** P1 的 transport 讓 `reconnectToStream` 直接回 `null`。端點要到 P2 才有，打到 404 會讓 `useChat` 每次載入都進 `error`。P2 之後，沒有進行中的 Run 時伺服器回 204，transport 轉成 `null`。
+- **P1 沒有 `GET /stream`。** P1 的 transport 讓 `reconnectToStream` 直接回 `null`。端點要到 P2 才有，打到 404 會讓 `useChat` 每次載入都進 `error`。P2 之後，只有 Run 是 `running` 時才串流；`waiting_approval` 或已結束時伺服器回 204，transport 轉成 `null`。（H-03 把 `waiting_approval` 算進行中的 Run，這裡的「串流」不同：停在核准上的 Run 沒有東西可送，開著串流會讓 `useChat` 停在 `submitted`，之後按核准不會自動送出，卡片卡住。）
 - **zod 版本。** `ai` 的 peer 是 `zod@^3.25.76 || ^4.1.8`。
 
 ## 6. 沒有驗證的事
@@ -358,5 +367,5 @@ Tests:       2 passed, 2 total
 - jest 探針只測了 import 和一段簡單的文字串流，沒有測核准和接回（那兩項在 Node 加 jsdom 的腳本裡測過，見 5.2）。
 - TypeScript 5.8 編譯 `ai` 的型別定義。
 - 真正的瀏覽器：`useChat` 的 `resume` 只測了掛載時重連，沒測分頁回到前景時的重連。
-- 多個核准同時進行（5.5 的做法只靠讀 `useChat` 的程式判斷，沒有實測）。
+- 多個核准：畫面連按時鎖住卡片，和 decision 端點回 JSON 的那條路（5.5）。`pendingDecision` 的流程本身已實測。
 - 在 Backstage 的 HTTP 堆疊（Express）上送 SSE：驗證用的是 Node 內建 `http`。

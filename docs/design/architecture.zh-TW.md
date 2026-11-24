@@ -724,20 +724,20 @@ shares                                           P2
 
 路徑都在 `/api/ai-chat` 底下。
 
-| 方法和路徑                                                                    | Use case                  | 回應                                  | 分期                      |
-| ----------------------------------------------------------------------------- | ------------------------- | ------------------------------------- | ------------------------- |
-| `GET /sessions`                                                               | ListSessions              | JSON                                  | P1                        |
-| `POST /sessions`                                                              | CreateSession             | JSON                                  | P1                        |
-| `GET /sessions/:id`                                                           | GetSession                | JSON：Session、Run 狀態、Item         | P1                        |
-| `PATCH /sessions/:id`                                                         | UpdateSession             | JSON                                  | P1（Toolset）、P2（其他） |
-| `DELETE /sessions/:id`                                                        | DeleteSession             | 204                                   | P1                        |
-| `POST /sessions/:id/runs`                                                     | SendMessage               | SSE                                   | P1                        |
-| `POST /sessions/:id/runs/:runId/cancel`                                       | CancelRun                 | 202                                   | P1                        |
-| `POST /sessions/:id/tool-calls/:callId/decision`                              | DecideApproval            | 還有別的要決定：JSON。全部決定了：SSE | P1                        |
-| `GET /sessions/:id/stream?afterSeq=`（`afterSeq` 選用）                       | FollowSession             | SSE；沒有進行中的 Run 時 204          | P2                        |
-| `GET/POST /sessions/:id/shares`、`PATCH/DELETE /sessions/:id/shares/:shareId` | ShareSession、UpdateShare | JSON                                  | P2                        |
-| `POST /sessions/:id/fork`                                                     | ForkSession               | JSON                                  | P2                        |
-| `GET /toolsets`、`GET /agents`                                                | AgentCatalog              | JSON                                  | P1、P3                    |
+| 方法和路徑                                                                    | Use case                  | 回應                                                          | 分期                      |
+| ----------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------- | ------------------------- |
+| `GET /sessions`                                                               | ListSessions              | JSON                                                          | P1                        |
+| `POST /sessions`                                                              | CreateSession             | JSON                                                          | P1                        |
+| `GET /sessions/:id`                                                           | GetSession                | JSON：Session、Run 狀態、Item                                 | P1                        |
+| `PATCH /sessions/:id`                                                         | UpdateSession             | JSON                                                          | P1（Toolset）、P2（其他） |
+| `DELETE /sessions/:id`                                                        | DeleteSession             | 204                                                           | P1                        |
+| `POST /sessions/:id/runs`                                                     | SendMessage               | SSE                                                           | P1                        |
+| `POST /sessions/:id/runs/:runId/cancel`                                       | CancelRun                 | 202                                                           | P1                        |
+| `POST /sessions/:id/tool-calls/:callId/decision`                              | DecideApproval            | 還有別的要決定：JSON。全部決定了：SSE                         | P1                        |
+| `GET /sessions/:id/stream?afterSeq=`（`afterSeq` 選用）                       | FollowSession             | SSE；Run 是 running 時才串流，waiting_approval 或已結束時 204 | P2                        |
+| `GET/POST /sessions/:id/shares`、`PATCH/DELETE /sessions/:id/shares/:shareId` | ShareSession、UpdateShare | JSON                                                          | P2                        |
+| `POST /sessions/:id/fork`                                                     | ForkSession               | JSON                                                          | P2                        |
+| `GET /toolsets`、`GET /agents`                                                | AgentCatalog              | JSON                                                          | P1、P3                    |
 
 Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use case、把結果交給 presenter。
 
@@ -765,7 +765,7 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 
 「停在核准上」用協定原生的 `tool-approval-request`。核准是另一個請求（`decision`），它的回應用同一個 `messageId`，從 `tool-approval-response` 開始，接在同一則訊息上。不用 `signature`：歷史在伺服器的紀錄裡，用戶端不送歷史。
 
-重新整理後接回（A-07）：伺服器先送 `start`（同一個 `messageId`），從目前 Run 的第一個 Item 重送，再接著送新的。還沒完成的 Item 補送 `text-start` 加已累積的文字，不送缺開頭的 `text-delta`（`useChat` 會報錯）。只送缺的 Item 時，`useChat` 會蓋掉已載入的部分訊息。`afterSeq` 給不用 `useChat` 的用戶端當下限。沒有進行中的 Run 時回 204。
+重新整理後接回（A-07）：伺服器先送 `start`（同一個 `messageId`），從目前 Run 的第一個 Item 重送，再接著送新的。還沒完成的 Item 補送 `text-start` 加已累積的文字（Run 在別台 backend、拿不到逐字片段時，等它完成再整段送），不送缺開頭的 `text-delta`（`useChat` 會報錯）。只送缺的 Item 時，`useChat` 會蓋掉已載入的部分訊息。`afterSeq` 給不用 `useChat` 的用戶端當下限。Run 是 `running` 時才串流；`waiting_approval` 或已結束時回 204（停在核准上的 Session 開著串流，`useChat` 會停在 `streaming`，按核准不會自動送出）。
 
 `data-plan` 的「後送的取代先送的」只在同一則訊息裡成立。前一個 Run 的計畫留在舊訊息，畫面取最新的。
 
