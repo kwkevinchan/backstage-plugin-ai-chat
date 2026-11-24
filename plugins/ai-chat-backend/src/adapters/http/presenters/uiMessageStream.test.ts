@@ -429,6 +429,25 @@ describe('UiMessageStreamPresenter', () => {
     });
   });
 
+  it('sends nothing for message.read yet', () => {
+    const message = {
+      ...base(2),
+      kind: 'user_message',
+      text: 'inserted',
+      delivery: 'inserted',
+    } as Item;
+    const without = present([
+      { type: 'run.started', runId: RUN },
+      { type: 'run.ended', outcome: { status: 'completed' } },
+    ]);
+    const withRead = present([
+      { type: 'run.started', runId: RUN },
+      { type: 'message.read', item: message },
+      { type: 'run.ended', outcome: { status: 'completed' } },
+    ]);
+    expect(withRead).toEqual(without);
+  });
+
   it('turns the summary and the trimming of the context into notices, one for the trimming, and shows no summary message', async () => {
     const summary = {
       ...base(2),

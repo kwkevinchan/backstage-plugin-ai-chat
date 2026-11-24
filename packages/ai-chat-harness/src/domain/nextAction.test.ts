@@ -23,6 +23,7 @@ import {
   approve,
   call,
   inRun,
+  inserted,
   limits,
   log,
   note,
@@ -524,6 +525,172 @@ describe('decideNextAction', () => {
     const before = JSON.stringify(items);
     decideNextAction(Object.freeze(items), usage(), limits);
     expect(JSON.stringify(items)).toBe(before);
+  });
+});
+
+describe('decideNextAction: messages inserted into the run (IN-10, IN-11)', () => {
+  describe('a message the model has not read', () => {
+    it.each<Row>([
+      [
+        'is inserted while the model answered: not complete, the model is called again',
+        [user(), agentSays('a', 1), inserted()],
+        {},
+        { type: 'call_model' },
+      ],
+      [
+        'is inserted before the last answer but was not read by it: not complete',
+        [user(), inserted(), agentSays('a', 1)],
+        {},
+        { type: 'call_model' },
+      ],
+      [
+        'is inserted after the results of an earlier step and the answer: call_model',
+        [
+          user(),
+          call('c1', { readUpToSeq: 1 }),
+          result('c1'),
+          agentSays('a', 3),
+          inserted(),
+        ],
+        {},
+        { type: 'call_model' },
+      ],
+      [
+        'is not held up by the steps when they are not used up',
+        [user(), agentSays('a', 1), inserted()],
+        { stepsUsed: 9 },
+        { type: 'call_model' },
+      ],
+    ])('%s', (_name, bodies, used, expected) => {
+      expect(decide(bodies, used)).toEqual(expected);
+    });
+
+    it('stops with max_steps when the steps are used up, and does not call the model', () => {
+      expect(
+        decide([user(), agentSays('a', 1), inserted()], { stepsUsed: 10 }),
+      ).toEqual({ type: 'stop', reason: 'max_steps' });
+    });
+
+    it('stops with max_tool_calls when the tool calls are used up', () => {
+      expect(
+        decide([user(), agentSays('a', 1), inserted()], {
+          toolCallsUsed: 30,
+        }),
+      ).toEqual({ type: 'stop', reason: 'max_tool_calls' });
+    });
+
+    it('stops with timeout when the time is used up', () => {
+      expect(
+        decide([user(), agentSays('a', 1), inserted()], {
+          elapsedSeconds: 300,
+        }),
+      ).toEqual({ type: 'stop', reason: 'timeout' });
+    });
+  });
+
+  describe('a message the model has read', () => {
+    it.each<Row>([
+      [
+        'does not hold up the end',
+        [user(), inserted(), agentSays('a', 2)],
+        {},
+        { type: 'complete' },
+      ],
+      [
+        'read by the call of an earlier step does not hold up the end',
+        [
+          user(),
+          call('c1', { readUpToSeq: 1 }),
+          inserted(),
+          result('c1'),
+          agentSays('a', 4),
+        ],
+        {},
+        { type: 'complete' },
+      ],
+      [
+        'of a run that has ended does not hold up the next run',
+        [
+          user('one'),
+          agentSays('a', 1),
+          inserted('lost'),
+          user('two'),
+          agentSays('b', 4),
+        ],
+        {},
+        { type: 'complete' },
+      ],
+    ])('%s', (_name, bodies, used, expected) => {
+      expect(decide(bodies, used)).toEqual(expected);
+    });
+  });
+
+  describe('the calls of the last step start after the first message of the run', () => {
+    it.each<Row>([
+      [
+        'a message inserted between an approved call and its result: the call still runs',
+        [
+          user(),
+          call('c1', { policy: 'ask', readOnly: false, readUpToSeq: 1 }),
+          approve('c1'),
+          inserted(),
+        ],
+        {},
+        { type: 'execute_tools', calls: ['c1'], interrupted: [] },
+      ],
+      [
+        'a message inserted after the calls and before their results: the calls run',
+        [user(), call('c1', { readUpToSeq: 1 }), inserted()],
+        {},
+        { type: 'execute_tools', calls: ['c1'], interrupted: [] },
+      ],
+      [
+        'a call that started before the insert is interrupted, not run again',
+        [
+          user(),
+          call('c1', { readOnly: false, readUpToSeq: 1 }),
+          approve('c1'),
+          started('c1'),
+          inserted(),
+        ],
+        {},
+        { type: 'execute_tools', calls: [], interrupted: ['c1'] },
+      ],
+      [
+        'a call that needs approval and has no decision still waits',
+        [
+          user(),
+          call('c1', { policy: 'ask', readOnly: false, readUpToSeq: 1 }),
+          inserted(),
+        ],
+        {},
+        { type: 'wait_approval', pending: ['c1'] },
+      ],
+      [
+        'a queued message starts a run: the calls before it are not of this run',
+        [
+          user('one'),
+          call('c1', { readUpToSeq: 1 }),
+          { kind: 'user_message', text: 'two', delivery: 'queued' },
+        ],
+        {},
+        { type: 'call_model' },
+      ],
+    ])('%s', (_name, bodies, used, expected) => {
+      expect(decide(bodies, used)).toEqual(expected);
+    });
+  });
+
+  it('keeps the rules of P1 for a log with no delivery and no readUpToSeq', () => {
+    expect(decide([user(), agentSays()])).toEqual({ type: 'complete' });
+    expect(decide([user(), call('c1')])).toEqual({
+      type: 'execute_tools',
+      calls: ['c1'],
+      interrupted: [],
+    });
+    expect(
+      decide([user('one'), call('c1'), result('c1'), user('two')]),
+    ).toEqual({ type: 'call_model' });
   });
 });
 

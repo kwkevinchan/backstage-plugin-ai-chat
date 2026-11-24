@@ -16,6 +16,7 @@
 
 import type { Item, ToolCallItem } from './item';
 import type { Limits } from './agent';
+import { unreadInserted } from './inputs';
 import { needsApproval } from './policy';
 import type { RunUsage } from './run';
 
@@ -49,8 +50,10 @@ export type NextAction =
  * Works out the next step from the log alone (D-18), so any backend can
  * continue a run. The rules, first match wins:
  *
- * 1. The last conversation item is an `agent_message` and no call of the last
- *    step is open: `complete`.
+ * 1. The last conversation item is an `agent_message`, no call of the last
+ *    step is open and the model has read every message inserted into the run:
+ *    `complete`. A message inserted while the model answered is not read yet;
+ *    the loop goes on to read it (IN-11).
  * 2. The working time is used up: `stop`.
  * 3. A call of the last step needs approval, has no decision and has no
  *    result: `wait_approval`. A call needs approval when its policy is `ask`,
@@ -58,9 +61,9 @@ export type NextAction =
  *    that step runs before every such call has a decision (P-04).
  * 4. A call of the last step has no result: `execute_tools`. A call with a
  *    `tool_started` item and no result goes to `interrupted` (D-25, A-08).
- * 5. Anything else (the last item is the user's message, or every result is
- *    in): `call_model`, unless the steps or the tool calls of the run are
- *    used up, then `stop`.
+ * 5. Anything else (the last item is the user's message, every result is in,
+ *    or a message is inserted and not read): `call_model`, unless the steps or
+ *    the tool calls of the run are used up, then `stop`.
  *
  * The step and tool call limits stop a new model call only. They never leave
  * the calls of the last step without a result.
@@ -83,7 +86,11 @@ export function decideNextAction(
   }
   const open = calls.filter(call => !withResult.has(call.callId));
 
-  if (lastFlowItem(items)?.kind === 'agent_message' && open.length === 0) {
+  if (
+    lastFlowItem(items)?.kind === 'agent_message' &&
+    open.length === 0 &&
+    unreadInserted(items).length === 0
+  ) {
     return { type: 'complete' };
   }
   if (run.elapsedSeconds >= limits.runTimeoutSeconds) {
@@ -151,17 +158,20 @@ function lastFlowItem(items: readonly Item[]): Item | undefined {
 }
 
 /**
- * The calls of the newest step since the last message of the user, in the
- * order of their position. The newest step is the one of the last `tool_call`
- * in the log, in its run: two runs can follow one message of the user (for
- * example a run that expired and a resend), and step numbers start again in
- * each run. Calls of older steps have their results or are closed when the
- * model input is built.
+ * The calls of the newest step since the first message of the run (the last
+ * message of the user that is not inserted), in the order of their position.
+ * A message inserted between the calls and their results does not move the
+ * start: the calls still have to run. The newest step is the one of the last
+ * `tool_call` in the log, in its run: two runs can follow one message of the
+ * user (for example a run that expired and a resend), and step numbers start
+ * again in each run. Calls of older steps have their results or are closed
+ * when the model input is built.
  */
 function callsOfLastStep(items: readonly Item[]): ToolCallItem[] {
   let start = 0;
   for (let i = items.length - 1; i >= 0; i--) {
-    if (items[i].kind === 'user_message') {
+    const item = items[i];
+    if (item.kind === 'user_message' && item.delivery !== 'inserted') {
       start = i + 1;
       break;
     }

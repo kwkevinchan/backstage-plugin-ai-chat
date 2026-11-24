@@ -99,6 +99,8 @@ export class UiMessageStreamPresenter {
           ...(this.options.afterStart ?? []),
           this.run('running'),
         ];
+      case 'message.read':
+        return [];
       case 'step.started':
         if (event.step <= this.replayedStep) return [];
         return [...this.closeStep(), ...this.openStep()];

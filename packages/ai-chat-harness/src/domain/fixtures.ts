@@ -45,9 +45,18 @@ export const user = (text = 'question'): ItemBody => ({
   text,
 });
 
-export const agentSays = (text = 'answer'): ItemBody => ({
+/** A message of the user inserted into a run that was running. */
+export const inserted = (text = 'insert'): ItemBody => ({
+  kind: 'user_message',
+  text,
+  delivery: 'inserted',
+});
+
+/** `readUpToSeq` is the mark of the model output; none is a record of P1. */
+export const agentSays = (text = 'answer', readUpToSeq?: number): ItemBody => ({
   kind: 'agent_message',
   text,
+  ...(readUpToSeq !== undefined ? { readUpToSeq } : {}),
 });
 
 export function call(
@@ -59,6 +68,7 @@ export function call(
     readOnly?: boolean;
     toolId?: string;
     input?: JsonObject;
+    readUpToSeq?: number;
   } = {},
 ): ItemBody {
   const policy = options.policy ?? 'allow';
@@ -72,6 +82,9 @@ export function call(
     readOnly: options.readOnly ?? policy === 'allow',
     step: options.step ?? 1,
     position: options.position ?? 0,
+    ...(options.readUpToSeq !== undefined
+      ? { readUpToSeq: options.readUpToSeq }
+      : {}),
   };
 }
 

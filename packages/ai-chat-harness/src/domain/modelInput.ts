@@ -15,6 +15,7 @@
  */
 
 import type { AgentDefinition } from './agent';
+import { inCausalOrder, withoutLostInserts } from './inputs';
 import type {
   Item,
   JsonObject,
@@ -115,7 +116,15 @@ const STEPS_OMITTED = 'Some earlier steps of this answer were left out.';
  * - The output of a tool appears only in a `tool` message, as data (S-03).
  * - The newest `summary` item replaces the items up to its `coversUpToSeq`:
  *   those are not sent, and the text of the summary is the first message.
- * - The newest `user_message` is always sent as written.
+ * - The messages of the run are always sent as written: the first message
+ *   (the newest `user_message` that is not inserted) and the messages
+ *   inserted after it. An inserted message comes before the first model
+ *   output that read it (`readUpToSeq`), so after every output that did not,
+ *   with the tool results of those steps; a message no output has read comes
+ *   last. A summary covers by `seq`, up to the first message of the run, so
+ *   the order does not matter to it.
+ * - An inserted message that the model never read, in a run that has ended, is
+ *   not sent: the user is told it was not read and may send it again.
  *
  * The input stays within `budget.tokenBudget` (H-09, sizes by
  * {@link estimateTokens}) when it can, in this order: the outputs of the old
@@ -167,7 +176,7 @@ function assemble(
   extra: { context: string[]; tools: ToolDescriptor[] },
   budget: ContextBudget,
 ): { input: ModelInput; earlier: boolean; steps: boolean } {
-  const layout = layoutOf(items, agent, extra, budget);
+  const layout = layoutOf(withoutLostInserts(items), agent, extra, budget);
   const copy = (segments: Segment[]) =>
     segments.map(segment => ({ ...segment, messages: [...segment.messages] }));
   const old = copy(layout.old);
@@ -194,8 +203,11 @@ function assemble(
     if (!earlier && !hasSummary) total += estimateTokens(EARLIER_OMITTED);
     earlier = true;
   }
-  while (mid.length > 0 && total > budget.tokenBudget) {
-    const [dropped] = mid.splice(0, 1);
+  // The messages inserted into the run stay, as the first message does.
+  while (total > budget.tokenBudget) {
+    const at = mid.findIndex(segment => !segment.inserted);
+    if (at < 0) break;
+    const [dropped] = mid.splice(at, 1);
     total -= tokensOfSegment(dropped);
     if (!steps) total += estimateTokens(STEPS_OMITTED);
     steps = true;
@@ -250,7 +262,8 @@ export function planSummary(
   extra: { context: string[]; tools: ToolDescriptor[] },
   budget: ContextBudget,
 ): SummaryPlan | undefined {
-  const layout = layoutOf(items, agent, extra, budget);
+  const visible = withoutLostInserts(items);
+  const layout = layoutOf(visible, agent, extra, budget);
   if (layout.old.length === 0) return undefined;
   // A summary cannot make room when the parts that always stay, with the
   // room a summary takes, are over the budget already: it would be written
@@ -258,6 +271,7 @@ export function planSummary(
   const kept =
     layout.fixedTokens +
     sumTokens(layout.pinned) +
+    sumTokens(layout.mid.filter(segment => segment.inserted)) +
     sumTokens(layout.recent) +
     Math.min(SUMMARY_RESERVE_TOKENS, Math.ceil(budget.tokenBudget / 10));
   if (kept > budget.tokenBudget) return undefined;
@@ -276,7 +290,8 @@ export function planSummary(
   total = shortenOutputs(mid, total, budget.tokenBudget);
   if (total <= budget.tokenBudget) return undefined;
 
-  // The newest user message is never covered: the summary stops before it.
+  // The first message of the run is never covered: the summary stops before
+  // it, and so before the messages inserted after it.
   const coversUpToSeq = layout.boundarySeq - 1;
   const after = layout.coveredUpTo;
   return {
@@ -284,7 +299,7 @@ export function planSummary(
     ...(layout.previousSummary !== undefined
       ? { previousSummary: layout.previousSummary }
       : {}),
-    items: items.filter(
+    items: visible.filter(
       item =>
         item.kind !== 'summary' &&
         item.seq > after &&
@@ -424,6 +439,8 @@ type Segment = {
   role: 'user' | 'assistant';
   /** The `seq` of the first item that makes the segment. */
   firstSeq: number;
+  /** A message of the user that was inserted into a run that was running. */
+  inserted?: true;
   messages: ModelMessage[];
 };
 
@@ -491,6 +508,7 @@ function toSegments(items: readonly Item[], lookup: Lookup): Segment[] {
         segments.push({
           role: 'user',
           firstSeq: item.seq,
+          ...(item.delivery === 'inserted' ? { inserted: true as const } : {}),
           messages: [{ role: 'user', content: userContent(item) }],
         });
         break;
@@ -553,16 +571,24 @@ type Layout = {
   fixedTokens: number;
   /** The segments before the newest user message: a summary may cover them. */
   old: Segment[];
-  /** The newest user message when it is not in `recent`; it always stays. */
+  /**
+   * The first message of the run (the newest user message that is not
+   * inserted) when it is not in `recent`; it always stays.
+   */
   pinned: Segment[];
   /**
    * The steps after `pinned` and before `recent`: they are shortened and left
-   * out like `old`, but a summary does not cover them.
+   * out like `old`, but a summary does not cover them. The messages inserted
+   * into the run are among them and always stay.
    */
   mid: Segment[];
   /** The newest steps, and the user messages before and after them. */
   recent: Segment[];
-  /** The `seq` of the first item that no summary may cover (0 if none). */
+  /**
+   * The `seq` of the first item that no summary may cover (0 if none): the
+   * first message of the run, so a summary never covers the messages
+   * inserted after it.
+   */
   boundarySeq: number;
 };
 
@@ -582,7 +608,7 @@ function layoutOf(
   const live = items.filter(
     item => item.kind !== 'summary' && item.seq > coveredUpTo,
   );
-  const segments = toSegments(live, lookupOf(live));
+  const segments = toSegments(inCausalOrder(live), lookupOf(live));
 
   const system = [agent.systemPrompt, UNTRUSTED_OUTPUT_NOTICE, ...extra.context]
     .filter(part => part.length > 0)
@@ -613,11 +639,12 @@ function layoutOf(
   }
   while (from > 0 && segments[from - 1].role === 'user') from--;
 
-  // The newest user message stays as the user wrote it: the question of the
-  // run. When the steps after it are more than `keep`, it is kept apart.
+  // The first message of the run stays as the user wrote it: the question of
+  // the run. When the steps after it are more than `keep`, it is kept apart.
+  // The messages inserted after it stay too, where they are (`mid`).
   let newestUser = -1;
   for (let i = segments.length - 1; i >= 0; i--) {
-    if (segments[i].role === 'user') {
+    if (segments[i].role === 'user' && !segments[i].inserted) {
       newestUser = i;
       break;
     }

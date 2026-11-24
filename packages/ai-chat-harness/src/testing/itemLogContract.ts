@@ -317,6 +317,59 @@ export function itemLogContract(
       ]);
     });
 
+    describe('the fields of an inserted message and of the marks of the model output', () => {
+      it('stores and reads back delivery and readUpToSeq as they were written', async () => {
+        const { log, newSession } = subject;
+        const { sessionId, fence } = await newSession();
+        const written = await log.append(
+          sessionId,
+          [
+            { kind: 'user_message', text: 'first', delivery: 'direct' },
+            { kind: 'user_message', text: 'inserted', delivery: 'inserted' },
+            { kind: 'user_message', text: 'queued', delivery: 'queued' },
+            { kind: 'agent_message', text: 'answer', readUpToSeq: 7 },
+            { ...(toolCall('call-1') as object), readUpToSeq: 7 } as ItemBody,
+          ],
+          fence,
+        );
+        const read = await log.read(sessionId);
+        expect(read).toEqual(written);
+        expect(
+          read.map(item => (item as { delivery?: string }).delivery),
+        ).toEqual(['direct', 'inserted', 'queued', undefined, undefined]);
+        expect(
+          read.map(item => (item as { readUpToSeq?: number }).readUpToSeq),
+        ).toEqual([undefined, undefined, undefined, 7, 7]);
+      });
+
+      it('keeps a readUpToSeq of 0', async () => {
+        const { log, newSession } = subject;
+        const { sessionId, fence } = await newSession();
+        await log.append(
+          sessionId,
+          [{ kind: 'agent_message', text: 'answer', readUpToSeq: 0 }],
+          fence,
+        );
+        expect((await log.read(sessionId))[0]).toMatchObject({
+          readUpToSeq: 0,
+        });
+      });
+
+      it('does not add the fields to an item written without them', async () => {
+        const { log, newSession } = subject;
+        const { sessionId, fence } = await newSession();
+        await log.append(
+          sessionId,
+          [user('plain'), agent('plain'), toolCall('call-1')],
+          fence,
+        );
+        for (const item of await log.read(sessionId)) {
+          expect(item).not.toHaveProperty('delivery');
+          expect(item).not.toHaveProperty('readUpToSeq');
+        }
+      });
+    });
+
     describe('dedupe', () => {
       it.each<[string, (callId: string) => ItemBody]>([
         ['tool_call', toolCall],
