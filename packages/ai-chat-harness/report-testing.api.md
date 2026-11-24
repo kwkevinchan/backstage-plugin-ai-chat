@@ -57,7 +57,12 @@ export class FakeRunControl implements RunControl {
 export type FakeTool = {
   descriptor: ToolDescriptor;
   validate?: (input: JsonObject) => ValidationResult;
-  execute?: (call: ToolCallItem) => ToolOutput | Promise<ToolOutput>;
+  execute?: (
+    call: ToolCallItem,
+    opts: {
+      signal: AbortSignal;
+    },
+  ) => ToolOutput | Promise<ToolOutput>;
 };
 
 // @public
@@ -67,7 +72,7 @@ export class FakeToolGateway implements ToolGateway {
   execute(
     call: ToolCallItem,
     _ctx: CallContext,
-    _opts: {
+    opts: {
       signal: AbortSignal;
     },
   ): Promise<ToolOutput>;
@@ -95,7 +100,7 @@ export class InMemoryItemLog implements ItemLog {
     drafts: ItemDraft[],
     fence: RunFence,
   ): Promise<Item[]>;
-  grantLease(fence: RunFence): void;
+  grantLease(sessionId: string, fence: RunFence): void;
   // (undocumented)
   read(
     sessionId: string,
@@ -115,11 +120,16 @@ export function itemLogContract(
 ): void;
 
 // @public
-export type ItemLogSubject = {
-  log: ItemLog;
+export type ItemLogSession = {
+  sessionId: string;
   fence: RunFence;
   staleFence: RunFence;
-  newSession: () => Promise<string>;
+};
+
+// @public
+export type ItemLogSubject = {
+  log: ItemLog;
+  newSession: () => Promise<ItemLogSession>;
 };
 
 // @public
@@ -146,6 +156,7 @@ export class ScriptedModel implements ModelClient {
 export type ScriptedStep =
   | ModelChunk[]
   | Error
+  | typeof waitForAbort
   | ((input: ModelInput, callNumber: number) => ModelChunk[] | Error);
 
 // @public
@@ -154,4 +165,7 @@ export class SequentialIdGenerator implements IdGenerator {
   // (undocumented)
   next(): string;
 }
+
+// @public
+export const waitForAbort: unique symbol;
 ```

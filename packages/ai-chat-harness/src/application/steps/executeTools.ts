@@ -44,8 +44,12 @@ type Batch = { calls: ToolCallItem[]; concurrent: boolean };
  *   a backend that takes over after a crash never runs it twice.
  * - An interrupted call (started, no result) gets an `unknown` result. It does
  *   not run again.
- * - A failure of the tool is an `error` result; it does not end the run. When
- *   the signal aborts, the call is left as it is and nothing is written for it.
+ * - A failure of the tool, or no answer from it, is an `error` result; it does
+ *   not end the run. When the signal aborts, the call is left as it is and
+ *   nothing is written for it.
+ * - Before each call that is not read-only the loop asks `heartbeat`. When the
+ *   user asked to stop, this returns `'cancelled'` and the call does not start.
+ * - A decision that is neither `allow` nor `deny` throws.
  *
  * Each item is written when it is ready, so a crash keeps what is done.
  */
@@ -54,7 +58,7 @@ export async function* executeTools(
   req: AdvanceRunRequest,
   items: readonly Item[],
   action: { calls: ToolCallItem[]; interrupted: ToolCallItem[] },
-): AsyncGenerator<HarnessEvent, void> {
+): AsyncGenerator<HarnessEvent, 'cancelled' | undefined> {
   async function* write(draft: ItemDraft): AsyncGenerator<HarnessEvent, void> {
     const [item] = await deps.items.append(
       req.ctx.sessionId,
@@ -84,17 +88,22 @@ export async function* executeTools(
     // P3 runs a concurrent batch with Promise.all and writes the results in
     // the order of `position`. Until then every call runs on its own.
     for (const call of batch.calls) {
-      if (req.signal.aborted) return;
+      if (req.signal.aborted) return undefined;
       const decision = needsApproval(call)
         ? decisionOf(items, call.callId)
         : 'allow';
 
       if (decision === 'allow') {
         if (call.readOnly !== true) {
+          // The user may have asked to stop while an earlier call ran. Ask
+          // before each call that is not read-only, so no more of them start.
+          const { cancelRequested } = await deps.run.heartbeat(req.fence);
+          if (cancelRequested) return 'cancelled';
           yield* write({ kind: 'tool_started', callId: call.callId });
+          if (req.signal.aborted) return undefined;
         }
         const output = await run(deps, req, call);
-        if (!output) return;
+        if (!output) return undefined;
         yield* write(resultOf(call, output));
       } else if (decision === 'deny') {
         yield* write({
@@ -103,9 +112,16 @@ export async function* executeTools(
           status: 'denied',
           message: 'The user denied this call.',
         });
+      } else if (decision !== undefined) {
+        throw new Error(
+          `The decision of call ${call.callId} is not allow or deny: ${String(
+            decision,
+          )}`,
+        );
       }
     }
   }
+  return undefined;
 }
 
 function batchesOf(calls: readonly ToolCallItem[]): Batch[] {
@@ -128,7 +144,13 @@ async function run(
   call: ToolCallItem,
 ): Promise<ToolOutput | undefined> {
   try {
-    return await deps.tools.execute(call, req.ctx, { signal: req.signal });
+    const output = await deps.tools.execute(call, req.ctx, {
+      signal: req.signal,
+    });
+    if (typeof output === 'object' && output !== null) return output;
+    return req.signal.aborted
+      ? undefined
+      : { status: 'error', message: 'The tool gave no result.' };
   } catch (error) {
     if (req.signal.aborted) return undefined;
     return {

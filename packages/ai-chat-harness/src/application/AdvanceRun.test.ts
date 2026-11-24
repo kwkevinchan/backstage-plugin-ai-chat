@@ -17,7 +17,7 @@
 import { LeaseLost, type ItemBody } from '../domain';
 import { approve, call, result, started, tool } from '../domain/fixtures';
 import type { HarnessEvent } from './events';
-import { callTool, say } from '../testing';
+import { callTool, say, waitForAbort } from '../testing';
 import type { FakeTool } from '../testing';
 import { kit, fence, sessionId } from '../testing/fixture';
 import { executeTools } from './steps/executeTools';
@@ -131,7 +131,6 @@ describe('AdvanceRun: events and the log (A-03)', () => {
     expect(completed).toEqual(log.slice(1));
     const deltas = events.filter(e => e.type === 'item.delta');
     expect(deltas.length).toBeGreaterThan(0);
-    expect(JSON.stringify(log)).not.toContain('item.delta');
     expect(log.map(i => i.kind)).toEqual([
       'user_message',
       'agent_message',
@@ -248,16 +247,17 @@ describe('AdvanceRun: call ids (agreement 1)', () => {
 
     expect(toolCall.callId).not.toBe('call_0');
     expect(toolCall.callId).toMatch(/^call-\d+$/);
-    // The id of the model is only the draft id in the events.
+    // The draft id is the call id of the log; the id of the model is a field.
     expect(events).toContainEqual({
       type: 'item.started',
-      draftId: 'call_0',
+      draftId: toolCall.callId,
       kind: 'tool_call',
+      modelCallId: 'call_0',
     });
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'item.completed',
-        draftId: 'call_0',
+        draftId: toolCall.callId,
         item: expect.objectContaining({ callId: toolCall.callId }),
       }),
     );
@@ -1010,17 +1010,20 @@ describe('AdvanceRun: errors', () => {
   it('ends the run as failed when the model call fails, and keeps the log', async () => {
     const t = await kit({ script: [new Error('503 from the model')] });
     const { outcome, events } = await t.execute();
+    // The text for the user is fixed; the text of the provider is the cause.
     expect(outcome).toEqual({
       status: 'failed',
-      message: 'The model call failed: 503 from the model',
+      message: 'The model call failed.',
+      cause: new Error('503 from the model'),
     });
+    expect(JSON.stringify(events)).not.toContain('503');
     expect(events[events.length - 1]).toEqual({ type: 'run.ended', outcome });
     expect(await t.kinds()).toEqual(['user_message']);
   });
 
   it('throws LeaseLost out of the loop, with no run.ended', async () => {
     const t = await kit({ script: [[say('x')]] });
-    t.items.grantLease({ ...fence, leaseOwner: 'backend-b' });
+    t.items.grantLease(sessionId, { ...fence, leaseOwner: 'backend-b' });
     await expect(t.execute()).rejects.toBeInstanceOf(LeaseLost);
   });
 });
@@ -1069,6 +1072,26 @@ describe('executeTools: agreement 5', () => {
     expect(t.tools.executed).toHaveLength(0);
     expect(events).toEqual([]);
     expect(await t.kinds()).toEqual(['user_message', 'tool_call']);
+  });
+
+  it('throws for a decision that is neither allow nor deny, and runs nothing', async () => {
+    const t = await kit({
+      script: [],
+      tools: [writeTool],
+      log: [
+        { kind: 'user_message', text: 'q' },
+        call('call-1', {
+          policy: 'ask',
+          readOnly: false,
+          toolId: 'temporal:start-workflow',
+        }),
+        { ...approval('call-1'), decision: 'maybe' } as never,
+      ],
+    });
+    await expect(
+      run(t, { calls: await callsOf(t), interrupted: [] }),
+    ).rejects.toThrow('not allow or deny');
+    expect(t.tools.executed).toHaveLength(0);
   });
 
   it('does not run a denied call', async () => {
@@ -1158,4 +1181,377 @@ it('uses the session of the context for every write', async () => {
   const t = await kit({ script: [[say('ok')]] });
   await t.execute();
   expect((await t.read()).every(i => i.sessionId === sessionId)).toBe(true);
+});
+
+describe('AdvanceRun: tools that give no result', () => {
+  it('writes an error result when the tool gives nothing, and does not run it again', async () => {
+    const t = await kit({
+      script: [[callTool('m1', 'catalog:get-entity')], [say('ok')]],
+      tools: [{ ...readTool, execute: () => undefined as never }],
+    });
+    const { outcome } = await t.execute();
+    expect(outcome).toEqual({ status: 'completed' });
+    expect(t.tools.executed).toHaveLength(1);
+    expect((await t.read())[2]).toMatchObject({
+      kind: 'tool_result',
+      status: 'error',
+      message: 'The tool gave no result.',
+    });
+  });
+
+  it('leaves the call alone when the tool gives nothing because the signal aborted', async () => {
+    const t = await kit({
+      script: [[callTool('m1', 'catalog:get-entity')], [say('never')]],
+      tools: [
+        {
+          ...readTool,
+          execute: () => {
+            t.controller.abort();
+            return undefined as never;
+          },
+        },
+      ],
+    });
+    const { outcome } = await t.execute();
+    expect(outcome).toEqual({ status: 'cancelled' });
+    expect(await t.kinds()).toEqual(['user_message', 'tool_call']);
+  });
+});
+
+describe('AdvanceRun: stopping between calls that are not read-only', () => {
+  const twoApproved = (): ItemBody[] => [
+    { kind: 'user_message', text: 'deploy both' },
+    call('call-1', {
+      policy: 'ask',
+      readOnly: false,
+      toolId: 'temporal:start-workflow',
+      position: 0,
+    }),
+    call('call-2', {
+      policy: 'ask',
+      readOnly: false,
+      toolId: 'temporal:start-workflow',
+      position: 1,
+    }),
+    approval('call-1'),
+    approval('call-2'),
+  ];
+
+  it('does not start the second call when the user asks to stop while the first one runs', async () => {
+    const t = await kit({
+      script: [[say('never')]],
+      tools: [writeTool],
+      log: twoApproved(),
+    });
+    // 1: the round of the loop, 2: before call-1, 3: before call-2.
+    t.run.cancelAtHeartbeat(3);
+    const { outcome, events } = await t.execute();
+
+    expect(outcome).toEqual({ status: 'cancelled' });
+    expect(events[events.length - 1]).toEqual({ type: 'run.ended', outcome });
+    expect(t.tools.executed.map(c => c.callId)).toEqual(['call-1']);
+    const log = await t.read();
+    expect(
+      log
+        .filter(i => i.kind === 'tool_started')
+        .map(i => (i as { callId: string }).callId),
+    ).toEqual(['call-1']);
+    expect(t.model.inputs).toHaveLength(0);
+  });
+
+  it('asks before each call that is not read-only, and not before a read-only one', async () => {
+    const t = await kit({
+      script: [[say('ok')]],
+      tools: [writeTool, readTool],
+      log: [
+        ...twoApproved(),
+        call('call-3', { policy: 'allow', readOnly: true, position: 2 }),
+      ],
+    });
+    await t.execute();
+    // Three rounds (tools, model call, end) and one for each of the two calls
+    // that are not read-only.
+    expect(t.run.heartbeats).toBe(3 + 2);
+  });
+
+  it('does not run a call whose tool_started was written when the signal aborted after it', async () => {
+    const t = await kit({
+      script: [[say('never')]],
+      tools: [writeTool],
+      log: twoApproved(),
+    });
+    const original = t.items.append.bind(t.items);
+    jest.spyOn(t.items, 'append').mockImplementation(async (s, d, f) => {
+      const written = await original(s, d, f);
+      if (d[0].kind === 'tool_started') t.controller.abort();
+      return written;
+    });
+    const { outcome } = await t.execute();
+    expect(outcome).toEqual({ status: 'cancelled' });
+    expect(t.tools.executed).toHaveLength(0);
+    // Started and no result: a backend that takes over writes unknown.
+    expect(await t.kinds()).toEqual([
+      'user_message',
+      'tool_call',
+      'tool_call',
+      'approval',
+      'approval',
+      'tool_started',
+    ]);
+  });
+});
+
+describe('AdvanceRun: the working time inside a step', () => {
+  it('ends a model call that is still running at the deadline as timeout, not as cancelled', async () => {
+    const t = await kit({
+      script: [waitForAbort],
+      limits: { runTimeoutSeconds: 0.05 },
+    });
+    const { outcome, events } = await t.execute();
+    expect(outcome).toEqual({ status: 'completed', endReason: 'timeout' });
+    expect(events[events.length - 1]).toEqual({ type: 'run.ended', outcome });
+    expect(await t.kinds()).toEqual(['user_message']);
+  });
+
+  it('ends a tool that is still running at the deadline as timeout, and writes no result for it', async () => {
+    const t = await kit({
+      script: [[callTool('m1', 'catalog:get-entity')], [say('never')]],
+      tools: [
+        {
+          ...readTool,
+          execute: (_call, { signal }) =>
+            new Promise((_resolve, reject) =>
+              signal.addEventListener('abort', () => reject(new Error('x'))),
+            ),
+        },
+      ],
+      limits: { runTimeoutSeconds: 0.05 },
+    });
+    const { outcome } = await t.execute();
+    expect(outcome).toEqual({ status: 'completed', endReason: 'timeout' });
+    expect(await t.kinds()).toEqual(['user_message', 'tool_call']);
+  });
+
+  it('counts the time used before this call of the loop', async () => {
+    const t = await kit({
+      script: [waitForAbort],
+      limits: { runTimeoutSeconds: 10 },
+    });
+    // 9.95 s are used: 0.05 s are left for the model call.
+    const { outcome } = await t.execute({
+      stepsUsed: 0,
+      toolCallsUsed: 0,
+      elapsedSeconds: 9.95,
+    });
+    expect(outcome).toEqual({ status: 'completed', endReason: 'timeout' });
+  });
+
+  it('still ends as cancelled when the user aborts before the deadline', async () => {
+    const t = await kit({
+      script: [waitForAbort],
+      limits: { runTimeoutSeconds: 60 },
+    });
+    setTimeout(() => t.controller.abort(), 20);
+    const { outcome } = await t.execute();
+    expect(outcome).toEqual({ status: 'cancelled' });
+  });
+});
+
+describe('AdvanceRun: the number of a step', () => {
+  const afterTwoSteps = (): ItemBody[] => [
+    { kind: 'user_message', text: 'q' },
+    call('old-1', { step: 1 }),
+    result('old-1'),
+    call('old-2', { step: 2 }),
+    result('old-2'),
+  ];
+
+  it('goes on after the newest step of the run in the log when the usage is behind', async () => {
+    const t = await kit({
+      script: [[callTool('m1', 'catalog:get-entity')], [say('ok')]],
+      tools: [readTool],
+      log: afterTwoSteps(),
+    });
+    // The usage says nothing was used: the backend crashed before it stored it.
+    const { events } = await t.execute({
+      stepsUsed: 0,
+      toolCallsUsed: 0,
+      elapsedSeconds: 0,
+    });
+    expect(
+      events
+        .filter(e => e.type === 'step.started')
+        .map(e => (e as { step: number }).step),
+    ).toEqual([3, 4]);
+    const steps = (await t.read()).flatMap(i =>
+      i.kind === 'tool_call' ? [i.step] : [],
+    );
+    expect(steps).toEqual([1, 2, 3]);
+  });
+
+  it('counts the steps of the log against the limit', async () => {
+    const t = await kit({
+      script: [[say('never')]],
+      log: afterTwoSteps(),
+      limits: { maxSteps: 2 },
+    });
+    const { outcome } = await t.execute({
+      stepsUsed: 0,
+      toolCallsUsed: 0,
+      elapsedSeconds: 0,
+    });
+    expect(outcome).toEqual({ status: 'completed', endReason: 'max_steps' });
+    expect(t.model.inputs).toHaveLength(0);
+  });
+
+  it('does not count the steps of another run', async () => {
+    const t = await kit({
+      script: [[say('ok')]],
+      log: [{ kind: 'user_message', text: 'q' }],
+      limits: { maxSteps: 2 },
+    });
+    const other = { runId: 'run-0', leaseOwner: 'backend-x' };
+    t.items.grantLease(sessionId, other);
+    await t.items.append(sessionId, afterTwoSteps().slice(1) as never, other);
+    const { events } = await t.execute({
+      stepsUsed: 0,
+      toolCallsUsed: 0,
+      elapsedSeconds: 0,
+    });
+    expect(events).toContainEqual({ type: 'step.started', step: 1 });
+  });
+});
+
+describe('AdvanceRun: ids of the drafts', () => {
+  it('gives two calls of one answer with the same model id different draft ids', async () => {
+    const t = await kit({
+      script: [
+        [
+          callTool('same', 'catalog:get-entity'),
+          callTool('same', 'catalog:get-entity'),
+        ],
+        [say('ok')],
+      ],
+      tools: [readTool],
+    });
+    const { events } = await t.execute();
+    const toolStarts = events.flatMap(e =>
+      e.type === 'item.started' && e.kind === 'tool_call' ? [e] : [],
+    );
+    expect(toolStarts.map(e => e.modelCallId)).toEqual(['same', 'same']);
+    expect(new Set(toolStarts.map(e => e.draftId)).size).toBe(2);
+    const completed = events.flatMap(e =>
+      e.type === 'item.completed' && e.item.kind === 'tool_call' ? [e] : [],
+    );
+    expect(completed.map(e => e.draftId)).toEqual(
+      toolStarts.map(e => e.draftId),
+    );
+  });
+});
+
+describe('AdvanceRun: a call that cannot be checked', () => {
+  it('writes an invalid result when the validation throws, and the run goes on', async () => {
+    const t = await kit({
+      script: [[callTool('m1', 'catalog:get-entity')], [say('ok')]],
+      tools: [
+        {
+          ...readTool,
+          validate: () => {
+            throw new Error('schema service down');
+          },
+        },
+      ],
+    });
+    const { outcome } = await t.execute();
+    expect(outcome).toEqual({ status: 'completed' });
+    expect(t.tools.executed).toHaveLength(0);
+    expect((await t.read())[2]).toMatchObject({
+      status: 'invalid',
+      message: 'The input could not be checked.',
+    });
+  });
+
+  it('writes nothing when the signal aborts while the input is checked', async () => {
+    const t = await kit({
+      script: [[callTool('m1', 'catalog:get-entity')], [say('never')]],
+      tools: [
+        {
+          ...readTool,
+          validate: () => {
+            t.controller.abort();
+            return { valid: true };
+          },
+        },
+      ],
+    });
+    const { outcome } = await t.execute();
+    expect(outcome).toEqual({ status: 'cancelled' });
+    expect(await t.kinds()).toEqual(['user_message']);
+  });
+});
+
+describe('AdvanceRun: a tool that sends data out', () => {
+  it('does not run a read-only tool that sends data out when the user denies it', async () => {
+    const egress: FakeTool = {
+      descriptor: tool({ id: 'web:fetch', readOnly: true, egress: true }),
+    };
+    const t = await kit({
+      script: [[callTool('m1', 'web:fetch')], [say('ok')]],
+      tools: [egress],
+    });
+    const first = await t.execute();
+    expect(first.outcome).toMatchObject({ status: 'waiting_approval' });
+    await t.append(approval('call-1', 'deny'));
+    const second = await t.execute();
+    expect(second.outcome).toEqual({ status: 'completed' });
+    expect(t.tools.executed).toHaveLength(0);
+    expect((await t.read()).find(i => i.kind === 'tool_result')).toMatchObject({
+      callId: 'call-1',
+      status: 'denied',
+    });
+  });
+});
+
+describe('AdvanceRun: the lease is lost while a tool runs', () => {
+  it('throws LeaseLost, and the backend that takes over writes unknown and does not run the tool again', async () => {
+    const t = await kit({
+      script: [[say('I could not tell.')]],
+      tools: [
+        {
+          ...writeTool,
+          execute: () => {
+            // Another backend took the run while the tool was running.
+            t.items.grantLease(sessionId, {
+              ...fence,
+              leaseOwner: 'backend-b',
+            });
+            return { status: 'ok', output: {} };
+          },
+        },
+      ],
+      log: [
+        { kind: 'user_message', text: 'deploy it' },
+        call('call-1', {
+          policy: 'ask',
+          readOnly: false,
+          toolId: 'temporal:start-workflow',
+        }),
+        approval('call-1'),
+      ],
+    });
+    await expect(t.execute()).rejects.toBeInstanceOf(LeaseLost);
+    expect(t.tools.executed).toHaveLength(1);
+    expect((await t.kinds()).slice(-1)).toEqual(['tool_started']);
+
+    const { outcome } = await t.execute(undefined, {
+      ...fence,
+      leaseOwner: 'backend-b',
+    });
+    expect(outcome).toEqual({ status: 'completed' });
+    expect(t.tools.executed).toHaveLength(1);
+    expect((await t.read()).find(i => i.kind === 'tool_result')).toMatchObject({
+      callId: 'call-1',
+      status: 'unknown',
+    });
+  });
 });

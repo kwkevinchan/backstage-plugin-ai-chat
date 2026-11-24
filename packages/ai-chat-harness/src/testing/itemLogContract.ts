@@ -22,9 +22,23 @@ import {
   DuplicateItem,
   LeaseLost,
   type ItemBody,
+  type JsonObject,
   type ItemLog,
   type RunFence,
 } from '@kwkevinchan/ai-chat-harness';
+
+/**
+ * A session the log can write to, with a fence of a run of that session.
+ *
+ * @public
+ */
+export type ItemLogSession = {
+  sessionId: string;
+  /** A fence whose owner holds the lease of its run. */
+  fence: RunFence;
+  /** A fence of the same run whose owner does not hold the lease. */
+  staleFence: RunFence;
+};
 
 /**
  * What `itemLogContract` needs from an implementation under test.
@@ -33,17 +47,21 @@ import {
  */
 export type ItemLogSubject = {
   log: ItemLog;
-  /** A fence whose owner holds the lease of its run. */
-  fence: RunFence;
-  /** A fence of the same run whose owner does not hold the lease. */
-  staleFence: RunFence;
-  /** Makes a session the log can write to. Each call gives a new one. */
-  newSession: () => Promise<string>;
+  /**
+   * Makes a session and a run in it. Each call gives a new session with its
+   * own run, so a fence is good for its own session only.
+   */
+  newSession: () => Promise<ItemLogSession>;
 };
 
 /**
  * The tests every `ItemLog` passes (A-10): the in-memory one and the one of
  * the database. `create` is called for each test and gives a clean log.
+ *
+ * The lease tests write the kinds the loop writes with its fence. The host
+ * writes `user_message` and `approval` too, and a database log may check the
+ * status of the run for those instead of the lease, so no test here relies on
+ * the lease for them.
  *
  * @public
  */
@@ -67,11 +85,12 @@ export function itemLogContract(
     });
 
     const user = (text: string): ItemBody => ({ kind: 'user_message', text });
-    const toolCall = (callId: string): ItemBody => ({
+    const agent = (text: string): ItemBody => ({ kind: 'agent_message', text });
+    const toolCall = (callId: string, input: JsonObject = {}): ItemBody => ({
       kind: 'tool_call',
       callId,
       toolId: 'catalog:get-entity',
-      input: {},
+      input,
       schemaHash: 'hash',
       policy: 'allow',
       readOnly: true,
@@ -95,13 +114,13 @@ export function itemLogContract(
     });
 
     it('reads nothing from a session with no items', async () => {
-      const sessionId = await subject.newSession();
+      const { sessionId } = await subject.newSession();
       expect(await subject.log.read(sessionId)).toEqual([]);
     });
 
     it('numbers the items from 1, one after the other, over several appends', async () => {
-      const { log, fence, newSession } = subject;
-      const sessionId = await newSession();
+      const { log, newSession } = subject;
+      const { sessionId, fence } = await newSession();
       const first = await log.append(sessionId, [user('a')], fence);
       const second = await log.append(sessionId, [user('b')], fence);
       const third = await log.append(sessionId, [user('c')], fence);
@@ -111,16 +130,12 @@ export function itemLogContract(
     });
 
     it('gives the items of one append consecutive numbers, in the order given', async () => {
-      const { log, fence, newSession } = subject;
-      const sessionId = await newSession();
+      const { log, newSession } = subject;
+      const { sessionId, fence } = await newSession();
       await log.append(sessionId, [user('first')], fence);
       const written = await log.append(
         sessionId,
-        [
-          { kind: 'agent_message', text: 'text' },
-          toolCall('call-1'),
-          toolCall('call-2'),
-        ],
+        [agent('text'), toolCall('call-1'), toolCall('call-2')],
         fence,
       );
       expect(written.map(item => item.seq)).toEqual([2, 3, 4]);
@@ -136,8 +151,8 @@ export function itemLogContract(
     });
 
     it('keeps the session id, the run id of the fence and the time on every item', async () => {
-      const { log, fence, newSession } = subject;
-      const sessionId = await newSession();
+      const { log, newSession } = subject;
+      const { sessionId, fence } = await newSession();
       const [item] = await log.append(sessionId, [user('a')], fence);
       expect(item).toMatchObject({
         kind: 'user_message',
@@ -149,18 +164,18 @@ export function itemLogContract(
     });
 
     it('keeps the sessions apart', async () => {
-      const { log, fence, newSession } = subject;
+      const { log, newSession } = subject;
       const one = await newSession();
       const two = await newSession();
-      await log.append(one, [user('a'), user('b')], fence);
-      const [item] = await log.append(two, [user('c')], fence);
+      await log.append(one.sessionId, [user('a'), user('b')], one.fence);
+      const [item] = await log.append(two.sessionId, [user('c')], two.fence);
       expect(item.seq).toBe(1);
-      expect(await log.read(one)).toHaveLength(2);
+      expect(await log.read(one.sessionId)).toHaveLength(2);
     });
 
     it('reads only the items after afterSeq', async () => {
-      const { log, fence, newSession } = subject;
-      const sessionId = await newSession();
+      const { log, newSession } = subject;
+      const { sessionId, fence } = await newSession();
       await log.append(sessionId, [user('a'), user('b'), user('c')], fence);
       const after = await log.read(sessionId, { afterSeq: 1 });
       expect(after.map(item => item.seq)).toEqual([2, 3]);
@@ -169,13 +184,83 @@ export function itemLogContract(
     });
 
     it('does not change what it read when the caller changes it', async () => {
-      const { log, fence, newSession } = subject;
-      const sessionId = await newSession();
+      const { log, newSession } = subject;
+      const { sessionId, fence } = await newSession();
       await log.append(sessionId, [user('a')], fence);
       const [item] = await log.read(sessionId);
       (item as { text: string }).text = 'changed';
       const [again] = await log.read(sessionId);
       expect(again).toMatchObject({ text: 'a' });
+    });
+
+    it('reads back every kind of item as it was written', async () => {
+      const { log, newSession } = subject;
+      const { sessionId, fence } = await newSession();
+      const bodies: ItemBody[] = [
+        user('question'),
+        agent('answer'),
+        toolCall('call-1', {
+          list: [1, 'two', null, { deep: true }],
+          nested: { a: {} },
+        }),
+        approval('call-1'),
+        started('call-1'),
+        {
+          kind: 'tool_result',
+          callId: 'call-1',
+          status: 'ok',
+          output: {
+            items: [{ name: 'a', tags: ['x', 'y'] }, null, 3],
+            nothing: null,
+            nested: { deeper: { flag: false } },
+          },
+          truncated: true,
+          message: 'cut',
+        },
+        {
+          kind: 'plan_update',
+          plan: {
+            items: [
+              { text: 'one', status: 'completed' },
+              { text: 'two', status: 'in_progress' },
+            ],
+          },
+        },
+        { kind: 'summary', coversUpToSeq: 3, text: 'so far' },
+        { kind: 'note', text: 'a remark' },
+      ];
+      expect(new Set(bodies.map(body => body.kind)).size).toBe(9);
+      await log.append(sessionId, bodies, fence);
+      const read = await log.read(sessionId);
+      expect(read).toHaveLength(9);
+      read.forEach((item, index) => {
+        expect(item).toMatchObject(bodies[index] as object);
+        expect(item.seq).toBe(index + 1);
+      });
+      expect((read[5] as { output: unknown }).output).toEqual(
+        (bodies[5] as { output: unknown }).output,
+      );
+    });
+
+    it('numbers two appends to one session at the same time without a repeat or a gap', async () => {
+      const { log, newSession } = subject;
+      const { sessionId, fence } = await newSession();
+      const [one, two] = await Promise.all([
+        log.append(sessionId, [agent('a'), agent('b'), agent('c')], fence),
+        log.append(sessionId, [agent('d'), agent('e')], fence),
+      ]);
+      const seqs = [...one, ...two].map(item => item.seq).sort((a, b) => a - b);
+      expect(seqs).toEqual([1, 2, 3, 4, 5]);
+      // Each append got a run of numbers.
+      expect(one.map(i => i.seq)).toEqual(
+        Array.from({ length: one.length }, (_v, i) => one[0].seq + i),
+      );
+      expect(two.map(i => i.seq)).toEqual(
+        Array.from({ length: two.length }, (_v, i) => two[0].seq + i),
+      );
+      expect((await log.read(sessionId)).map(item => item.seq)).toEqual([
+        1, 2, 3, 4, 5,
+      ]);
     });
 
     describe('dedupe', () => {
@@ -185,8 +270,8 @@ export function itemLogContract(
         ['tool_started', started],
         ['tool_result', result],
       ])('refuses a second %s for the same call', async (_kind, make) => {
-        const { log, fence, newSession } = subject;
-        const sessionId = await newSession();
+        const { log, newSession } = subject;
+        const { sessionId, fence } = await newSession();
         await log.append(sessionId, [make('call-1')], fence);
         await expect(
           log.append(sessionId, [make('call-1')], fence),
@@ -194,13 +279,13 @@ export function itemLogContract(
       });
 
       it('writes none of the items of an append that has a duplicate', async () => {
-        const { log, fence, newSession } = subject;
-        const sessionId = await newSession();
+        const { log, newSession } = subject;
+        const { sessionId, fence } = await newSession();
         await log.append(sessionId, [toolCall('call-1')], fence);
         await expect(
           log.append(
             sessionId,
-            [user('new'), toolCall('call-2'), toolCall('call-1')],
+            [agent('new'), toolCall('call-2'), toolCall('call-1')],
             fence,
           ),
         ).rejects.toMatchObject({ dedupeKey: 'tool_call:call-1' });
@@ -211,8 +296,8 @@ export function itemLogContract(
       });
 
       it('refuses a duplicate inside one append', async () => {
-        const { log, fence, newSession } = subject;
-        const sessionId = await newSession();
+        const { log, newSession } = subject;
+        const { sessionId, fence } = await newSession();
         await expect(
           log.append(
             sessionId,
@@ -224,51 +309,68 @@ export function itemLogContract(
       });
 
       it('allows the different kinds of one call, and the same id in another session', async () => {
-        const { log, fence, newSession } = subject;
+        const { log, newSession } = subject;
         const one = await newSession();
         const two = await newSession();
         await log.append(
-          one,
+          one.sessionId,
           [toolCall('call-1'), approval('call-1'), started('call-1')],
-          fence,
+          one.fence,
         );
-        await log.append(one, [result('call-1')], fence);
-        await log.append(two, [toolCall('call-1')], fence);
-        expect(await log.read(one)).toHaveLength(4);
-        expect(await log.read(two)).toHaveLength(1);
+        await log.append(one.sessionId, [result('call-1')], one.fence);
+        await log.append(two.sessionId, [toolCall('call-1')], two.fence);
+        expect(await log.read(one.sessionId)).toHaveLength(4);
+        expect(await log.read(two.sessionId)).toHaveLength(1);
       });
 
       it('allows the items that have no key as often as needed', async () => {
-        const { log, fence, newSession } = subject;
-        const sessionId = await newSession();
-        await log.append(sessionId, [user('same'), user('same')], fence);
-        await log.append(sessionId, [user('same')], fence);
+        const { log, newSession } = subject;
+        const { sessionId, fence } = await newSession();
+        await log.append(sessionId, [agent('same'), agent('same')], fence);
+        await log.append(sessionId, [agent('same')], fence);
         expect(await log.read(sessionId)).toHaveLength(3);
       });
     });
 
     describe('lease', () => {
-      it('refuses a write of an owner that does not hold the lease', async () => {
-        const { log, staleFence, newSession } = subject;
-        const sessionId = await newSession();
-        await expect(
-          log.append(sessionId, [user('a')], staleFence),
-        ).rejects.toBeInstanceOf(LeaseLost);
-        await expect(
-          log.append(sessionId, [user('a')], staleFence),
-        ).rejects.toMatchObject({ runId: staleFence.runId });
-      });
+      it.each<[string, ItemBody]>([
+        ['agent_message', agent('a')],
+        ['tool_call', toolCall('call-1')],
+        ['tool_result', result('call-1')],
+      ])(
+        'refuses a %s from an owner that does not hold the lease',
+        async (_kind, body) => {
+          const { log, newSession } = subject;
+          const { sessionId, staleFence } = await newSession();
+          await expect(
+            log.append(sessionId, [body], staleFence),
+          ).rejects.toBeInstanceOf(LeaseLost);
+          await expect(
+            log.append(sessionId, [body], staleFence),
+          ).rejects.toMatchObject({ runId: staleFence.runId });
+        },
+      );
 
-      it('writes nothing for a refused write', async () => {
-        const { log, fence, staleFence, newSession } = subject;
-        const sessionId = await newSession();
-        await log.append(sessionId, [user('a')], fence);
+      it('writes nothing for a refused write, and leaves no gap', async () => {
+        const { log, newSession } = subject;
+        const { sessionId, fence, staleFence } = await newSession();
+        await log.append(sessionId, [agent('a')], fence);
         await expect(
-          log.append(sessionId, [user('b'), user('c')], staleFence),
+          log.append(sessionId, [agent('b'), toolCall('call-1')], staleFence),
         ).rejects.toBeInstanceOf(LeaseLost);
         expect(await log.read(sessionId)).toHaveLength(1);
-        const [next] = await log.append(sessionId, [user('d')], fence);
+        const [next] = await log.append(sessionId, [agent('d')], fence);
         expect(next.seq).toBe(2);
+      });
+
+      it('refuses a fence of a run that belongs to another session', async () => {
+        const { log, newSession } = subject;
+        const one = await newSession();
+        const two = await newSession();
+        await expect(
+          log.append(two.sessionId, [agent('a')], one.fence),
+        ).rejects.toBeInstanceOf(LeaseLost);
+        expect(await log.read(two.sessionId)).toEqual([]);
       });
     });
   });

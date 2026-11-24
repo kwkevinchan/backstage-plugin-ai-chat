@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { decideNextAction, type RunUsage } from '../domain';
+import { decideNextAction, type Item, type RunUsage } from '../domain';
 import type { HarnessEvent, RunOutcome } from './events';
 import { callModel } from './steps/callModel';
 import { executeTools } from './steps/executeTools';
@@ -31,7 +31,15 @@ import type { AdvanceRunDeps, AdvanceRunRequest } from './types';
  * waits for the user (`waiting_approval`), the user asked to stop or the
  * signal aborted (`cancelled`), or the model call failed (`failed`). The same
  * outcome is the last event. Errors of the ports, such as `LeaseLost`, are
- * thrown and end the generator without a `run.ended` event.
+ * thrown and end the generator without a `run.ended` event; the host then sets
+ * the status of the run itself.
+ *
+ * The working time of the run also ends a model call or a tool that is in
+ * progress: both get a signal that aborts at the deadline, and the run ends as
+ * `completed` with `endReason` `timeout`. The user stopping the run, by the
+ * request of `heartbeat` or by the signal of the request, ends it as
+ * `cancelled`. `heartbeat` is asked once per round of the loop and before each
+ * call that is not read-only.
  *
  * @public
  */
@@ -50,7 +58,21 @@ export class AdvanceRun {
   private async *loop(
     req: AdvanceRunRequest,
   ): AsyncGenerator<HarnessEvent, RunOutcome> {
+    const deadline = deadlineOf(req);
+    try {
+      return yield* this.steps(req, deadline);
+    } finally {
+      deadline.dispose();
+    }
+  }
+
+  private async *steps(
+    outer: AdvanceRunRequest,
+    deadline: Deadline,
+  ): AsyncGenerator<HarnessEvent, RunOutcome> {
     const { deps } = this;
+    // The steps see the signal that also aborts at the deadline.
+    const req: AdvanceRunRequest = { ...outer, signal: deadline.signal };
     const startedAt = deps.clock.now().getTime();
     const usage: RunUsage = { ...req.usage };
     const elapsed = () =>
@@ -65,12 +87,15 @@ export class AdvanceRun {
 
     for (;;) {
       const { cancelRequested } = await deps.run.heartbeat(req.fence);
-      if (cancelRequested || req.signal.aborted) {
+      if (cancelRequested || outer.signal.aborted) {
         return end({ status: 'cancelled' });
       }
 
       usage.elapsedSeconds = elapsed();
       const items = await deps.items.read(req.ctx.sessionId);
+      // A backend that crashed before `recordUsage` leaves steps in the log
+      // that the stored usage does not count.
+      usage.stepsUsed = Math.max(usage.stepsUsed, lastStepOf(items, req));
       const action = decideNextAction(items, usage, req.limits);
 
       switch (action.type) {
@@ -78,13 +103,18 @@ export class AdvanceRun {
           const step = yield* callModel(deps, req, items, usage);
           usage.stepsUsed += 1;
           usage.toolCallsUsed += step.toolCallsRequested;
+          const stopped = stoppedBy(outer, deadline);
+          if (stopped) return end(stopped);
           if (step.outcome) return end(step.outcome);
           break;
         }
-        case 'execute_tools':
-          yield* executeTools(deps, req, items, action);
-          if (req.signal.aborted) return end({ status: 'cancelled' });
+        case 'execute_tools': {
+          const result = yield* executeTools(deps, req, items, action);
+          const stopped = stoppedBy(outer, deadline);
+          if (stopped) return end(stopped);
+          if (result === 'cancelled') return end({ status: 'cancelled' });
           break;
+        }
         case 'wait_approval':
           return end({ status: 'waiting_approval', pending: action.pending });
         case 'complete':
@@ -104,4 +134,59 @@ export class AdvanceRun {
 
 function assertNever(value: never): never {
   throw new Error(`Unexpected next action: ${JSON.stringify(value)}`);
+}
+
+/** The step number of the newest call of this run in the log, or 0. */
+function lastStepOf(items: readonly Item[], req: AdvanceRunRequest): number {
+  let last = 0;
+  for (const item of items) {
+    if (item.kind === 'tool_call' && item.runId === req.fence.runId) {
+      last = Math.max(last, item.step);
+    }
+  }
+  return last;
+}
+
+/** The largest delay `setTimeout` takes. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+type Deadline = {
+  /** Aborts when the caller aborts or the working time of the run is used up. */
+  signal: AbortSignal;
+  expired: () => boolean;
+  dispose: () => void;
+};
+
+/**
+ * The time left in the run, as a signal for the model call and the tools: a
+ * call in progress ends at the deadline instead of running on. The timer is
+ * real time; the loop also checks the working time between steps with the
+ * clock port.
+ */
+function deadlineOf(req: AdvanceRunRequest): Deadline {
+  const controller = new AbortController();
+  let expired = false;
+  const leftMs = Math.max(
+    0,
+    (req.limits.runTimeoutSeconds - req.usage.elapsedSeconds) * 1000,
+  );
+  const timer = setTimeout(() => {
+    expired = true;
+    controller.abort();
+  }, Math.min(leftMs, MAX_TIMER_MS));
+  return {
+    signal: AbortSignal.any([req.signal, controller.signal]),
+    expired: () => expired,
+    dispose: () => clearTimeout(timer),
+  };
+}
+
+/** Why the run must end now, if it must: the user, or the deadline. */
+function stoppedBy(
+  outer: AdvanceRunRequest,
+  deadline: Deadline,
+): RunOutcome | undefined {
+  if (outer.signal.aborted) return { status: 'cancelled' };
+  if (deadline.expired()) return { status: 'completed', endReason: 'timeout' };
+  return undefined;
 }

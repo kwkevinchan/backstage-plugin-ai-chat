@@ -156,6 +156,7 @@ export type HarnessEvent =
       type: 'item.started';
       draftId: string;
       kind: 'agent_message' | 'tool_call';
+      modelCallId?: string;
     }
   | {
       type: 'item.delta';
@@ -408,6 +409,7 @@ export type RunOutcome =
   | {
       status: 'failed';
       message: string;
+      cause?: unknown;
     };
 
 // @public (undocumented)

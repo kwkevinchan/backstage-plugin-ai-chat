@@ -32,22 +32,32 @@ import {
  * holder of the lease of a run may write.
  *
  * Nobody holds a lease at first. A test grants it with `grantLease`; granting
- * the same run to another owner takes it away from the first.
+ * the same run to another owner takes it away from the first. Like the lease
+ * of a database log it covers every kind of item, which is stricter than the
+ * log of the host: that one checks the status of the run for the messages and
+ * approvals the host writes.
  *
  * @public
  */
 export class InMemoryItemLog implements ItemLog {
   private readonly sessions = new Map<string, Item[]>();
-  private readonly leases = new Map<string, string>();
+  private readonly leases = new Map<
+    string,
+    { sessionId: string; leaseOwner: string }
+  >();
   private readonly clock: Clock;
 
   constructor(options: { clock?: Clock } = {}) {
     this.clock = options.clock ?? { now: () => new Date() };
   }
 
-  /** Makes `fence.leaseOwner` the holder of the lease of `fence.runId`. */
-  grantLease(fence: RunFence): void {
-    this.leases.set(fence.runId, fence.leaseOwner);
+  /**
+   * Makes `fence.leaseOwner` the holder of the lease of `fence.runId`, a run of
+   * this session. A run belongs to one session: a fence of another session's
+   * run is refused.
+   */
+  grantLease(sessionId: string, fence: RunFence): void {
+    this.leases.set(fence.runId, { sessionId, leaseOwner: fence.leaseOwner });
   }
 
   async read(
@@ -65,7 +75,11 @@ export class InMemoryItemLog implements ItemLog {
     drafts: ItemDraft[],
     fence: RunFence,
   ): Promise<Item[]> {
-    if (this.leases.get(fence.runId) !== fence.leaseOwner) {
+    const lease = this.leases.get(fence.runId);
+    if (
+      lease?.sessionId !== sessionId ||
+      lease.leaseOwner !== fence.leaseOwner
+    ) {
       throw new LeaseLost(fence.runId);
     }
     const existing = this.sessions.get(sessionId) ?? [];

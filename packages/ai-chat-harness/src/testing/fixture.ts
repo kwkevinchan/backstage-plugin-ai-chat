@@ -56,7 +56,7 @@ export async function kit(options: {
 }) {
   const clock = new FakeClock();
   const items = new InMemoryItemLog({ clock });
-  items.grantLease(fence);
+  items.grantLease(sessionId, fence);
   const model = new ScriptedModel(options.script);
   const tools = new FakeToolGateway(options.tools ?? []);
   const run = new FakeRunControl();
@@ -83,13 +83,16 @@ export async function kit(options: {
       elapsedSeconds: 0,
     };
 
-  const request = (usage: RunUsage = lastUsage()): AdvanceRunRequest => ({
+  const request = (
+    usage: RunUsage = lastUsage(),
+    runFence: RunFence = fence,
+  ): AdvanceRunRequest => ({
     agent: { id: 'default', systemPrompt: 'You are a helpful agent.' },
     limits,
     budget: { tokenBudget: 24000, keepRecentSteps: 6 },
     policy: options.policy ?? {},
-    fence,
-    ctx: { sessionId, runId: fence.runId, principal: { user: 'user:a' } },
+    fence: runFence,
+    ctx: { sessionId, runId: runFence.runId, principal: { user: 'user:a' } },
     signal: controller.signal,
     usage,
   });
@@ -97,9 +100,10 @@ export async function kit(options: {
   /** Runs the loop once, as the host does, and collects what it reports. */
   const execute = async (
     usage?: RunUsage,
+    runFence?: RunFence,
   ): Promise<{ events: HarnessEvent[]; outcome: RunOutcome }> => {
     const events: HarnessEvent[] = [];
-    const generator = loop.execute(request(usage));
+    const generator = loop.execute(request(usage, runFence));
     for (;;) {
       const next = await generator.next();
       if (next.done) return { events, outcome: next.value };

@@ -25,8 +25,9 @@ import type { Item, StopReason, ToolCallItem } from '../domain';
  *   user (the ones with no decision yet, not the ones decided). The host
  *   writes the `approval` items and calls the loop again.
  * - `cancelled`: the user asked to stop, or the signal aborted.
- * - `failed`: the model call failed or gave nothing. `message` is for the
- *   user, not for the log.
+ * - `failed`: the model call failed or gave nothing. `message` is fixed text
+ *   for the user. `cause` is the original error: the host logs it and never
+ *   shows it.
  *
  * @public
  */
@@ -34,7 +35,7 @@ export type RunOutcome =
   | { status: 'completed'; endReason?: StopReason }
   | { status: 'waiting_approval'; pending: ToolCallItem[] }
   | { status: 'cancelled' }
-  | { status: 'failed'; message: string };
+  | { status: 'failed'; message: string; cause?: unknown };
 
 /**
  * What the loop reports while it runs, in three layers (A-03): the run, the
@@ -46,7 +47,8 @@ export type RunOutcome =
  * - `item.started` and `item.delta` are only for the screen. They are not
  *   stored, and a run that ends in between leaves no item for them. `draftId`
  *   ties them to the `item.completed` that follows. For a `tool_call` it is
- *   the id the model gave to the call.
+ *   the `callId` the call has in the log, and `modelCallId` is the id the
+ *   model gave.
  * - A step is one model call: `step.started` before it, `step.ended` after
  *   its items are written. The results of the tools come after it.
  *
@@ -59,6 +61,8 @@ export type HarnessEvent =
       type: 'item.started';
       draftId: string;
       kind: 'agent_message' | 'tool_call';
+      /** For a `tool_call`: the id the model gave to the call. */
+      modelCallId?: string;
     }
   | { type: 'item.delta'; draftId: string; text: string }
   | { type: 'item.completed'; draftId?: string; item: Item }

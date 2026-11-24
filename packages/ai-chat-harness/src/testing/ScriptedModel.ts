@@ -23,7 +23,8 @@ import type {
 
 /**
  * What the model does in one call: the chunks of its answer, an error to
- * throw, or a function that works it out from the input (and may do something
+ * throw, `waitForAbort` (a call that gives nothing and ends, with an error,
+ * when the signal aborts), or a function that works it out from the input (and may do something
  * on the way, such as moving a fake clock).
  *
  * @public
@@ -31,7 +32,15 @@ import type {
 export type ScriptedStep =
   | ModelChunk[]
   | Error
+  | typeof waitForAbort
   | ((input: ModelInput, callNumber: number) => ModelChunk[] | Error);
+
+/**
+ * A step in which the model call does not end until the signal aborts.
+ *
+ * @public
+ */
+export const waitForAbort = Symbol('waitForAbort');
 
 /** A text chunk. @public */
 export const say = (text: string): ModelChunk => ({ type: 'text', text });
@@ -69,6 +78,13 @@ export class ScriptedModel implements ModelClient {
     }
     const step = typeof entry === 'function' ? entry(input, number) : entry;
     if (step instanceof Error) throw step;
+    if (step === waitForAbort) {
+      await new Promise<void>(resolve => {
+        if (opts.signal.aborted) resolve();
+        opts.signal.addEventListener('abort', () => resolve());
+      });
+      throw new Error('aborted');
+    }
     for (const chunk of step) {
       if (opts.signal.aborted) throw new Error('aborted');
       yield chunk;

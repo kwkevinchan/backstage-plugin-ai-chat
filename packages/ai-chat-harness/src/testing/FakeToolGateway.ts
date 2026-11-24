@@ -33,7 +33,10 @@ import type {
 export type FakeTool = {
   descriptor: ToolDescriptor;
   validate?: (input: JsonObject) => ValidationResult;
-  execute?: (call: ToolCallItem) => ToolOutput | Promise<ToolOutput>;
+  execute?: (
+    call: ToolCallItem,
+    opts: { signal: AbortSignal },
+  ) => ToolOutput | Promise<ToolOutput>;
 };
 
 /**
@@ -66,11 +69,13 @@ export class FakeToolGateway implements ToolGateway {
   async execute(
     call: ToolCallItem,
     _ctx: CallContext,
-    _opts: { signal: AbortSignal },
+    opts: { signal: AbortSignal },
   ): Promise<ToolOutput> {
     this.executed.push(call);
     const tool = this.find(call.toolId);
-    return tool.execute ? tool.execute(call) : { status: 'ok', output: {} };
+    return tool.execute
+      ? tool.execute(call, opts)
+      : { status: 'ok', output: {} };
   }
 
   private find(toolId: string): FakeTool {

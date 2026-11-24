@@ -28,6 +28,7 @@ import {
 } from '../../domain';
 import type { HarnessEvent, RunOutcome } from '../events';
 import type { ItemDraft } from '../ports/ItemLog';
+import type { ValidationResult } from '../ports/ToolGateway';
 import type { AdvanceRunDeps, AdvanceRunRequest } from '../types';
 
 /** What one model call left: how many calls the model asked for, or an end. */
@@ -37,14 +38,21 @@ export type CallModelResult = {
   outcome?: RunOutcome;
 };
 
-type RequestedCall = { modelCallId: string; toolId: string; input: JsonValue };
+type RequestedCall = {
+  /** The id of the call in the log, also the `draftId` in the events. */
+  callId: string;
+  modelCallId: string;
+  toolId: string;
+  input: JsonValue;
+};
 
 /**
  * One model call: sends the model input, turns the answer into events, and
  * writes the answer to the log in one append, the text first (D-17).
  *
- * - `callId` comes from the `IdGenerator`, never from the model. The id of the
- *   model is the `draftId` of the call in the events.
+ * - `callId` comes from the `IdGenerator`, never from the model, and is taken
+ *   when the call arrives: it is the `draftId` of the call in the events. The
+ *   id of the model is the `modelCallId` of `item.started`.
  * - The policy of a call is always `decidePolicy` of the descriptor and the
  *   settings of the request.
  * - A call that cannot run gets its `tool_result` in the same append: `invalid`
@@ -64,6 +72,7 @@ export async function* callModel(
   items: readonly Item[],
   usage: RunUsage,
 ): AsyncGenerator<HarnessEvent, CallModelResult> {
+  // `usage.stepsUsed` already counts the steps the log shows for this run.
   const step = usage.stepsUsed + 1;
   const available = await deps.tools.list(req.ctx);
   const byId = new Map(available.map(tool => [tool.id, tool]));
@@ -104,15 +113,18 @@ export async function* callModel(
           yield { type: 'item.delta', draftId: textDraftId, text: chunk.text };
         }
       } else {
+        const callId = deps.ids.next();
         requested.push({
+          callId,
           modelCallId: chunk.modelCallId,
           toolId: chunk.toolId,
           input: chunk.input,
         });
         yield {
           type: 'item.started',
-          draftId: chunk.modelCallId,
+          draftId: callId,
           kind: 'tool_call',
+          modelCallId: chunk.modelCallId,
         };
       }
     }
@@ -124,9 +136,8 @@ export async function* callModel(
       toolCallsRequested: 0,
       outcome: {
         status: 'failed',
-        message: `The model call failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        message: 'The model call failed.',
+        cause: error,
       },
     };
   }
@@ -149,18 +160,17 @@ export async function* callModel(
   const results: ItemBody[] = [];
   for (let position = 0; position < requested.length; position++) {
     const call = requested[position];
-    const callId = deps.ids.next();
     const descriptor = byId.get(call.toolId);
     const { body, result } = await classify(deps, req, {
       call,
-      callId,
+      callId: call.callId,
       descriptor,
       step,
       position,
       overLimit: position >= remaining,
     });
     drafts.push(body);
-    draftIds.push(call.modelCallId);
+    draftIds.push(call.callId);
     if (result) results.push(result);
   }
   for (const result of results) {
@@ -174,6 +184,11 @@ export async function* callModel(
       toolCallsRequested: 0,
       outcome: { status: 'failed', message: 'The model gave no answer.' },
     };
+  }
+
+  // Classifying awaits the validation, so the signal may have aborted since.
+  if (req.signal.aborted) {
+    return { toolCallsRequested: 0, outcome: { status: 'cancelled' } };
   }
 
   const written = await deps.items.append(req.ctx.sessionId, drafts, req.fence);
@@ -252,11 +267,15 @@ async function classify(
       policy,
     });
   }
-  const validation = await deps.tools.validate(
-    call.toolId,
-    fields.input,
-    req.ctx,
-  );
+  let validation: ValidationResult;
+  try {
+    validation = await deps.tools.validate(call.toolId, fields.input, req.ctx);
+  } catch {
+    return refuse('invalid', 'The input could not be checked.', {
+      ...fields,
+      policy,
+    });
+  }
   if (!validation.valid) {
     return refuse('invalid', validation.message, { ...fields, policy });
   }
