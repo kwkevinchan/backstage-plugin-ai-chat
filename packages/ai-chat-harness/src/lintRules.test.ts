@@ -60,6 +60,8 @@ describe('dependency rules of the core', () => {
     ['src/application/example.ts'],
     ['src/testing/example.ts'],
     ['src/domain/example.test.ts'],
+    ['src/testing/example.test.ts'],
+    ['src/index.test.ts'],
   ])('%s', file => {
     it.each([
       ['@backstage/errors'],
@@ -99,6 +101,51 @@ describe('dependency rules of the core', () => {
     );
     expect(messages.map(m => m.rule)).toContain('import/no-restricted-paths');
   });
+});
+
+describe('the circles are an allow list', () => {
+  it.each([
+    ['src/domain/example.ts', '../index'],
+    ['src/domain/example.ts', '..'],
+    ['src/application/example.ts', '../index'],
+    ['src/application/example.ts', '..'],
+  ])('%s rejects an import of %s (the entry point)', async (file, source) => {
+    const messages = await lint(
+      file,
+      `import {} from '${source}';\n\nexport {};\n`,
+    );
+    expect(messages.map(m => m.rule)).toContain('import/no-restricted-paths');
+  });
+
+  it.each([
+    ['src/application/example.test.ts', '../testing/index'],
+    ['src/application/example.test.ts', '../domain/index'],
+    ['src/domain/example.test.ts', '../testing/index'],
+    ['src/testing/example.test.ts', '../application/index'],
+  ])('lets the test file %s import %s', async (file, source) => {
+    expect(
+      await lint(file, `import {} from '${source}';\n\nexport {};\n`),
+    ).toEqual([]);
+  });
+
+  it('still keeps domain from importing application in a test file', async () => {
+    const messages = await lint(
+      'src/domain/example.test.ts',
+      "import {} from '../application/index';\n\nexport {};\n",
+    );
+    expect(messages.map(m => m.rule)).toContain('import/no-restricted-paths');
+  });
+
+  it.each([['src/domain/example.ts'], ['src/application/example.ts']])(
+    '%s does not use fetch',
+    async file => {
+      const messages = await lint(
+        file,
+        "export const f = () => fetch('https://example.com');\n",
+      );
+      expect(messages.map(m => m.rule)).toContain('no-restricted-globals');
+    },
+  );
 });
 
 describe('manifest of the core', () => {
