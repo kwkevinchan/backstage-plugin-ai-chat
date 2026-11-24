@@ -15,7 +15,7 @@
  */
 
 import { LeaseLost } from '@kwkevinchan/ai-chat-harness';
-import { RunAlreadyActive, RunNotFound } from '../../domain';
+import { RunAlreadyActive, RunNotFound, UnreadMessages } from '../../domain';
 import {
   CONSTRAINT_ERROR,
   NEW_SESSION,
@@ -235,6 +235,118 @@ describe('KnexRunRepository', () => {
       const run = await p.runs.start(sessionId);
       await p.runs.transition(run.id, 'failed', { endReason: 'error' });
       expect(await p.runs.acquireLease(run.id)).toBeUndefined();
+    });
+  });
+
+  describe('transition with requireAllRead (IN-11)', () => {
+    const insert = (runId: string, text = 'also') =>
+      p.items.append(
+        sessionId,
+        [{ kind: 'user_message', text, delivery: 'inserted' }],
+        { runId, leaseOwner: '' },
+      );
+
+    async function runWithAnswer() {
+      const run = await p.runs.start(sessionId);
+      await p.items.append(
+        sessionId,
+        [{ kind: 'user_message', text: 'go' }],
+        run.fence,
+      );
+      await p.items.append(
+        sessionId,
+        [{ kind: 'agent_message', text: 'done', readUpToSeq: 1 }],
+        run.fence,
+      );
+      return run;
+    }
+
+    it('ends the run when every message is read', async () => {
+      const run = await runWithAnswer();
+      const ended = await p.runs.transition(run.id, 'completed', {
+        leaseOwner: run.fence.leaseOwner,
+        requireAllRead: true,
+      });
+      expect(ended.status).toBe('completed');
+    });
+
+    it('refuses with UnreadMessages when a message was inserted after what the model read, and leaves the run, its lease and its session as they were', async () => {
+      const run = await runWithAnswer();
+      await insert(run.id);
+      await expect(
+        p.runs.transition(run.id, 'completed', {
+          leaseOwner: run.fence.leaseOwner,
+          requireAllRead: true,
+        }),
+      ).rejects.toBeInstanceOf(UnreadMessages);
+      const row = await p.knex('runs').where({ id: run.id }).first();
+      expect(row).toMatchObject({
+        status: 'running',
+        lease_owner: run.fence.leaseOwner,
+        active_session_id: sessionId,
+        ended_at: null,
+      });
+    });
+
+    it('ends the run once a model call has read the message', async () => {
+      const run = await runWithAnswer();
+      await insert(run.id);
+      await p.items.append(
+        sessionId,
+        [{ kind: 'agent_message', text: 'read it', readUpToSeq: 3 }],
+        run.fence,
+      );
+      const ended = await p.runs.transition(run.id, 'completed', {
+        leaseOwner: run.fence.leaseOwner,
+        requireAllRead: true,
+      });
+      expect(ended.status).toBe('completed');
+    });
+
+    it('does not look at the log without the option, so a run that ends in another way leaves unread messages (IN-12)', async () => {
+      const run = await runWithAnswer();
+      await insert(run.id);
+      const ended = await p.runs.transition(run.id, 'completed', {
+        leaseOwner: run.fence.leaseOwner,
+        endReason: 'max_steps',
+      });
+      expect(ended.status).toBe('completed');
+    });
+
+    it('does not count the messages of an earlier run of the session', async () => {
+      const first = await runWithAnswer();
+      await insert(first.id);
+      await p.runs.transition(first.id, 'completed', {
+        leaseOwner: first.fence.leaseOwner,
+        endReason: 'max_steps',
+      });
+      const second = await p.runs.start(sessionId);
+      await p.items.append(
+        sessionId,
+        [{ kind: 'user_message', text: 'next' }],
+        second.fence,
+      );
+      await p.items.append(
+        sessionId,
+        [{ kind: 'agent_message', text: 'ok', readUpToSeq: 4 }],
+        second.fence,
+      );
+      const ended = await p.runs.transition(second.id, 'completed', {
+        leaseOwner: second.fence.leaseOwner,
+        requireAllRead: true,
+      });
+      expect(ended.status).toBe('completed');
+    });
+
+    it('checks the lease before the log', async () => {
+      const run = await runWithAnswer();
+      await insert(run.id);
+      await expect(
+        p.runs.transition(run.id, 'completed', {
+          leaseOwner: 'someone-else',
+          requireAllRead: true,
+        }),
+      ).rejects.toBeInstanceOf(LeaseLost);
     });
   });
 

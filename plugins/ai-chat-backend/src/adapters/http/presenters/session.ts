@@ -16,13 +16,15 @@
 
 import type {
   ChatItem,
+  ChatQueue,
+  ChatQueuedMessage,
   ChatRun,
   ChatSession,
   ChatSessionDetail,
   ChatToolset,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { SessionView } from '../../../application';
-import type { Run, Session, Toolset } from '../../../domain';
+import type { QueuedMessage, Run, Session, Toolset } from '../../../domain';
 
 /** The fields of a session that the owner gets, and no others. */
 export function toChatSession(session: Session): ChatSession {
@@ -53,16 +55,42 @@ export function toChatRun(run: Run): ChatRun {
   };
 }
 
+export function toChatQueuedMessage(message: QueuedMessage): ChatQueuedMessage {
+  return {
+    id: message.id,
+    position: message.position,
+    text: message.text,
+    ...(message.page && { page: message.page }),
+    createdAt: message.createdAt,
+    updatedAt: message.updatedAt,
+  };
+}
+
+export function toChatQueue(queue: {
+  items: QueuedMessage[];
+  paused: boolean;
+}): ChatQueue {
+  return {
+    items: queue.items.map(toChatQueuedMessage),
+    paused: queue.paused,
+  };
+}
+
 export function toChatSessionDetail(view: SessionView): ChatSessionDetail {
   // The items are the log as it is stored; the type of the API is checked
-  // against the type of the core here.
-  const items: ChatItem[] = view.items;
+  // against the type of the core here. An inserted message also says whether
+  // the model read it.
+  const items: ChatItem[] = view.items.map(item => {
+    const insertState = view.insertStates.get(item.seq);
+    return insertState === undefined ? item : { ...item, insertState };
+  });
   return {
     session: toChatSession(view.session),
     ...(view.run && { run: toChatRun(view.run) }),
     items,
     awaitingDecision: view.awaitingDecision,
     resumable: view.resumable,
+    queue: toChatQueue(view.queue),
   };
 }
 

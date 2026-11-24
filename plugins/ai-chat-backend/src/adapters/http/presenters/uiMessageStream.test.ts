@@ -19,6 +19,7 @@ import type {
   Item,
   ToolCallItem,
 } from '@kwkevinchan/ai-chat-harness';
+import type { HostEvent } from '../../../application';
 import { TOOL_RESULT_NOT_KNOWN } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import { readMessage, throughSdk } from '../__testUtils__/uiMessageStream';
 import type { UiMessageChunk } from './uiMessageChunk';
@@ -79,7 +80,7 @@ const completed = (item: Item, draftId?: string): HarnessEvent => ({
 });
 
 function present(
-  events: HarnessEvent[],
+  events: HostEvent[],
   options: ConstructorParameters<typeof UiMessageStreamPresenter>[0] = {
     runId: RUN,
   },
@@ -429,23 +430,207 @@ describe('UiMessageStreamPresenter', () => {
     });
   });
 
-  it('sends nothing for message.read yet', () => {
-    const message = {
-      ...base(2),
-      kind: 'user_message',
-      text: 'inserted',
-      delivery: 'inserted',
-    } as Item;
-    const without = present([
-      { type: 'run.started', runId: RUN },
-      { type: 'run.ended', outcome: { status: 'completed' } },
-    ]);
-    const withRead = present([
-      { type: 'run.started', runId: RUN },
-      { type: 'message.read', item: message },
-      { type: 'run.ended', outcome: { status: 'completed' } },
-    ]);
-    expect(withRead).toEqual(without);
+  describe('inserted messages and the queue (PI-03)', () => {
+    const inserted = (seq: number, text = 'inserted'): Item =>
+      ({
+        ...base(seq),
+        kind: 'user_message',
+        text,
+        delivery: 'inserted',
+      } as Item);
+    const output = (seq: number, readUpToSeq: number): Item =>
+      ({ ...agentMessage(seq, 'ok'), readUpToSeq } as Item);
+
+    it('sends data-inserted for message.read before the step that read it, as a part of the message', async () => {
+      const chunks = present([
+        { type: 'run.started', runId: RUN },
+        { type: 'message.read', item: inserted(3, 'Use the staging one') },
+        { type: 'step.started', step: 2 },
+        completed(output(5, 3)),
+        { type: 'step.ended', step: 2 },
+        { type: 'run.ended', outcome: { status: 'completed' } },
+      ]);
+      const at = (type: string) => chunks.findIndex(c => c.type === type);
+      expect(chunks[at('data-inserted')]).toEqual({
+        type: 'data-inserted',
+        id: 'inserted-3',
+        data: { seq: 3, text: 'Use the staging one' },
+      });
+      expect(at('data-inserted')).toBeLessThan(at('start-step'));
+      // Not transient: the SDK keeps it in the message.
+      const message = await readMessage(await throughSdk(chunks));
+      expect(
+        message.parts.filter(part => part.type === 'data-inserted'),
+      ).toEqual([
+        {
+          type: 'data-inserted',
+          id: 'inserted-3',
+          data: { seq: 3, text: 'Use the staging one' },
+        },
+      ]);
+    });
+
+    it('does not drop a message that was written before the output the stream already sent (its seq is lower)', () => {
+      // The output with seq 4 went out; the inserted message has seq 3.
+      const presenter = new UiMessageStreamPresenter({ runId: RUN });
+      presenter.present(completed(output(4, 2)));
+      const chunks = presenter.present({
+        type: 'message.read',
+        item: inserted(3),
+      });
+      expect(types(chunks)).toEqual(['data-inserted']);
+    });
+
+    it('sends each inserted message once', () => {
+      const presenter = new UiMessageStreamPresenter({ runId: RUN });
+      const event = { type: 'message.read', item: inserted(3) } as const;
+      expect(types(presenter.present(event))).toEqual(['data-inserted']);
+      expect(presenter.present(event)).toEqual([]);
+    });
+
+    it('sends data-inserted in a replay before the output that read the message, and not again for the live event', () => {
+      const presenter = new UiMessageStreamPresenter({
+        runId: RUN,
+        typing: false,
+      });
+      const log: Item[] = [
+        { ...base(1), kind: 'user_message', text: 'go' } as Item,
+        output(2, 1),
+        inserted(3),
+        output(4, 3),
+        inserted(5, 'not read yet'),
+      ];
+      const head = presenter.replay('running', log, 5);
+      const inserts = head.filter(c => c.type === 'data-inserted');
+      // Only the message that an output read; the later one is not shown yet.
+      expect(inserts).toEqual([
+        {
+          type: 'data-inserted',
+          id: 'inserted-3',
+          data: { seq: 3, text: 'inserted' },
+        },
+      ]);
+      const insertAt = head.findIndex(c => c.type === 'data-inserted');
+      const outputsAfter = head
+        .slice(insertAt)
+        .filter(c => c.type === 'text-start');
+      expect(outputsAfter).toHaveLength(1);
+      // The live event of the message the replay sent adds nothing; the other
+      // one is sent when the model reads it.
+      expect(
+        presenter.present({ type: 'message.read', item: inserted(3) }),
+      ).toEqual([]);
+      expect(
+        types(presenter.present({ type: 'message.read', item: inserted(5) })),
+      ).toEqual(['data-inserted']);
+    });
+
+    it('sends a message whose message.read came before the stream, with the output that read it', () => {
+      const presenter = new UiMessageStreamPresenter({
+        runId: RUN,
+        typing: false,
+      });
+      const log: Item[] = [
+        { ...base(1), kind: 'user_message', text: 'go' } as Item,
+        output(2, 1),
+        inserted(3, 'late idea'),
+      ];
+      // The replay has no output that read message 3.
+      const head = presenter.replay('running', log, 3, log);
+      expect(head.filter(c => c.type === 'data-inserted')).toEqual([]);
+
+      const live = presenter.present(completed(output(4, 3)));
+      expect(live.filter(c => c.type === 'data-inserted')).toEqual([
+        {
+          type: 'data-inserted',
+          id: 'inserted-3',
+          data: { seq: 3, text: 'late idea' },
+        },
+      ]);
+      // Before the text of the output that read it, and only once.
+      expect(types(live).indexOf('data-inserted')).toBeLessThan(
+        types(live).indexOf('text-start'),
+      );
+      expect(
+        presenter.present({ type: 'message.read', item: inserted(3) }),
+      ).toEqual([]);
+      expect(
+        presenter
+          .present(completed(output(5, 3)))
+          .filter(c => c.type === 'data-inserted'),
+      ).toEqual([]);
+    });
+
+    it('sends it also when afterSeq left the message out of the replay', () => {
+      const presenter = new UiMessageStreamPresenter({
+        runId: RUN,
+        typing: false,
+      });
+      // The items after seq 3 are none; the host still hands over message 3.
+      const head = presenter.replay('running', [], 3, [
+        inserted(3, 'late idea'),
+      ]);
+      expect(head.filter(c => c.type === 'data-inserted')).toEqual([]);
+      const live = presenter.present(completed(output(4, 3)));
+      expect(live.filter(c => c.type === 'data-inserted')).toHaveLength(1);
+    });
+
+    it('does not hold a message for an output that did not read it', () => {
+      const presenter = new UiMessageStreamPresenter({ runId: RUN });
+      presenter.replay('running', [], 3, [inserted(3)]);
+      expect(
+        presenter
+          .present(completed(output(4, 2)))
+          .filter(c => c.type === 'data-inserted'),
+      ).toEqual([]);
+    });
+
+    it('sends the queue as a transient data-queue before the state of the run', async () => {
+      const queued = {
+        id: 'q1',
+        sessionId: 's1',
+        position: 1,
+        text: 'Next',
+        createdAt: 'x',
+        updatedAt: 'x',
+      };
+      const chunks = present([
+        { type: 'run.started', runId: RUN },
+        {
+          type: 'queue.state',
+          items: [queued],
+          paused: false,
+          nextRunId: 'run-2',
+        },
+        { type: 'run.ended', outcome: { status: 'completed' } },
+      ]);
+      expect(types(chunks)).toEqual([
+        'start',
+        'data-run',
+        'data-queue',
+        'data-run',
+        'finish',
+      ]);
+      expect(chunks[2]).toEqual({
+        type: 'data-queue',
+        transient: true,
+        // The shape of `GET /queue`: no `sessionId`.
+        data: {
+          items: [
+            {
+              id: 'q1',
+              position: 1,
+              text: 'Next',
+              createdAt: 'x',
+              updatedAt: 'x',
+            },
+          ],
+          paused: false,
+          nextRunId: 'run-2',
+        },
+      });
+      await throughSdk(chunks);
+    });
   });
 
   it('turns the summary and the trimming of the context into notices, one for the trimming, and shows no summary message', async () => {

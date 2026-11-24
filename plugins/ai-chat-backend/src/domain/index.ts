@@ -18,17 +18,32 @@ export { callsAwaitingDecision, findToolCall, hasResult } from './approval';
 export {
   AgentNotFound,
   ChatDomainError,
+  InsertLimitReached,
+  NoActiveRun,
   NotSessionOwner,
+  QueueChanged,
+  QueuedMessageNotFound,
+  QueueFull,
   RunAlreadyActive,
   RunNotFound,
+  RunNotRunning,
   RunNotWaiting,
   SessionNotFound,
   ShuttingDown,
   ToolCallNotFound,
   ToolCallNotWaiting,
   UnknownToolset,
+  UnreadMessages,
 } from './errors';
 export type { Principal } from './principal';
+export {
+  canAutoStart,
+  DEFAULT_INSERT_MAX_PER_RUN,
+  DEFAULT_QUEUE_MAX_MESSAGES,
+  isNormalEnd,
+  type PausedReason,
+  type QueuedMessage,
+} from './queue';
 export { CREDENTIALS_MARGIN_SECONDS, runLimits } from './runLimits';
 export type { LeasedRun, Run } from './run';
 export { assertOwner } from './session';

@@ -55,11 +55,21 @@ export interface RunRepository extends RunControl {
    * Throws `InvalidRunTransition` when the change is not allowed. A run that
    * ends, or waits for an approval, has no lease and (when it ends) no
    * active session any more.
+   *
+   * With `requireAllRead` the change is refused with `UnreadMessages`, and the
+   * run stays as it is, when a message was inserted that the model has not
+   * read (IN-11). The check and the change are one transaction on the run, and
+   * an insert holds the same row, so each of the two comes first and the other
+   * sees it.
    */
   transition(
     runId: string,
     to: RunTransitionTarget,
-    opts?: { leaseOwner?: string; endReason?: string },
+    opts?: {
+      leaseOwner?: string;
+      endReason?: string;
+      requireAllRead?: boolean;
+    },
   ): Promise<Run>;
 
   /** Asks the loop to stop. Returns `false` when the run has ended. */

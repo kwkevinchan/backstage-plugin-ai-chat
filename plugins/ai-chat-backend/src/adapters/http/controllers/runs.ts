@@ -20,17 +20,23 @@ import type {
   CancelRun,
   DecideApproval,
   FollowSession,
+  InsertMessage,
+  ResumeQueue,
   ResumeRun,
   RunHandle,
   SendMessage,
 } from '../../../application';
 import type { Logger } from '../../../application/ports';
 import type { Principal } from '../../../domain';
-import type { ChatDecisionResponse } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type {
+  ChatDecisionResponse,
+  ChatItem,
+} from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import { UiMessageStreamPresenter } from '../presenters/uiMessageStream';
 import {
   afterSeqQuery,
   decisionBody,
+  insertMessageBody,
   parse,
   resumeBody,
   sendMessageBody,
@@ -41,6 +47,8 @@ export type RunUseCases = {
   sendMessage: Pick<SendMessage, 'execute'>;
   decideApproval: Pick<DecideApproval, 'execute'>;
   resumeRun: Pick<ResumeRun, 'execute'>;
+  insertMessage: Pick<InsertMessage, 'execute'>;
+  resumeQueue: Pick<ResumeQueue, 'execute'>;
   cancelRun: Pick<CancelRun, 'execute'>;
   followSession: Pick<FollowSession, 'execute'>;
 };
@@ -124,6 +132,38 @@ export class RunsController {
     return true;
   }
 
+  /** `POST /sessions/:id/runs/:runId/messages`: the item that was written. */
+  async insert(
+    principal: Principal,
+    sessionId: string,
+    runId: string,
+    body: unknown,
+  ): Promise<ChatItem> {
+    const { text, page } = parse(insertMessageBody, body);
+    return this.useCases.insertMessage.execute({
+      principal,
+      sessionId,
+      runId,
+      text,
+      ...(page && { page }),
+    });
+  }
+
+  /** `POST /sessions/:id/queue/resume`: false when there is nothing to send. */
+  async resumeQueue(
+    principal: Principal,
+    sessionId: string,
+    res: Response,
+  ): Promise<boolean> {
+    const handle = await this.useCases.resumeQueue.execute({
+      principal,
+      sessionId,
+    });
+    if (!handle) return false;
+    await this.stream(res, handle);
+    return true;
+  }
+
   /** `POST /sessions/:id/runs/:runId/cancel` */
   async cancel(
     principal: Principal,
@@ -165,6 +205,7 @@ export class RunsController {
           followed.run.status,
           followed.items,
           followed.upToSeq,
+          followed.inserted,
         ),
       },
       this.logger,

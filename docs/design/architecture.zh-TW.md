@@ -1229,7 +1229,7 @@ plugins/ai-chat/src/
 
 ## 13. 輸入：圖片、插入、排隊（PI）
 
-這一節是 PI 的設計。核心的部分（PI-02：Item 的欄位、`unreadInserted`、`insertStatesOf`、`decideNextAction`、`buildModelInput`、`message.read`）已實作；宿主、前端和圖片尚未。對應規格 D-27 到 D-30 和需求 4.11（IN-01 到 IN-19）。其他節的表格（use case、路由、事件、資料表）已列出 PI 的項目，細節在這裡。
+這一節是 PI 的設計。已實作的部分：核心（PI-02：Item 的欄位、`unreadInserted`、`insertStatesOf`、`decideNextAction`、`buildModelInput`、`message.read`），和宿主的插入與排隊（PI-03）；前端和圖片（附件）尚未。對應規格 D-27 到 D-30 和需求 4.11（IN-01 到 IN-19）。其他節的表格（use case、路由、事件、資料表）已列出 PI 的項目，細節在這裡。
 
 ### 13.1 結論
 
@@ -1238,51 +1238,51 @@ plugins/ai-chat/src/
 - **插入和 Run 結束的競爭由資料庫的鎖解決。** 插入的 transaction 對 `runs` 那一列加共享鎖。結束的 transaction 對同一列加更新鎖，再檢查有沒有還沒讀的訊息。兩者一定有先後（13.4）。
 - **自動送出只送一次，也不會丟。** 取出排隊列、建立 Run、寫入 `user_message` 在同一個 transaction（13.6）。
 - **暫停不存狀態。** Session 沒有進行中的 Run，而且佇列不是空的，就是暫停。
-- **鎖的順序固定：先 `runs`，再 `sessions`，最後是 `items`、`queued_messages`、`attachments`。** 每種寫入的取鎖順序和理由見 13.8。順序相反，或先取共享鎖再升級，會在 PostgreSQL 死結。
+- **鎖的順序固定：需要 `runs` 的先取 `runs`，再取 `sessions` 的列鎖；`items`、`queued_messages`、`attachments` 都在 `sessions` 之後，由 `sessions` 的列鎖排成一個接一個。** 每種寫入的取鎖順序和理由見 13.8。順序相反，或先取共享鎖再升級，會在 PostgreSQL 死結。
 
 ### 13.2 每樣東西放在哪一圈
 
-| 東西                                                                                                             | 圈                 | 位置                                                                                                            |
-| ---------------------------------------------------------------------------------------------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `UserMessageBody` 加 `attachments`、`delivery`；`agent_message`、`tool_call` 加 `readUpToSeq`                    | 核心 1 domain      | `domain/item.ts`                                                                                                |
-| `unreadInserted()`：哪些插入訊息還沒讀                                                                           | 核心 1 domain      | `domain/inputs.ts`                                                                                              |
-| `decideNextAction` 的規則；`callsOfLastStep` 的起點                                                              | 核心 1 domain      | `domain/nextAction.ts`                                                                                          |
-| `buildModelInput`：Run 的使用者訊息、圖片的處理；`ModelMessage` 加 `images`；`ContextBudget` 加 `tokensPerImage` | 核心 1 domain      | `domain/modelInput.ts`                                                                                          |
-| `ModelClient.capabilities.images`、`ModelClient.stream` 的 `opts.sessionId`                                      | 核心 2 application | `application/ports/ModelClient.ts`                                                                              |
-| `message.read` 事件；`callModel` 寫入 `readUpToSeq`                                                              | 核心 2 application | `application/events.ts`、`steps/callModel.ts`                                                                   |
-| `Attachment`、`checkImage()`（檔頭比對）                                                                         | 宿主 1 domain      | `domain/attachment.ts`                                                                                          |
-| `QueuedMessage`、`isNormalEnd()`、`canAutoStart()`                                                               | 宿主 1 domain      | `domain/queue.ts`                                                                                               |
-| 新的錯誤（13.7）                                                                                                 | 宿主 1 domain      | `domain/errors.ts`                                                                                              |
-| port：`AttachmentStore`、`QueuedMessageRepository`；`RunRepository.transition` 加 `requireAllRead`               | 宿主 2 application | `application/ports/`                                                                                            |
-| use case                                                                                                         | 宿主 2 application | `application/usecases/`（13.3）                                                                                 |
-| `RunSupervisor`：被拒絕結束時重跑迴圈；結束後呼叫 `afterRun`                                                     | 宿主 2 application | `application/RunSupervisor.ts`                                                                                  |
-| `KnexAttachmentStore`、`KnexQueuedMessageRepository`；共用 transaction 的函式                                    | 宿主 3 adapters    | `adapters/persistence/`（`transactions.ts` 放兩個 repository 和 `KnexRunRepository`、`KnexItemLog` 共用的步驟） |
-| 上傳和讀取的 controller、排隊的 controller、raw body 的中介層、請求內容的檢查                                    | 宿主 3 adapters    | `adapters/http/`（`controllers/attachments.ts`、`controllers/queue.ts`、`rawBody.ts`）                          |
-| 圖片轉成 `image_url`                                                                                             | 宿主 3 adapters    | `adapters/model/OpenAiCompatibleModelClient.ts`                                                                 |
-| 設定的 schema、migration                                                                                         | 宿主 4 框架        | `config.d.ts`、`migrations/`                                                                                    |
-| 輸入框、排隊清單、縮圖                                                                                           | 前端               | 13.9                                                                                                            |
+| 東西                                                                                                                      | 圈                 | 位置                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `UserMessageBody` 加 `attachments`、`delivery`；`agent_message`、`tool_call` 加 `readUpToSeq`                             | 核心 1 domain      | `domain/item.ts`                                                                                                                                                     |
+| `unreadInserted()`：哪些插入訊息還沒讀                                                                                    | 核心 1 domain      | `domain/inputs.ts`                                                                                                                                                   |
+| `decideNextAction` 的規則；`callsOfLastStep` 的起點                                                                       | 核心 1 domain      | `domain/nextAction.ts`                                                                                                                                               |
+| `buildModelInput`：Run 的使用者訊息、圖片的處理；`ModelMessage` 加 `images`；`ContextBudget` 加 `tokensPerImage`          | 核心 1 domain      | `domain/modelInput.ts`                                                                                                                                               |
+| `ModelClient.capabilities.images`、`ModelClient.stream` 的 `opts.sessionId`                                               | 核心 2 application | `application/ports/ModelClient.ts`                                                                                                                                   |
+| `message.read` 事件；`callModel` 寫入 `readUpToSeq`                                                                       | 核心 2 application | `application/events.ts`、`steps/callModel.ts`                                                                                                                        |
+| `Attachment`、`checkImage()`（檔頭比對）                                                                                  | 宿主 1 domain      | `domain/attachment.ts`                                                                                                                                               |
+| `QueuedMessage`、`isNormalEnd()`、`canAutoStart()`、`PausedReason`                                                        | 宿主 1 domain      | `domain/queue.ts`                                                                                                                                                    |
+| 新的錯誤（13.7）                                                                                                          | 宿主 1 domain      | `domain/errors.ts`                                                                                                                                                   |
+| port：`AttachmentStore`、`QueuedMessageRepository`；`RunRepository.transition` 加 `requireAllRead`                        | 宿主 2 application | `application/ports/`                                                                                                                                                 |
+| use case                                                                                                                  | 宿主 2 application | `application/usecases/`（13.3）                                                                                                                                      |
+| `RunSupervisor`：被拒絕結束時重跑迴圈；結束後呼叫 `afterRun`；`afterRun` 本身和 `HostEvent`（核心的事件加 `queue.state`） | 宿主 2 application | `application/RunSupervisor.ts`、`application/afterRun.ts`、`application/hostEvents.ts`                                                                               |
+| `KnexAttachmentStore`、`KnexQueuedMessageRepository`；共用 transaction 的函式                                             | 宿主 3 adapters    | `adapters/persistence/`（`transactions.ts` 放 `KnexQueuedMessageRepository`、`KnexRunRepository`、`KnexItemLog` 共用的步驟：新 Run 的列、取序號、寫入 Item、列轉換） |
+| 上傳和讀取的 controller、排隊的 controller、raw body 的中介層、請求內容的檢查                                             | 宿主 3 adapters    | `adapters/http/`（`controllers/attachments.ts`、`controllers/queue.ts`、`rawBody.ts`）                                                                               |
+| 圖片轉成 `image_url`                                                                                                      | 宿主 3 adapters    | `adapters/model/OpenAiCompatibleModelClient.ts`                                                                                                                      |
+| 設定的 schema、migration                                                                                                  | 宿主 4 框架        | `config.d.ts`、`migrations/`                                                                                                                                         |
+| 輸入框、排隊清單、縮圖                                                                                                    | 前端               | 13.9                                                                                                                                                                 |
 
 ### 13.3 Use case 和 port
 
 宿主新增的 use case：
 
-| Use case                 | 做什麼                                                                        | 用到的 port                                                    | 規格                |
-| ------------------------ | ----------------------------------------------------------------------------- | -------------------------------------------------------------- | ------------------- |
-| `UploadAttachment`       | 檢查擁有者和檔案，存成附件                                                    | SessionRepository、AttachmentStore                             | IN-01 到 IN-04      |
-| `ReadAttachment`         | 檢查擁有者，回傳位元組和型別                                                  | SessionRepository、AttachmentStore                             | IN-03、IN-08        |
-| `InsertMessage`          | 檢查訊息，寫入 `delivery: inserted` 的 `user_message`。不建立 Run，不啟動迴圈 | SessionRepository、ItemLog、AttachmentStore、AgentCatalog      | IN-10、IN-11、IN-17 |
-| `QueueMessage`           | 檢查訊息，加進佇列                                                            | SessionRepository、QueuedMessageRepository、AttachmentStore    | IN-13               |
-| `UpdateQueuedMessage`    | 改文字、附件、頁面                                                            | SessionRepository、QueuedMessageRepository                     | IN-13               |
-| `DeleteQueuedMessage`    | 刪除一則，釋放它保留的附件                                                    | SessionRepository、QueuedMessageRepository                     | IN-13、IN-15        |
-| `ReorderQueue`           | 依 id 清單重排                                                                | SessionRepository、QueuedMessageRepository                     | IN-13               |
-| `ListQueue`              | 回傳佇列和是否暫停                                                            | SessionRepository、QueuedMessageRepository、RunRepository      | IN-15               |
-| `StartNextQueued`        | 用最前面那則開新的 Run 並啟動迴圈。自動送出和 `ResumeQueue` 共用              | QueuedMessageRepository、RunSupervisor、AgentCatalog、AuditLog | IN-14、IN-16、IN-17 |
-| `ResumeQueue`            | 使用者按「繼續」：對 `StartNextQueued` 用請求的身分，不檢查身分的剩餘時間     | 同上                                                           | IN-15               |
-| `PurgeUnusedAttachments` | 刪除超過 24 小時沒進訊息也沒被保留的附件。`plugin.ts` 每小時排一次            | AttachmentStore                                                | IN-04               |
+| Use case                 | 做什麼                                                                        | 用到的 port                                                                                      | 規格                |
+| ------------------------ | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------- |
+| `UploadAttachment`       | 檢查擁有者和檔案，存成附件                                                    | SessionRepository、AttachmentStore                                                               | IN-01 到 IN-04      |
+| `ReadAttachment`         | 檢查擁有者，回傳位元組和型別                                                  | SessionRepository、AttachmentStore                                                               | IN-03、IN-08        |
+| `InsertMessage`          | 檢查訊息，寫入 `delivery: inserted` 的 `user_message`。不建立 Run，不啟動迴圈 | SessionRepository、ItemLog（PI-05 加 AttachmentStore、AgentCatalog）                             | IN-10、IN-11、IN-17 |
+| `QueueMessage`           | 檢查訊息，加進佇列                                                            | SessionRepository、QueuedMessageRepository、AttachmentStore                                      | IN-13               |
+| `UpdateQueuedMessage`    | 改文字、附件、頁面                                                            | SessionRepository、QueuedMessageRepository                                                       | IN-13               |
+| `DeleteQueuedMessage`    | 刪除一則，釋放它保留的附件                                                    | SessionRepository、QueuedMessageRepository                                                       | IN-13、IN-15        |
+| `ReorderQueue`           | 依 id 清單重排，回傳佇列和是否暫停                                            | SessionRepository、QueuedMessageRepository、RunRepository                                        | IN-13               |
+| `ListQueue`              | 回傳佇列和是否暫停（`queueViewOf`，`GetSession`、`ReorderQueue` 也用）        | SessionRepository、QueuedMessageRepository、RunRepository                                        | IN-15               |
+| `StartNextQueued`        | 用最前面那則開新的 Run 並啟動迴圈，寫稽核。自動送出和 `ResumeQueue` 共用      | SessionRepository、RunRepository、QueuedMessageRepository、RunSupervisor、AgentCatalog、AuditLog | IN-14、IN-17        |
+| `ResumeQueue`            | 使用者按「繼續」：對 `StartNextQueued` 用請求的身分，不檢查身分的剩餘時間     | SessionRepository、StartNextQueued                                                               | IN-15               |
+| `PurgeUnusedAttachments` | 刪除超過 24 小時沒進訊息也沒被保留的附件。`plugin.ts` 每小時排一次            | AttachmentStore                                                                                  | IN-04               |
 
 `SendMessage` 多收 `attachmentIds`，其他不變。`GetSession` 多回傳佇列和每則插入訊息的狀態（13.7）。`ForkSession`（P2）帶走範圍內的附件（13.5）。
 
-兩個 port 放在宿主的 `application/ports/`：
+兩個 port 放在宿主的 `application/ports/`。`AttachmentStore` 在 PI-05 加；下面的 `QueuedMessage` 在 PI-03 沒有 `attachments`，`add` 沒有 `attachmentIds`（`queued_messages.attachment_ids` 欄位存在，一律是 `[]`），PI-05 加上：
 
 ```ts
 export type AttachmentMeta = {
@@ -1333,7 +1333,7 @@ export type QueuedMessage = {
   sessionId: string;
   position: number; // 1 起算
   text: string;
-  attachments: AttachmentMeta[];
+  attachments: AttachmentMeta[]; // PI-05；PI-03 沒有這個欄位
   page?: { path: string; entityRef?: string };
   createdAt: string;
   updatedAt: string;
@@ -1343,14 +1343,14 @@ export interface QueuedMessageRepository {
   list(sessionId: string): Promise<QueuedMessage[]>; // 依 position
   /**
    * 一個 transaction：Session 有進行中的 Run（沒有就丟 NoActiveRun）、
-   * 筆數小於 `max`（否則 QueueFull）、保留附件（`reserved_by`）、寫入。
+   * 筆數小於 `max`（否則 QueueFull）、保留附件（`reserved_by`，PI-05）、寫入。
    */
   add(
     sessionId: string,
     input: { text: string; attachmentIds: string[]; page?: PageContext },
     opts: { max: number },
   ): Promise<QueuedMessage>;
-  /** 丟 QueuedMessageNotFound。改附件時，移掉的釋放、新的保留。 */
+  /** 丟 QueuedMessageNotFound。改附件時，移掉的釋放、新的保留（PI-05）。`page: null` 移掉頁面。 */
   update(
     sessionId: string,
     id: string,
@@ -1385,7 +1385,7 @@ transition(
 ): Promise<Run>; // requireAllRead 而且有還沒讀的訊息時丟 UnreadMessages
 ```
 
-`RunSupervisor` 加兩個注入的函式，`host.ts` 把它們接到 use case，所以 supervisor 不 import use case：
+`RunSupervisor` 加一個注入的函式 `afterRun`，`host.ts` 把它接到 use case（`createAfterRun`，用 `StartNextQueued`），所以 supervisor 不 import use case。supervisor 的訂閱者收到的事件是 `HostEvent`：核心的 `HarnessEvent` 加 `queue.state`（欄位和 `afterRun` 的回傳相同）：
 
 ```ts
 afterRun?(info: {
@@ -1393,7 +1393,7 @@ afterRun?(info: {
   outcome: RunOutcome;
   principal: Principal; // 啟動這個迴圈的請求的身分，只在記憶體
 }): Promise<{
-  queue: QueuedMessage[];
+  items: QueuedMessage[]; // 佇列；和 data-queue 同一個形狀
   paused: boolean;
   pausedReason?: 'run_not_completed' | 'credentials' | 'shutting_down';
   nextRunId?: string;
@@ -1441,14 +1441,14 @@ export type UserMessageBody = {
 **插入的流程**
 
 1. `POST /sessions/:id/runs/:runId/messages`。controller 檢查內容（文字、附件 id 的格式），交給 `InsertMessage`。
-2. `InsertMessage` 做擁有者檢查（`assertOwner`）；訊息帶圖片時檢查模型能讀圖片（IN-05）和張數（IN-01）；用 `AttachmentStore.describe` 確認附件屬於這段 Session。然後呼叫 `ItemLog.append`。帶圖片時，在 append 的 transaction 裡、更新 `sessions` 之後（和筆數檢查同一個位置），加總這個 Run 所有使用者訊息的附件 `size` 和這則的，超過 `maxBytesPerInput` 丟 `TooManyImageBytes`（400，13.5）並回復。兩則帶圖片的插入同時進來時，第二則在 `sessions` 上排隊，看得到第一則。append 的 fence 是 `{ runId, leaseOwner }`。`leaseOwner` 在這種寫入不比對（跟 `approval` 一樣：宿主替使用者寫，不持有租約）。
+2. `InsertMessage` 做擁有者檢查（`assertOwner`）；訊息帶圖片時檢查模型能讀圖片（IN-05）和張數（IN-01）；用 `AttachmentStore.describe` 確認附件屬於這段 Session。然後呼叫 `ItemLog.append`。帶圖片時，在 append 的 transaction 裡、更新 `sessions` 之後（和筆數檢查同一個位置），加總這個 Run 所有使用者訊息的附件 `size` 和這則的，超過 `maxBytesPerInput` 丟 `TooManyImageBytes`（400，13.5）並回復。兩則帶圖片的插入同時進來時，第二則在 `sessions` 上排隊，看得到第一則。append 的 fence 是 `{ runId, leaseOwner }`。`leaseOwner` 在這種寫入不比對（跟 `approval` 一樣：宿主替使用者寫，不持有租約），所以 `InsertMessage` 傳空字串。
 3. `KnexItemLog.append` 發現批次只有一筆 `delivery: inserted` 的 `user_message` 時，在 transaction 裡依序做：
    1. 對 `runs` 那一列加共享鎖（`FOR SHARE`）讀取 `session_id`、`status`、`lease_expires_at`。
    2. 條件：Run 屬於這段 Session，`status` 是 `running`（不是 `waiting_approval`），`lease_expires_at` 還沒過。不符合丟 `LeaseLost`，錯誤對應成 409。
    3. 照現有的步驟更新 `sessions.next_seq`（取得序號，同一段 Session 的寫入從這裡開始一個接一個）。
    4. 上限檢查：這個 Run 的 `user_message` 筆數減 1（第一則不算）要小於 `insert.maxPerRun`，否則丟 `InsertLimitReached`（409）。放在第 3 步之後，所以同時進來的插入不會一起超過上限。
    5. 檢查 `dedupe_key`、插入 Item。
-   6. 附件：`SELECT … FROM attachments WHERE id IN (…) FOR UPDATE`，確認每個 id 都屬於這段 Session，再把 `used_seq` 是空值的設成這則的序號、`reserved_by` 清空。有 id 不屬於這段 Session 就丟 `AttachmentNotFound`，整個 transaction 回復。
+   6. 附件（PI-05；PI-03 沒有這一步）：`SELECT … FROM attachments WHERE id IN (…) FOR UPDATE`，確認每個 id 都屬於這段 Session，再把 `used_seq` 是空值的設成這則的序號、`reserved_by` 清空。有 id 不屬於這段 Session 就丟 `AttachmentNotFound`，整個 transaction 回復。
    7. commit 時釋放共享鎖。
 4. 回應 201 和寫入的 Item。迴圈不知道有人插入：它下一輪讀紀錄就會看到（D-18）。哪一台 backend 跑這個 Run 都沒關係，插入只寫資料庫，所以插入請求不受 503 影響。
 
@@ -1474,10 +1474,10 @@ Run 正常結束（`completed`、沒有 `endReason`）時，`RunSupervisor` 用 
   - 插入先 commit：結束的第 2 步是新的查詢，用新的快照，看得到剛 commit 的訊息，它的序號比 `read_up_to_seq` 大，所以不結束。
   - 結束先拿到鎖：插入的第 3.1 步要等結束 commit，之後讀到 `status` 是 `completed`，丟 `LeaseLost`，得到 409。訊息沒寫入。
   - 第 2 步不能和第 1 步合成一個 `UPDATE … WHERE NOT EXISTS (…)`：同一個陳述式的子查詢用陳述式開始時的快照，看不到等鎖期間 commit 的插入。
-- **SQLite**：knex 把 `forShare` 和 `forUpdate` 在 SQLite 編成空字串，不加任何鎖。靠的是 knex 的 SQLite 連線池預設只有一條連線，所有 transaction 在這條連線上排隊，做完一個才換下一個。所以結果仍是「插入先」或「結束先」，SQL 相同，結果同上。連線池開到多條的檔案資料庫沒有這個保證：兩個連線同時寫入時，後來的可能收到 `SQLITE_BUSY`，請求失敗，不會寫出錯的結果。這一點列在規劃的 V-10，用測試確認。
+- **SQLite**：knex 把 `forShare` 和 `forUpdate` 在 SQLite 編成空字串，不加任何鎖。靠的是 knex 的 SQLite 連線池預設只有一條連線，所有 transaction 在這條連線上排隊，做完一個才換下一個。所以結果仍是「插入先」或「結束先」，SQL 相同，結果同上。連線池開到多條的檔案資料庫沒有這個保證：兩個連線同時寫入時，後來的可能收到 `SQLITE_BUSY`，請求失敗，不會寫出錯的結果（這一點只靠推理，沒有測試；V-10 的結論見實作計畫）。測試確認的是：測試用的 SQLite 資料庫只有一條連線（`KnexItemLog.test.ts`），PostgreSQL 的測試用兩條以上的連線（`postgresConcurrency.test.ts`）。
 - 在 `transition` 之前，迴圈自己的 `complete` 判斷（`unreadInserted`）也會擋掉大部分的情況。資料庫的檢查是剩下的空檔的保證：迴圈讀完紀錄、到 `transition` 之間才 commit 的插入。
 
-被拒絕之後：`RunSupervisor` 不把 `run.ended` 交給訂閱者，帶著租約用 `runs.get` 讀到的用量再呼叫一次 `AdvanceRun.execute()`，第二次的 `run.started` 也不交出去。迴圈讀到未讀的訊息，呼叫模型（一個 Step）。每次重跑至少用掉一個 Step，所以最多重跑到 `maxSteps`；那時結果是 `completed` 加 `endReason`，不檢查（見下），未讀的訊息標成「Agent 沒有讀到」。
+被拒絕之後：`RunSupervisor` 不把 `run.ended` 交給訂閱者，帶著租約用 `runs.get` 讀到的用量再呼叫一次 `AdvanceRun.execute()`，第二次的 `run.started` 也不交出去。迴圈讀到未讀的訊息，呼叫模型（一個 Step）。每次重跑至少用掉一個 Step，所以最多重跑到 `maxSteps`；每次重跑也至少讀到一則新的插入訊息，一個 Run 最多 `insert.maxPerRun` 則，設定檔把它限制在 20 以內，所以 `MAX_REREADS`（20）夠用；那時結果是 `completed` 加 `endReason`，不檢查（見下），未讀的訊息標成「Agent 沒有讀到」。另外有一個保險：同一個迴圈被拒絕超過 20 次（`MAX_REREADS`；正常不會發生，因為每次都讀到更多）就當成錯誤，Run 結束成 `failed`，原因 `error`。只有「模型給出最後回答」的結束（`completed`、沒有 `endReason`）帶 `requireAllRead`。
 
 不檢查的結束方式：`failed`、`cancelled`、`expired`、有 `endReason` 的 `completed`、`waiting_approval`。前四種的未讀訊息標成沒讀到（IN-12）。`waiting_approval`：插入在 Run 轉成等核准之前 commit 時，訊息留在紀錄裡，核准後迴圈的下一次模型呼叫會讀到；之後才來的插入得到 409。
 
@@ -1572,7 +1572,7 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 
 - `queued_messages.position` 從 1 起算，不加唯一索引：重排時兩列暫時會有相同的值。
 - 所有改佇列的 transaction（`add`、`update`、`remove`、`reorder`、`startNext`）先鎖 `sessions` 那一列（PostgreSQL 用 `FOR NO KEY UPDATE`，跟 `append` 更新 `next_seq` 的鎖同一級），所以同一段 Session 的佇列變更一個接一個。`add` 和 `startNext` 先碰 `runs`，所以順序仍是 `runs` 在前。
-- `add`：`runs` 加共享鎖，確認 Session 有進行中的 Run（沒有就丟 `NoActiveRun`，409）。再鎖 `sessions`，筆數達到 `queue.maxMessages` 就丟 `QueueFull`（409）。`position` 是目前最大值加 1。
+- `add`：`runs` 加共享鎖（用 `active_session_id` 找 Session 進行中的 Run；沒有就丟 `NoActiveRun`，409）。再鎖 `sessions`，筆數達到 `queue.maxMessages` 就丟 `QueueFull`（409）。`position` 是目前最大值加 1。`remove` 不重新編號（留下空位），只有 `reorder` 把位置排成 1、2、3…；順序看 `position`，位置相同時看 `id`。
 - `reorder`：請求帶完整的 id 清單。和現在的 id 集合不同（別的分頁刪了或加了）丟 `QueueChanged`（409），畫面重新讀取。相同就依清單重排成 1、2、3…
 - `update`、`remove`：列不存在（已被刪除或已送出）丟 `QueuedMessageNotFound`（404）。
 
@@ -1580,13 +1580,13 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 
 `RunSupervisor` 在迴圈結束、`transition` 成功之後，呼叫 `afterRun`，再把 `queue.state` 和 `run.ended` 交給訂閱者。`afterRun` 做：
 
-1. `outcome` 是 `waiting_approval`：Run 沒有結束。回傳 `{ queue, paused: false }`，不送出，先於後面所有判斷。（`afterRun` 在每次 `settle` 後都會被呼叫，包含轉成等核准的那一次。）
-2. 佇列是空的：回傳 `{ queue: [], paused: false }`。
+1. `outcome` 是 `waiting_approval`：Run 沒有結束。回傳 `{ items, paused: false }`，不送出，先於後面所有判斷。（`afterRun` 在每次 `settle` 後都會被呼叫，包含轉成等核准的那一次。）
+2. 佇列是空的：回傳 `{ items: [], paused: false }`。
 3. `isNormalEnd(outcome)`：`completed` 而且沒有 `endReason`。不是就暫停：回傳佇列和 `paused: true`。
 4. `canAutoStart(principal, limits, now)`：`principal.credentialsExpireAt` 要知道，而且距離現在至少 `runTimeoutSeconds` 加 `CREDENTIALS_MARGIN_SECONDS`（30 秒）。不是就暫停。這是 IN-16。到期時間不明也暫停，因為沒有使用者在場看工具失敗。
 5. `supervisor.accepting` 是 `false`（關機中）：暫停。
-6. `StartNextQueued`：`queue.startNext(sessionId)`。回傳 `undefined`（佇列被清空，或使用者剛好自己開了 Run）就不做事。有結果就用同一個 `principal` 和那則訊息存的 `page` 組 request，`supervisor.launch`，寫稽核（`queued-message-send`；規劃的 V-07），回傳 `nextRunId`。
-7. 任何一步丟例外：記 log，當成暫停。Run 已經是 `completed`，不受影響。
+6. `StartNextQueued`：`queue.startNext(sessionId)`。回傳 `undefined`（佇列被清空，或使用者剛好自己開了 Run）就不做事，回傳目前的佇列，`paused: false`。有結果就用同一個 `principal` 和那則訊息存的 `page` 組 request，寫稽核（`queued-message-send`；V-07 的結論見實作計畫），`supervisor.launch`，回傳 `nextRunId`。稽核在 `launch` 之前開始：開始記錄失敗時 Run 以 `not_started` 結束，不送沒有紀錄的訊息。新 Run 的事件沒有人在這裡讀（畫面用 `GET /sessions/:id/stream` 接上），所以 `afterRun` 馬上取消那個訂閱，不讓事件堆在記憶體。
+7. 任何一步丟例外：記 log，當成暫停（`paused: true`，沒有 `pausedReason`）。Run 已經是 `completed`，不受影響。`RunSupervisor` 自己呼叫 `afterRun` 失敗時也只記 log，不送 `queue.state`，`run.ended` 照送。
 
 `startNext` 的 transaction：
 
@@ -1617,7 +1617,7 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 
 既有路由的變更：`POST /sessions/:id/runs` 的內容多一個選用的 `attachmentIds`。`GET /sessions/:id` 多回傳 `queue`（`{ items, paused }`），每則 `delivery` 是 `inserted` 的 `user_message` 多一個 `insertState`：`read`（有 `agent_message` 或 `tool_call` 的 `readUpToSeq` 涵蓋它）、`pending`（沒讀到，而且它的 Run 還在進行）、`unread`（沒讀到，Run 已結束）。`GET /sessions/:id` 回傳的 Item 裡有這些訊息，但模型輸入不含 `unread` 的舊訊息（13.4）。
 
-新增的錯誤。domain 的錯誤名稱放在回應的 `error.name`，畫面用它區分同一個狀態碼的不同情形：
+新增的錯誤。domain 的錯誤名稱放在回應的 `error.name`，畫面用它區分同一個狀態碼的不同情形。`errorMapping.ts` 的 `NamedHttpError` 帶這個名稱和 `statusCode`（Backstage 的錯誤處理只對自己的錯誤類別從名稱推狀態碼，其他的讀 `statusCode`）。已經實作的是 `RunNotRunning`、`InsertLimitReached`、`NoActiveRun`、`QueueFull`、`QueueChanged`、`QueuedMessageNotFound`；其餘屬於附件，在 PI-05：
 
 | 錯誤                        | 狀態碼   | 情形                                                                                         |
 | --------------------------- | -------- | -------------------------------------------------------------------------------------------- |
@@ -1643,7 +1643,7 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 第 8 節的對照表加兩列：`message.read` 對應 `data-inserted`，宿主的 `queue.state` 對應 `data-queue`。
 
 - 插入的訊息被讀到時，才出現在串流裡。寫入時沒有事件：插入的請求本身回傳那筆 Item，畫面自己顯示「等待讀取」。
-- **`message.read` 不走 presenter 的 `seq` 去重。** presenter 用 `seq` 略過紀錄裡已有、又再來一次的 Item 事件（接回時）；插入的 Item 在寫入時就有序號，被讀到才送 `data-inserted`，用 `seq` 去重會把它吞掉。presenter 另外記一個「已送過 `data-inserted` 的插入序號」集合，同一個序號只送一次。接回（A-07）重送階段補送的插入訊息也加進這個集合，之後的即時 `message.read` 不再重送。
+- **`message.read` 不走 presenter 的 `seq` 去重。** presenter 用 `seq` 略過紀錄裡已有、又再來一次的 Item 事件（接回時）；插入的 Item 在寫入時就有序號，被讀到才送 `data-inserted`，用 `seq` 去重會把它吞掉。presenter 另外記一個「已送過 `data-inserted` 的插入序號」集合，同一個序號只送一次。接回（A-07）重送階段補送的插入訊息也加進這個集合，之後的即時 `message.read` 不再重送。接回時 `message.read` 可能已經在接回之前發出、讀到它的輸出卻還沒寫入：`FollowSession` 不論 `afterSeq`，把這個 Run 的插入訊息（`afterSeq` 以前的輸出沒有讀到的那些）交給 presenter，presenter 放在「等待」清單，之後即時的輸出（`agent_message` 或 `tool_call`）的 `readUpToSeq` 涵蓋它時，才在那個輸出之前送出。`data-inserted` 的 `id` 是 `inserted-<seq>`、資料是 `{ seq, text, page? }`：用戶端萬一收到兩次，SDK 把同一個 `id` 的 part 合成一個。重送階段在每個輸出前先送它讀到的插入訊息（`readUpToSeq` 大於等於它的序號，而且還沒送過），並先關閉開著的 Step，所以它在讀到它的那一步的 `start-step` 之前；還沒有輸出讀到的訊息不送，之後被讀到時才送。
 - 一個串流只有一則 assistant 訊息，所以插入的訊息不能是另一則 `user` 訊息。它是那則 assistant 訊息裡的 `data-inserted` part，出現在它被讀到的那一步之前。
 - 接回（A-07）和 `GET /sessions/:id` 還原畫面時，同一個位置用 `readUpToSeq` 決定：插入的訊息放在第一個 `readUpToSeq` 大於等於它的序號的 `agent_message` 或 `tool_call` 之前。還沒讀到的：Run 還在進行時不顯示在對話裡（畫面把它放在輸入框上方），Run 已結束時顯示成使用者訊息，帶「Agent 沒有讀到」。
 - `data-queue` 是 `{ items, paused, pausedReason?, nextRunId? }`，送在 `data-run` 之前。`nextRunId`：自動送出開了新的 Run，而且是這一台。畫面收到後，在 `finish` 之後用 `GET /sessions/:id/stream` 接上新的 Run（重送從那個 Run 的第一個 Item 開始，A-07）。沒有 `nextRunId` 而且 `paused` 為真，畫面顯示暫停。
@@ -1653,11 +1653,11 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 
 欄位在第 7 節。這裡寫索引的理由和 migration。
 
-- 一個 migration，`20260104000000_input.js`：`runs` 加 `read_up_to_seq integer not null default 0`；新增 `attachments`、`queued_messages`。`down` 刪除兩張表和那個欄位。
+- PI-03 的 migration `20260104000000_input.js`：`runs` 加 `read_up_to_seq integer not null default 0`；新增 `queued_messages`（含 `attachment_ids`，預設 `[]`）。`down` 刪除那張表和那個欄位。`attachments` 在 PI-05 的 migration（日期較晚）。
 - `attachments.bytes` 用 knex 的 `binary`（PostgreSQL 是 `bytea`，SQLite 是 `blob`）。所有只要中繼資料的查詢明列欄位，不用 `select *`。
 - `attachments` 的索引：`(session_id)`、`(created_at)`（清理）。外鍵 `session_id` 連帶刪除。
 - `queued_messages` 的索引：`(session_id, position)`，外鍵 `session_id` 連帶刪除。
-- **取鎖順序。** 每個 transaction 照下表的順序碰資料表，所有 transaction 的順序一致（`runs`、`sessions`、`items`、`queued_messages`、`attachments`）。碰 `runs` 時一開始就取需要的最強的鎖，不先取 `FOR SHARE` 再升級：兩個都持有共享鎖的 transaction 同時要升級，會互等。
+- **取鎖順序。** 每個 transaction 照下表的順序碰資料表：要碰 `runs` 的先碰它，再取 `sessions` 的列鎖；`sessions` 之後的表（`items`、`queued_messages`、`attachments`）由 `sessions` 的列鎖排成一個接一個，同一段 Session 的 transaction 不會互等。不碰 `runs` 的（排隊的 `update`、`remove`、`reorder`、上傳）從 `sessions` 開始；`startNext` 用 INSERT 建立自己的 `runs` 列（新列沒有別人在等），再取 `sessions`。碰 `runs` 時一開始就取需要的最強的鎖，不先取 `FOR SHARE` 再升級：兩個都持有共享鎖的 transaction 同時要升級，會互等。
 
 | 寫入                                                   | 順序                                                                                           |
 | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
@@ -1697,6 +1697,7 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 | 佇列暫停（沒有進行中的 Run，佇列不是空的） | 送出，馬上開新的 Run。輸入框提示「送出後，這次結束時會接著送佇列」 | 同 Enter；不顯示「排隊」按鈕       |
 
 - Run 進行中輸入框不再停用。Stop 按鈕照舊。
+- Run 結束到自動送出新 Run 之間有一小段空檔：Run 已經結束、新的還沒開，這時 `GET /sessions/:id` 會短暫回 `paused: true`。畫面不要在這個空檔顯示「排隊已暫停」：收到 `run.ended` 後，等 `data-queue`（有 `nextRunId` 就接上新的 Run，`paused` 為真才顯示暫停）或下一個 `data-run` 再決定；只有重新讀取（沒有串流可等）時才用 `GET` 的 `paused`。
 - 插入得到 409 時，畫面重新讀取 Session，依結果分三種處理，文字留在輸入框直到成功（現有的 `sent === false` 做法）：
   1. 錯誤是 `InsertLimitReached`，或 Run 是 `waiting_approval`：改成排隊（排隊也得到 409 時，顯示原因，文字保留）。
   2. Run 是 `running`，但 `runId` 和送出時的不同（原來的 Run 結束、自動送出開了新的 Run）：對新的 `runId` 再插入一次。

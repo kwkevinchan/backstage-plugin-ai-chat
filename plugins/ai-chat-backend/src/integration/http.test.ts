@@ -170,6 +170,7 @@ describe('the HTTP routes', () => {
         items: [],
         awaitingDecision: [],
         resumable: false,
+        queue: { items: [], paused: false },
       });
 
       const patched = await as(JANE, request(b.app).patch(`/sessions/${id}`))

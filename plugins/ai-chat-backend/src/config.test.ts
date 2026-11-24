@@ -15,6 +15,7 @@
  */
 
 import { mockServices } from '@backstage/backend-test-utils';
+import type { JsonObject } from '@backstage/types';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { parse } from 'yaml';
@@ -39,10 +40,30 @@ describe('readAiChatConfig', () => {
       maxToolCallsPerRun: 30,
       runTimeoutSeconds: 300,
       context: { tokenBudget: 100000, keepRecentSteps: 6 },
+      input: { insertMaxPerRun: 5, queueMaxMessages: 5 },
       systemPrompt: undefined,
       actions: { include: [], exclude: [] },
       maxToolOutputChars: 20000,
     });
+  });
+
+  it('reads the limits of the inserted and the queued messages, and refuses a value that is not a positive integer', () => {
+    const read = (input: JsonObject) =>
+      readAiChatConfig(
+        mockServices.rootConfig({ data: { aiChat: { llm, input } } }),
+      ).input;
+    expect(
+      read({ insert: { maxPerRun: 2 }, queue: { maxMessages: 9 } }),
+    ).toEqual({ insertMaxPerRun: 2, queueMaxMessages: 9 });
+    expect(() => read({ insert: { maxPerRun: 0 } })).toThrow(
+      /input\.insert\.maxPerRun must be a positive integer/,
+    );
+    expect(() => read({ insert: { maxPerRun: 21 } })).toThrow(
+      /input\.insert\.maxPerRun must be at most 20/,
+    );
+    expect(() => read({ queue: { maxMessages: 1.5 } })).toThrow(
+      /input\.queue\.maxMessages must be a positive integer/,
+    );
   });
 
   it('reads everything that can be set', () => {

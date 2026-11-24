@@ -18,6 +18,7 @@ import express from 'express';
 import Router from 'express-promise-router';
 import type { Logger } from '../../application/ports';
 import type { Principal } from '../../domain';
+import { QueueController, type QueueUseCases } from './controllers/queue';
 import { RunsController, type RunUseCases } from './controllers/runs';
 import {
   SessionsController,
@@ -28,7 +29,7 @@ import { toHttpError } from './errorMapping';
 export type RouterOptions = {
   /** The signed-in user of the request. Refuses a request that has none. */
   principal(req: express.Request): Promise<Principal>;
-  useCases: SessionUseCases & RunUseCases;
+  useCases: SessionUseCases & RunUseCases & QueueUseCases;
   logger: Logger;
   /** The time between the comment lines that keep an idle stream open; 15 seconds by default. */
   keepAliveMs?: number;
@@ -43,6 +44,7 @@ export function createRouter(options: RouterOptions): express.Router {
   const { principal, useCases, logger, keepAliveMs } = options;
   const sessions = new SessionsController(useCases);
   const runs = new RunsController(useCases, logger, keepAliveMs);
+  const queue = new QueueController(useCases);
   const router = Router();
   router.use(express.json({ limit: '64kb' }));
 
@@ -126,6 +128,16 @@ export function createRouter(options: RouterOptions): express.Router {
     }),
   );
   router.post(
+    '/sessions/:id/runs/:runId/messages',
+    route(async (user, req, res) => {
+      res
+        .status(201)
+        .json(
+          await runs.insert(user, req.params.id, req.params.runId, req.body),
+        );
+    }),
+  );
+  router.post(
     '/sessions/:id/runs/:runId/cancel',
     route(async (user, req, res) => {
       await runs.cancel(user, req.params.id, req.params.runId);
@@ -151,6 +163,47 @@ export function createRouter(options: RouterOptions): express.Router {
       if (!(await runs.resume(user, req.params.id, req.body, res))) {
         res.status(204).end();
       }
+    }),
+  );
+  router.get(
+    '/sessions/:id/queue',
+    route(async (user, req, res) => {
+      res.json(await queue.list(user, req.params.id));
+    }),
+  );
+  router.post(
+    '/sessions/:id/queue',
+    route(async (user, req, res) => {
+      res.status(201).json(await queue.add(user, req.params.id, req.body));
+    }),
+  );
+  router.put(
+    '/sessions/:id/queue/order',
+    route(async (user, req, res) => {
+      res.json(await queue.reorder(user, req.params.id, req.body));
+    }),
+  );
+  router.post(
+    '/sessions/:id/queue/resume',
+    route(async (user, req, res) => {
+      if (!(await runs.resumeQueue(user, req.params.id, res))) {
+        res.status(204).end();
+      }
+    }),
+  );
+  router.patch(
+    '/sessions/:id/queue/:queuedId',
+    route(async (user, req, res) => {
+      res.json(
+        await queue.update(user, req.params.id, req.params.queuedId, req.body),
+      );
+    }),
+  );
+  router.delete(
+    '/sessions/:id/queue/:queuedId',
+    route(async (user, req, res) => {
+      await queue.remove(user, req.params.id, req.params.queuedId);
+      res.status(204).end();
     }),
   );
   router.get(

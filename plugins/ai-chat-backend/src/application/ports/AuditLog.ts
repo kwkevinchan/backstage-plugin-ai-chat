@@ -18,7 +18,7 @@
  * What the audit log records about a tool call (O-02): the decision of the
  * user, and the run of a tool that is not read-only.
  */
-export type AuditEvent = {
+export type ToolAuditEvent = {
   eventId: 'tool-call-approve' | 'tool-call-deny' | 'tool-call-invoke';
   /** The entity ref of the user the event is for. */
   actorRef: string;
@@ -28,6 +28,23 @@ export type AuditEvent = {
   toolId: string;
   readOnly: boolean;
 };
+
+/**
+ * A queued message that starts a run (IN-17). No HTTP request of the user
+ * makes it (the queue sends it when the run before it ended), so the event says
+ * whose message it is.
+ */
+export type QueueAuditEvent = {
+  eventId: 'queued-message-send';
+  /** The entity ref of the user the event is for. */
+  actorRef: string;
+  sessionId: string;
+  /** The run the message started. */
+  runId: string;
+  queuedMessageId: string;
+};
+
+export type AuditEvent = ToolAuditEvent | QueueAuditEvent;
 
 /** An event that has begun; end it with `success` or `fail`. */
 export interface AuditSpan {

@@ -213,12 +213,9 @@ export interface IdGenerator {
 }
 
 // @public
-export type InsertState = 'read' | 'unread';
-
-// @public
 export function insertStatesOf(
   items: readonly Item[],
-): ReadonlyMap<number, InsertState>;
+): ReadonlyMap<number, ReadState>;
 
 // @public
 export class InvalidRunTransition extends HarnessError {
@@ -433,6 +430,9 @@ export type PolicyName = 'allow' | 'ask' | 'deny';
 export type PolicySettings = {
   byTool?: Readonly<Record<string, PolicyName>>;
 };
+
+// @public
+export type ReadState = 'read' | 'unread';
 
 // @public
 export interface RunControl {

@@ -24,9 +24,15 @@ import {
 import { InvalidRunTransition, LeaseLost } from '@kwkevinchan/ai-chat-harness';
 import {
   AgentNotFound,
+  InsertLimitReached,
+  NoActiveRun,
   NotSessionOwner,
+  QueueChanged,
+  QueuedMessageNotFound,
+  QueueFull,
   RunAlreadyActive,
   RunNotFound,
+  RunNotRunning,
   RunNotWaiting,
   SessionNotFound,
   ShuttingDown,
@@ -38,12 +44,29 @@ import {
 const UNEXPECTED_TEXT = 'The request failed.';
 
 /**
+ * An error whose `name` is the name of the domain error, so a screen can tell
+ * apart the errors that share a status code (`QueueFull` and `QueueChanged`
+ * are both 409). The status is set on the error: the error handler of Backstage
+ * reads it from there, and from the name only for its own error classes.
+ */
+class NamedHttpError extends CustomErrorBase {
+  readonly statusCode: number;
+
+  constructor(name: string, statusCode: number, message: string) {
+    super(message);
+    this.name = name;
+    this.statusCode = statusCode;
+  }
+}
+
+/**
  * The error of a use case as the error that Backstage answers with.
  *
  * - Not found, and not the owner: 404, with the same text. Another user's
  *   session looks like a session that does not exist.
  * - A run is active, or a call or a run is not in the state the request needs:
- *   409.
+ *   409. The errors of the input phase (a message that cannot be inserted or
+ *   queued, a queue that changed) keep their own name in `error.name`.
  * - A toolset or an agent that the request names and does not exist: 400.
  * - The backend is shutting down: 503.
  * - The run was taken over or ended by someone else in the meantime
@@ -74,6 +97,19 @@ export function toHttpError(
     error instanceof ToolCallNotWaiting
   ) {
     return new ConflictError(error.message);
+  }
+  if (error instanceof RunNotRunning || error instanceof InsertLimitReached) {
+    return new NamedHttpError(error.name, 409, error.message);
+  }
+  if (
+    error instanceof NoActiveRun ||
+    error instanceof QueueFull ||
+    error instanceof QueueChanged
+  ) {
+    return new NamedHttpError(error.name, 409, error.message);
+  }
+  if (error instanceof QueuedMessageNotFound) {
+    return new NamedHttpError(error.name, 404, error.message);
   }
   if (error instanceof UnknownToolset || error instanceof AgentNotFound) {
     return new InputError(error.message);

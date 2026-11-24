@@ -106,3 +106,68 @@ export class ShuttingDown extends ChatDomainError {
     super('SHUTTING_DOWN', 'The backend is shutting down');
   }
 }
+
+/**
+ * A message cannot be inserted: the run is not `running` (it waits for an
+ * approval or has ended), it is another run than the one the request names, or
+ * its lease has expired (IN-11).
+ */
+export class RunNotRunning extends ChatDomainError {
+  constructor(runId: string) {
+    super('RUN_NOT_RUNNING', `Run ${runId} does not take inserted messages`);
+  }
+}
+
+/** The run has taken as many inserted messages as it may (IN-10). */
+export class InsertLimitReached extends ChatDomainError {
+  constructor(runId: string, max: number) {
+    super(
+      'INSERT_LIMIT_REACHED',
+      `Run ${runId} has taken ${max} inserted messages already`,
+    );
+  }
+}
+
+/**
+ * The run cannot end: a message was inserted after the model began its last
+ * answer, so the model has not read it (IN-11). The run stays `running`.
+ */
+export class UnreadMessages extends ChatDomainError {
+  constructor(runId: string) {
+    super(
+      'UNREAD_MESSAGES',
+      `Run ${runId} has messages the model did not read`,
+    );
+  }
+}
+
+/** A message cannot be queued: the session has no run that has not ended. */
+export class NoActiveRun extends ChatDomainError {
+  constructor(sessionId: string) {
+    super('NO_ACTIVE_RUN', `Session ${sessionId} has no run to queue behind`);
+  }
+}
+
+/** The queue of the session is full (IN-13). */
+export class QueueFull extends ChatDomainError {
+  constructor(sessionId: string, max: number) {
+    super(
+      'QUEUE_FULL',
+      `The queue of session ${sessionId} has ${max} messages`,
+    );
+  }
+}
+
+/** The ids of a reorder are not the ids in the queue: another tab changed it. */
+export class QueueChanged extends ChatDomainError {
+  constructor(sessionId: string) {
+    super('QUEUE_CHANGED', `The queue of session ${sessionId} changed`);
+  }
+}
+
+/** The queued message is gone: deleted, or already sent. */
+export class QueuedMessageNotFound extends ChatDomainError {
+  constructor(queuedId: string) {
+    super('QUEUED_MESSAGE_NOT_FOUND', `There is no queued message ${queuedId}`);
+  }
+}

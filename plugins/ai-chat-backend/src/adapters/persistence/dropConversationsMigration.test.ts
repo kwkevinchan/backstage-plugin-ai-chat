@@ -75,7 +75,9 @@ describe('the migration that drops the tables of the first version', () => {
     await knex.migrate.latest(config);
     expect(await has(OLD_TABLES)).toEqual([false, false, false]);
 
-    // Rolling back brings the three tables back, empty.
+    // Rolling back brings the three tables back, empty. The migration of the
+    // input phase is the last one: it goes first.
+    await knex.migrate.down(config);
     await knex.migrate.down(config);
     expect(await has(OLD_TABLES)).toEqual([true, true, true]);
     expect(await knex('conversations').count({ n: '*' })).toHaveLength(1);

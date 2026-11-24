@@ -23,6 +23,8 @@ tags:
     description: The sessions of the signed-in user.
   - name: Runs
     description: Routes that start, continue or follow a run, and answer with a stream.
+  - name: Queue
+    description: Messages that wait for the run of a session to end, and are sent as a new run when it ends well.
   - name: Toolsets
     description: The groups of tools the user can switch on in a session.
 security:
@@ -55,6 +57,13 @@ components:
       description: ID of the tool call (`callId` of the `tool_call` item). It is also the `approvalId` of the stream.
       schema:
         type: string
+    queuedId:
+      name: queuedId
+      in: path
+      required: true
+      description: ID of the queued message.
+      schema:
+        type: string
     afterSeq:
       name: afterSeq
       in: query
@@ -72,7 +81,7 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     Stream:
-      description: 'A UI message stream, `text/event-stream`, with the response header `x-vercel-ai-ui-message-stream: v1`. The parts: `start`, `start-step`, `text-start`, `text-delta`, `text-end`, `tool-input-available`, `tool-approval-request`, `tool-approval-response`, `tool-output-available`, `tool-output-error`, `tool-output-denied`, `finish-step`, `finish`, `error`, `abort`, and the data parts `data-run`, `data-item`, `data-notice` (all three transient) and `data-plan`.'
+      description: 'A UI message stream, `text/event-stream`, with the response header `x-vercel-ai-ui-message-stream: v1`. The parts: `start`, `start-step`, `text-start`, `text-delta`, `text-end`, `tool-input-available`, `tool-approval-request`, `tool-approval-response`, `tool-output-available`, `tool-output-error`, `tool-output-denied`, `finish-step`, `finish`, `error`, `abort`, and the data parts `data-run`, `data-item`, `data-notice` (all three transient) and `data-plan`, and the data parts `data-inserted` (a message that was inserted into the run, read by the model; it is part of the message and has the id `inserted-<seq>`) and `data-queue` (transient; the queue when the run ended, before `data-run`).'
       content:
         text/event-stream:
           schema:
@@ -88,6 +97,7 @@ components:
           properties:
             name:
               type: string
+              description: 'The name of the error. The errors of the input phase keep their own name, so a client can tell apart errors of one status: `RunNotRunning`, `InsertLimitReached`, `NoActiveRun`, `QueueFull`, `QueueChanged` (409) and `QueuedMessageNotFound` (404).'
             message:
               type: string
           required: [name, message]
@@ -206,7 +216,17 @@ components:
               type: string
             page:
               $ref: '#/components/schemas/ChatPageContext'
+            delivery:
+              type: string
+              enum: [direct, inserted, queued]
+              description: How the message reached its run. A message with no value is `direct`.
+            insertState:
+              $ref: '#/components/schemas/ChatInsertState'
           required: [kind, text]
+    ChatInsertState:
+      type: string
+      enum: [read, pending, unread]
+      description: 'Whether the model read an inserted message, in the answer of `GET /sessions/{id}`: `read`; `pending` (not read yet, the run goes on); `unread` (the run ended without reading it).'
     AgentMessageItem:
       allOf:
         - $ref: '#/components/schemas/ItemBase'
@@ -216,6 +236,9 @@ components:
               const: agent_message
             text:
               type: string
+            readUpToSeq:
+              type: integer
+              description: The largest `seq` the model had read when it began this answer.
           required: [kind, text]
     ToolCallItem:
       allOf:
@@ -244,6 +267,9 @@ components:
               type: integer
             position:
               type: integer
+            readUpToSeq:
+              type: integer
+              description: The largest `seq` the model had read when it began the answer that asked for this call.
           required:
             [
               kind,
@@ -364,7 +390,38 @@ components:
         resumable:
           type: boolean
           description: The run waits for an approval and no call is left to decide, so the loop did not start after the last decision. `POST /sessions/{id}/resume` carries it on.
-      required: [session, items, awaitingDecision, resumable]
+        queue:
+          $ref: '#/components/schemas/ChatQueue'
+      required: [session, items, awaitingDecision, resumable, queue]
+    ChatQueuedMessage:
+      type: object
+      properties:
+        id:
+          type: string
+        position:
+          type: integer
+          minimum: 1
+          description: From 1, in the order the messages are sent.
+        text:
+          type: string
+        page:
+          $ref: '#/components/schemas/ChatPageContext'
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, position, text, createdAt, updatedAt]
+    ChatQueue:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatQueuedMessage'
+        paused:
+          type: boolean
+          description: The session has no run that has not ended and the queue is not empty. Nothing is sent until `POST /sessions/{id}/queue/resume`.
+      required: [items, paused]
     ChatTool:
       type: object
       properties:
@@ -599,6 +656,201 @@ paths:
         '404':
           $ref: '#/components/responses/Error'
         '409':
+          $ref: '#/components/responses/Error'
+  /sessions/{id}/runs/{runId}/messages:
+    parameters:
+      - $ref: '#/components/parameters/sessionId'
+      - $ref: '#/components/parameters/runId'
+    post:
+      operationId: insertMessage
+      tags: [Runs]
+      summary: Add a message to the run that is running.
+      description: 'The message is written to the log as an item with `delivery: inserted`, and the model reads it in its next call; no run starts and no stream opens. The answer is the item. Two outcomes only: the message is written, or the answer is 409. 409 `RunNotRunning` when the run waits for an approval, has ended, is not a run of this session, or has no live lease; 409 `InsertLimitReached` when the run has taken as many inserted messages as the configuration allows (`aiChat.input.insert.maxPerRun`). The model reads a message that comes in before the run ends; a run that is about to end reads it first.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text:
+                  type: string
+                  minLength: 1
+                  maxLength: 8000
+                page:
+                  $ref: '#/components/schemas/ChatPageContext'
+              required: [text]
+      responses:
+        '201':
+          description: The item that was written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserMessageItem'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+  /sessions/{id}/queue:
+    parameters:
+      - $ref: '#/components/parameters/sessionId'
+    get:
+      operationId: listQueue
+      tags: [Queue]
+      summary: Read the queue of a session.
+      description: The messages in the order they are sent, and whether the queue is paused (the session has no run that has not ended and the queue is not empty).
+      responses:
+        '200':
+          description: The queue.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatQueue'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: queueMessage
+      tags: [Queue]
+      summary: Queue a message for when the run ends.
+      description: 'When the run ends the normal way (the model answered, no limit stopped it) and the credentials of the user last for another run, the first message of the queue starts a new run. 409 `NoActiveRun` when the session has no run that has not ended (send the message instead); 409 `QueueFull` at `aiChat.input.queue.maxMessages` messages.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text:
+                  type: string
+                  minLength: 1
+                  maxLength: 8000
+                page:
+                  $ref: '#/components/schemas/ChatPageContext'
+              required: [text]
+      responses:
+        '201':
+          description: The queued message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatQueuedMessage'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+  /sessions/{id}/queue/order:
+    parameters:
+      - $ref: '#/components/parameters/sessionId'
+    put:
+      operationId: reorderQueue
+      tags: [Queue]
+      summary: Set the order of the queue.
+      description: '`ids` must be exactly the ids of the queue now; the messages then have the positions 1, 2, 3 in that order. 409 `QueueChanged` when another tab deleted or added a message, or the message was sent: read the queue again.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: string
+              required: [ids]
+      responses:
+        '200':
+          description: The queue in the new order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatQueue'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+  /sessions/{id}/queue/resume:
+    parameters:
+      - $ref: '#/components/parameters/sessionId'
+    post:
+      operationId: resumeQueue
+      tags: [Queue]
+      summary: Send the first queued message now and stream its run.
+      description: For a queue that is paused (`paused` of the queue). The run uses the credentials of this request; their remaining time is not checked. 204 when the queue is empty or the session has a run that has not ended. 503 while the backend shuts down.
+      responses:
+        '200':
+          $ref: '#/components/responses/Stream'
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+  /sessions/{id}/queue/{queuedId}:
+    parameters:
+      - $ref: '#/components/parameters/sessionId'
+      - $ref: '#/components/parameters/queuedId'
+    patch:
+      operationId: updateQueuedMessage
+      tags: [Queue]
+      summary: Change a queued message.
+      description: Only the fields in the body change; `page` as `null` removes the page. 404 `QueuedMessageNotFound` when the message was deleted or sent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text:
+                  type: string
+                  minLength: 1
+                  maxLength: 8000
+                page:
+                  oneOf:
+                    - $ref: '#/components/schemas/ChatPageContext'
+                    - type: 'null'
+      responses:
+        '200':
+          description: The queued message after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatQueuedMessage'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+    delete:
+      operationId: deleteQueuedMessage
+      tags: [Queue]
+      summary: Remove a queued message.
+      description: 404 `QueuedMessageNotFound` when the message was deleted or sent.
+      responses:
+        '204':
+          description: Removed.
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
           $ref: '#/components/responses/Error'
   /sessions/{id}/tool-calls/{callId}/decision:
     parameters:

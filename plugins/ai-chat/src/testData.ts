@@ -87,6 +87,7 @@ export function detail(
     items: [],
     awaitingDecision: [],
     resumable: false,
+    queue: { items: [], paused: false },
     ...overrides,
   };
 }

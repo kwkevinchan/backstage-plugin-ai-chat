@@ -95,6 +95,24 @@ export const sendMessageBody = z.object({
   page: page.optional(),
 });
 
+export const insertMessageBody = sendMessageBody;
+
+export const queueMessageBody = sendMessageBody;
+
+export const updateQueuedMessageBody = z
+  .object({
+    text: sendMessageBody.shape.text.optional(),
+    page: page.nullable().optional(),
+  })
+  .refine(
+    body => body.text !== undefined || body.page !== undefined,
+    'must change the text or the page',
+  );
+
+export const reorderQueueBody = z.object({
+  ids: z.array(id).max(100),
+});
+
 export const decisionBody = z.object({
   approved: z.boolean(),
   page: page.optional(),

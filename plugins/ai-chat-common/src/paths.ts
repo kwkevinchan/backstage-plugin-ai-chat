@@ -31,6 +31,16 @@ export const chatPaths = {
     `/sessions/${encodeURIComponent(id)}/tool-calls/${encodeURIComponent(
       callId,
     )}/decision`,
+  insertMessage: (id: string, runId: string) =>
+    `/sessions/${encodeURIComponent(id)}/runs/${encodeURIComponent(
+      runId,
+    )}/messages`,
+  queue: (id: string) => `/sessions/${encodeURIComponent(id)}/queue`,
+  queuedMessage: (id: string, queuedId: string) =>
+    `/sessions/${encodeURIComponent(id)}/queue/${encodeURIComponent(queuedId)}`,
+  queueOrder: (id: string) => `/sessions/${encodeURIComponent(id)}/queue/order`,
+  queueResume: (id: string) =>
+    `/sessions/${encodeURIComponent(id)}/queue/resume`,
   resume: (id: string) => `/sessions/${encodeURIComponent(id)}/resume`,
   stream: (id: string) => `/sessions/${encodeURIComponent(id)}/stream`,
   tools: (id: string) => `/sessions/${encodeURIComponent(id)}/tools`,

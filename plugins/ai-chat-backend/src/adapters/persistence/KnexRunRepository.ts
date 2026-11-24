@@ -32,27 +32,18 @@ import type {
 import {
   RunAlreadyActive,
   RunNotFound,
+  UnreadMessages,
   type LeasedRun,
   type Run,
 } from '../../domain';
+import {
+  leased,
+  leaseEnd,
+  newRunRow,
+  toRun,
+  type RunRow,
+} from './transactions';
 import { isUniqueViolation } from './uniqueViolation';
-
-type RunRow = {
-  id: string;
-  session_id: string;
-  parent_run_id: string | null;
-  status: RunStatus;
-  active_session_id: string | null;
-  lease_owner: string | null;
-  lease_expires_at: string | null;
-  steps_used: number;
-  tool_calls_used: number;
-  elapsed_seconds: number;
-  cancel_requested: boolean | number;
-  end_reason: string | null;
-  started_at: string;
-  ended_at: string | null;
-};
 
 const ACTIVE: RunStatus[] = ['running', 'waiting_approval'];
 
@@ -88,23 +79,7 @@ export class KnexRunRepository implements RunRepository {
     sessionId: string,
     opts: { parentRunId?: string } = {},
   ): Promise<LeasedRun> {
-    const now = this.clock.now();
-    const row: RunRow = {
-      id: this.ids.next(),
-      session_id: sessionId,
-      parent_run_id: opts.parentRunId ?? null,
-      status: 'running',
-      active_session_id: sessionId,
-      lease_owner: this.ids.next(),
-      lease_expires_at: this.leaseEnd(now),
-      steps_used: 0,
-      tool_calls_used: 0,
-      elapsed_seconds: 0,
-      cancel_requested: false,
-      end_reason: null,
-      started_at: now.toISOString(),
-      ended_at: null,
-    };
+    const row = newRunRow(this.timing(), sessionId, opts.parentRunId);
     try {
       await this.knex('runs').insert(row);
     } catch (error) {
@@ -113,7 +88,7 @@ export class KnexRunRepository implements RunRepository {
       }
       throw error;
     }
-    return this.leased(toRun(row));
+    return leased(toRun(row));
   }
 
   async get(runId: string): Promise<Run> {
@@ -143,15 +118,17 @@ export class KnexRunRepository implements RunRepository {
       .update({
         status: 'running',
         lease_owner: this.ids.next(),
-        lease_expires_at: this.leaseEnd(now),
+        lease_expires_at: leaseEnd(now, this.leaseSeconds),
       })
       .returning('*');
-    return row ? this.leased(toRun(row)) : undefined;
+    return row ? leased(toRun(row)) : undefined;
   }
 
   async heartbeat(fence: RunFence): Promise<{ cancelRequested: boolean }> {
     const [row] = await this.held(fence)
-      .update({ lease_expires_at: this.leaseEnd(this.clock.now()) })
+      .update({
+        lease_expires_at: leaseEnd(this.clock.now(), this.leaseSeconds),
+      })
       .returning('cancel_requested');
     if (!row) throw new LeaseLost(fence.runId);
     return { cancelRequested: Boolean(row.cancel_requested) };
@@ -169,7 +146,11 @@ export class KnexRunRepository implements RunRepository {
   async transition(
     runId: string,
     to: RunTransitionTarget,
-    opts: { leaseOwner?: string; endReason?: string } = {},
+    opts: {
+      leaseOwner?: string;
+      endReason?: string;
+      requireAllRead?: boolean;
+    } = {},
   ): Promise<Run> {
     return this.knex.transaction(async trx => {
       const row = await trx<RunRow>('runs')
@@ -184,6 +165,17 @@ export class KnexRunRepository implements RunRepository {
         throw new LeaseLost(runId);
       }
       assertTransition(row.status, to);
+      if (opts.requireAllRead) {
+        // A query of its own, after the lock: it sees what an insert that held
+        // the row before us committed (READ COMMITTED takes a snapshot for each
+        // statement).
+        const unread = await trx('items')
+          .where({ session_id: row.session_id, run_id: runId })
+          .andWhere({ kind: 'user_message' })
+          .andWhere('seq', '>', row.read_up_to_seq)
+          .first('seq');
+        if (unread) throw new UnreadMessages(runId);
+      }
       const changes: Partial<RunRow> = {
         status: to,
         lease_owner: null,
@@ -233,36 +225,11 @@ export class KnexRunRepository implements RunRepository {
     });
   }
 
-  private leaseEnd(from: Date): string {
-    return new Date(from.getTime() + this.leaseSeconds * 1000).toISOString();
+  private timing() {
+    return {
+      clock: this.clock,
+      ids: this.ids,
+      leaseSeconds: this.leaseSeconds,
+    };
   }
-
-  private leased(run: Run): LeasedRun {
-    if (run.leaseOwner === undefined) {
-      throw new Error(`Run ${run.id} has no lease owner`);
-    }
-    return { ...run, fence: { runId: run.id, leaseOwner: run.leaseOwner } };
-  }
-}
-
-function toRun(row: RunRow): Run {
-  return {
-    id: row.id,
-    sessionId: row.session_id,
-    ...(row.parent_run_id !== null && { parentRunId: row.parent_run_id }),
-    status: row.status,
-    ...(row.lease_owner !== null && { leaseOwner: row.lease_owner }),
-    ...(row.lease_expires_at !== null && {
-      leaseExpiresAt: row.lease_expires_at,
-    }),
-    usage: {
-      stepsUsed: row.steps_used,
-      toolCallsUsed: row.tool_calls_used,
-      elapsedSeconds: row.elapsed_seconds,
-    },
-    cancelRequested: Boolean(row.cancel_requested),
-    ...(row.end_reason !== null && { endReason: row.end_reason }),
-    startedAt: row.started_at,
-    ...(row.ended_at !== null && { endedAt: row.ended_at }),
-  };
 }

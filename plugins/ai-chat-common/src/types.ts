@@ -75,10 +75,46 @@ export interface ChatPlan {
   items: { text: string; status: ChatPlanItemStatus }[];
 }
 
+/**
+ * How a message of the user reached the run: written by the user as the first
+ * message of the run (`direct`), added to a run that was going on
+ * (`inserted`), or sent from the queue when the run before it ended
+ * (`queued`). A message with no value is `direct`.
+ *
+ * @public
+ */
+export type ChatDelivery = 'direct' | 'inserted' | 'queued';
+
+/**
+ * Whether the model read an inserted message: `read`; `pending` (not read
+ * yet, and the run goes on); `unread` (the run ended without reading it).
+ *
+ * @public
+ */
+export type ChatInsertState = 'read' | 'pending' | 'unread';
+
 /** @public */
 export type ChatItemBody =
-  | { kind: 'user_message'; text: string; page?: ChatPageContext }
-  | { kind: 'agent_message'; text: string }
+  | {
+      kind: 'user_message';
+      text: string;
+      page?: ChatPageContext;
+      delivery?: ChatDelivery;
+      /**
+       * Only in the answer of `GET /sessions/:id`, and only on an inserted
+       * message.
+       */
+      insertState?: ChatInsertState;
+    }
+  | {
+      kind: 'agent_message';
+      text: string;
+      /**
+       * The largest `seq` the model had read when it began this answer. An
+       * inserted message with a `seq` up to it was read by this answer.
+       */
+      readUpToSeq?: number;
+    }
   | {
       kind: 'tool_call';
       callId: string;
@@ -91,6 +127,8 @@ export type ChatItemBody =
       readOnly: boolean;
       step: number;
       position: number;
+      /** See `agent_message`. */
+      readUpToSeq?: number;
     }
   | {
       kind: 'approval';
@@ -153,6 +191,30 @@ export interface ChatSessionDetail {
    * on.
    */
   resumable: boolean;
+  /** The messages that wait for the run to end, and whether the queue waits for the user. */
+  queue: ChatQueue;
+}
+
+/** A message that waits for the run of the session to end. @public */
+export interface ChatQueuedMessage {
+  id: string;
+  /** From 1, in the order the messages are sent. */
+  position: number;
+  text: string;
+  page?: ChatPageContext;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * The queue of a session. It is `paused` when no run goes on and the queue is
+ * not empty: nothing is sent until the user continues it.
+ *
+ * @public
+ */
+export interface ChatQueue {
+  items: ChatQueuedMessage[];
+  paused: boolean;
 }
 
 /** The page the user is on; the model gets it with the message. @public */
@@ -181,6 +243,29 @@ export interface UpdateChatSessionRequest {
 export interface SendChatMessageRequest {
   text: string;
   page?: ChatPageContext;
+}
+
+/** The body of `POST /sessions/:id/runs/:runId/messages`. @public */
+export interface InsertChatMessageRequest {
+  text: string;
+  page?: ChatPageContext;
+}
+
+/** The body of `POST /sessions/:id/queue`. @public */
+export interface QueueChatMessageRequest {
+  text: string;
+  page?: ChatPageContext;
+}
+
+/** The body of `PATCH /sessions/:id/queue/:queuedId`. `null` as the page removes it. @public */
+export interface UpdateQueuedMessageRequest {
+  text?: string;
+  page?: ChatPageContext | null;
+}
+
+/** The body of `PUT /sessions/:id/queue/order`: every id of the queue, in the new order. @public */
+export interface ReorderQueueRequest {
+  ids: string[];
 }
 
 /** The body of `POST /sessions/:id/tool-calls/:callId/decision`. @public */
@@ -279,6 +364,42 @@ export interface ChatNoticeData {
 }
 
 /**
+ * The data of the `data-inserted` part of the response stream: the model read
+ * a message that was inserted into the run. The part comes before the step
+ * that read it, and goes into the message. It has the id `inserted-<seq>`, so
+ * a client that gets it twice keeps one.
+ *
+ * @public
+ */
+export interface ChatInsertedData {
+  seq: number;
+  text: string;
+  page?: ChatPageContext;
+}
+
+/** Why a queue does not send its next message by itself. @public */
+export type ChatQueuePausedReason =
+  | 'run_not_completed'
+  | 'credentials'
+  | 'shutting_down';
+
+/**
+ * The data of the `data-queue` part of the response stream (transient): the
+ * queue when the run ended. It comes before `data-run`.
+ *
+ * - `nextRunId`: the queue started this run, and this backend runs it. Join it
+ *   with `GET /sessions/:id/stream` after the stream ends.
+ * - `paused` without `nextRunId`: nothing is sent; show the queue as paused.
+ *   `pausedReason` says why, when it is known.
+ *
+ * @public
+ */
+export interface ChatQueueData extends ChatQueue {
+  pausedReason?: ChatQueuePausedReason;
+  nextRunId?: string;
+}
+
+/**
  * The data parts of the response stream, by the name after `data-`. The plan
  * part has the fixed id `plan`: a later one replaces an earlier one in the same
  * message.
@@ -290,6 +411,8 @@ export interface ChatDataParts {
   item: ChatItemData;
   notice: ChatNoticeData;
   plan: ChatPlan;
+  inserted: ChatInsertedData;
+  queue: ChatQueueData;
 }
 
 /**

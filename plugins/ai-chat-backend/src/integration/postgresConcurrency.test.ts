@@ -1,0 +1,347 @@
+/*
+ * Copyright 2026 The backstage-plugin-ai-chat Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import {
+  FakeClock,
+  SequentialIdGenerator,
+} from '@kwkevinchan/ai-chat-harness/testing';
+import type { Knex } from 'knex';
+import { KnexItemLog } from '../adapters/persistence/KnexItemLog';
+import { KnexQueuedMessageRepository } from '../adapters/persistence/KnexQueuedMessageRepository';
+import { KnexRunRepository } from '../adapters/persistence/KnexRunRepository';
+import { KnexSessionRepository } from '../adapters/persistence/KnexSessionRepository';
+import { InsertMessage } from '../application';
+import {
+  NoActiveRun,
+  QueueFull,
+  RunNotRunning,
+  UnreadMessages,
+  type LeasedRun,
+} from '../domain';
+import { createMigratedDb } from '../__testUtils__';
+
+/**
+ * Two connections of PostgreSQL that work at the same time (V-10). SQLite has
+ * one connection, and its transactions go one after the other, so there is
+ * nothing to race; these tests run on the PostgreSQL service of the CI
+ * (`BACKSTAGE_TEST_DATABASE_POSTGRES16_CONNECTION_STRING`) and are skipped
+ * without it.
+ *
+ * What they check is the guarantee of the design (architecture, "Insert and
+ * the end of a run" and "Database"): an insert and the end of a run, whichever
+ * comes first, never lose a message; and the writes of one run take their
+ * locks in one order, so none of them is chosen as the victim of a deadlock.
+ * Each round of a test starts the two sides at the same time, and a few turns
+ * of the event loop of difference decide which one is first.
+ */
+const onPostgres = Boolean(
+  process.env.BACKSTAGE_TEST_DATABASE_POSTGRES16_CONNECTION_STRING,
+);
+const describePostgres = onPostgres ? describe : describe.skip;
+
+const ROUNDS = 100;
+
+const owner = {
+  userRef: 'user:default/jane',
+  ownershipRefs: ['user:default/jane'],
+  credentials: {},
+};
+
+type Db = {
+  knex: Knex;
+  sessions: KnexSessionRepository;
+  runs: KnexRunRepository;
+  items: KnexItemLog;
+  queue: KnexQueuedMessageRepository;
+  insertMessage: InsertMessage;
+};
+
+/** Lets the other side start first or second. */
+async function jitter(): Promise<void> {
+  const turns = Math.floor(Math.random() * 4);
+  for (let i = 0; i < turns; i++) await new Promise(r => setImmediate(r));
+}
+
+/** A session with a running run, its first message, and one answer that read it. */
+async function runningRun(
+  db: Db,
+): Promise<{ sessionId: string; run: LeasedRun }> {
+  const session = await db.sessions.create({
+    ownerRef: owner.userRef,
+    agentId: 'default',
+  });
+  const run = await db.runs.start(session.id);
+  await db.items.append(
+    session.id,
+    [{ kind: 'user_message', text: 'go' }],
+    run.fence,
+  );
+  await db.items.append(
+    session.id,
+    [{ kind: 'agent_message', text: 'answer', readUpToSeq: 1 }],
+    run.fence,
+  );
+  return { sessionId: session.id, run };
+}
+
+async function readUpToSeqOf(db: Db, runId: string): Promise<number> {
+  const row = await db
+    .knex('runs')
+    .where({ id: runId })
+    .first('read_up_to_seq');
+  return row.read_up_to_seq;
+}
+
+function insertText(db: Db, sessionId: string, runId: string, text: string) {
+  return jitter().then(() =>
+    db.insertMessage.execute({ principal: owner, sessionId, runId, text }),
+  );
+}
+
+function endRun(db: Db, run: LeasedRun) {
+  return jitter().then(() =>
+    db.runs.transition(run.id, 'completed', {
+      leaseOwner: run.fence.leaseOwner,
+      requireAllRead: true,
+    }),
+  );
+}
+
+async function appendOutput(
+  db: Db,
+  sessionId: string,
+  run: LeasedRun,
+): Promise<void> {
+  await jitter();
+  const log = await db.items.read(sessionId);
+  await db.items.append(
+    sessionId,
+    [
+      {
+        kind: 'agent_message',
+        text: 'a',
+        readUpToSeq: log[log.length - 1].seq,
+      },
+    ],
+    run.fence,
+  );
+}
+
+async function addToQueue(
+  db: Db,
+  sessionId: string,
+  text: string,
+  max: number,
+) {
+  await jitter();
+  try {
+    return await db.queue.add(sessionId, { text }, { max });
+  } catch (error) {
+    // A full queue is an answer, not a failure of the locks.
+    if (error instanceof QueueFull) return undefined;
+    throw error;
+  }
+}
+
+/** The reasons of the calls that failed, as text: empty when none did. */
+function failuresOf(results: PromiseSettledResult<unknown>[]): string[] {
+  return results.flatMap(result =>
+    result.status === 'rejected' ? [String(result.reason)] : [],
+  );
+}
+
+describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
+  const db = {} as Db;
+
+  beforeAll(async () => {
+    db.knex = await createMigratedDb();
+  });
+
+  afterAll(async () => {
+    await db.knex.destroy();
+  });
+
+  beforeEach(() => {
+    const clock = new FakeClock();
+    // Ids are unique across the tests: the database is shared.
+    const ids = new SequentialIdGenerator(
+      `r${Math.random().toString(36).slice(2, 8)}`,
+    );
+    db.sessions = new KnexSessionRepository(db.knex, clock, ids);
+    db.runs = new KnexRunRepository(db.knex, clock, ids);
+    db.items = new KnexItemLog(db.knex, clock, { maxInsertsPerRun: 1000 });
+    db.queue = new KnexQueuedMessageRepository(db.knex, clock, ids);
+    db.insertMessage = new InsertMessage({
+      sessions: db.sessions,
+      items: db.items,
+    });
+  });
+
+  it(`an insert and the end of the run at the same time, ${ROUNDS} rounds: each round, the message is written and the run goes on, or the run ended and the insert got RunNotRunning; no message is lost`, async () => {
+    const rounds: {
+      insertFirst: boolean;
+      endedRefused: boolean;
+      insertRefused: boolean;
+      status: string;
+      unread: number;
+    }[] = [];
+    for (let round = 0; round < ROUNDS; round++) {
+      const { sessionId, run } = await runningRun(db);
+      const [inserted, ended] = await Promise.allSettled([
+        insertText(db, sessionId, run.id, `round ${round}`),
+        endRun(db, run),
+      ]);
+      const row = await db.knex('runs').where({ id: run.id }).first();
+      const unread = await db
+        .knex('items')
+        .where({ session_id: sessionId, run_id: run.id, kind: 'user_message' })
+        .andWhere('seq', '>', row.read_up_to_seq);
+      rounds.push({
+        insertFirst: inserted.status === 'fulfilled',
+        endedRefused:
+          ended.status === 'rejected' && ended.reason instanceof UnreadMessages,
+        insertRefused:
+          inserted.status === 'rejected' &&
+          inserted.reason instanceof RunNotRunning,
+        status: row.status,
+        unread: unread.length,
+      });
+    }
+    // Insert first: the end was refused, the run goes on, one message waits.
+    expect(
+      rounds
+        .filter(r => r.insertFirst)
+        .every(r => r.endedRefused && r.status === 'running' && r.unread === 1),
+    ).toBe(true);
+    // End first: the insert saw it and wrote nothing.
+    expect(
+      rounds
+        .filter(r => !r.insertFirst)
+        .every(
+          r => r.insertRefused && r.status === 'completed' && r.unread === 0,
+        ),
+    ).toBe(true);
+    // A run that ended the normal way has no message beyond what was read.
+    expect(
+      rounds.filter(r => r.status === 'completed').every(r => r.unread === 0),
+    ).toBe(true);
+    expect(rounds).toHaveLength(ROUNDS);
+  });
+
+  it(`an insert and the output of a model call at the same time, ${ROUNDS} rounds: both finish, no deadlock, and runs.read_up_to_seq only goes up`, async () => {
+    const { sessionId, run } = await runningRun(db);
+    const marks = [await readUpToSeqOf(db, run.id)];
+    const failures: string[] = [];
+    for (let round = 0; round < ROUNDS; round++) {
+      const results = await Promise.allSettled([
+        insertText(db, sessionId, run.id, `round ${round}`),
+        appendOutput(db, sessionId, run),
+      ]);
+      failures.push(...failuresOf(results));
+      marks.push(await readUpToSeqOf(db, run.id));
+    }
+    expect(failures).toEqual([]);
+    expect(marks).toEqual([...marks].sort((a, b) => a - b));
+    expect(marks[marks.length - 1]).toBeGreaterThan(marks[0]);
+  });
+
+  it(`a queued message and the output of a model call at the same time, ${ROUNDS} rounds: both finish, no deadlock, and runs.read_up_to_seq only goes up`, async () => {
+    const { sessionId, run } = await runningRun(db);
+    const marks = [await readUpToSeqOf(db, run.id)];
+    const failures: string[] = [];
+    for (let round = 0; round < ROUNDS; round++) {
+      const results = await Promise.allSettled([
+        addToQueue(db, sessionId, `q${round}`, 3),
+        appendOutput(db, sessionId, run),
+      ]);
+      failures.push(...failuresOf(results));
+      marks.push(await readUpToSeqOf(db, run.id));
+      // Keep room in the queue.
+      await db
+        .knex('queued_messages')
+        .where({ session_id: sessionId })
+        .delete();
+    }
+    expect(failures).toEqual([]);
+    expect(marks).toEqual([...marks].sort((a, b) => a - b));
+  });
+
+  it('many inserts, queued messages and outputs at once: no deadlock, and the numbers of the items stay one after the other', async () => {
+    const { sessionId, run } = await runningRun(db);
+    const work: Promise<unknown>[] = [];
+    for (let i = 0; i < 30; i++) {
+      work.push(
+        insertText(db, sessionId, run.id, `i${i}`),
+        addToQueue(db, sessionId, `q${i}`, 1000),
+        appendOutput(db, sessionId, run),
+      );
+    }
+    const failures = failuresOf(await Promise.allSettled(work));
+    expect(failures).toEqual([]);
+    const seqs = (await db.items.read(sessionId)).map(item => item.seq);
+    expect(seqs).toEqual(seqs.map((_seq, index) => index + 1));
+  });
+
+  it('two starts of the queue at the same time, 20 rounds: one run, one message sent', async () => {
+    const sent: { started: number; left: string[] }[] = [];
+    for (let round = 0; round < 20; round++) {
+      const session = await db.sessions.create({
+        ownerRef: owner.userRef,
+        agentId: 'default',
+      });
+      const first = await db.runs.start(session.id);
+      await db.queue.add(session.id, { text: 'a' }, { max: 5 });
+      await db.queue.add(session.id, { text: 'b' }, { max: 5 });
+      await db.runs.transition(first.id, 'completed');
+      const started = await Promise.all([
+        db.queue.startNext(session.id),
+        db.queue.startNext(session.id),
+        db.queue.startNext(session.id),
+      ]);
+      sent.push({
+        started: started.filter(Boolean).length,
+        left: (await db.queue.list(session.id)).map(m => m.text),
+      });
+    }
+    expect(sent.every(r => r.started === 1 && r.left.join() === 'b')).toBe(
+      true,
+    );
+  });
+
+  it(`a queued message and the end of the run at the same time, ${ROUNDS} rounds: it is in the queue when the run ended, or it got NoActiveRun`, async () => {
+    const rounds: { added: boolean; refused: boolean; inQueue: number }[] = [];
+    for (let round = 0; round < ROUNDS; round++) {
+      const { sessionId, run } = await runningRun(db);
+      const [added, ended] = await Promise.allSettled([
+        jitter().then(() => db.queue.add(sessionId, { text: 'q' }, { max: 5 })),
+        endRun(db, run),
+      ]);
+      expect(ended.status).toBe('fulfilled');
+      rounds.push({
+        added: added.status === 'fulfilled',
+        refused:
+          added.status === 'rejected' && added.reason instanceof NoActiveRun,
+        inQueue: (await db.queue.list(sessionId)).length,
+      });
+    }
+    // Added: the message waits for the next start. Refused: nothing was left.
+    expect(
+      rounds.every(r =>
+        r.added ? r.inQueue === 1 : r.refused && r.inQueue === 0,
+      ),
+    ).toBe(true);
+  });
+});

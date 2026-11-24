@@ -29,6 +29,7 @@ import { OpenAiCompatibleClient } from './adapters/model/OpenAiCompatibleClient'
 import { OpenAiCompatibleModelClient } from './adapters/model/OpenAiCompatibleModelClient';
 import {
   KnexItemLog,
+  KnexQueuedMessageRepository,
   KnexRunRepository,
   KnexSessionRepository,
 } from './adapters/persistence';
@@ -99,12 +100,15 @@ export const aiChatPlugin = createBackendPlugin({
 
         const clock = new SystemClock();
         const ids = new UuidGenerator();
-        const items = new KnexItemLog(db, clock);
+        const items = new KnexItemLog(db, clock, {
+          maxInsertsPerRun: aiChat.input.insertMaxPerRun,
+        });
         const sessions = new KnexSessionRepository(db, clock, ids);
         const host = createHost({
           items,
           sessions,
           runs: new KnexRunRepository(db, clock, ids),
+          queue: new KnexQueuedMessageRepository(db, clock, ids),
           agents: catalog,
           tools: new ActionsToolGateway({
             actions,
@@ -122,6 +126,7 @@ export const aiChatPlugin = createBackendPlugin({
           clock,
           ids,
           logger,
+          queueMaxMessages: aiChat.input.queueMaxMessages,
           settings: {
             limits: {
               maxSteps: aiChat.maxTurns,

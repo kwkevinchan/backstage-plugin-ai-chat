@@ -23,11 +23,12 @@ import type {
   ChatNoticeData,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type {
-  HarnessEvent,
   Item,
   RunOutcome,
   ToolCallItem,
 } from '@kwkevinchan/ai-chat-harness';
+import type { HostEvent } from '../../../application';
+import { toChatQueuedMessage } from './session';
 import type { UiMessageChunk } from './uiMessageChunk';
 
 const NOTICES: Record<ChatNoticeData['code'], ChatNoticeData> = {
@@ -61,11 +62,28 @@ const STOPPED_TEXT = 'The run stopped.';
  * - Every item gets a transient `data-item` with its `seq`. An item whose
  *   `seq` the presenter has sent already (a replayed item that comes again
  *   as an event) is skipped.
+ * - An inserted message the model read goes out as `data-inserted`, before the
+ *   step that read it. It is no item of the stream: the message was written
+ *   when the user inserted it, so its `seq` is lower than that of the output
+ *   before it and the `seq` check above would drop it. The presenter keeps the
+ *   `seq` of the inserted messages it sent instead, and sends each once; a
+ *   replay marks the ones it sent, so the live event does not send them again.
+ * - The state of the queue goes out as a transient `data-queue`, before the
+ *   `data-run` of the end.
  */
 export class UiMessageStreamPresenter {
   private stepOpen = false;
   private readonly openText = new Map<string, string>();
   private lastSeq = 0;
+  /** The `seq` of the inserted messages already sent as `data-inserted`. */
+  private readonly insertedSent = new Set<number>();
+  /**
+   * Inserted messages the model read already (their `message.read` came before
+   * this stream began) and that the stream has not sent: the output that read
+   * them has not been written yet, or the replay left it out. The first output
+   * of the live stream that read them sends them.
+   */
+  private waiting: Item[] = [];
   private trimmedSent = false;
   private ended = false;
   private replaying = false;
@@ -91,7 +109,7 @@ export class UiMessageStreamPresenter {
   ) {}
 
   /** The chunks of one event. */
-  present(event: HarnessEvent): UiMessageChunk[] {
+  present(event: HostEvent): UiMessageChunk[] {
     switch (event.type) {
       case 'run.started':
         return [
@@ -100,7 +118,26 @@ export class UiMessageStreamPresenter {
           this.run('running'),
         ];
       case 'message.read':
-        return [];
+        return event.item.kind === 'user_message'
+          ? this.inserted(event.item)
+          : [];
+      case 'queue.state':
+        return [
+          {
+            type: 'data-queue',
+            data: {
+              items: event.items.map(toChatQueuedMessage),
+              paused: event.paused,
+              ...(event.pausedReason !== undefined && {
+                pausedReason: event.pausedReason,
+              }),
+              ...(event.nextRunId !== undefined && {
+                nextRunId: event.nextRunId,
+              }),
+            },
+            transient: true,
+          },
+        ];
       case 'step.started':
         if (event.step <= this.replayedStep) return [];
         return [...this.closeStep(), ...this.openStep()];
@@ -140,14 +177,29 @@ export class UiMessageStreamPresenter {
    * state of the run, and the items of the run so far, in the order of
    * `seq` (A-07). Events of items up to `upToSeq` (the highest `seq` that was
    * read, also of items left out) are skipped when they come.
+   *
+   * `inserted` is every inserted message of the run that no output of `items`
+   * before the first one shown read: also those that `items` leaves out. Each
+   * goes out before the output that read it, in the replay or, when no output
+   * read it yet, in the live stream with the first output that did.
    */
   replay(
     status: ChatRunStatus,
     items: readonly Item[],
     upToSeq: number,
+    inserted: readonly Item[] = [],
   ): UiMessageChunk[] {
     this.replaying = true;
     const chunks: UiMessageChunk[] = [this.start(), this.run(status)];
+    const known = new Map<number, Item>();
+    for (const item of [...inserted, ...items]) {
+      if (item.kind === 'user_message' && item.delivery === 'inserted') {
+        known.set(item.seq, item);
+      }
+    }
+    this.waiting = [...known.values()]
+      .filter(message => !this.insertedSent.has(message.seq))
+      .sort((a, b) => a.seq - b.seq);
     for (const item of items) chunks.push(...this.item(item));
     this.replaying = false;
     this.lastSeq = Math.max(this.lastSeq, upToSeq);
@@ -208,12 +260,48 @@ export class UiMessageStreamPresenter {
     ];
   }
 
+  private inserted(message: Item): UiMessageChunk[] {
+    if (message.kind !== 'user_message') return [];
+    this.waiting = this.waiting.filter(m => m.seq !== message.seq);
+    if (this.insertedSent.has(message.seq)) return [];
+    this.insertedSent.add(message.seq);
+    return [
+      {
+        type: 'data-inserted',
+        id: `inserted-${message.seq}`,
+        data: {
+          seq: message.seq,
+          text: message.text,
+          ...(message.page && { page: message.page }),
+        },
+      },
+    ];
+  }
+
+  /**
+   * The waiting inserted messages that `output` read (its `readUpToSeq`, or
+   * its own `seq` for an output with no mark). In a replay the step that is
+   * open ends first, so they come before the step that read them.
+   */
+  private takeRead(output: Item): UiMessageChunk[] {
+    if (output.kind !== 'agent_message' && output.kind !== 'tool_call') {
+      return [];
+    }
+    const mark = output.readUpToSeq ?? output.seq;
+    const read = this.waiting.filter(message => message.seq <= mark);
+    if (read.length === 0) return [];
+    const chunks = read.flatMap(message => this.inserted(message));
+    return chunks.length > 0 && this.replaying
+      ? [...this.closeStep(), ...chunks]
+      : chunks;
+  }
+
   private item(item: Item, draftId?: string): UiMessageChunk[] {
     if (item.seq <= this.lastSeq) {
       return draftId === undefined ? [] : this.closeText(draftId);
     }
     this.lastSeq = item.seq;
-    const chunks = this.chunksOf(item, draftId);
+    const chunks = [...this.takeRead(item), ...this.chunksOf(item, draftId)];
     chunks.push({
       type: 'data-item',
       data: { seq: item.seq, kind: item.kind },

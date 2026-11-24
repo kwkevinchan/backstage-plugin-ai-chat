@@ -16,6 +16,10 @@
 
 import { Config } from '@backstage/config';
 import { InputError } from '@backstage/errors';
+import {
+  DEFAULT_INSERT_MAX_PER_RUN,
+  DEFAULT_QUEUE_MAX_MESSAGES,
+} from './domain';
 
 export interface AiChatConfig {
   llm: {
@@ -31,6 +35,13 @@ export interface AiChatConfig {
   runTimeoutSeconds: number;
   /** How much the model gets of a long session (H-09). */
   context: { tokenBudget: number; keepRecentSteps: number };
+  /** What the user may add while a run goes on (IN-10, IN-13). */
+  input: {
+    /** Most messages inserted into one run. */
+    insertMaxPerRun: number;
+    /** Most messages in the queue of one session. */
+    queueMaxMessages: number;
+  };
   systemPrompt?: string;
   actions: {
     include: string[];
@@ -39,6 +50,12 @@ export interface AiChatConfig {
   maxToolOutputChars: number;
 }
 
+/**
+ * The most `input.insert.maxPerRun` may be. A run that is about to end reads
+ * again for the messages inserted into it, and `RunSupervisor` allows 20 such
+ * reads (`MAX_REREADS`), at least one for each inserted message.
+ */
+const MAX_INSERT_MAX_PER_RUN = 20;
 const DEFAULT_MAX_TURNS = 10;
 const DEFAULT_TIMEOUT_SECONDS = 120;
 const DEFAULT_CONTEXT_TOKEN_BUDGET = 100_000;
@@ -120,6 +137,20 @@ export function readAiChatConfig(root: Config): AiChatConfig {
       1,
       MAX_RUN_TIMEOUT_SECONDS,
     ),
+    input: {
+      insertMaxPerRun: positiveInt(
+        config,
+        'input.insert.maxPerRun',
+        DEFAULT_INSERT_MAX_PER_RUN,
+        1,
+        MAX_INSERT_MAX_PER_RUN,
+      ),
+      queueMaxMessages: positiveInt(
+        config,
+        'input.queue.maxMessages',
+        DEFAULT_QUEUE_MAX_MESSAGES,
+      ),
+    },
     systemPrompt: config.getOptionalString('systemPrompt'),
     actions: {
       include: config.getOptionalStringArray('actions.include') ?? [],

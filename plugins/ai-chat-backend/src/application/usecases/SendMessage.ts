@@ -15,12 +15,8 @@
  */
 
 import type { Clock, ItemLog } from '@kwkevinchan/ai-chat-harness';
-import {
-  assertOwner,
-  ShuttingDown,
-  type LeasedRun,
-  type Principal,
-} from '../../domain';
+import { assertOwner, ShuttingDown, type Principal } from '../../domain';
+import { abandonRun } from '../abandonRun';
 import { buildRunRequest, type RunSettings } from '../buildRunRequest';
 import type { RunHandle, RunSupervisor } from '../RunSupervisor';
 import type { AgentCatalog, RunRepository, SessionRepository } from '../ports';
@@ -79,20 +75,8 @@ export class SendMessage {
       );
       return supervisor.launch(run, request);
     } catch (error) {
-      await this.abandon(run);
+      await abandonRun(runs, run);
       throw error;
-    }
-  }
-
-  /** The run did not start the loop: end it, so the session is free again. */
-  private async abandon(run: LeasedRun): Promise<void> {
-    try {
-      await this.deps.runs.transition(run.id, 'failed', {
-        leaseOwner: run.fence.leaseOwner,
-        endReason: 'not_started',
-      });
-    } catch {
-      // The lease expiry (ExpireStaleRuns) ends it.
     }
   }
 }
