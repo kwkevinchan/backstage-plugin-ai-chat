@@ -627,7 +627,10 @@ export function visibleItems(
 ): VisibleItem[];
 
 // 規格 SH-04
-export function forkItems(visible: readonly VisibleItem[]): ItemDraft[];
+export function forkItems(
+  visible: readonly VisibleItem[],
+  idMap: ReadonlyMap<string, string>, // 舊附件 id 到新附件 id（13.5）
+): ItemDraft[];
 
 // 規格 T-02、T-11、D-24
 export function enabledTools(
@@ -661,7 +664,7 @@ export function enabledTools(
 | `CancelRun`                          | 設定停止要求。Run 在這一台就直接中止                                        | RunRepository、RunSupervisor                                                                | H-06                   |
 | `FollowSession`                      | 從目前 Run 的第一個 Item 重送，再接上即時事件。只接這一台跑的 `running` Run | SessionRepository、RunRepository、ItemLog、RunSupervisor（P2：AccessControl）               | A-07                   |
 | `ShareSession`、`UpdateShare`        | 建立和修改分享                                                              | ShareRepository、ItemLog、AuditLog、Notifier                                                | SH-01、SH-06 到 SH-11  |
-| `ForkSession`                        | 複製成自己的 Session                                                        | SessionRepository、ItemLog、AccessControl、AuditLog                                         | SH-04                  |
+| `ForkSession`                        | 複製成自己的 Session                                                        | SessionRepository、ItemLog、AccessControl、AuditLog、AttachmentStore                        | SH-04                  |
 | `ExpireStaleRuns`                    | 租約過期的 Run 標成 `expired`                                               | RunRepository                                                                               | H-04                   |
 | `PurgeExpiredSessions`               | 刪除超過保存期限的 Session                                                  | SessionRepository                                                                           | SE-05                  |
 | `UploadAttachment`、`ReadAttachment` | 上傳和讀取圖片附件（PI，13.3）                                              | SessionRepository、AttachmentStore                                                          | IN-01 到 IN-04、IN-08  |
@@ -1275,7 +1278,7 @@ plugins/ai-chat/src/
 | `ResumeQueue`            | 使用者按「繼續」：對 `StartNextQueued` 用請求的身分，不檢查身分的剩餘時間     | 同上                                                           | IN-15               |
 | `PurgeUnusedAttachments` | 刪除超過 24 小時沒進訊息也沒被保留的附件。`plugin.ts` 每小時排一次            | AttachmentStore                                                | IN-04               |
 
-`SendMessage` 多收 `attachmentIds`，其他不變。`GetSession` 多回傳佇列和每則插入訊息的狀態（13.7）。`ForkSession`（P2）不帶附件（13.5）。
+`SendMessage` 多收 `attachmentIds`，其他不變。`GetSession` 多回傳佇列和每則插入訊息的狀態（13.7）。`ForkSession`（P2）帶走範圍內的附件（13.5）。
 
 兩個 port 放在宿主的 `application/ports/`：
 
@@ -1435,7 +1438,7 @@ export type UserMessageBody = {
 **插入的流程**
 
 1. `POST /sessions/:id/runs/:runId/messages`。controller 檢查內容（文字、附件 id 的格式），交給 `InsertMessage`。
-2. `InsertMessage` 做擁有者檢查（`assertOwner`）；訊息帶圖片時檢查模型能讀圖片（IN-05）和張數（IN-01）；用 `AttachmentStore.describe` 確認附件屬於這段 Session。帶圖片時，加總這個 Run 所有使用者訊息的附件 `size` 和這則的，超過 `maxBytesPerInput` 丟 `TooManyImageBytes`（400，13.5）。然後呼叫 `ItemLog.append`，fence 是 `{ runId, leaseOwner }`。`leaseOwner` 在這種寫入不比對（跟 `approval` 一樣：宿主替使用者寫，不持有租約）。
+2. `InsertMessage` 做擁有者檢查（`assertOwner`）；訊息帶圖片時檢查模型能讀圖片（IN-05）和張數（IN-01）；用 `AttachmentStore.describe` 確認附件屬於這段 Session。然後呼叫 `ItemLog.append`。帶圖片時，在 append 的 transaction 裡、更新 `sessions` 之後（和筆數檢查同一個位置），加總這個 Run 所有使用者訊息的附件 `size` 和這則的，超過 `maxBytesPerInput` 丟 `TooManyImageBytes`（400，13.5）並回復。兩則帶圖片的插入同時進來時，第二則在 `sessions` 上排隊，看得到第一則。append 的 fence 是 `{ runId, leaseOwner }`。`leaseOwner` 在這種寫入不比對（跟 `approval` 一樣：宿主替使用者寫，不持有租約）。
 3. `KnexItemLog.append` 發現批次只有一筆 `delivery: inserted` 的 `user_message` 時，在 transaction 裡依序做：
    1. 對 `runs` 那一列加共享鎖（`FOR SHARE`）讀取 `session_id`、`status`、`lease_expires_at`。
    2. 條件：Run 屬於這段 Session，`status` 是 `running`（不是 `waiting_approval`），`lease_expires_at` 還沒過。不符合丟 `LeaseLost`，錯誤對應成 409。
@@ -1534,7 +1537,7 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 - 附件有 `session_id` 和 `owner_ref`。訊息（直接送、插入、排隊）只能用同一段 Session 的附件，`describe` 檢查。附件可以被同一段 Session 的多則訊息用：「再送一次」要用同一張圖。
 - `used_seq`：第一則用它的 `user_message` 的序號。直接送和插入由 `KnexItemLog.append` 在寫入的 transaction 裡設定；排隊的由 `startNext` 在寫入的 transaction 裡設定。所以「訊息寫了、附件沒標」不會發生。
 - `reserved_by`：排隊列的 id。`add` 和 `update` 設定，`remove` 清除，`startNext` 寫入訊息後清除。保留中的附件不會被清理。
-- 清理：`PurgeUnusedAttachments` 每小時刪除 `used_seq` 和 `reserved_by` 都是空值、`created_at` 早於 24 小時前的列（IN-04）。多台 backend 同時跑也只是重複刪除同樣的列。刪除 Session 時，外鍵連帶刪除。
+- 清理：`PurgeUnusedAttachments` 每小時刪除 `used_seq` 和 `reserved_by` 都是空值、`created_at` 早於 24 小時前的列（IN-04）。多台 backend 同時跑也只是重複刪除同樣的列。刪除用 `FOR UPDATE SKIP LOCKED` 先選出要刪的列：正在被訊息標成已用的附件被跳過，不會和插入、送出互等。刪除 Session 時，外鍵連帶刪除。
 
 **送給模型**
 
@@ -1663,7 +1666,9 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 | `startNext`                                            | `runs`（INSERT）、`sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`items`、`attachments` |
 | 排隊的 `update`、`remove`、`reorder`                   | `sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`attachments`                            |
 | 上傳（`put`）                                          | `sessions`（`FOR NO KEY UPDATE`）、`attachments`                                               |
+| `PurgeUnusedAttachments`                               | 只有 `attachments`（`FOR UPDATE SKIP LOCKED` 選出，再刪除）                                    |
 
+- 一個 transaction 要鎖多列 `attachments` 時，依 `id` 排序上鎖。
 - 沒有新的唯一索引：同一則排隊訊息只送一次靠 transaction 內「刪除影響 1 列」和 `runs.active_session_id` 的唯一索引。
 
 ### 13.9 前端
