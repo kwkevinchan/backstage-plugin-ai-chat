@@ -16,6 +16,7 @@
 
 import { createApiRef } from '@backstage/core-plugin-api';
 import type {
+  ChatInputConfig,
   ChatItem,
   ChatQueue,
   ChatQueuedMessage,
@@ -23,6 +24,7 @@ import type {
   ChatSessionDetail,
   ChatTool,
   ChatToolset,
+  ChatUploadedAttachment,
   CreateChatSessionRequest,
   DecideToolCallRequest,
   InsertChatMessageRequest,
@@ -108,6 +110,20 @@ export interface AiChatApi {
    * `undefined` when the queue is empty or a run goes on.
    */
   resumeQueue(id: string, signal?: AbortSignal): Promise<Response | undefined>;
+  /** What a message may carry, including whether the model reads images. */
+  getInputConfig(): Promise<ChatInputConfig>;
+  /**
+   * Uploads one image to the session. `onProgress` is called with 0 at the
+   * start and with the size when the upload has finished.
+   */
+  uploadAttachment(
+    sessionId: string,
+    body: Blob,
+    name: string,
+    onProgress?: (loaded: number, total: number) => void,
+  ): Promise<ChatUploadedAttachment>;
+  /** The bytes of one image of the session. */
+  readAttachment(sessionId: string, attachmentId: string): Promise<Blob>;
 }
 
 /**

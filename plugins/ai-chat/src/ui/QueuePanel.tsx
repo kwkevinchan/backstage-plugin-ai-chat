@@ -95,6 +95,13 @@ function QueueRow(props: {
       <span className={cx('chat-queue-text')} title={item.text}>
         {item.text}
       </span>
+      {item.attachments && item.attachments.length > 0 && (
+        <span className={cx('chat-queue-images')}>
+          {item.attachments.length === 1
+            ? '1 image'
+            : `${item.attachments.length} images`}
+        </span>
+      )}
       <span className={cx('chat-queue-actions')}>
         <button
           type="button"

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Route,
   Routes,
@@ -27,13 +27,17 @@ import { useApi } from '@backstage/core-plugin-api';
 import { RiAddLine, RiDeleteBinLine } from '@remixicon/react';
 import { Button, Container } from '@backstage/ui';
 import type {
+  ChatAttachment,
+  ChatSession,
   ChatSessionDetail,
   ChatToolset,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import { aiChatApiRef } from '../api';
 import type { AiChatApi } from '../api';
 import { describeError } from '../adapters/describeError';
+import { useInputConfig } from '../application/useInputConfig';
 import { usePageContext } from '../application/usePageContext';
+import type { OutgoingMessage } from '../domain/types';
 import { useSessionList } from '../application/useSessionList';
 import { useToolsets } from '../application/useToolsets';
 import { Composer } from './Composer';
@@ -59,8 +63,12 @@ function OpenSession({ api, toolsets, onChanged }: Basics) {
     | undefined
   >();
   // The first message of a session that was just created is in the location.
-  const firstMessage = (location.state as { firstMessage?: string } | null)
-    ?.firstMessage;
+  const navState = location.state as {
+    firstMessage?: string;
+    attachments?: ChatAttachment[];
+  } | null;
+  const firstMessage = navState?.firstMessage;
+  const firstAttachments = navState?.attachments;
 
   useEffect(() => {
     let cancelled = false;
@@ -83,14 +91,17 @@ function OpenSession({ api, toolsets, onChanged }: Basics) {
   const opened =
     state?.id === sessionId && state !== undefined && 'detail' in state;
   useEffect(() => {
-    if (opened && firstMessage) {
+    if (
+      opened &&
+      (firstMessage || (firstAttachments && firstAttachments.length > 0))
+    ) {
       navigate(`${location.pathname}${location.search}`, {
         replace: true,
         state: null,
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opened, firstMessage]);
+  }, [opened, firstMessage, firstAttachments]);
 
   if (!state || state.id !== sessionId) {
     return (
@@ -115,6 +126,7 @@ function OpenSession({ api, toolsets, onChanged }: Basics) {
       detail={state.detail}
       toolsets={toolsets}
       firstMessage={firstMessage}
+      firstAttachments={firstAttachments}
       onChanged={onChanged}
     />
   );
@@ -124,28 +136,118 @@ function OpenSession({ api, toolsets, onChanged }: Basics) {
 function NewSession({ api, basePath, toolsets, onChanged }: Basics) {
   const navigate = useNavigate();
   const page = usePageContext();
+  const inputConfig = useInputConfig(api);
   const [enabled, setEnabled] = useState<string[]>();
   const [error, setError] = useState<string>();
   const chosen = enabled ?? toolsets.filter(t => t.default).map(t => t.id);
+  const chosenKey = chosen.join('\0');
+  const chosenRef = useRef(chosen);
+  const toolsetsRef = useRef(toolsets);
+  chosenRef.current = chosen;
+  toolsetsRef.current = toolsets;
+  const sessionRef = useRef<ChatSession>();
+  const creatingRef = useRef<Promise<ChatSession>>();
+  const createdWith = useRef<string>();
 
-  const send = async (text: string) => {
+  // The first image creates the session, and the first message reuses it.
+  // A later change of the toolsets is written onto that session.
+  const ensureSession = () => {
+    if (sessionRef.current) return Promise.resolve(sessionRef.current);
+    if (!creatingRef.current) {
+      const atCreate = chosenRef.current;
+      const sendToolsets = toolsetsRef.current.length > 0;
+      creatingRef.current = api
+        .createSession(
+          // Without a list the backend takes the default toolsets.
+          sendToolsets ? { enabledToolsets: atCreate } : undefined,
+        )
+        .then(session => {
+          sessionRef.current = session;
+          createdWith.current = sendToolsets ? atCreate.join('\0') : '';
+          onChanged();
+          return session;
+        })
+        .catch(cause => {
+          creatingRef.current = undefined;
+          throw cause;
+        });
+    }
+    return creatingRef.current;
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const wanted = chosenRef.current;
+    const wantedKey = wanted.join('\0');
+    const active = Boolean(sessionRef.current || creatingRef.current);
+    const alreadyWritten =
+      Boolean(sessionRef.current) && createdWith.current === wantedKey;
+    if (active && !alreadyWritten) {
+      (async () => {
+        try {
+          const session = sessionRef.current ?? (await creatingRef.current);
+          if (!session || cancelled) return;
+          if (chosenRef.current.join('\0') !== wantedKey) return;
+          if (createdWith.current === wantedKey) return;
+          await api.updateSession(session.id, { enabledToolsets: wanted });
+          createdWith.current = wantedKey;
+        } catch (cause) {
+          if (!cancelled) setError(describeError(cause));
+        }
+      })();
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [api, chosenKey]);
+
+  const imageLimits = inputConfig?.images.enabled
+    ? {
+        mediaTypes: inputConfig.images.mediaTypes,
+        maxPerMessage: inputConfig.images.maxPerMessage,
+        maxBytes: inputConfig.images.maxBytes,
+      }
+    : undefined;
+
+  const uploadImage = async (
+    file: File,
+    onProgress: (loaded: number, total: number) => void,
+  ) => {
     try {
-      const session = await api.createSession({
-        // Without a list the backend takes the default toolsets.
-        ...(toolsets.length > 0 && { enabledToolsets: chosen }),
-      });
-      onChanged();
+      const session = await ensureSession();
+      return await api.uploadAttachment(
+        session.id,
+        file,
+        file.name,
+        onProgress,
+      );
+    } catch (cause) {
+      throw new Error(describeError(cause));
+    }
+  };
+
+  const send = async (draft: OutgoingMessage) => {
+    try {
+      const session = await ensureSession();
       navigate(
         `${basePath}/${encodeURIComponent(session.id)}${
           page.entityRef
             ? `?entityRef=${encodeURIComponent(page.entityRef)}`
             : ''
         }`,
-        { state: { firstMessage: text } },
+        {
+          state: {
+            firstMessage: draft.text,
+            ...(draft.attachments &&
+              draft.attachments.length > 0 && {
+                attachments: draft.attachments,
+              }),
+          },
+        },
       );
       return true;
-    } catch (e) {
-      setError(describeError(e));
+    } catch (cause) {
+      setError(describeError(cause));
       return false;
     }
   };
@@ -169,7 +271,12 @@ function NewSession({ api, basePath, toolsets, onChanged }: Basics) {
           </div>
         )}
       </div>
-      <Composer onSend={send} disabled={false} />
+      <Composer
+        onSend={send}
+        disabled={false}
+        images={imageLimits}
+        uploadImage={imageLimits ? uploadImage : undefined}
+      />
     </div>
   );
 }

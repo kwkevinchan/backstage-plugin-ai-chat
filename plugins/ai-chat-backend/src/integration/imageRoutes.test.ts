@@ -736,6 +736,127 @@ describe('the routes of the images', () => {
       ).expect(202);
       await pending;
     });
+
+    it('accepts a message that has images and no text on send, and stores the images', async () => {
+      await start();
+      const b = backend([[say('seen')]]);
+      const id = await newSession(b);
+      const [a] = await uploadedIn(b, id);
+
+      await as(JANE, request(b.app).post(`/sessions/${id}/runs`))
+        .send({ text: '', attachmentIds: [a] })
+        .expect(200);
+
+      const detail = await as(
+        JANE,
+        request(b.app).get(`/sessions/${id}`),
+      ).expect(200);
+      expect(detail.body.items[0]).toMatchObject({
+        kind: 'user_message',
+        text: '',
+        attachments: [{ id: a }],
+      });
+      expect(b.model.inputs[0].messages[0]).toMatchObject({
+        content: '',
+        images: [{ attachmentId: a }],
+      });
+    });
+
+    it('accepts an inserted message that has images and no text', async () => {
+      await start();
+      const b = backend([waitForAbort]);
+      const id = await newSession(b);
+      const [a] = await uploadedIn(b, id);
+      const pending = as(JANE, request(b.app).post(`/sessions/${id}/runs`))
+        .send({ text: 'go' })
+        .then(res => res);
+      await until(() => b.model.inputs.length === 1);
+      const runId = (await world.knex('runs').where({ session_id: id }).first())
+        .id;
+
+      const res = await as(
+        JANE,
+        request(b.app).post(`/sessions/${id}/runs/${runId}/messages`),
+      )
+        .send({ text: '', attachmentIds: [a] })
+        .expect(201);
+
+      expect(res.body).toMatchObject({
+        kind: 'user_message',
+        text: '',
+        attachments: [{ id: a }],
+      });
+      await as(
+        JANE,
+        request(b.app).post(`/sessions/${id}/runs/${runId}/cancel`),
+      ).expect(202);
+      await pending;
+    });
+
+    it('accepts a queued message that has images and no text', async () => {
+      await start();
+      const b = backend([waitForAbort]);
+      const id = await newSession(b);
+      const [a] = await uploadedIn(b, id);
+      const pending = as(JANE, request(b.app).post(`/sessions/${id}/runs`))
+        .send({ text: 'go' })
+        .then(res => res);
+      await until(() => b.model.inputs.length === 1);
+      const runId = (await world.knex('runs').where({ session_id: id }).first())
+        .id;
+
+      const res = await as(JANE, request(b.app).post(`/sessions/${id}/queue`))
+        .send({ text: '', attachmentIds: [a] })
+        .expect(201);
+
+      expect(res.body).toMatchObject({
+        text: '',
+        attachments: [{ id: a }],
+      });
+      await as(
+        JANE,
+        request(b.app).post(`/sessions/${id}/runs/${runId}/cancel`),
+      ).expect(202);
+      await pending;
+    });
+
+    it('refuses a message with no text and no image on send, insert and queue', async () => {
+      await start();
+      const b = backend([waitForAbort]);
+      const id = await newSession(b);
+
+      await as(JANE, request(b.app).post(`/sessions/${id}/runs`))
+        .send({ text: '' })
+        .expect(400);
+      await as(JANE, request(b.app).post(`/sessions/${id}/runs`))
+        .send({ text: '', attachmentIds: [] })
+        .expect(400);
+      expect(await world.runCount()).toBe(0);
+
+      const pending = as(JANE, request(b.app).post(`/sessions/${id}/runs`))
+        .send({ text: 'go' })
+        .then(res => res);
+      await until(() => b.model.inputs.length === 1);
+      const runId = (await world.knex('runs').where({ session_id: id }).first())
+        .id;
+
+      await as(
+        JANE,
+        request(b.app).post(`/sessions/${id}/runs/${runId}/messages`),
+      )
+        .send({ text: '' })
+        .expect(400);
+      await as(JANE, request(b.app).post(`/sessions/${id}/queue`))
+        .send({ text: '   ' })
+        .expect(400);
+      expect(await world.items.read(id)).toHaveLength(1);
+      expect(await world.queue.list(id)).toEqual([]);
+      await as(
+        JANE,
+        request(b.app).post(`/sessions/${id}/runs/${runId}/cancel`),
+      ).expect(202);
+      await pending;
+    });
   });
 
   describe('GET /input-config', () => {

@@ -87,11 +87,21 @@ function emptyStream(): ReadableStream<UIMessageChunk> {
   return new ReadableStream({ start: controller => controller.close() });
 }
 
-function lastUserText(messages: ChatUiMessage[]): string {
+/** The last message of the user: its text, and the ids of its images. */
+function lastUserSend(messages: ChatUiMessage[]): {
+  text: string;
+  attachmentIds?: string[];
+} {
   const message = [...messages].reverse().find(m => m.role === 'user');
-  return (message?.parts ?? [])
+  const text = (message?.parts ?? [])
     .map(part => (part.type === 'text' ? part.text : ''))
     .join('');
+  const attachmentIds = message?.metadata?.attachments?.map(
+    attachment => attachment.id,
+  );
+  return attachmentIds && attachmentIds.length > 0
+    ? { text, attachmentIds }
+    : { text };
 }
 
 /**
@@ -144,7 +154,7 @@ export class AiChatTransport implements ChatTransport<ChatUiMessage> {
     }
     const response = await api.sendMessage(
       sessionId,
-      { text: lastUserText(request.messages), page },
+      { ...lastUserSend(request.messages), page },
       request.abortSignal,
     );
     return chunksOf(response);

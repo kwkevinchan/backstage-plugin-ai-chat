@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { lastAssistantMessageIsCompleteWithApprovalResponses } from 'ai';
 import type {
+  ChatAttachment,
   ChatNoticeData,
   ChatPageContext,
   ChatQueue,
@@ -45,10 +46,10 @@ import {
   decisionsOf,
   itemsToMessages,
   lastRunInterrupted,
-  lastUserText,
+  lastUserDraft,
   pendingInserts,
 } from '../domain/itemsToMessages';
-import type { ChatUiMessage } from '../domain/types';
+import type { ChatUiMessage, OutgoingMessage } from '../domain/types';
 
 export interface UseSessionChatOptions {
   api: AiChatApi;
@@ -57,6 +58,8 @@ export interface UseSessionChatOptions {
   page: ChatPageContext;
   /** A message to send when the screen opens (the first message of a new session). */
   firstMessage?: string;
+  /** Images of that first message. An image with no text is still sent. */
+  firstAttachments?: ChatAttachment[];
   /** Called after a run changed the session (a title, the order of the list). */
   onChanged?(): void;
 }
@@ -83,6 +86,28 @@ export const RUN_CANNOT_TAKE_TEXT =
 
 /** The time that a direct send waits for the stream of an ended run to close. */
 const IDLE_WAIT_MS = 3000;
+
+function draftOf(input: string | OutgoingMessage): OutgoingMessage {
+  return typeof input === 'string' ? { text: input } : input;
+}
+
+/** The body of send, insert and queue. Image ids are omitted when there are none. */
+function messageBody(draft: OutgoingMessage, page: ChatPageContext) {
+  const attachmentIds = draft.attachments?.map(attachment => attachment.id);
+  return {
+    text: draft.text,
+    page,
+    ...(attachmentIds && attachmentIds.length > 0 ? { attachmentIds } : {}),
+  };
+}
+
+function hasContent(draft: OutgoingMessage | undefined): boolean {
+  return Boolean(
+    draft &&
+      (draft.text.length > 0 ||
+        (draft.attachments && draft.attachments.length > 0)),
+  );
+}
 
 /**
  * The chat of one session: `useChat` with the transport of the backend, the
@@ -126,8 +151,8 @@ export function useSessionChat(options: UseSessionChatOptions) {
   const [interrupted, setInterrupted] = useState(() =>
     lastRunInterrupted(initial.detail),
   );
-  const [resendText, setResendText] = useState(() =>
-    lastUserText(initial.detail.items),
+  const [resendDraft, setResendDraft] = useState(() =>
+    lastUserDraft(initial.detail.items),
   );
   const [pending, setPending] = useState(() => pendingInserts(initial.detail));
   const pendingRef = useRef(pending);
@@ -311,7 +336,7 @@ export function useSessionChat(options: UseSessionChatOptions) {
         applyQueue(detail.queue, true);
         setPending(pendingInserts(detail));
         setInterrupted(lastRunInterrupted(detail));
-        setResendText(lastUserText(detail.items));
+        setResendDraft(lastUserDraft(detail.items));
         setDecisions(decisionsOf(detail.items));
         if (opts?.carryOn && detail.resumable && !carryOnTried.current) {
           carryOnTried.current = true;
@@ -404,8 +429,15 @@ export function useSessionChat(options: UseSessionChatOptions) {
     if (initial.detail.resumable) {
       const body: ChatRequestBody = { resume: true };
       chatRef.current.sendMessage(undefined, { body });
-    } else if (options.firstMessage) {
-      chatRef.current.sendMessage({ text: options.firstMessage });
+    } else if (
+      options.firstMessage ||
+      (options.firstAttachments && options.firstAttachments.length > 0)
+    ) {
+      const attachments = options.firstAttachments ?? [];
+      chatRef.current.sendMessage({
+        text: options.firstMessage ?? '',
+        ...(attachments.length > 0 ? { metadata: { attachments } } : {}),
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -422,16 +454,20 @@ export function useSessionChat(options: UseSessionChatOptions) {
     }
   }, []);
 
-  /** Starts a run with the text (no run goes on). */
+  /** Starts a run with the message (no run goes on). */
   const sendDirect = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (draft: OutgoingMessage): Promise<boolean> => {
       carryOnTried.current = false;
       setFailure(undefined);
       setQueueNotice(undefined);
       setInterrupted(false);
-      setResendText(text);
+      setResendDraft(draft);
       await waitUntilIdle();
-      await chatRef.current.sendMessage({ text });
+      const attachments = draft.attachments ?? [];
+      await chatRef.current.sendMessage({
+        text: draft.text,
+        ...(attachments.length > 0 ? { metadata: { attachments } } : {}),
+      });
       return true;
     },
     [waitUntilIdle],
@@ -439,21 +475,26 @@ export function useSessionChat(options: UseSessionChatOptions) {
 
   /** Sends a message that was not read again; not while a run goes on. */
   const sendTextAgain = useCallback(
-    async (text: string): Promise<boolean> =>
-      activeRunRef.current ? false : sendDirect(text),
+    async (text: string, attachments?: ChatAttachment[]): Promise<boolean> =>
+      activeRunRef.current
+        ? false
+        : sendDirect({
+            text,
+            ...(attachments && attachments.length > 0 ? { attachments } : {}),
+          }),
     [sendDirect],
   );
 
-  /** Queues the text. A queue that cannot take it leaves the text with the user (`false`). */
+  /** Queues the message. A queue that cannot take it leaves it with the user (`false`). */
   const queueText = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (draft: OutgoingMessage): Promise<boolean> => {
       setFailure(undefined);
       setQueueNotice(undefined);
       try {
-        const item = await api.queueMessage(sessionId, {
-          text,
-          page: pageRef.current,
-        });
+        const item = await api.queueMessage(
+          sessionId,
+          messageBody(draft, pageRef.current),
+        );
         setQueue(current => ({
           ...current,
           items: [...current.items.filter(m => m.id !== item.id), item],
@@ -465,7 +506,7 @@ export function useSessionChat(options: UseSessionChatOptions) {
           // The run ended before the message got there: nothing to wait for.
           await refreshQueue();
           setActiveRun(undefined);
-          return sendDirect(text);
+          return sendDirect(draft);
         }
         if (name === 'QueueFull') {
           await refreshQueue();
@@ -480,21 +521,42 @@ export function useSessionChat(options: UseSessionChatOptions) {
   );
 
   /**
-   * Inserts the text into the run. A 409 means that the run is not what the
+   * Inserts the message into the run. A 409 means that the run is not what the
    * screen thought: read the session, and take the way that fits.
    */
   const insertText = useCallback(
-    async (runId: string, text: string, retry = true): Promise<boolean> => {
+    async (
+      runId: string,
+      draft: OutgoingMessage,
+      retry = true,
+    ): Promise<boolean> => {
       setFailure(undefined);
       setQueueNotice(undefined);
       try {
-        const item = await api.insertMessage(sessionId, runId, {
-          text,
-          page: pageRef.current,
-        });
+        const item = await api.insertMessage(
+          sessionId,
+          runId,
+          messageBody(draft, pageRef.current),
+        );
         // The stream may have said the model read it before this answer came.
         if (!readSeqs.current.has(item.seq)) {
-          setPending(current => [...current, { seq: item.seq, text }]);
+          const stored =
+            item.kind === 'user_message' ? item.attachments : undefined;
+          let attachments = stored;
+          if (!attachments || attachments.length === 0) {
+            attachments = draft.attachments;
+          }
+          if (!attachments || attachments.length === 0) {
+            attachments = undefined;
+          }
+          setPending(current => [
+            ...current,
+            {
+              seq: item.seq,
+              text: draft.text,
+              ...(attachments ? { attachments } : {}),
+            },
+          ]);
         }
         return true;
       } catch (error) {
@@ -518,12 +580,12 @@ export function useSessionChat(options: UseSessionChatOptions) {
           errorNameOf(error) === 'InsertLimitReached' ||
           current?.status === 'waiting_approval'
         ) {
-          return queueText(text);
+          return queueText(draft);
         }
         if (current?.status === 'running' && current.id !== runId && retry) {
-          return insertText(current.id, text, false);
+          return insertText(current.id, draft, false);
         }
-        if (!current) return sendDirect(text);
+        if (!current) return sendDirect(draft);
         setFailure(RUN_CANNOT_TAKE_TEXT);
         return false;
       }
@@ -532,30 +594,33 @@ export function useSessionChat(options: UseSessionChatOptions) {
   );
 
   /**
-   * The text of the box with Enter: a new run when none goes on, an insert
+   * The message of the box with Enter: a new run when none goes on, an insert
    * into the run, or, while the run waits for a decision, the queue.
-   * Resolves with `false` when the text was not taken.
+   * Resolves with `false` when the message was not taken.
    */
   const send = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (input: string | OutgoingMessage): Promise<boolean> => {
+      const draft = draftOf(input);
       const run = activeRunRef.current;
-      if (!run) return sendDirect(text);
-      if (run.status === 'waiting_approval') return queueText(text);
-      return insertText(run.id, text);
+      if (!run) return sendDirect(draft);
+      if (run.status === 'waiting_approval') return queueText(draft);
+      return insertText(run.id, draft);
     },
     [insertText, queueText, sendDirect],
   );
 
-  /** The text with Ctrl or Cmd and Enter, or the Queue button. */
+  /** The message with Ctrl or Cmd and Enter, or the Queue button. */
   const queueMessage = useCallback(
-    async (text: string): Promise<boolean> =>
-      activeRunRef.current ? queueText(text) : sendDirect(text),
+    async (input: string | OutgoingMessage): Promise<boolean> => {
+      const draft = draftOf(input);
+      return activeRunRef.current ? queueText(draft) : sendDirect(draft);
+    },
     [queueText, sendDirect],
   );
 
   const sendAgain = useCallback(async () => {
-    if (resendText) await sendDirect(resendText);
-  }, [resendText, sendDirect]);
+    if (hasContent(resendDraft) && resendDraft) await sendDirect(resendDraft);
+  }, [resendDraft, sendDirect]);
 
   /** Shows what a change of the queue found, and reads the queue again. */
   const queueChangeFailed = useCallback(
@@ -715,7 +780,7 @@ export function useSessionChat(options: UseSessionChatOptions) {
     deciding,
     notice,
     interrupted,
-    canResend: Boolean(resendText),
+    canResend: hasContent(resendDraft),
     error: failure ?? (chat.error ? describeError(chat.error) : undefined),
     pending,
     queue: queue.items,
