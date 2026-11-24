@@ -539,6 +539,35 @@ describe('AdvanceRun: the context budget (H-09)', () => {
     expect(events[1]).toEqual({ type: 'context.trimmed', parts: ['earlier'] });
   });
 
+  it('reports context.trimmed once while the left-out parts stay the same', async () => {
+    const bodies: ItemBody[] = [user('q')];
+    for (let i = 1; i <= 10; i++) {
+      bodies.push(
+        agentSays(`s${i}`),
+        call(`c${i}`, { step: i }),
+        result(`c${i}`, 'ok', { output: { text: 'x'.repeat(20000) } }),
+      );
+    }
+    bodies.push(user('next'));
+    const t = await kit({
+      script: [
+        [callTool('m1', 'catalog:get-entity')],
+        [callTool('m2', 'catalog:get-entity')],
+        [say('The answer.')],
+      ],
+      tools: [readTool],
+      budget: { tokenBudget: 24000, keepRecentSteps: 6 },
+      limits: { maxSteps: 100 },
+      log: bodies,
+    });
+    const { events } = await t.execute();
+    expect(t.model.inputs).toHaveLength(3);
+    expect(types(events).filter(e => e === 'step.started')).toHaveLength(3);
+    expect(events.filter(e => e.type === 'context.trimmed')).toEqual([
+      { type: 'context.trimmed', parts: ['earlier'] },
+    ]);
+  });
+
   it('cuts a summary that is longer than 4000 characters', async () => {
     const t = await kit({
       script: [[say('y'.repeat(10000))], [say('The answer.')]],

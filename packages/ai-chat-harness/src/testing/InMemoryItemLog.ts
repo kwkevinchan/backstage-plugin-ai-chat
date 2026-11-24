@@ -68,7 +68,8 @@ export class InMemoryItemLog implements ItemLog {
     let afterSeq = opts.afterSeq ?? 0;
     if (opts.fromLatestSummary) {
       const newest = [...items].reverse().find(item => item.kind === 'summary');
-      if (newest?.kind === 'summary') {
+      // A summary that does not say how far it goes counts as no summary.
+      if (newest?.kind === 'summary' && Number.isFinite(newest.coversUpToSeq)) {
         afterSeq = Math.max(afterSeq, newest.coversUpToSeq);
       }
     }

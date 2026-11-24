@@ -218,6 +218,25 @@ export function itemLogContract(
       expect(await log.read(sessionId)).toHaveLength(8);
     });
 
+    it('reads everything with fromLatestSummary when the newest summary has no usable coversUpToSeq', async () => {
+      const { log, newSession } = subject;
+      for (const bad of [Number.NaN, Number.POSITIVE_INFINITY]) {
+        const { sessionId, fence } = await newSession();
+        await log.append(
+          sessionId,
+          [
+            user('a'),
+            user('b'),
+            { kind: 'summary', coversUpToSeq: bad, text: 'broken' },
+            user('c'),
+          ],
+          fence,
+        );
+        const read = await log.read(sessionId, { fromLatestSummary: true });
+        expect(read.map(item => item.seq)).toEqual([1, 2, 3, 4]);
+      }
+    });
+
     it('does not change what it read when the caller changes it', async () => {
       const { log, newSession } = subject;
       const { sessionId, fence } = await newSession();
