@@ -97,6 +97,9 @@ export class AdvanceRun {
 
     // A summary that failed is not tried again in this call of the loop.
     let summarize = true;
+    // The parts of the input left out at the last step, as `callModel` keeps
+    // them: `context.trimmed` is sent when they change.
+    let trimmed = '';
 
     for (;;) {
       const { cancelRequested } = await deps.run.heartbeat(req.fence);
@@ -119,7 +122,9 @@ export class AdvanceRun {
         case 'call_model': {
           const step = yield* callModel(deps, req, items, usage, {
             summarize,
+            trimmed,
           });
+          trimmed = step.trimmed ?? trimmed;
           if (step.summaryFailed) summarize = false;
           if (!step.noStep) usage.stepsUsed += 1;
           usage.toolCallsUsed += step.toolCallsRequested;
