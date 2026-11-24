@@ -296,15 +296,24 @@ function limit(output: JsonValue | undefined, maxChars: number): ToolOutput {
   if (output === undefined) return { status: 'ok' };
   const json = JSON.stringify(output) ?? 'null';
   if (json.length <= maxChars) return { status: 'ok', output };
-  let text = json.slice(0, maxChars);
-  const wrap = () => ({ text, originalLength: json.length });
-  while (text.length > 0 && JSON.stringify(wrap()).length > maxChars) {
-    const excess = JSON.stringify(wrap()).length - maxChars;
-    text = text.slice(0, Math.max(0, text.length - excess));
+  // The longest prefix whose serialized form fits. The serialized length never
+  // shrinks when the prefix grows, so a binary search finds it.
+  const wrap = (length: number) => ({
+    text: json.slice(0, length),
+    originalLength: json.length,
+  });
+  const fits = (length: number) =>
+    JSON.stringify(wrap(length)).length <= maxChars;
+  let low = 0;
+  let high = maxChars;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (fits(mid)) low = mid;
+    else high = mid - 1;
   }
   return {
     status: 'ok',
-    output: wrap(),
+    output: wrap(low),
     truncated: true,
     message: `The output was cut: the stored output is at most ${maxChars} characters of ${json.length}.`,
   };
