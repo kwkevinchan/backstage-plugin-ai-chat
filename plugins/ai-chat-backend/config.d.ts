@@ -45,7 +45,12 @@ export interface Config {
      * the built-in rules.
      */
     systemPrompt?: string;
-    /** Which actions of the actions registry the chat can use. */
+    /**
+     * Which actions of the actions registry the chat can use.
+     * @deprecated `toolsets` replaces these two lists once the new agent loop
+     * is connected. Until then the chat still filters actions with them, with
+     * or without `toolsets`, and the backend logs a warning when they are set.
+     */
     actions?: {
       /**
        * Action ID patterns (`*` matches any characters), for example
@@ -54,6 +59,43 @@ export interface Config {
       include?: string[];
       /** Action ID patterns that are never offered. */
       exclude?: string[];
+    };
+    /**
+     * Groups of actions, by toolset id. A session offers the actions of the
+     * toolsets that are switched on for it; the user switches toolsets on and
+     * off in their own session, but only these. An action in no toolset is
+     * never offered. When this is not set, one toolset with every action (or
+     * the ones left by the deprecated `actions`) is on for every session.
+     */
+    toolsets?: {
+      [toolsetId: string]: {
+        /** Name shown to the user. */
+        title?: string;
+        /** Action ID patterns (`*` matches any characters), for example `catalog:*`. */
+        actions: string[];
+        /** Action ID patterns that are not part of the toolset. */
+        exclude?: string[];
+        /** Whether a new session has the toolset switched on. Defaults to false. */
+        default?: boolean;
+        /**
+         * Set it when the actions send data out of the organization. Such an
+         * action asks for approval even when it is read-only. Defaults to
+         * false.
+         */
+        egress?: boolean;
+      };
+    };
+    /**
+     * What happens when the model calls an action, by action ID: `allow` runs
+     * it at once, `ask` asks the user first, `deny` never runs it and never
+     * offers it. `allow` takes effect only for an action that marks itself
+     * read-only and is not in an `egress` toolset; any other action asks, and
+     * the backend logs a warning. Keys are complete action IDs; a key with `*`
+     * is refused. An action that is not listed is `allow` when
+     * it is read-only and `ask` otherwise.
+     */
+    policy?: {
+      [actionId: string]: 'allow' | 'ask' | 'deny';
     };
     /**
      * Most characters of the output of an action that are stored and sent to

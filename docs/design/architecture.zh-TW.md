@@ -637,12 +637,19 @@ export class SendMessage {
 | `Clock`、`IdGenerator`                                             | `SystemClock`、`UuidGenerator` | 沒有                                                                              |
 | （HTTP 的身分）                                                    | `principalFromRequest`         | `coreServices.httpAuth`、`coreServices.userInfo`                                  |
 
-`ActionsToolGateway` 負責的轉換：
+`ActionsToolGateway` 負責的轉換。它是 adapter 裡唯一用到 `actionsServiceRef` 的檔案（V-02）。`plugin.ts` 的組裝，以及舊的 `ChatService`、`ToolCatalog` 是例外，P1-08、P1-09 會刪掉它們：
 
-- action 的 `attributes.readOnly` 轉成 `ToolDescriptor.readOnly`。沒有標的當成不是唯讀（D-06）。
-- action 的 id 對照 Toolset 的樣式（例如 `catalog:*`），算出每個工具屬於哪一組、是不是 `egress`。
-- 用 action 的 input schema 驗證參數，並算出 schema 雜湊（T-05、T-06）。
-- 執行時把 `CallContext.principal` 還原成 `BackstageCredentials`，交給 `actions.invoke`。
+- 建構時收到 `actions`（`ActionsService`）、`catalog`（`AgentCatalog`）、`logger`、`maxOutputChars`，以及 `enabledToolsets(ctx)`：回傳這個 Session 開啟的 Toolset id，`undefined` 表示沒選過，用預設值（`default: true` 的組）。
+- `list`：用呼叫者的憑證呼叫 `actions.list`。要 `secrets` 的 action 不給（聊天沒辦法提供）。每個 action 轉成 `ToolDescriptor`：`id` 是 action id，`readOnly` 只有 `attributes.readOnly === true` 才是 `true`，沒有標的當成不是唯讀（D-06）；`egress` 由 Toolset 算出（所屬的任一組標了 `egress` 就是）；`inputSchema` 是 action 的 input schema 去掉 `$schema`，不是 object 型別時換成空的 object schema；`schemaHash` 是這份 schema 排序鍵之後的 SHA-256（T-06）。最後用 domain 的 `enabledTools` 只留下 Session 開啟的 Toolset 裡的工具（T-02、T-11）；不在任何 Toolset 的 action 不會出現。
+- `validate`：用 `ajv`（draft-07，不檢查 `format`）驗證參數。找不到工具、schema 編不出來，都回傳不合格；訊息是 ajv 的錯誤文字，最多 2000 字（T-05）。
+- `execute`：先用現在的 action 和政策檢查這筆存下來的呼叫（T-06）。政策在提出呼叫時和執行前各檢查一次。工具已經不在清單裡、呼叫存成唯讀但 action 現在不是唯讀、`schemaHash` 變了而存下的輸入不符合新 schema、現在的政策是 `deny`、或存下時不需核准而現在政策要 `ask`（例如事後改成 `egress`），都不執行，回傳 `error` 結果。存下時要核准的呼叫，核准之後現在的政策仍是 `ask` 就照常執行。通過就把 `CallContext.principal` 的 `credentials` 交給 `actions.invoke`。`invoke` 沒有 signal 參數，所以 signal 中止時不再等它並丟出例外（核心看到 signal 已中止就不寫結果）；action 本身可能仍會跑完。action 丟出的例外轉成 `error` 結果。回傳值一律整理成 `ToolOutput` 物件：沒有值是 `{ status: 'ok' }`，字串、數字、`null`、陣列放進 `output`；序列化後超過 `maxOutputChars` 的，`output` 換成 `{ text, originalLength }`（序列化後不超過 `maxOutputChars`），`truncated: true`。
+- 政策的警告：政策把不是唯讀或屬於 `egress` Toolset 的 action 設成 `allow` 時，第一次在 `list` 看到它就記一筆警告，同一個工具只記一次。執行時 `decidePolicy` 仍然算出 `ask`。Actions Registry 要用憑證才能列出 action，所以啟動時沒有清單可查。
+
+`ConfigAgentCatalog` 在建構時讀取並檢查 `aiChat.toolsets` 和 `aiChat.policy`，值不對就丟 `InputError`，後端啟動失敗。它只實作 `AgentCatalog { toolsets(); policy() }`，Agent 留到 P3。
+
+- Toolset 的欄位：`actions`（樣式，不可為空）、`exclude`（不屬於這組的樣式）、`title`、`default`（預設 `false`）、`egress`（預設 `false`）。id 以字母開頭，只能是字母、數字，以及夾在中間的 `-`、`_`。`policy` 的鍵只接受完整的 action id，含 `*` 會丟 `InputError`。
+- `policy` 在設定檔是平的 `{ toolId: allow|ask|deny }`，轉成 domain 的 `PolicySettings { byTool }`。
+- 沒有 `toolsets` 時，用淘汰的 `actions.include`、`actions.exclude` 組成一個 `default` Toolset，所有 Session 預設開啟；兩個都空就是所有 action。只要其中一個有設，啟動時記一筆警告；有 `toolsets` 時 catalog 不用它們。目前的 `ChatService` 不管有沒有 `toolsets` 都用這兩個清單過濾，新的設定要等 P1-08 接上迴圈才生效，警告也這樣說。
 
 ### 5.6 組裝
 
@@ -667,8 +674,14 @@ export const aiChatPlugin = createBackendPlugin({
         const items = new KnexItemLog(knex, clock);
         const sessions = new KnexSessionRepository(knex, clock);
         const runs = new KnexRunRepository(knex, clock, ids);
-        const agents = new ConfigAgentCatalog(d.rootConfig, extensions);
-        const tools = new ActionsToolGateway(d.actions, agents);
+        const agents = new ConfigAgentCatalog(d.rootConfig, d.logger); // P3 再加 extensions
+        const tools = new ActionsToolGateway({
+          actions: d.actions,
+          catalog: agents,
+          logger: d.logger,
+          enabledToolsets: ctx => sessions.enabledToolsets(ctx.sessionId),
+          maxOutputChars: readToolOutputLimit(d.rootConfig),
+        });
         const model = new OpenAiCompatibleModelClient(readModelConfig(d.rootConfig));
         const access = new PermissionAccessControl(d.permissions);
         const audit = new AuditorAuditLog(d.auditor);

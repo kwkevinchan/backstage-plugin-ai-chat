@@ -20,6 +20,7 @@ import {
   resolvePackagePath,
 } from '@backstage/backend-plugin-api';
 import { actionsServiceRef } from '@backstage/backend-plugin-api/alpha';
+import { ConfigAgentCatalog } from './adapters/backstage/ConfigAgentCatalog';
 import { ChatService } from './chat/ChatService';
 import { readAiChatConfig } from './config';
 import { ChatStore } from './database/ChatStore';
@@ -59,6 +60,13 @@ export const aiChatPlugin = createBackendPlugin({
         actions,
       }) {
         const aiChat = readAiChatConfig(config);
+        // Reads and checks the toolsets and the policy, and warns about the
+        // deprecated include and exclude lists.
+        const catalog = new ConfigAgentCatalog(config, logger);
+        const toolsets = await catalog.toolsets();
+        logger.info(
+          `AI chat toolsets: ${toolsets.map(t => t.id).join(', ') || 'none'}`,
+        );
         const db = await database.getClient();
         if (!database.migrations?.skip) {
           await db.migrate.latest({
