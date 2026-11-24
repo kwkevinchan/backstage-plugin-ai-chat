@@ -512,18 +512,19 @@ plugins/ai-chat-backend/
   config.d.ts                          第 4 圈
   src/
     domain/                            第 1 圈
-      session.ts                       Session、可以改哪些欄位
+      session.ts                       Session、NewSession、SessionPatch（可以改哪些欄位）
+      run.ts                           Run、LeasedRun（Run 加上 fence）
       principal.ts                     Principal { userRef, ownershipRefs, credentials: unknown }
       share.ts                         Share、ShareMode、到期的處理
       visibility.ts                    visibleItems()：某個檢視者看得到哪些 Item
       fork.ts                          forkItems()：複製時帶走哪些 Item
       toolset.ts                       Toolset、enabledTools()
       retention.ts
-      errors.ts                        NotFound、NotSessionOwner、RunAlreadyActive…
+      errors.ts                        SessionNotFound、RunNotFound、RunAlreadyActive（P1-05）；NotSessionOwner…（P1-08）
     application/                       第 2 圈
       ports/
-        SessionRepository.ts
-        RunRepository.ts               建立 Run、租約、狀態轉移。也實作核心的 RunControl
+        SessionRepository.ts           create、get、listByOwner、update、delete
+        RunRepository.ts               start、acquireLease、transition、requestCancel、expireStale。也實作核心的 RunControl（heartbeat、recordUsage）
         ShareRepository.ts             P2
         AccessControl.ts               能不能讀這段 Session、能不能用這個 Toolset
         AuditLog.ts
@@ -556,7 +557,8 @@ plugins/ai-chat-backend/
         KnexItemLog.ts
         KnexSessionRepository.ts
         KnexRunRepository.ts
-        KnexShareRepository.ts
+        KnexShareRepository.ts         P2
+        uniqueViolation.ts             判斷資料庫的唯一性錯誤（SQLite、PostgreSQL 各一種格式）
       backstage/
         ActionsToolGateway.ts          Actions Registry 轉成 ToolGateway
         PermissionAccessControl.ts
@@ -677,6 +679,16 @@ export class SendMessage {
 - **結束**：依照 `RunOutcome` 更新 Run 的狀態，清掉 `active_session_id`，通知 Notifier。
 - **關機**：停止接新的 Run。等進行中的 Run 最多 20 秒。沒跑完的中止並標成 `expired`（H-11）。
 
+租約在 `KnexRunRepository` 裡的規則。同時進來的呼叫由資料庫決定：`start` 靠唯一索引，`heartbeat`、`recordUsage`、`acquireLease`、`requestCancel`、`expireStale` 各是一個帶條件的 UPDATE，`transition` 在 transaction 裡先 `SELECT … FOR UPDATE` 再 UPDATE：
+
+- `start`：INSERT 一個 `running` 的 Run，期限是現在加租約長度。`lease_owner` 是用 `IdGenerator` 產生的新值（UUID），每次 `start` 和每次 `acquireLease` 都產生一個，fence 就是 `{runId, leaseOwner}`；同一台 backend 再接手同一個 Run 也拿到不同的 fence，舊的迴圈寫入、續租都會被拒絕。`active_session_id` 的唯一索引擋下第二個進行中的 Run，adapter 把它轉成 `RunAlreadyActive`（H-03）。
+- `heartbeat`：`lease_owner` 是自己、狀態是 `running` 才更新期限，同時回傳 `cancel_requested`。否則丟 `LeaseLost`。`recordUsage` 的條件相同。
+- `acquireLease`：接手一個 Run。條件是狀態為 `waiting_approval`，或狀態為 `running` 而租約沒有主人或已過期。有效的租約不能再接手，持有者自己也一樣。同時有多個呼叫（不論同一台或不同台）時只有一個拿到；等核准的 Run 這時改成 `running`。
+- `transition`：`waiting_approval` 和結束的狀態都會清掉租約；結束的狀態同時清掉 `active_session_id`，讓這段 Session 可以開新的 Run。帶 `leaseOwner` 時不是這個持有者就丟 `LeaseLost`；不帶時是宿主替使用者操作（例如取消一個等核准的 Run）。
+- `expireStale`：狀態 `running` 而 `lease_expires_at` 已過的 Run 標成 `expired`，`end_reason` 是 `lease_expired`。等核准的 Run 沒有租約，不在其中。
+- 租約長度預設 30 秒（建構時可指定）。
+- 各台 backend 的時鐘要同步：租約期限和過期判斷用的是各台自己的時鐘，誤差要小於租約長度減續租間隔（目前 30 − 10 = 20 秒）。
+
 ### 5.5 Adapters
 
 | Port                                                               | Adapter                        | 用到的 Backstage 服務                                                             |
@@ -727,7 +739,7 @@ export const aiChatPlugin = createBackendPlugin({
 
         // 第 3 圈
         const items = new KnexItemLog(knex, clock);
-        const sessions = new KnexSessionRepository(knex, clock);
+        const sessions = new KnexSessionRepository(knex, clock, ids);
         const runs = new KnexRunRepository(knex, clock, ids);
         const agents = new ConfigAgentCatalog(d.rootConfig, d.logger); // P3 再加 extensions
         const tools = new ActionsToolGateway({
@@ -836,7 +848,7 @@ runs
   lease_expires_at      string(32)   null, index
   steps_used            integer      not null default 0
   tool_calls_used       integer      not null default 0
-  elapsed_seconds       real         not null default 0   不含等核准的已用時間（RunUsage.elapsedSeconds）
+  elapsed_seconds       double       not null default 0   不含等核准的已用時間（RunUsage.elapsedSeconds）
   cancel_requested      boolean      not null default false
   end_reason            string(32)   null
   started_at            string(32)   not null
@@ -865,14 +877,19 @@ shares                                           P2
   revoked_at            string(32)   null
 ```
 
-寫入 Item 的 transaction：
+SQLite 和 PostgreSQL 對唯一索引裡的空值的行為相同：空值之間不算重複，只有相同的非空值才算（V-03，測試在 `sessionLogMigration.test.ts`，兩種資料庫都跑）。所以 `active_session_id` 在 Run 結束後設成空值，同一段 Session 可以有任意多個結束的 Run；`dedupe_key` 是空值的 Item 可以有任意多筆。兩個唯一索引都不依賴別的行為。
 
-1. 確認 `runs` 裡這個 Run 的 `lease_owner` 是自己，而且狀態是 `running`。宿主寫 `user_message` 和 `approval` 時不檢查這一項，改成檢查 Run 的狀態。
-2. 讀取並遞增 `sessions.next_seq`。
-3. 插入 Item。
-4. 更新 `sessions.updated_at`。
+寫入 Item 的 transaction（`KnexItemLog.append`）：
 
-`dedupe_key` 重複時，資料庫會拒絕。adapter 把它轉成 `DuplicateItem`。`DecideApproval` 收到這個錯誤時，回傳已經存在的那個決定。
+1. 用共享鎖讀取 `runs` 裡 fence 的那個 Run，確認它屬於這段 Session。接著分兩種：
+   - 批次裡只有 `user_message` 和 `approval`（宿主替使用者寫的）：Run 的狀態是 `running` 或 `waiting_approval` 即可，不看 `lease_owner`。核准可以由任何一台 backend 寫入，而等核准的 Run 沒有租約。
+   - 其餘（迴圈寫的，批次裡有任何一筆就算）：Run 的狀態是 `running`，而且 `lease_owner` 是 fence 的 `leaseOwner`。
+     不符合時丟 `LeaseLost`，整批不寫。
+2. 用一個 UPDATE 把 `sessions.next_seq` 加上這一批的筆數，取回新的值，新值減筆數就是這一批的第一個序號。UPDATE 鎖住那一列，同一段 Session 的寫入一個接一個，序號不重複、不跳號；寫入失敗時 transaction 一起回復，序號不會用掉。
+3. 檢查批次裡的 `dedupe_key` 有沒有在紀錄裡，或在批次裡重複，有就丟 `DuplicateItem`。
+4. 插入 Item，更新 `sessions.updated_at`。
+
+`dedupe_key` 的唯一索引才是保證：第 3 步擋不到的情況下（例如有人繞過紀錄直接寫表），資料庫仍會拒絕，adapter 把這個錯誤也轉成 `DuplicateItem`。`DecideApproval` 收到這個錯誤時，回傳已經存在的那個決定。
 
 ## 8. HTTP 介面
 
