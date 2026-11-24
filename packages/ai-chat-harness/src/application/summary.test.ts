@@ -218,6 +218,7 @@ describe('AdvanceRun: the context budget (H-09)', () => {
     });
     const { events } = await t.execute();
     expect(types(events)).not.toContain('summary.started');
+    expect(types(events)).not.toContain('context.trimmed');
     expect(t.model.inputs).toHaveLength(1);
     expect((await t.kinds()).includes('summary')).toBe(false);
   });
@@ -484,8 +485,19 @@ describe('AdvanceRun: the context budget (H-09)', () => {
         budget,
         log: nineSteps(),
       });
-      const { outcome } = await t.execute();
+      const { events, outcome } = await t.execute();
       expect(outcome).toEqual({ status: 'completed' });
+      // The screen learns that the summary failed and what was left out.
+      expect(types(events).slice(0, 4)).toEqual([
+        'run.started',
+        'summary.started',
+        'summary.failed',
+        'context.trimmed',
+      ]);
+      expect(events[3]).toEqual({
+        type: 'context.trimmed',
+        parts: ['earlier', 'steps'],
+      });
       const input = t.model.inputs[1];
       expect(texts(input)).toContain('the question of the run');
       expect(input.messages[0].role).toBe('user');
@@ -510,9 +522,21 @@ describe('AdvanceRun: the context budget (H-09)', () => {
       limits: { maxSteps: 100 },
       log: bodies,
     });
-    await t.execute();
+    const { events } = await t.execute();
     expect(t.model.inputs).toHaveLength(1);
     expect((await t.kinds()).includes('summary')).toBe(false);
+    // The screen is told that the older part was left out of the input.
+    expect(types(events)).toEqual([
+      'run.started',
+      'context.trimmed',
+      'step.started',
+      'item.started',
+      'item.delta',
+      'item.completed',
+      'step.ended',
+      'run.ended',
+    ]);
+    expect(events[1]).toEqual({ type: 'context.trimmed', parts: ['earlier'] });
   });
 
   it('cuts a summary that is longer than 4000 characters', async () => {

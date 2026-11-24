@@ -18,6 +18,7 @@ import {
   buildModelInput,
   decidePolicy,
   planSummary,
+  trimmedPartsOf,
   type Item,
   type ItemBody,
   type JsonObject,
@@ -123,6 +124,16 @@ export async function* callModel(
     }
   }
   const input = buildModelInput(current, req.agent, extra, req.budget);
+  const trimmed = trimmedPartsOf(current, req.agent, extra, req.budget);
+  if (trimmed.earlier || trimmed.steps) {
+    yield {
+      type: 'context.trimmed',
+      parts: [
+        ...(trimmed.earlier ? (['earlier'] as const) : []),
+        ...(trimmed.steps ? (['steps'] as const) : []),
+      ],
+    };
+  }
 
   yield { type: 'step.started', step };
 

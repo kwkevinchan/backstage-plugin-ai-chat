@@ -56,6 +56,11 @@ export type RunOutcome =
  *   `summary.failed` when the model call failed or gave no text. A failed
  *   summary does not fail the run. `cause` is the original error: the host
  *   logs it and never shows it. A summary is not a step.
+ * - `context.trimmed` comes before `step.started` when the budget made the
+ *   loop leave old content out of the model input: `earlier` is the part before
+ *   the newest user message, `steps` the steps of the current answer. It is
+ *   also sent after `summary.failed`, and when no summary was made because it
+ *   would not have helped. The screen may show one notice for it.
  *
  * @public
  */
@@ -74,4 +79,5 @@ export type HarnessEvent =
   | { type: 'step.ended'; step: number }
   | { type: 'summary.started'; coversUpToSeq: number }
   | { type: 'summary.failed'; cause?: unknown }
+  | { type: 'context.trimmed'; parts: ('earlier' | 'steps')[] }
   | { type: 'run.ended'; outcome: RunOutcome };

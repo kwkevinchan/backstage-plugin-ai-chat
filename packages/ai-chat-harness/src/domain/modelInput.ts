@@ -92,7 +92,10 @@ export type ModelInput = {
 export const SUMMARY_RESERVE_TOKENS = 600;
 
 /** Said first when old steps are left out and there is no summary. */
-const OMITTED_NOTICE = 'The earlier part of the conversation was left out.';
+const EARLIER_OMITTED = 'The earlier part of the conversation was left out.';
+
+/** Said after the question when steps of the current answer are left out. */
+const STEPS_OMITTED = 'Some earlier steps of this answer were left out.';
 
 /**
  * Works out what to send to the model from the log (A-05). The log is not
@@ -117,7 +120,9 @@ const OMITTED_NOTICE = 'The earlier part of the conversation was left out.';
  * {@link estimateTokens}) when it can, in this order: the outputs of the old
  * tool calls become one line, oldest first; then the oldest steps are left
  * out; when that happens and there is no summary, the first message says
- * that the earlier part was left out. The newest `keepRecentSteps` steps are
+ * that the earlier part was left out. Steps of the current answer (after the
+ * newest user message) that are left out are announced after that message,
+ * with or without a summary. The newest `keepRecentSteps` steps are
  * never changed, so a log whose
  * recent steps alone are too big gives an input over the budget. Steps are
  * cut whole: a tool call and its answer stay together. {@link planSummary}
@@ -132,6 +137,35 @@ export function buildModelInput(
   extra: { context: string[]; tools: ToolDescriptor[] },
   budget: ContextBudget,
 ): ModelInput {
+  return assemble(items, agent, extra, budget).input;
+}
+
+/**
+ * What {@link buildModelInput} left out of the input to stay within the
+ * budget, so the screen can say so: `earlier` is true when older steps (before
+ * the newest user message) are left out, `steps` when steps of the current
+ * answer (after it) are. Both are false when nothing is left out. A summary
+ * covers what it covers without being "left out"; what the budget still
+ * removes after it counts.
+ *
+ * @public
+ */
+export function trimmedPartsOf(
+  items: readonly Item[],
+  agent: AgentDefinition,
+  extra: { context: string[]; tools: ToolDescriptor[] },
+  budget: ContextBudget,
+): { earlier: boolean; steps: boolean } {
+  const { earlier, steps } = assemble(items, agent, extra, budget);
+  return { earlier, steps };
+}
+
+function assemble(
+  items: readonly Item[],
+  agent: AgentDefinition,
+  extra: { context: string[]; tools: ToolDescriptor[] },
+  budget: ContextBudget,
+): { input: ModelInput; earlier: boolean; steps: boolean } {
   const layout = layoutOf(items, agent, extra, budget);
   const copy = (segments: Segment[]) =>
     segments.map(segment => ({ ...segment, messages: [...segment.messages] }));
@@ -146,29 +180,41 @@ export function buildModelInput(
 
   total = shortenOutputs(old, total, budget.tokenBudget);
   total = shortenOutputs(mid, total, budget.tokenBudget);
-  // Still too big: leave the oldest steps out. When nothing tells the model
-  // that something is gone (no summary), a message says so; it also keeps the
-  // input starting with a user message.
-  let omitted = false;
-  for (const group of [old, mid]) {
-    while (group.length > 0 && total > budget.tokenBudget) {
-      const [dropped] = group.splice(0, 1);
-      total -= tokensOfSegment(dropped);
-      if (!omitted && layout.summaryMessages.length === 0) {
-        total += estimateTokens(OMITTED_NOTICE);
-      }
-      omitted = true;
-    }
+  // Still too big: leave the oldest steps out, and say so in a message that
+  // is part of the size. Without a summary, the earlier part is announced
+  // first (which also keeps the input starting with a user message); the steps
+  // of the current answer are announced after its question, summary or not.
+  const hasSummary = layout.summaryMessages.length > 0;
+  let earlier = false;
+  let steps = false;
+  while (old.length > 0 && total > budget.tokenBudget) {
+    const [dropped] = old.splice(0, 1);
+    total -= tokensOfSegment(dropped);
+    if (!earlier && !hasSummary) total += estimateTokens(EARLIER_OMITTED);
+    earlier = true;
+  }
+  while (mid.length > 0 && total > budget.tokenBudget) {
+    const [dropped] = mid.splice(0, 1);
+    total -= tokensOfSegment(dropped);
+    if (!steps) total += estimateTokens(STEPS_OMITTED);
+    steps = true;
   }
 
   const messages: ModelMessage[] = [...layout.summaryMessages];
-  if (omitted && layout.summaryMessages.length === 0) {
-    messages.push({ role: 'user', content: OMITTED_NOTICE });
+  if (earlier && !hasSummary) {
+    messages.push({ role: 'user', content: EARLIER_OMITTED });
   }
-  for (const segment of [...old, ...layout.pinned, ...mid, ...layout.recent]) {
+  for (const segment of old) messages.push(...segment.messages);
+  for (const segment of layout.pinned) messages.push(...segment.messages);
+  if (steps) messages.push({ role: 'user', content: STEPS_OMITTED });
+  for (const segment of [...mid, ...layout.recent]) {
     messages.push(...segment.messages);
   }
-  return { system: layout.system, messages, tools: [...extra.tools] };
+  return {
+    input: { system: layout.system, messages, tools: [...extra.tools] },
+    earlier,
+    steps,
+  };
 }
 
 /**

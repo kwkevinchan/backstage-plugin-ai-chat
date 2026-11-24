@@ -190,6 +190,10 @@ export type HarnessEvent =
       cause?: unknown;
     }
   | {
+      type: 'context.trimmed';
+      parts: ('earlier' | 'steps')[];
+    }
+  | {
       type: 'run.ended';
       outcome: RunOutcome;
     };
@@ -561,6 +565,20 @@ export type ToolStartedBody = {
 
 // @public (undocumented)
 export type ToolStartedItem = Item & ToolStartedBody;
+
+// @public
+export function trimmedPartsOf(
+  items: readonly Item[],
+  agent: AgentDefinition,
+  extra: {
+    context: string[];
+    tools: ToolDescriptor[];
+  },
+  budget: ContextBudget,
+): {
+  earlier: boolean;
+  steps: boolean;
+};
 
 // @public
 export const UNTRUSTED_OUTPUT_NOTICE =

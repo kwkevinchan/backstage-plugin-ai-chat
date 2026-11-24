@@ -17,6 +17,7 @@
 import { Item, ItemBody } from './item';
 import {
   buildModelInput,
+  trimmedPartsOf,
   buildSummaryInput,
   estimateTokens,
   ModelInput,
@@ -494,13 +495,14 @@ describe('buildModelInput: the budget (H-09)', () => {
 
   it('keeps at least the newest step when keepRecentSteps is 0', () => {
     const input = buildWith(bodies, 10, 0);
-    // The first question stays too: it is the newest user message.
+    // The first question stays too: it is the newest user message. Nothing
+    // is older than it, so only the steps of its answer are announced.
     expect(input.messages).toEqual([
+      { role: 'user', content: 'first question' },
       {
         role: 'user',
-        content: 'The earlier part of the conversation was left out.',
+        content: 'Some earlier steps of this answer were left out.',
       },
-      { role: 'user', content: 'first question' },
       { role: 'assistant', content: 'done', toolCalls: [] },
     ]);
   });
@@ -893,6 +895,82 @@ describe('the newest user message and the start of the input', () => {
       content: 'The earlier part of the conversation was left out.',
     });
     expect(sizeOf(input)).toBeGreaterThan(0);
+  });
+
+  const EARLIER = 'The earlier part of the conversation was left out.';
+  const STEPS = 'Some earlier steps of this answer were left out.';
+  const parts = (bodies: ItemBody[], tokenBudget: number, keep = 2) =>
+    trimmedPartsOf(log(...bodies), agent, extra, {
+      tokenBudget,
+      keepRecentSteps: keep,
+    });
+
+  it('announces the steps of the answer that are left out after its question, with a summary', () => {
+    const items = log(...run(9));
+    const question = items.find(
+      i => i.kind === 'user_message' && i.text === 'the question',
+    );
+    const withSummary = log(...run(9), {
+      kind: 'summary',
+      coversUpToSeq: (question?.seq ?? 0) - 1,
+      text: 'S',
+    });
+    const limit = { tokenBudget: 1, keepRecentSteps: 2 };
+    const input = buildModelInput(withSummary, agent, extra, limit);
+    const texts = input.messages.map(m => m.content);
+    expect(texts[0]).toContain('S');
+    expect(texts[1]).toBe('the question');
+    expect(texts[2]).toBe(STEPS);
+    expect(texts).not.toContain(EARLIER);
+    expect(callIds(input.messages)).toEqual(['r8', 'r9']);
+    expect(trimmedPartsOf(withSummary, agent, extra, limit)).toEqual({
+      earlier: false,
+      steps: true,
+    });
+  });
+
+  it('announces both the earlier part and the steps when there is no summary', () => {
+    const input = buildWith(run(9), 1, 2);
+    const texts = input.messages.map(m => m.content);
+    expect(texts.slice(0, 3)).toEqual([EARLIER, 'the question', STEPS]);
+    expect(parts(run(9), 1)).toEqual({ earlier: true, steps: true });
+  });
+
+  it('announces only the earlier part when only old content is left out', () => {
+    const bodies: ItemBody[] = [
+      ...Array.from({ length: 6 }, (_v, i): ItemBody[] => [
+        user(`old ${i}`),
+        agentSays('x'.repeat(400)),
+      ]).flat(),
+      user('the question'),
+      agentSays('answer'),
+    ];
+    const input = buildWith(bodies, 150, 1);
+    const texts = input.messages.map(m => m.content);
+    expect(texts[0]).toBe(EARLIER);
+    expect(texts).not.toContain(STEPS);
+    expect(texts).toContain('the question');
+    expect(parts(bodies, 150, 1)).toEqual({ earlier: true, steps: false });
+  });
+
+  it('counts the announcements in the size', () => {
+    const input = buildWith(run(9), 1, 2);
+    const withoutNotes = input.messages
+      .filter(m => m.content !== EARLIER && m.content !== STEPS)
+      .reduce((n, m) => n + estimateTokens(m.content), 0);
+    expect(sizeOf(input)).toBeGreaterThan(withoutNotes);
+    // With room for the kept parts and the notes only, nothing else is left.
+    const roomy = buildWith(run(9), sizeOf(input), 2);
+    expect(sizeOf(roomy)).toBeLessThanOrEqual(sizeOf(input));
+  });
+
+  it('reports nothing trimmed when everything fits or only outputs are shortened', () => {
+    expect(parts(run(9), 1_000_000)).toEqual({ earlier: false, steps: false });
+    const whole = sizeOf(buildWith(run(9), 1_000_000, 2));
+    expect(parts(run(9), whole - 100)).toEqual({
+      earlier: false,
+      steps: false,
+    });
   });
 
   it('says nothing about omission when nothing is left out', () => {
