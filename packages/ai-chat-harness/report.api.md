@@ -68,7 +68,13 @@ export function buildModelInput(
     context: string[];
     tools: ToolDescriptor[];
   },
-  _budget: ContextBudget,
+  budget: ContextBudget,
+): ModelInput;
+
+// @public
+export function buildSummaryInput(
+  plan: SummaryPlan,
+  budget: ContextBudget,
 ): ModelInput;
 
 // @public
@@ -133,6 +139,9 @@ export class DuplicateItem extends HarnessError {
 }
 
 // @public
+export function estimateTokens(text: string): number;
+
+// @public
 export type Extensions = Readonly<Record<string, never>>;
 
 // @public
@@ -171,6 +180,18 @@ export type HarnessEvent =
   | {
       type: 'step.ended';
       step: number;
+    }
+  | {
+      type: 'summary.started';
+      coversUpToSeq: number;
+    }
+  | {
+      type: 'summary.failed';
+      cause?: unknown;
+    }
+  | {
+      type: 'context.trimmed';
+      parts: ('earlier' | 'steps')[];
     }
   | {
       type: 'run.ended';
@@ -228,6 +249,7 @@ export interface ItemLog {
     sessionId: string,
     opts?: {
       afterSeq?: number;
+      fromLatestSummary?: boolean;
     },
   ): Promise<Item[]>;
 }
@@ -365,6 +387,17 @@ export type PlanItem = {
 // @public (undocumented)
 export type PlanItemStatus = 'pending' | 'in_progress' | 'completed';
 
+// @public
+export function planSummary(
+  items: readonly Item[],
+  agent: AgentDefinition,
+  extra: {
+    context: string[];
+    tools: ToolDescriptor[];
+  },
+  budget: ContextBudget,
+): SummaryPlan | undefined;
+
 // @public (undocumented)
 export type PlanUpdateBody = {
   kind: 'plan_update';
@@ -432,10 +465,23 @@ export type RunUsage = {
 export type StopReason = 'max_steps' | 'max_tool_calls' | 'timeout';
 
 // @public
+export const SUMMARY_PROMPT: string;
+
+// @public
+export const SUMMARY_RESERVE_TOKENS = 600;
+
+// @public
 export type SummaryBody = {
   kind: 'summary';
   coversUpToSeq: number;
   text: string;
+};
+
+// @public
+export type SummaryPlan = {
+  coversUpToSeq: number;
+  previousSummary?: string;
+  items: Item[];
 };
 
 // @public
@@ -519,6 +565,20 @@ export type ToolStartedBody = {
 
 // @public (undocumented)
 export type ToolStartedItem = Item & ToolStartedBody;
+
+// @public
+export function trimmedPartsOf(
+  items: readonly Item[],
+  agent: AgentDefinition,
+  extra: {
+    context: string[];
+    tools: ToolDescriptor[];
+  },
+  budget: ContextBudget,
+): {
+  earlier: boolean;
+  steps: boolean;
+};
 
 // @public
 export const UNTRUSTED_OUTPUT_NOTICE =

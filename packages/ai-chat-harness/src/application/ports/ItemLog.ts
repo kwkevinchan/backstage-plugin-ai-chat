@@ -45,10 +45,19 @@ export type RunFence = {
  */
 export interface ItemLog {
   /**
-   * The items of the session in order of `seq`; with `afterSeq` only those
-   * with a larger `seq`.
+   * The items of the session in order of `seq`.
+   *
+   * - With `afterSeq`, only those with a larger `seq`.
+   * - With `fromLatestSummary`, only the items after what the newest `summary`
+   *   covers (`seq` larger than its `coversUpToSeq`), which includes the
+   *   summary itself. A session with no summary gives all its items. This is
+   *   how the loop keeps the read short for a long session. With both options
+   *   the larger bound counts.
    */
-  read(sessionId: string, opts?: { afterSeq?: number }): Promise<Item[]>;
+  read(
+    sessionId: string,
+    opts?: { afterSeq?: number; fromLatestSummary?: boolean },
+  ): Promise<Item[]>;
 
   /**
    * Writes all drafts in one step, with consecutive sequence numbers starting

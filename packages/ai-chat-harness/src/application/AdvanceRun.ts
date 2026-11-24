@@ -34,12 +34,17 @@ import type { AdvanceRunDeps, AdvanceRunRequest } from './types';
  * thrown and end the generator without a `run.ended` event; the host then sets
  * the status of the run itself.
  *
+ * Before a model call whose input would not fit the context budget, the loop
+ * has the old steps summarized (H-09): one more model call, written as a
+ * `summary` item. It is not a step. When it fails the run goes on, and the
+ * input leaves the old steps out.
+ *
  * The working time of the run also ends a model call or a tool that is in
  * progress: both get a signal that aborts at the deadline, and the run ends as
  * `completed` with `endReason` `timeout`. The user stopping the run, by the
  * request of `heartbeat` or by the signal of the request, ends it as
  * `cancelled`. `heartbeat` is asked once per round of the loop and before each
- * call that is not read-only.
+ * call that is not read-only, and once after a summary is written.
  *
  * The deadline timer is `unref`ed, so it does not keep the process alive. The
  * host keeps the process alive until the generator ends. A host with no HTTP
@@ -90,6 +95,9 @@ export class AdvanceRun {
       return outcome;
     };
 
+    // A summary that failed is not tried again in this call of the loop.
+    let summarize = true;
+
     for (;;) {
       const { cancelRequested } = await deps.run.heartbeat(req.fence);
       if (cancelRequested || outer.signal.aborted) {
@@ -97,7 +105,11 @@ export class AdvanceRun {
       }
 
       usage.elapsedSeconds = elapsed();
-      const items = await deps.items.read(req.ctx.sessionId);
+      // Only what the newest summary does not cover: it is all the steps need,
+      // and the read stays short for a long session.
+      const items = await deps.items.read(req.ctx.sessionId, {
+        fromLatestSummary: true,
+      });
       // A backend that crashed before `recordUsage` leaves steps in the log
       // that the stored usage does not count.
       usage.stepsUsed = Math.max(usage.stepsUsed, lastStepOf(items, req));
@@ -105,8 +117,11 @@ export class AdvanceRun {
 
       switch (action.type) {
         case 'call_model': {
-          const step = yield* callModel(deps, req, items, usage);
-          usage.stepsUsed += 1;
+          const step = yield* callModel(deps, req, items, usage, {
+            summarize,
+          });
+          if (step.summaryFailed) summarize = false;
+          if (!step.noStep) usage.stepsUsed += 1;
           usage.toolCallsUsed += step.toolCallsRequested;
           const stopped = stoppedBy(outer, deadline);
           if (stopped) return end(stopped);

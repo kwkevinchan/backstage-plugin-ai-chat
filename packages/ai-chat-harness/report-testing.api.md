@@ -106,6 +106,7 @@ export class InMemoryItemLog implements ItemLog {
     sessionId: string,
     opts?: {
       afterSeq?: number;
+      fromLatestSummary?: boolean;
     },
   ): Promise<Item[]>;
 }
