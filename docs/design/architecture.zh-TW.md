@@ -2,7 +2,7 @@
 
 | 欄位     | 內容                                                                                                                                         |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| 狀態     | 已定案，P1 完成（P1-01 到 P1-11）。PI 規劃中（第 13 節）                                                                                     |
+| 狀態     | 已定案，P1 完成（P1-01 到 P1-11）。PI 進行中：核心（PI-02）已實作，其餘見第 13 節                                                            |
 | 版本     | 1.1（2026-11-24）                                                                                                                            |
 | 對應規格 | [harness-spec.zh-TW.md](harness-spec.zh-TW.md) 1.1，主要是 D-15 到 D-19、D-23、D-25，以及需求 4.9（A）。PI 是 D-27 到 D-30 和需求 4.11（IN） |
 | 下一份   | [implementation-plan.zh-TW.md](implementation-plan.zh-TW.md)                                                                                 |
@@ -511,6 +511,7 @@ export type HarnessEvent =
   | { type: 'summary.started'; coversUpToSeq: number }
   | { type: 'summary.failed'; cause?: unknown }
   | { type: 'context.trimmed'; parts: ('earlier' | 'steps')[] }
+  | { type: 'message.read'; item: Item } // 插入的 user_message 第一次被模型輸入包含
   | { type: 'run.ended'; outcome: RunOutcome };
 ```
 
@@ -519,6 +520,7 @@ export type HarnessEvent =
 - 一個 step 是一次模型呼叫：`step.started` 在呼叫之前，`step.ended` 在這次的 Item 寫完之後。工具的結果在 `step.ended` 之後。
 - 摘要在需要它的 Step 之前：`summary.started`，然後 `summary` Item 的 `item.completed`；失敗時是 `summary.failed`。摘要不是 Step，沒有 `step.started`。
 - `context.trimmed` 在 `step.started` 之前：預算讓迴圈把舊內容拿出送給模型的輸入時發。同一次 `execute()` 內只有 `parts` 跟上一步發的不同才發（不會每一步重發）；核准後接續的 `execute()` 會再發一次。`earlier` 是最新的使用者訊息之前的部分，`steps` 是同一個 Run 裡它之後的 Step。
+- `message.read` 在 `step.started` 之前（在 `context.trimmed` 之後）：這一輪才第一次給模型的插入訊息，每則送一次，`item` 是那筆 `user_message`。模型呼叫在這之後失敗或中止，訊息仍標成沒讀到（紀錄沒有 `readUpToSeq` 蓋過它），下一次 `execute()` 會再送。
 - 模型呼叫失敗或中止時，已送出的 `item.started` 沒有對應的 `item.completed`。畫面要能忽略它們。
 
 ## 5. 宿主：`ai-chat-backend`
@@ -1227,7 +1229,7 @@ plugins/ai-chat/src/
 
 ## 13. 輸入：圖片、插入、排隊（PI）
 
-這一節是 PI 的設計，尚未實作。對應規格 D-27 到 D-30 和需求 4.11（IN-01 到 IN-19）。其他節的表格（use case、路由、事件、資料表）已列出 PI 的項目，細節在這裡。
+這一節是 PI 的設計。核心的部分（PI-02：Item 的欄位、`unreadInserted`、`insertStatesOf`、`decideNextAction`、`buildModelInput`、`message.read`）已實作；宿主、前端和圖片尚未。對應規格 D-27 到 D-30 和需求 4.11（IN-01 到 IN-19）。其他節的表格（use case、路由、事件、資料表）已列出 PI 的項目，細節在這裡。
 
 ### 13.1 結論
 
@@ -1423,9 +1425,10 @@ export type UserMessageBody = {
 //   readUpToSeq?: number  這一輪開始讀紀錄時看到的最大序號（不含這一步自己寫的摘要）
 ```
 
-- **`readUpToSeq`**：`callModel` 這一輪**開始時**讀紀錄，取讀到的 Item 裡最大的 `seq`，寫入同一次 `append` 的每一筆 `agent_message` 和 `tool_call`。不用「輸入裡最大的 `seq`」：`callModel` 可能先寫一筆 `summary`，它的序號比讀取之後才 commit 的插入訊息大，會把那則訊息算成已讀。沒有這個欄位的舊 Item（P1 的紀錄），當成「讀到它自己的序號」。
+- **`readUpToSeq`**：`callModel` 這一輪**開始時**讀紀錄（迴圈傳給它的 `items`），取其中最大的 `seq`，寫入同一次 `append` 的每一筆 `agent_message` 和 `tool_call`。不用「輸入裡最大的 `seq`」：`callModel` 可能先寫一筆 `summary`，它的序號比讀取之後才 commit 的插入訊息大，會把那則訊息算成已讀。沒有這個欄位的舊 Item（P1 的紀錄），當成「讀到它自己的序號」。
 - **`unreadInserted(items)`**（純函式）：找最後一則 `delivery` 不是 `inserted` 的 `user_message`，它是這個 Run 的第一則訊息（所以不用 `runId`）。它之後的 `agent_message` 和 `tool_call` 取最大的 `readUpToSeq`（沒有就是 0）。回傳它之後、`delivery` 是 `inserted`、序號比這個值大的 `user_message`。只看最後一個 Run：較早的 Run 留下的未讀訊息不會擋住這個 Run 結束。
-- **`insertStatesOf(items)`**（純函式）：對每個 Run 的範圍（兩則不是插入的 `user_message` 之間）各算一次，回傳每則插入訊息是 `read` 還是 `unread`。給 `GetSession` 和 A-07 的重送用（13.7）。- **`buildModelInput` 不放沒讀到的舊插入訊息**：不在最後一個 Run 範圍裡、而且 `insertStatesOf` 是 `unread` 的插入訊息，不放進輸入。它的 Run 已經結束；畫面標「Agent 沒有讀到」，使用者按「再送一次」會用新的訊息送出，不排除的話模型會讀到兩次。最後一個 Run 裡還沒讀的插入訊息照常放進輸入（它們正是這一輪要讀的）。
+- **`insertStatesOf(items)`**（純函式）：對每個 Run 的範圍（兩則不是插入的 `user_message` 之間）各算一次，回傳 `Map<seq, 'read' | 'unread'>`，每則插入訊息一筆。給 `GetSession` 和 A-07 的重送用（13.7）。
+- **`buildModelInput` 不放沒讀到的舊插入訊息**：不在最後一個 Run 範圍裡、而且 `insertStatesOf` 是 `unread` 的插入訊息，不放進輸入。它的 Run 已經結束；畫面標「Agent 沒有讀到」，使用者按「再送一次」會用新的訊息送出，不排除的話模型會讀到兩次。最後一個 Run 裡還沒讀的插入訊息照常放進輸入（它們正是這一輪要讀的）。
 - **`decideNextAction`** 兩處改動：
   1. `complete` 的條件加「`unreadInserted(items)` 是空的」。有未讀的插入訊息時，這一條不成立，規則往下走：沒有未完成的呼叫就是 `call_model`；Step 數用完就是 `stop`（`max_steps`）。
   2. `callsOfLastStep` 從「最後一則 `delivery` 不是 `inserted` 的 `user_message`」之後開始找，不從最後一則 `user_message`。插入的訊息可能夾在 `tool_call` 和還沒寫的 `tool_result` 之間（例如核准後、工具還沒執行時插入）；從插入的訊息之後找，最後一步的呼叫會被當成不存在，核准過的呼叫就不會執行。
@@ -1497,7 +1500,8 @@ Run 正常結束（`completed`、沒有 `endReason`）時，`RunSupervisor` 用 
 - 「這個 Run 的使用者訊息」是最後一則 `delivery` 不是 `inserted` 的 `user_message`，加上它之後所有插入的 `user_message`。
 - 它們都原文送出（含圖片），不縮短、不省略、不被摘要。摘要最多涵蓋到第一則之前（`coversUpToSeq` 最多到它的 `seq` 減 1）。
 - 數量受 `insert.maxPerRun` 限制（5 則，每則最多 8000 字），所以這一塊的大小有上限。它和最近的 Step 加起來超過預算時，輸入會超過預算，跟「最近的部分太大」同一種情形。
-- `planSummary` 的 `boundarySeq` 和 `buildModelInput` 的 `pinned` 都改用這個範圍。
+- 實作：`pinned` 只放第一則（這個 Run 最後一則 `delivery` 不是 `inserted` 的 `user_message`）；插入的訊息留在原來的位置，在預算不夠時不被省略（`mid` 裡跳過它們、`recent` 本來就不動）。`boundarySeq` 是第一則的 `seq`，所以摘要不涵蓋第一則，也不涵蓋它之後的插入訊息。`planSummary` 算「留下的部分」時把這些插入訊息加進去。
+- 插入的訊息仍依 `seq` 的順序排進輸入（除了上面說的：同一步的工具結果先於它）。模型串流到一半時插入的訊息，`seq` 比那一次輸出小，所以在輸入裡排在那次輸出之前。
 
 **Stop 和租約過期**
 

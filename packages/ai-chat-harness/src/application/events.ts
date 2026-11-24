@@ -49,6 +49,9 @@ export type RunOutcome =
  *   ties them to the `item.completed` that follows. For a `tool_call` it is
  *   the `callId` the call has in the log, and `modelCallId` is the id the
  *   model gave.
+ * - `message.read` comes before the `step.started` of the model call that is
+ *   the first to give a message inserted into the run to the model (IN-10). It
+ *   is sent once for each message. `item` is the `user_message`.
  * - A step is one model call: `step.started` before it, `step.ended` after
  *   its items are written. The results of the tools come after it.
  * - A summary of the old steps (H-09) is made before the step that needs it:
@@ -69,6 +72,7 @@ export type RunOutcome =
  */
 export type HarnessEvent =
   | { type: 'run.started'; runId: string }
+  | { type: 'message.read'; item: Item }
   | { type: 'step.started'; step: number }
   | {
       type: 'item.started';

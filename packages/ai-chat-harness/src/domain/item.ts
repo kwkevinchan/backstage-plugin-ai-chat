@@ -57,6 +57,20 @@ export type ToolResultStatus =
 export type PageContext = { path: string; entityRef?: string };
 
 /**
+ * How a message of the user reached the log (IN-17).
+ *
+ * - `direct`: the user sent it to start a run.
+ * - `inserted`: the user sent it while a run was running; the run reads it at
+ *   its next model call.
+ * - `queued`: it waited in the queue and the host started a run with it.
+ *
+ * A message with no `delivery` (a record of P1) is `direct`.
+ *
+ * @public
+ */
+export type Delivery = 'direct' | 'inserted' | 'queued';
+
+/**
  * The message of the user. `page` is where the user was; `buildModelInput`
  * tells the model with one line before the text.
  *
@@ -66,6 +80,7 @@ export type UserMessageBody = {
   kind: 'user_message';
   text: string;
   page?: PageContext;
+  delivery?: Delivery;
 };
 
 /**
@@ -73,9 +88,19 @@ export type UserMessageBody = {
  * `tool_call` items of that step, text first, so an `agent_message` that is
  * the last conversation item has no call after it.
  *
+ * `readUpToSeq` is the largest `seq` the log had when the loop read it for the
+ * model call that wrote this item. It does not count the summary the same
+ * call may write before the model runs: a message inserted while that summary
+ * was made has a smaller `seq` than the summary and was not read. An item with
+ * no `readUpToSeq` (a record of P1) counts as having read up to its own `seq`.
+ *
  * @public
  */
-export type AgentMessageBody = { kind: 'agent_message'; text: string };
+export type AgentMessageBody = {
+  kind: 'agent_message';
+  text: string;
+  readUpToSeq?: number;
+};
 
 /**
  * A request of the model to run a tool. `step` is the number of the step of
@@ -101,6 +126,8 @@ export type ToolCallBody = {
   readOnly: boolean;
   step: number;
   position: number;
+  /** See {@link AgentMessageBody}. */
+  readUpToSeq?: number;
 };
 
 /** The decision of the user about one call that needs approval. @public */

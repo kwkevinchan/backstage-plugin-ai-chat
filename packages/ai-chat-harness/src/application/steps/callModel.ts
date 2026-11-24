@@ -19,6 +19,7 @@ import {
   decidePolicy,
   planSummary,
   trimmedPartsOf,
+  unreadInserted,
   type Item,
   type ItemBody,
   type JsonObject,
@@ -77,6 +78,11 @@ type RequestedCall = {
  *   has no `deny`; the result closes it.
  * - A model call with neither text nor calls writes nothing and fails the
  *   run: asking again would give the same input.
+ * - Each item of the model output has `readUpToSeq`: the largest `seq` of the
+ *   log as the loop read it for this call (`items`). The summary this call may
+ *   write is not counted: a message inserted while it was made is not read.
+ * - `message.read` is sent, before `step.started`, for each inserted message
+ *   this call is the first to give to the model (`unreadInserted(items)`).
  * - When the input would be over the budget even with the old tool outputs
  *   shortened, the old steps are summarized first (`summarize`; H-09), unless
  *   `summarize` is false. The summary is not a step. If it fails, the model is
@@ -142,6 +148,13 @@ export async function* callModel(
     yield { type: 'context.trimmed', parts };
   }
 
+  // What the log holds now is what this call reads. Items that arrive later
+  // are for the next call, whatever the summary or the model take in between.
+  const readUpToSeq = items.reduce((max, item) => Math.max(max, item.seq), 0);
+  for (const message of unreadInserted(items)) {
+    yield { type: 'message.read', item: message };
+  }
+
   yield { type: 'step.started', step };
 
   let text = '';
@@ -203,7 +216,7 @@ export async function* callModel(
   const drafts: ItemDraft[] = [];
   const draftIds: (string | undefined)[] = [];
   if (text.trim().length > 0) {
-    drafts.push({ kind: 'agent_message', text });
+    drafts.push({ kind: 'agent_message', text, readUpToSeq });
     draftIds.push(textDraftId);
   }
 
@@ -223,7 +236,7 @@ export async function* callModel(
       position,
       overLimit: position >= remaining,
     });
-    drafts.push(body);
+    drafts.push({ ...body, readUpToSeq });
     draftIds.push(call.callId);
     if (result) results.push(result);
   }

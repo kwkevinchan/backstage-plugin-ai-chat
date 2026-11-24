@@ -32,6 +32,7 @@ import {
   approve,
   budget,
   call,
+  inserted,
   log,
   note,
   result,
@@ -1094,5 +1095,253 @@ describe('planSummary: when a summary cannot help', () => {
       { tokenBudget: 600, keepRecentSteps: 2 },
     );
     expect(found).toBeDefined();
+  });
+});
+
+describe('buildModelInput: messages inserted into the run (IN-10)', () => {
+  const extra = { context: [], tools: [tool()] };
+  const text = (messages: ModelMessage[]) => messages.map(m => m.content);
+  const step = (n: number, size = 400): ItemBody[] => [
+    agentSays(`step ${n}`),
+    call(`r${n}`, { step: n }),
+    result(`r${n}`, 'ok', { output: { text: 'x'.repeat(size) } }),
+  ];
+
+  describe('the place of the message', () => {
+    it('is after the answers of the call it was inserted next to', () => {
+      const input = build([
+        user('Q'),
+        agentSays('looking'),
+        call('c1', { step: 1 }),
+        inserted('change course'),
+        result('c1'),
+      ]);
+      expect(roles(input.messages)).toEqual([
+        'user',
+        'assistant',
+        'tool',
+        'user',
+      ]);
+      expect(input.messages[3]).toEqual({
+        role: 'user',
+        content: 'change course',
+      });
+      expectPaired(input.messages);
+    });
+
+    it('is after all the results of a step with two calls, when it comes between the results', () => {
+      const input = build([
+        user('Q'),
+        agentSays('looking'),
+        call('c1', { step: 1 }),
+        call('c2', { step: 1, position: 1 }),
+        result('c1'),
+        inserted('change course'),
+        result('c2'),
+      ]);
+      expect(roles(input.messages)).toEqual([
+        'user',
+        'assistant',
+        'tool',
+        'tool',
+        'user',
+      ]);
+      expect(
+        input.messages.filter(m => m.role === 'tool').map(m => m.callId),
+      ).toEqual(['c1', 'c2']);
+      expect(input.messages[4].content).toBe('change course');
+      expectPaired(input.messages);
+    });
+
+    it('is after the results when it comes before both of them', () => {
+      const input = build([
+        user('Q'),
+        call('c1', { step: 1 }),
+        call('c2', { step: 1, position: 1 }),
+        inserted('change course'),
+        result('c1'),
+        result('c2'),
+        agentSays('next', 4),
+      ]);
+      expect(roles(input.messages)).toEqual([
+        'user',
+        'assistant',
+        'tool',
+        'tool',
+        'user',
+        'assistant',
+      ]);
+    });
+
+    it('is after the answer "the call did not run" when its call has no result', () => {
+      const input = build([
+        user('Q'),
+        call('c1', { step: 1 }),
+        inserted('change course'),
+      ]);
+      expect(roles(input.messages)).toEqual([
+        'user',
+        'assistant',
+        'tool',
+        'user',
+      ]);
+      expectPaired(input.messages);
+    });
+
+    it('is sent as written, with no mark that it was inserted', () => {
+      const input = build([user('Q'), inserted('also this')]);
+      expect(input.messages[1]).toEqual({ role: 'user', content: 'also this' });
+    });
+  });
+
+  describe('with a small budget', () => {
+    const run = (): ItemBody[] => [
+      user('old question'),
+      agentSays('old answer'),
+      user('the first message'),
+      ...step(1),
+      ...step(2),
+      inserted('insert A'),
+      ...step(3),
+      ...step(4),
+      inserted('insert B'),
+      ...step(5),
+      ...step(6),
+    ];
+    const small = { tokenBudget: 1, keepRecentSteps: 2 };
+
+    it('keeps the first message and every inserted message as written, in order', () => {
+      const input = buildModelInput(log(...run()), agent, extra, small);
+      const texts = text(input.messages);
+      const at = (t: string) => texts.indexOf(t);
+      expect(at('the first message')).toBeGreaterThanOrEqual(0);
+      expect(at('the first message')).toBeLessThan(at('insert A'));
+      expect(at('insert A')).toBeLessThan(at('insert B'));
+      expect(at('insert B')).toBeLessThan(at('step 6'));
+      // The steps are left out, not the messages of the user.
+      expect(texts).not.toContain('step 1');
+      expect(texts).not.toContain('step 3');
+      expect(texts).not.toContain('old question');
+      expectPaired(input.messages);
+    });
+
+    it('keeps an inserted message that falls before the newest steps while the steps around it are left out', () => {
+      const input = buildModelInput(log(...run()), agent, extra, small);
+      const texts = text(input.messages);
+      expect(texts).toContain('insert A');
+      expect(texts).toContain(
+        'Some earlier steps of this answer were left out.',
+      );
+      expect(
+        input.messages.flatMap(m =>
+          m.role === 'assistant' ? m.toolCalls.map(c => c.callId) : [],
+        ),
+      ).toEqual(['r5', 'r6']);
+    });
+
+    it('does not let a summary cover the first message or a message inserted after it', () => {
+      // The question of this run is the last message that is not inserted.
+      // The old answer is long text, which shortening cannot make smaller.
+      const bodies = [
+        user('old question'),
+        agentSays('x'.repeat(3000)),
+        ...run().slice(2),
+      ];
+      const first = log(...bodies).find(
+        i => i.kind === 'user_message' && i.text === 'the first message',
+      );
+      const plan = planSummary(log(...bodies), agent, extra, {
+        tokenBudget: 600,
+        keepRecentSteps: 2,
+      });
+      expect(plan).toBeDefined();
+      expect(plan!.coversUpToSeq).toBeLessThan(first!.seq);
+      expect(plan!.items.every(i => i.seq < first!.seq)).toBe(true);
+    });
+
+    it('sends the summary, then the first message and the inserted messages as written', () => {
+      const bodies = run();
+      const first = log(...bodies).find(
+        i => i.kind === 'user_message' && i.text === 'the first message',
+      );
+      const withSummary = log(...bodies, {
+        kind: 'summary',
+        coversUpToSeq: first!.seq - 1,
+        text: 'S',
+      });
+      const input = buildModelInput(withSummary, agent, extra, small);
+      const texts = text(input.messages);
+      expect(texts[0]).toContain('S');
+      expect(texts.slice(1, 3)).toEqual([
+        'the first message',
+        'Some earlier steps of this answer were left out.',
+      ]);
+      expect(texts).toEqual(expect.arrayContaining(['insert A', 'insert B']));
+    });
+  });
+
+  describe('a message that the model did not read in a run that has ended', () => {
+    it('is not sent in the input of a later run', () => {
+      const input = build([
+        user('one'),
+        agentSays('a', 1),
+        inserted('never read'),
+        user('two'),
+      ]);
+      expect(text(input.messages)).toEqual(['one', 'a', 'two']);
+    });
+
+    it('is not in the plan of a summary either', () => {
+      const bodies: ItemBody[] = [
+        user('one'),
+        agentSays('a', 1),
+        inserted('never read'),
+        user('two'),
+        ...Array.from({ length: 6 }, (_v, i) => step(i + 1)).flat(),
+      ];
+      const plan = planSummary(log(...bodies), agent, extra, {
+        tokenBudget: 250,
+        keepRecentSteps: 1,
+      });
+      expect(plan).toBeDefined();
+      expect(plan!.items.map(i => (i as { text?: string }).text)).not.toContain(
+        'never read',
+      );
+    });
+
+    it('is sent in the run it was inserted into, where it is still to be read', () => {
+      const input = build([
+        user('one'),
+        agentSays('a', 1),
+        inserted('to be read'),
+      ]);
+      expect(text(input.messages)).toEqual(['one', 'a', 'to be read']);
+    });
+
+    it('is sent when the model had read it', () => {
+      const input = build([
+        user('one'),
+        inserted('was read'),
+        agentSays('a', 2),
+        user('two'),
+      ]);
+      expect(text(input.messages)).toEqual(['one', 'was read', 'a', 'two']);
+    });
+  });
+
+  it('builds the same input from a log of P1 (no delivery, no readUpToSeq)', () => {
+    const input = build([
+      user('one'),
+      agentSays('a'),
+      call('c1'),
+      result('c1'),
+      user('two'),
+    ]);
+    expect(roles(input.messages)).toEqual([
+      'user',
+      'assistant',
+      'tool',
+      'user',
+    ]);
   });
 });
