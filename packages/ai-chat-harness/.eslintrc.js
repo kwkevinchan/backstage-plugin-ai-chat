@@ -20,13 +20,14 @@
 // 1. The whole package never imports `@backstage/*`, tests included. The
 //    manifest has no such runtime dependency either, and
 //    `@backstage/no-undeclared-imports` rejects an import it does not list.
-// 2. `import/no-restricted-paths` keeps the circles in order: domain imports
-//    neither the application circle nor the testing entry point, and the
-//    application circle does not import the testing entry point.
+// 2. `import/no-restricted-paths` is an allow list. `domain` imports only
+//    `domain`; `application` imports only `domain` and `application`. Anything
+//    else under `src`, including `src/index.ts` (what `'..'` resolves to) and
+//    `src/testing`, is refused. Test files may also import `src/testing`.
 // 3. `domain/` and `application/` also never import `express` or `knex`, and
 //    do not use `fetch`.
 // 4. `domain/` has no `async` function, no `await`, no `Promise`, and imports
-//    no Node.js module that does I/O.
+//    no Node.js built-in module (`fs`, `path`, `crypto`, `node:*` and so on).
 //
 // `src/lintRules.test.ts` lints sample files against this configuration.
 
@@ -39,10 +40,48 @@ const baseRestrictedPatterns = [
   '**/__mocks__/**',
 ];
 
+const { builtinModules } = require('module');
+
 const noBackstage = '@backstage/*';
 const noFrameworkPaths = ['express', 'knex'];
-const noIoPaths = ['fs', 'http', 'https', 'net', 'os', 'child_process'];
 const noFrameworkPatterns = ['express/*', 'knex/*'];
+// Every Node.js built-in module, with and without the `node:` prefix.
+const noNodePaths = builtinModules;
+const noNodePatterns = ['node:*', ...builtinModules.map(name => `${name}/*`)];
+
+// The test files of the shared configuration (@backstage/cli, eslint-factory).
+const testFiles = [
+  '**/*.test.*',
+  '**/*.stories.*',
+  '**/__testUtils__/**',
+  '**/__mocks__/**',
+  'src/setupTests.*',
+  '!src/**',
+];
+
+const pathsRule = (allowedForTests = false) => [
+  'error',
+  {
+    // Relative to the package, whatever the working directory is.
+    basePath: __dirname,
+    zones: [
+      {
+        target: './src/domain',
+        from: './src',
+        except: allowedForTests ? ['./domain', './testing'] : ['./domain'],
+        message: 'domain imports only domain (inner circle only)',
+      },
+      {
+        target: './src/application',
+        from: './src',
+        except: allowedForTests
+          ? ['./domain', './application', './testing']
+          : ['./domain', './application'],
+        message: 'application imports only domain and application',
+      },
+    ],
+  },
+];
 
 module.exports = require('@backstage/cli/config/eslint-factory')(__dirname, {
   restrictedImportPatterns: [noBackstage],
@@ -55,37 +94,15 @@ module.exports = require('@backstage/cli/config/eslint-factory')(__dirname, {
     },
   },
   rules: {
-    'import/no-restricted-paths': [
-      'error',
-      {
-        // Relative to the package, whatever the working directory is.
-        basePath: __dirname,
-        zones: [
-          {
-            target: './src/domain',
-            from: './src/application',
-            message: 'domain must not import application (inner circle only)',
-          },
-          {
-            target: './src/domain',
-            from: './src/testing',
-            message: 'domain must not import the testing entry point',
-          },
-          {
-            target: './src/application',
-            from: './src/testing',
-            message: 'application must not import the testing entry point',
-          },
-        ],
-      },
-    ],
+    'import/no-restricted-paths': pathsRule(),
   },
   overrides: [
     {
       // Test files get their own restricted imports from the shared
-      // configuration, which has no patterns.
-      files: ['**/*.test.*', '**/__testUtils__/**', '**/__mocks__/**'],
+      // configuration, which has no patterns. They may use `src/testing`.
+      files: testFiles,
       rules: {
+        'import/no-restricted-paths': pathsRule(true),
         'no-restricted-imports': ['error', { patterns: [noBackstage] }],
       },
     },
@@ -116,12 +133,12 @@ module.exports = require('@backstage/cli/config/eslint-factory')(__dirname, {
         'no-restricted-imports': [
           'error',
           {
-            paths: [...noFrameworkPaths, ...noIoPaths],
+            paths: [...noFrameworkPaths, ...noNodePaths],
             patterns: [
               ...baseRestrictedPatterns,
               noBackstage,
               ...noFrameworkPatterns,
-              'node:*',
+              ...noNodePatterns,
             ],
           },
         ],

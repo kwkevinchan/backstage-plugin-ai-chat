@@ -60,6 +60,8 @@ describe('dependency rules of the core', () => {
     ['src/application/example.ts'],
     ['src/testing/example.ts'],
     ['src/domain/example.test.ts'],
+    ['src/testing/example.test.ts'],
+    ['src/index.test.ts'],
   ])('%s', file => {
     it.each([
       ['@backstage/errors'],
@@ -101,28 +103,91 @@ describe('dependency rules of the core', () => {
   });
 });
 
-describe('the domain circle is pure', () => {
+describe('the circles are an allow list', () => {
   it.each([
-    ['an async function', 'export async function f() {\n  return 1;\n}\n'],
-    ['an async arrow function', 'export const f = async () => 1;\n'],
-    ['await', 'export const f = () => {\n  return (async () => 1)();\n};\n'],
-    ['a Promise type', 'export type P = Promise<number>;\n'],
-    ['fetch', "export const f = () => fetch('https://example.com');\n"],
-  ])('rejects %s', async (_name, code) => {
-    const messages = await lint('src/domain/example.ts', code);
-    expect(messages.length).toBeGreaterThan(0);
+    ['src/domain/example.ts', '../index'],
+    ['src/domain/example.ts', '..'],
+    ['src/application/example.ts', '../index'],
+    ['src/application/example.ts', '..'],
+  ])('%s rejects an import of %s (the entry point)', async (file, source) => {
+    const messages = await lint(
+      file,
+      `import {} from '${source}';\n\nexport {};\n`,
+    );
+    expect(messages.map(m => m.rule)).toContain('import/no-restricted-paths');
   });
 
-  it.each([['fs'], ['node:fs'], ['http'], ['child_process']])(
-    'rejects an import of %s',
-    async source => {
+  it.each([
+    ['src/application/example.test.ts', '../testing/index'],
+    ['src/application/example.test.ts', '../domain/index'],
+    ['src/domain/example.test.ts', '../testing/index'],
+    ['src/testing/example.test.ts', '../application/index'],
+  ])('lets the test file %s import %s', async (file, source) => {
+    expect(
+      await lint(file, `import {} from '${source}';\n\nexport {};\n`),
+    ).toEqual([]);
+  });
+
+  it('still keeps domain from importing application in a test file', async () => {
+    const messages = await lint(
+      'src/domain/example.test.ts',
+      "import {} from '../application/index';\n\nexport {};\n",
+    );
+    expect(messages.map(m => m.rule)).toContain('import/no-restricted-paths');
+  });
+
+  it.each([['src/domain/example.ts'], ['src/application/example.ts']])(
+    '%s does not use fetch',
+    async file => {
       const messages = await lint(
-        'src/domain/example.ts',
-        `import {} from '${source}';\n`,
+        file,
+        "export const f = () => fetch('https://example.com');\n",
       );
-      expect(messages.map(m => m.rule)).toContain('no-restricted-imports');
+      expect(messages.map(m => m.rule)).toContain('no-restricted-globals');
     },
   );
+});
+
+describe('the domain circle is pure', () => {
+  it.each([
+    [
+      'an async function',
+      'export async function f() {\n  return 1;\n}\n',
+      'no async function',
+    ],
+    [
+      'an async arrow function',
+      'export const f = async () => 1;\n',
+      'no async function',
+    ],
+    ['await', 'export const f = async () => {\n  await 1;\n};\n', 'no await'],
+    ['a Promise type', 'export type P = Promise<number>;\n', 'no Promise'],
+    [
+      'fetch',
+      "export const f = () => fetch('https://example.com');\n",
+      'instead of fetch',
+    ],
+  ])('rejects %s', async (_name, code, text) => {
+    const messages = await lint('src/domain/example.ts', code);
+    expect(messages.map(m => m.message).join('\n')).toContain(text);
+  });
+
+  it.each([
+    ['fs'],
+    ['fs/promises'],
+    ['node:fs'],
+    ['node:crypto'],
+    ['path'],
+    ['crypto'],
+    ['http'],
+    ['child_process'],
+  ])('rejects an import of %s', async source => {
+    const messages = await lint(
+      'src/domain/example.ts',
+      `import {} from '${source}';\n`,
+    );
+    expect(messages.map(m => m.rule)).toContain('no-restricted-imports');
+  });
 
   it('accepts plain synchronous code', async () => {
     expect(
