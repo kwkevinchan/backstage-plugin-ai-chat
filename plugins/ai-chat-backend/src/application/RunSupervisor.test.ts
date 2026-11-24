@@ -422,7 +422,10 @@ describe('RunSupervisor with inserted messages and the queue (PI-03)', () => {
 
   /** A loop that ends as completed every time it is run; counts the runs of it. */
   function completing(times: { n: number }) {
-    return async function* (): AsyncGenerator<HarnessEvent, RunOutcome> {
+    return async function* completingLoop(): AsyncGenerator<
+      HarnessEvent,
+      RunOutcome
+    > {
       times.n += 1;
       yield { type: 'run.started', runId: 'r1' };
       const outcome: RunOutcome = { status: 'completed' };
@@ -583,7 +586,7 @@ describe('RunSupervisor with inserted messages and the queue (PI-03)', () => {
   it('tells the failure of a loop that threw to afterRun as a failed run', async () => {
     const afterRun = jest.fn(async () => ({ items: [], paused: true }));
     const { supervisor } = setup(
-      async function* () {
+      async function* throwingLoop() {
         yield { type: 'run.started', runId: 'r1' };
         throw new Error('database down');
       },
