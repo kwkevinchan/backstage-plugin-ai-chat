@@ -58,6 +58,9 @@ describe('readAiChatConfig', () => {
     expect(() => read({ insert: { maxPerRun: 0 } })).toThrow(
       /input\.insert\.maxPerRun must be a positive integer/,
     );
+    expect(() => read({ insert: { maxPerRun: 21 } })).toThrow(
+      /input\.insert\.maxPerRun must be at most 20/,
+    );
     expect(() => read({ queue: { maxMessages: 1.5 } })).toThrow(
       /input\.queue\.maxMessages must be a positive integer/,
     );

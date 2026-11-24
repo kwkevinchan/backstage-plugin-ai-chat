@@ -1238,7 +1238,7 @@ plugins/ai-chat/src/
 - **插入和 Run 結束的競爭由資料庫的鎖解決。** 插入的 transaction 對 `runs` 那一列加共享鎖。結束的 transaction 對同一列加更新鎖，再檢查有沒有還沒讀的訊息。兩者一定有先後（13.4）。
 - **自動送出只送一次，也不會丟。** 取出排隊列、建立 Run、寫入 `user_message` 在同一個 transaction（13.6）。
 - **暫停不存狀態。** Session 沒有進行中的 Run，而且佇列不是空的，就是暫停。
-- **鎖的順序固定：先 `runs`，再 `sessions`，最後是 `items`、`queued_messages`、`attachments`。** 每種寫入的取鎖順序和理由見 13.8。順序相反，或先取共享鎖再升級，會在 PostgreSQL 死結。
+- **鎖的順序固定：需要 `runs` 的先取 `runs`，再取 `sessions` 的列鎖；`items`、`queued_messages`、`attachments` 都在 `sessions` 之後，由 `sessions` 的列鎖排成一個接一個。** 每種寫入的取鎖順序和理由見 13.8。順序相反，或先取共享鎖再升級，會在 PostgreSQL 死結。
 
 ### 13.2 每樣東西放在哪一圈
 
@@ -1477,7 +1477,7 @@ Run 正常結束（`completed`、沒有 `endReason`）時，`RunSupervisor` 用 
 - **SQLite**：knex 把 `forShare` 和 `forUpdate` 在 SQLite 編成空字串，不加任何鎖。靠的是 knex 的 SQLite 連線池預設只有一條連線，所有 transaction 在這條連線上排隊，做完一個才換下一個。所以結果仍是「插入先」或「結束先」，SQL 相同，結果同上。連線池開到多條的檔案資料庫沒有這個保證：兩個連線同時寫入時，後來的可能收到 `SQLITE_BUSY`，請求失敗，不會寫出錯的結果（這一點只靠推理，沒有測試；V-10 的結論見實作計畫）。測試確認的是：測試用的 SQLite 資料庫只有一條連線（`KnexItemLog.test.ts`），PostgreSQL 的測試用兩條以上的連線（`postgresConcurrency.test.ts`）。
 - 在 `transition` 之前，迴圈自己的 `complete` 判斷（`unreadInserted`）也會擋掉大部分的情況。資料庫的檢查是剩下的空檔的保證：迴圈讀完紀錄、到 `transition` 之間才 commit 的插入。
 
-被拒絕之後：`RunSupervisor` 不把 `run.ended` 交給訂閱者，帶著租約用 `runs.get` 讀到的用量再呼叫一次 `AdvanceRun.execute()`，第二次的 `run.started` 也不交出去。迴圈讀到未讀的訊息，呼叫模型（一個 Step）。每次重跑至少用掉一個 Step，所以最多重跑到 `maxSteps`；那時結果是 `completed` 加 `endReason`，不檢查（見下），未讀的訊息標成「Agent 沒有讀到」。另外有一個保險：同一個迴圈被拒絕超過 20 次（`MAX_REREADS`；正常不會發生，因為每次都讀到更多）就當成錯誤，Run 結束成 `failed`，原因 `error`。只有「模型給出最後回答」的結束（`completed`、沒有 `endReason`）帶 `requireAllRead`。
+被拒絕之後：`RunSupervisor` 不把 `run.ended` 交給訂閱者，帶著租約用 `runs.get` 讀到的用量再呼叫一次 `AdvanceRun.execute()`，第二次的 `run.started` 也不交出去。迴圈讀到未讀的訊息，呼叫模型（一個 Step）。每次重跑至少用掉一個 Step，所以最多重跑到 `maxSteps`；每次重跑也至少讀到一則新的插入訊息，一個 Run 最多 `insert.maxPerRun` 則，設定檔把它限制在 20 以內，所以 `MAX_REREADS`（20）夠用；那時結果是 `completed` 加 `endReason`，不檢查（見下），未讀的訊息標成「Agent 沒有讀到」。另外有一個保險：同一個迴圈被拒絕超過 20 次（`MAX_REREADS`；正常不會發生，因為每次都讀到更多）就當成錯誤，Run 結束成 `failed`，原因 `error`。只有「模型給出最後回答」的結束（`completed`、沒有 `endReason`）帶 `requireAllRead`。
 
 不檢查的結束方式：`failed`、`cancelled`、`expired`、有 `endReason` 的 `completed`、`waiting_approval`。前四種的未讀訊息標成沒讀到（IN-12）。`waiting_approval`：插入在 Run 轉成等核准之前 commit 時，訊息留在紀錄裡，核准後迴圈的下一次模型呼叫會讀到；之後才來的插入得到 409。
 
@@ -1643,7 +1643,7 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 第 8 節的對照表加兩列：`message.read` 對應 `data-inserted`，宿主的 `queue.state` 對應 `data-queue`。
 
 - 插入的訊息被讀到時，才出現在串流裡。寫入時沒有事件：插入的請求本身回傳那筆 Item，畫面自己顯示「等待讀取」。
-- **`message.read` 不走 presenter 的 `seq` 去重。** presenter 用 `seq` 略過紀錄裡已有、又再來一次的 Item 事件（接回時）；插入的 Item 在寫入時就有序號，被讀到才送 `data-inserted`，用 `seq` 去重會把它吞掉。presenter 另外記一個「已送過 `data-inserted` 的插入序號」集合，同一個序號只送一次。接回（A-07）重送階段補送的插入訊息也加進這個集合，之後的即時 `message.read` 不再重送。`data-inserted` 的 `id` 是 `inserted-<seq>`、資料是 `{ seq, text, page? }`：用戶端萬一收到兩次，SDK 把同一個 `id` 的 part 合成一個。重送階段在每個輸出前先送它讀到的插入訊息（`readUpToSeq` 大於等於它的序號，而且還沒送過），並先關閉開著的 Step，所以它在讀到它的那一步的 `start-step` 之前；還沒有輸出讀到的訊息不送，之後被讀到時才送。
+- **`message.read` 不走 presenter 的 `seq` 去重。** presenter 用 `seq` 略過紀錄裡已有、又再來一次的 Item 事件（接回時）；插入的 Item 在寫入時就有序號，被讀到才送 `data-inserted`，用 `seq` 去重會把它吞掉。presenter 另外記一個「已送過 `data-inserted` 的插入序號」集合，同一個序號只送一次。接回（A-07）重送階段補送的插入訊息也加進這個集合，之後的即時 `message.read` 不再重送。接回時 `message.read` 可能已經在接回之前發出、讀到它的輸出卻還沒寫入：`FollowSession` 不論 `afterSeq`，把這個 Run 的插入訊息（`afterSeq` 以前的輸出沒有讀到的那些）交給 presenter，presenter 放在「等待」清單，之後即時的輸出（`agent_message` 或 `tool_call`）的 `readUpToSeq` 涵蓋它時，才在那個輸出之前送出。`data-inserted` 的 `id` 是 `inserted-<seq>`、資料是 `{ seq, text, page? }`：用戶端萬一收到兩次，SDK 把同一個 `id` 的 part 合成一個。重送階段在每個輸出前先送它讀到的插入訊息（`readUpToSeq` 大於等於它的序號，而且還沒送過），並先關閉開著的 Step，所以它在讀到它的那一步的 `start-step` 之前；還沒有輸出讀到的訊息不送，之後被讀到時才送。
 - 一個串流只有一則 assistant 訊息，所以插入的訊息不能是另一則 `user` 訊息。它是那則 assistant 訊息裡的 `data-inserted` part，出現在它被讀到的那一步之前。
 - 接回（A-07）和 `GET /sessions/:id` 還原畫面時，同一個位置用 `readUpToSeq` 決定：插入的訊息放在第一個 `readUpToSeq` 大於等於它的序號的 `agent_message` 或 `tool_call` 之前。還沒讀到的：Run 還在進行時不顯示在對話裡（畫面把它放在輸入框上方），Run 已結束時顯示成使用者訊息，帶「Agent 沒有讀到」。
 - `data-queue` 是 `{ items, paused, pausedReason?, nextRunId? }`，送在 `data-run` 之前。`nextRunId`：自動送出開了新的 Run，而且是這一台。畫面收到後，在 `finish` 之後用 `GET /sessions/:id/stream` 接上新的 Run（重送從那個 Run 的第一個 Item 開始，A-07）。沒有 `nextRunId` 而且 `paused` 為真，畫面顯示暫停。
@@ -1657,7 +1657,7 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 - `attachments.bytes` 用 knex 的 `binary`（PostgreSQL 是 `bytea`，SQLite 是 `blob`）。所有只要中繼資料的查詢明列欄位，不用 `select *`。
 - `attachments` 的索引：`(session_id)`、`(created_at)`（清理）。外鍵 `session_id` 連帶刪除。
 - `queued_messages` 的索引：`(session_id, position)`，外鍵 `session_id` 連帶刪除。
-- **取鎖順序。** 每個 transaction 照下表的順序碰資料表，所有 transaction 的順序一致（`runs`、`sessions`、`items`、`queued_messages`、`attachments`）。碰 `runs` 時一開始就取需要的最強的鎖，不先取 `FOR SHARE` 再升級：兩個都持有共享鎖的 transaction 同時要升級，會互等。
+- **取鎖順序。** 每個 transaction 照下表的順序碰資料表：要碰 `runs` 的先碰它，再取 `sessions` 的列鎖；`sessions` 之後的表（`items`、`queued_messages`、`attachments`）由 `sessions` 的列鎖排成一個接一個，同一段 Session 的 transaction 不會互等。不碰 `runs` 的（排隊的 `update`、`remove`、`reorder`、上傳）從 `sessions` 開始；`startNext` 用 INSERT 建立自己的 `runs` 列（新列沒有別人在等），再取 `sessions`。碰 `runs` 時一開始就取需要的最強的鎖，不先取 `FOR SHARE` 再升級：兩個都持有共享鎖的 transaction 同時要升級，會互等。
 
 | 寫入                                                   | 順序                                                                                           |
 | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
@@ -1697,6 +1697,7 @@ body 超過上限的錯誤（`entity.too.large`）由 `errorMapping.ts` 轉成 4
 | 佇列暫停（沒有進行中的 Run，佇列不是空的） | 送出，馬上開新的 Run。輸入框提示「送出後，這次結束時會接著送佇列」 | 同 Enter；不顯示「排隊」按鈕       |
 
 - Run 進行中輸入框不再停用。Stop 按鈕照舊。
+- Run 結束到自動送出新 Run 之間有一小段空檔：Run 已經結束、新的還沒開，這時 `GET /sessions/:id` 會短暫回 `paused: true`。畫面不要在這個空檔顯示「排隊已暫停」：收到 `run.ended` 後，等 `data-queue`（有 `nextRunId` 就接上新的 Run，`paused` 為真才顯示暫停）或下一個 `data-run` 再決定；只有重新讀取（沒有串流可等）時才用 `GET` 的 `paused`。
 - 插入得到 409 時，畫面重新讀取 Session，依結果分三種處理，文字留在輸入框直到成功（現有的 `sent === false` 做法）：
   1. 錯誤是 `InsertLimitReached`，或 Run 是 `waiting_approval`：改成排隊（排隊也得到 409 時，顯示原因，文字保留）。
   2. Run 是 `running`，但 `runId` 和送出時的不同（原來的 Run 結束、自動送出開了新的 Run）：對新的 `runId` 再插入一次。

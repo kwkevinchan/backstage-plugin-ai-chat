@@ -65,7 +65,7 @@ aiChat:
   maxToolOutputChars: 20000 # 工具輸出存下並送給模型的字元上限；預設 20000，最小 100
   input: # Run 進行中使用者可以加的訊息
     insert:
-      maxPerRun: 5 # 一次 Run 最多插入幾則；預設 5
+      maxPerRun: 5 # 一次 Run 最多插入幾則，最大 20；預設 5
     queue:
       maxMessages: 5 # 一段對話的佇列最多幾則；預設 5
 backend:

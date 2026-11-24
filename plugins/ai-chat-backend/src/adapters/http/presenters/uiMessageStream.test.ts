@@ -525,6 +525,66 @@ describe('UiMessageStreamPresenter', () => {
       ).toEqual(['data-inserted']);
     });
 
+    it('sends a message whose message.read came before the stream, with the output that read it', () => {
+      const presenter = new UiMessageStreamPresenter({
+        runId: RUN,
+        typing: false,
+      });
+      const log: Item[] = [
+        { ...base(1), kind: 'user_message', text: 'go' } as Item,
+        output(2, 1),
+        inserted(3, 'late idea'),
+      ];
+      // The replay has no output that read message 3.
+      const head = presenter.replay('running', log, 3, log);
+      expect(head.filter(c => c.type === 'data-inserted')).toEqual([]);
+
+      const live = presenter.present(completed(output(4, 3)));
+      expect(live.filter(c => c.type === 'data-inserted')).toEqual([
+        {
+          type: 'data-inserted',
+          id: 'inserted-3',
+          data: { seq: 3, text: 'late idea' },
+        },
+      ]);
+      // Before the text of the output that read it, and only once.
+      expect(types(live).indexOf('data-inserted')).toBeLessThan(
+        types(live).indexOf('text-start'),
+      );
+      expect(
+        presenter.present({ type: 'message.read', item: inserted(3) }),
+      ).toEqual([]);
+      expect(
+        presenter
+          .present(completed(output(5, 3)))
+          .filter(c => c.type === 'data-inserted'),
+      ).toEqual([]);
+    });
+
+    it('sends it also when afterSeq left the message out of the replay', () => {
+      const presenter = new UiMessageStreamPresenter({
+        runId: RUN,
+        typing: false,
+      });
+      // The items after seq 3 are none; the host still hands over message 3.
+      const head = presenter.replay('running', [], 3, [
+        inserted(3, 'late idea'),
+      ]);
+      expect(head.filter(c => c.type === 'data-inserted')).toEqual([]);
+      const live = presenter.present(completed(output(4, 3)));
+      expect(live.filter(c => c.type === 'data-inserted')).toHaveLength(1);
+    });
+
+    it('does not hold a message for an output that did not read it', () => {
+      const presenter = new UiMessageStreamPresenter({ runId: RUN });
+      presenter.replay('running', [], 3, [inserted(3)]);
+      expect(
+        presenter
+          .present(completed(output(4, 2)))
+          .filter(c => c.type === 'data-inserted'),
+      ).toEqual([]);
+    });
+
     it('sends the queue as a transient data-queue before the state of the run', async () => {
       const queued = {
         id: 'q1',
@@ -554,7 +614,20 @@ describe('UiMessageStreamPresenter', () => {
       expect(chunks[2]).toEqual({
         type: 'data-queue',
         transient: true,
-        data: { items: [queued], paused: false, nextRunId: 'run-2' },
+        // The shape of `GET /queue`: no `sessionId`.
+        data: {
+          items: [
+            {
+              id: 'q1',
+              position: 1,
+              text: 'Next',
+              createdAt: 'x',
+              updatedAt: 'x',
+            },
+          ],
+          paused: false,
+          nextRunId: 'run-2',
+        },
       });
       await throughSdk(chunks);
     });

@@ -80,8 +80,9 @@ const DEFAULT_GRACE_MS = 20_000;
 const ABORT_WAIT_MS = 2_000;
 /**
  * How often one loop starts again because a message came in after the model
- * read the log. Every round reads at least one more step, so the step limit
- * ends it; this stops a loop that would not make progress.
+ * read the log. Every round reads at least one more inserted message, and a
+ * run takes at most 20 (`input.insert.maxPerRun` is capped at 20), so a loop
+ * that needs more rounds makes no progress.
  */
 const MAX_REREADS = 20;
 

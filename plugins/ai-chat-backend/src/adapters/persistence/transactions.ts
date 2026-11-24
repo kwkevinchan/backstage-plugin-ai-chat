@@ -28,10 +28,13 @@ import type { LeasedRun, Run } from '../../domain';
 /*
  * The steps that more than one repository takes inside a transaction: a run
  * starts in `KnexRunRepository` and in `KnexQueuedMessageRepository.startNext`,
- * and items are written by `KnexItemLog.append` and by `startNext`. Every
- * transaction touches the tables in one order, so two of them never wait for
- * each other: `runs`, `sessions`, `items`, `queued_messages` (architecture,
- * "Database").
+ * and items are written by `KnexItemLog.append` and by `startNext`. A
+ * transaction that needs a run takes it first, and with the strongest lock it
+ * will need (never a shared lock that it raises later). Then it takes the row
+ * of the session (`UPDATE`, or `FOR NO KEY UPDATE`): a transaction that
+ * touches `sessions`, `items` or `queued_messages` holds that row, so those
+ * transactions of one session go one after the other and none waits for a
+ * table while another holds it (architecture, "Database").
  */
 
 export type RunRow = {

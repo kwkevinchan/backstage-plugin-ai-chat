@@ -50,6 +50,12 @@ export interface AiChatConfig {
   maxToolOutputChars: number;
 }
 
+/**
+ * The most `input.insert.maxPerRun` may be. A run that is about to end reads
+ * again for the messages inserted into it, and `RunSupervisor` allows 20 such
+ * reads (`MAX_REREADS`), at least one for each inserted message.
+ */
+const MAX_INSERT_MAX_PER_RUN = 20;
 const DEFAULT_MAX_TURNS = 10;
 const DEFAULT_TIMEOUT_SECONDS = 120;
 const DEFAULT_CONTEXT_TOKEN_BUDGET = 100_000;
@@ -136,6 +142,8 @@ export function readAiChatConfig(root: Config): AiChatConfig {
         config,
         'input.insert.maxPerRun',
         DEFAULT_INSERT_MAX_PER_RUN,
+        1,
+        MAX_INSERT_MAX_PER_RUN,
       ),
       queueMaxMessages: positiveInt(
         config,

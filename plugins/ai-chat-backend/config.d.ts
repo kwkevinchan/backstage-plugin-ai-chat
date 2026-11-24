@@ -72,7 +72,7 @@ export interface Config {
      */
     input?: {
       insert?: {
-        /** Most messages inserted into one run. Defaults to 5. */
+        /** Most messages inserted into one run, at most 20. Defaults to 5. */
         maxPerRun?: number;
       };
       queue?: {

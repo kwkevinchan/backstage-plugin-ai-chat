@@ -205,6 +205,7 @@ export class RunsController {
           followed.run.status,
           followed.items,
           followed.upToSeq,
+          followed.inserted,
         ),
       },
       this.logger,
