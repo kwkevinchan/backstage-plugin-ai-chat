@@ -46,6 +46,11 @@ import type { AdvanceRunDeps, AdvanceRunRequest } from './types';
  * `cancelled`. `heartbeat` is asked once per round of the loop and before each
  * call that is not read-only.
  *
+ * The deadline timer is `unref`ed, so it does not keep the process alive. The
+ * host keeps the process alive until the generator ends. A host with no HTTP
+ * server (a CLI, a worker, a demo script) must take care: with no other I/O
+ * the process exits and the run is left unfinished.
+ *
  * @public
  */
 export class AdvanceRun {
@@ -189,6 +194,8 @@ function deadlineOf(req: AdvanceRunRequest): Deadline {
     expired = true;
     controller.abort();
   }, Math.min(leftMs, MAX_TIMER_MS));
+  // A host that drops the generator must not be kept alive until the deadline.
+  timer.unref?.();
   return {
     signal: AbortSignal.any([req.signal, controller.signal]),
     expired: () => expired,

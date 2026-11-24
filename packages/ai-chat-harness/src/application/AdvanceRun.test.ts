@@ -20,6 +20,7 @@ import type { HarnessEvent } from './events';
 import { callTool, say, waitForAbort } from '../testing';
 import type { FakeTool } from '../testing';
 import { kit, fence, sessionId } from '../testing/fixture';
+import { AdvanceRun } from './AdvanceRun';
 import { executeTools } from './steps/executeTools';
 
 const readTool: FakeTool = {
@@ -1553,5 +1554,83 @@ describe('AdvanceRun: the lease is lost while a tool runs', () => {
       callId: 'call-1',
       status: 'unknown',
     });
+  });
+});
+
+describe('AdvanceRun: follow-ups of the review', () => {
+  it('does not keep the process alive for the deadline timer', async () => {
+    const timers: NodeJS.Timeout[] = [];
+    const original = global.setTimeout;
+    const spy = jest.spyOn(global, 'setTimeout').mockImplementation(((
+      ...args: Parameters<typeof setTimeout>
+    ) => {
+      const timer = original(...args);
+      timers.push(timer);
+      return timer;
+    }) as never);
+    try {
+      const t = await kit({
+        script: [[say('ok')]],
+        limits: { runTimeoutSeconds: 60 },
+      });
+      // The host takes one event and drops the generator.
+      const generator = new AdvanceRun({
+        items: t.items,
+        model: t.model,
+        tools: t.tools,
+        run: t.run,
+        clock: t.clock,
+        ids: t.ids,
+        extensions: {},
+      }).execute(t.request());
+      await generator.next();
+      await generator.next();
+      expect(timers.length).toBeGreaterThan(0);
+      expect(timers.every(timer => !timer.hasRef())).toBe(true);
+      await generator.return(undefined as never);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('does not write tool_started when the signal aborts while the heartbeat is asked', async () => {
+    const t = await kit({
+      script: [[say('never')]],
+      tools: [writeTool],
+      log: [
+        { kind: 'user_message', text: 'deploy' },
+        call('call-1', {
+          policy: 'ask',
+          readOnly: false,
+          toolId: 'temporal:start-workflow',
+        }),
+        approval('call-1'),
+      ],
+    });
+    const heartbeat = t.run.heartbeat.bind(t.run);
+    let count = 0;
+    jest.spyOn(t.run, 'heartbeat').mockImplementation(async f => {
+      count += 1;
+      const answer = await heartbeat(f);
+      if (count === 2) t.controller.abort();
+      return answer;
+    });
+    const { outcome } = await t.execute();
+    expect(outcome).toEqual({ status: 'cancelled' });
+    expect(t.tools.executed).toHaveLength(0);
+    expect(await t.kinds()).not.toContain('tool_started');
+  });
+
+  it('treats an array from a tool as no result', async () => {
+    const t = await kit({
+      script: [[callTool('m1', 'catalog:get-entity')], [say('ok')]],
+      tools: [{ ...readTool, execute: () => [] as never }],
+    });
+    await t.execute();
+    expect((await t.read())[2]).toMatchObject({
+      status: 'error',
+      message: 'The tool gave no result.',
+    });
+    expect((await t.read())[2]).not.toHaveProperty('output');
   });
 });
