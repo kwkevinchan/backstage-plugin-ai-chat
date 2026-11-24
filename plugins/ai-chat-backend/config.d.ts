@@ -53,6 +53,19 @@ export interface Config {
      */
     runTimeoutSeconds?: number;
     /**
+     * How much of a long session the model gets (H-09). Old tool outputs are
+     * shortened first, then old steps are replaced by a summary.
+     */
+    context?: {
+      /**
+       * Size of the model input in tokens, estimated. Set it well below the
+       * context window of the model. Defaults to 100000.
+       */
+      tokenBudget?: number;
+      /** The newest steps that are never shortened or left out. Defaults to 6. */
+      keepRecentSteps?: number;
+    };
+    /**
      * Instructions added to the built-in system prompt. They cannot remove
      * the built-in rules.
      */

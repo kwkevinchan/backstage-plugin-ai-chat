@@ -224,6 +224,13 @@ export class RunSupervisor {
           await this.settle(loop, next.value.outcome);
           ended = true;
         }
+        if (next.value.type === 'summary.failed') {
+          // The cause is the original error: it goes to the log only.
+          this.deps.logger.warn('A summary could not be made', {
+            runId: run.id,
+            cause: describe(next.value.cause),
+          });
+        }
         this.publish(loop, next.value);
       }
     } catch (error) {

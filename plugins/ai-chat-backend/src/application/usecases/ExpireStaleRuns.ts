@@ -21,9 +21,7 @@ import type { Logger, RunRepository } from '../ports';
  * ran them stopped. The session can start a new run then.
  */
 export class ExpireStaleRuns {
-  constructor(
-    private readonly deps: { runs: RunRepository; logger: Logger },
-  ) {}
+  constructor(private readonly deps: { runs: RunRepository; logger: Logger }) {}
 
   /** Returns the ids of the runs that were marked. */
   async execute(): Promise<string[]> {

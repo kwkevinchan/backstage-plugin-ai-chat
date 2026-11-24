@@ -64,6 +64,11 @@ depends on no other package of this repository. The core
 (`packages/ai-chat-harness`) lists no `@backstage/*` package as a runtime
 dependency, and its lint rules (`packages/ai-chat-harness/.eslintrc.js`, tested in
 `src/lintRules.test.ts`) keep `domain/` from importing `application/`.
+The backend has the same rules for its `domain/` and `application/` folders
+(`plugins/ai-chat-backend/.eslintrc.js`, tested in `src/lintRules.test.ts`):
+they import no `@backstage/*`, `express`, `knex` or Node.js module, and
+`domain/` imports nothing but `domain/`. The old `chat/`, `routes/`,
+`database/` and `llm/` folders are outside the rules until they are removed.
 
 ### Backend (`plugins/ai-chat-backend/src`)
 
@@ -73,8 +78,13 @@ dependency, and its lint rules (`packages/ai-chat-harness/.eslintrc.js`, tested 
 | `chat/ChatService.ts`   | The loop and the approval. The only place that invokes an action (`invokeAndStore`)       |
 | `chat/ToolCatalog.ts`   | The actions offered to the model: filters and safe tool names                             |
 | `database/ChatStore.ts` | The queries; the conditional updates that make a decision count once                      |
-| `domain/`               | Sessions, runs and the ports of the host                                                  |
+| `domain/`               | Sessions, runs, principals and pure rules of the host; no I/O, no `async`                 |
+| `application/`          | The use cases, `RunSupervisor` and the ports of the host (`application/ports/`)           |
+| `host.ts`               | `createHost()`: wires the loop, the supervisor and the use cases on the ports             |
 | `adapters/persistence/` | `Knex*` implementations of the ports, on the tables of `migrations/`                      |
+| `adapters/backstage/`   | Tools (Actions Registry), agent catalog (configuration), auditor, `principalFromRequest`  |
+| `adapters/model/`       | The `ModelClient` of the core on an OpenAI-compatible server                              |
+| `adapters/system/`      | The clock and the UUID generator                                                          |
 | `llm/`                  | The client of the OpenAI-compatible server                                                |
 | `common/`               | Types and paths shared with the frontend                                                  |
 | `migrations/`           | Knex migrations (a folder of the package, not of `src`)                                   |

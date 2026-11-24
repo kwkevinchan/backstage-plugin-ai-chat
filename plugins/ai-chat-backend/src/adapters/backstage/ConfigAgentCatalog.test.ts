@@ -164,9 +164,7 @@ describe('ConfigAgentCatalog', () => {
       const agent = await catalog.agent('default');
       expect(agent.id).toBe('default');
       expect(agent.systemPrompt).toContain('Be brief.');
-      expect(agent.systemPrompt).toContain(
-        'Rules that always apply',
-      );
+      expect(agent.systemPrompt).toContain('Rules that always apply');
     });
 
     it('throws AgentNotFound for another id', async () => {

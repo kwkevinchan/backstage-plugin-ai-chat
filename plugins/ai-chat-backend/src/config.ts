@@ -29,6 +29,8 @@ export interface AiChatConfig {
   maxToolCallsPerRun: number;
   /** Seconds of working time of one run, without the wait for approvals. */
   runTimeoutSeconds: number;
+  /** How much the model gets of a long session (H-09). */
+  context: { tokenBudget: number; keepRecentSteps: number };
   systemPrompt?: string;
   actions: {
     include: string[];
@@ -39,6 +41,8 @@ export interface AiChatConfig {
 
 const DEFAULT_MAX_TURNS = 10;
 const DEFAULT_TIMEOUT_SECONDS = 120;
+const DEFAULT_CONTEXT_TOKEN_BUDGET = 100_000;
+const DEFAULT_KEEP_RECENT_STEPS = 6;
 const DEFAULT_MAX_TOOL_CALLS_PER_RUN = 30;
 const DEFAULT_RUN_TIMEOUT_SECONDS = 300;
 /**
@@ -97,6 +101,18 @@ export function readAiChatConfig(root: Config): AiChatConfig {
       'maxToolCallsPerRun',
       DEFAULT_MAX_TOOL_CALLS_PER_RUN,
     ),
+    context: {
+      tokenBudget: positiveInt(
+        config,
+        'context.tokenBudget',
+        DEFAULT_CONTEXT_TOKEN_BUDGET,
+      ),
+      keepRecentSteps: positiveInt(
+        config,
+        'context.keepRecentSteps',
+        DEFAULT_KEEP_RECENT_STEPS,
+      ),
+    },
     runTimeoutSeconds: positiveInt(
       config,
       'runTimeoutSeconds',

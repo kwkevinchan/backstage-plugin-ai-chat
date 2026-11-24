@@ -50,6 +50,7 @@ function baseConfig(overrides: Partial<AiChatConfig> = {}): AiChatConfig {
     maxTurns: 10,
     maxToolCallsPerRun: 30,
     runTimeoutSeconds: 300,
+    context: { tokenBudget: 100000, keepRecentSteps: 6 },
     actions: { include: [], exclude: [] },
     maxToolOutputChars: 20000,
     ...overrides,

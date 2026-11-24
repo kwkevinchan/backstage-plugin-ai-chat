@@ -62,14 +62,14 @@ export class SendMessage {
 
     const run = await runs.start(session.id);
     try {
+      const request = await buildRunRequest(
+        { agents, clock, settings },
+        { session, run, principal: input.principal, page: input.page },
+      );
       await items.append(
         session.id,
         [{ kind: 'user_message', text: input.text }],
         run.fence,
-      );
-      const request = await buildRunRequest(
-        { agents, clock, settings },
-        { session, run, principal: input.principal, page: input.page },
       );
       return supervisor.launch(run, request);
     } catch (error) {

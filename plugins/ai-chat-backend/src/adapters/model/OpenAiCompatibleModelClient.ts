@@ -59,10 +59,9 @@ export class OpenAiCompatibleModelClient implements ModelClient {
     const names = toolNames(input);
     const toolIdOf = new Map([...names].map(([id, name]) => [name, id]));
     const pending: string[] = [];
-    let wake: (() => void) | undefined;
+    const waiters: (() => void)[] = [];
     const notify = () => {
-      wake?.();
-      wake = undefined;
+      for (const wake of waiters.splice(0)) wake();
     };
 
     const result = this.llm
@@ -90,9 +89,7 @@ export class OpenAiCompatibleModelClient implements ModelClient {
       if (text !== undefined) {
         yield { type: 'text', text };
       } else if (!finished) {
-        await new Promise<void>(resolve => {
-          wake = resolve;
-        });
+        await new Promise<void>(resolve => waiters.push(resolve));
       }
     }
 
@@ -136,10 +133,7 @@ function toolNames(input: ModelInput): Map<string, string> {
   return byId;
 }
 
-function toLlmTool(
-  tool: ToolDescriptor,
-  names: Map<string, string>,
-): LlmTool {
+function toLlmTool(tool: ToolDescriptor, names: Map<string, string>): LlmTool {
   // Some servers refuse the `$schema` keyword.
   const { $schema: _ignored, ...parameters } = tool.inputSchema as JSONSchema7;
   return {

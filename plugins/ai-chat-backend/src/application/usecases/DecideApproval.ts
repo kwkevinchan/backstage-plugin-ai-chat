@@ -180,7 +180,10 @@ export class DecideApproval {
 
   private async carryOn(
     leased: LeasedRun,
-    input: { principal: Principal; page?: { path: string; entityRef?: string } },
+    input: {
+      principal: Principal;
+      page?: { path: string; entityRef?: string };
+    },
     session: Session,
   ): Promise<RunHandle> {
     const { agents, clock, settings, supervisor, runs } = this.deps;

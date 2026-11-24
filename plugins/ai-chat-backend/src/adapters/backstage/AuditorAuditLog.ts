@@ -15,11 +15,7 @@
  */
 
 import type { AuditorService } from '@backstage/backend-plugin-api';
-import type {
-  AuditEvent,
-  AuditLog,
-  AuditSpan,
-} from '../../application/ports';
+import type { AuditEvent, AuditLog, AuditSpan } from '../../application/ports';
 
 /**
  * The audit log in the auditor of Backstage (O-02). The user goes into the

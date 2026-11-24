@@ -15,7 +15,12 @@
  */
 
 import type { Item, ItemLog } from '@kwkevinchan/ai-chat-harness';
-import { assertOwner, type Principal, type Run, type Session } from '../../domain';
+import {
+  assertOwner,
+  type Principal,
+  type Run,
+  type Session,
+} from '../../domain';
 import type { RunRepository, SessionRepository } from '../ports';
 
 /** What a screen needs to show a session. */

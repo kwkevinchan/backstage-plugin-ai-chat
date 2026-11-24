@@ -75,7 +75,9 @@ export class ConfigAgentCatalog implements AgentCatalog {
     this.policySettings = readPolicy(config?.getOptional('policy'));
     this.defaultAgent = {
       id: DEFAULT_AGENT_ID,
-      systemPrompt: buildSystemPrompt(config?.getOptionalString('systemPrompt')),
+      systemPrompt: buildSystemPrompt(
+        config?.getOptionalString('systemPrompt'),
+      ),
     };
   }
 

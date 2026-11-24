@@ -14,11 +14,7 @@
  * limitations under the License.
  */
 
-import {
-  assertOwner,
-  RunAlreadyActive,
-  type Principal,
-} from '../../domain';
+import { assertOwner, RunAlreadyActive, type Principal } from '../../domain';
 import type { RunRepository, SessionRepository } from '../ports';
 
 /**

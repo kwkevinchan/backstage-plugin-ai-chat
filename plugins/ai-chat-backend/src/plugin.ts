@@ -37,9 +37,6 @@ import { createHost } from './host';
 import { OpenAiCompatibleClient } from './llm/OpenAiCompatibleClient';
 import { createRouter } from './routes/router';
 
-/** The size of the model input; it is not applied until the context budget is. */
-const CONTEXT_BUDGET = { tokenBudget: 100_000, keepRecentSteps: 6 };
-
 /** How often the runs whose lease expired are marked `expired`. */
 const EXPIRE_STALE_RUNS_EVERY = { seconds: 30 };
 
@@ -131,7 +128,7 @@ export const aiChatPlugin = createBackendPlugin({
               maxToolCallsPerRun: aiChat.maxToolCallsPerRun,
               runTimeoutSeconds: aiChat.runTimeoutSeconds,
             },
-            budget: CONTEXT_BUDGET,
+            budget: aiChat.context,
           },
         });
         lifecycle.addShutdownHook(() => host.supervisor.shutdown());
