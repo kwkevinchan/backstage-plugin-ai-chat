@@ -58,6 +58,13 @@ const roleOf = workspace => workspace.manifest.backstage?.role;
 const BACKEND_CORE = '@kwkevinchan/backstage-plugin-ai-chat-backend';
 const FRONTEND_CORE = '@kwkevinchan/backstage-plugin-ai-chat';
 
+/**
+ * The framework-free core of the agent loop. It does not know Backstage, so
+ * no @backstage/* package is a runtime dependency (dev dependencies, such as
+ * the CLI that builds it, are fine).
+ */
+const HARNESS = '@kwkevinchan/ai-chat-harness';
+
 module.exports = defineConfig({
   async constraints({ Yarn }) {
     const byIdent = new Map(Yarn.workspaces().map(w => [w.ident, w]));
@@ -144,6 +151,15 @@ module.exports = defineConfig({
             );
           }
         }
+      }
+
+      // The harness core knows nothing of Backstage.
+      if (
+        workspace.ident === HARNESS &&
+        dep.type !== 'devDependencies' &&
+        dep.ident.startsWith('@backstage/')
+      ) {
+        dep.error(`${HARNESS} must not depend on ${dep.ident}`);
       }
 
       // Published packages must not use local or git protocols.
