@@ -16,6 +16,7 @@
 
 import type { Item, ToolCallItem } from './item';
 import type { Limits } from './agent';
+import { needsApproval } from './policy';
 import type { RunUsage } from './run';
 
 /** @public */
@@ -90,9 +91,7 @@ export function decideNextAction(
   }
 
   const pending = open.filter(
-    call =>
-      (call.policy === 'ask' || call.readOnly !== true) &&
-      !decided.has(call.callId),
+    call => needsApproval(call) && !decided.has(call.callId),
   );
   if (pending.length > 0) {
     return { type: 'wait_approval', pending };

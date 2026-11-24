@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 
-import { decidePolicy, PolicyName, PolicySettings } from './policy';
+import {
+  decidePolicy,
+  needsApproval,
+  PolicyName,
+  PolicySettings,
+} from './policy';
 import { tool } from './fixtures';
 
 describe('decidePolicy', () => {
@@ -102,5 +107,19 @@ describe('decidePolicy', () => {
   it('asks for a setting it does not know, even for a read-only tool', () => {
     const settings = { byTool: { 'catalog:get-entity': 'yes' } } as never;
     expect(decidePolicy(tool(), settings)).toBe('ask');
+  });
+});
+
+describe('needsApproval', () => {
+  it.each<[string, 'allow' | 'ask', boolean | undefined, boolean]>([
+    ['allow and read-only: no', 'allow', true, false],
+    ['ask and read-only: yes', 'ask', true, true],
+    ['allow and not read-only: yes', 'allow', false, true],
+    ['ask and not read-only: yes', 'ask', false, true],
+    ['allow and no readOnly flag: yes', 'allow', undefined, true],
+  ])('%s', (_rule, policy, readOnly, expected) => {
+    expect(needsApproval({ policy, readOnly: readOnly as boolean })).toBe(
+      expected,
+    );
   });
 });

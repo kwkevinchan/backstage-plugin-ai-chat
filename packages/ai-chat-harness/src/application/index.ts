@@ -14,9 +14,18 @@
  * limitations under the License.
  */
 
-/**
- * The application circle of the harness: use cases and the ports they need.
- * Filled in with the agent loop.
- */
-
-export {};
+export { AdvanceRun } from './AdvanceRun';
+export type { AdvanceRunDeps, AdvanceRunRequest } from './types';
+export type { HarnessEvent, RunOutcome } from './events';
+export type { Clock } from './ports/Clock';
+export type { Extensions } from './ports/extensions';
+export type { IdGenerator } from './ports/IdGenerator';
+export type { ItemDraft, ItemLog, RunFence } from './ports/ItemLog';
+export type { ModelChunk, ModelClient } from './ports/ModelClient';
+export type { RunControl } from './ports/RunControl';
+export type {
+  CallContext,
+  ToolGateway,
+  ToolOutput,
+  ValidationResult,
+} from './ports/ToolGateway';

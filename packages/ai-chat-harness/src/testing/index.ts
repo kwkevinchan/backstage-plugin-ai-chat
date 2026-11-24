@@ -20,4 +20,11 @@
  * @packageDocumentation
  */
 
-export {};
+export { FakeClock, FakeRunControl, SequentialIdGenerator } from './fakes';
+export { FakeToolGateway } from './FakeToolGateway';
+export type { FakeTool } from './FakeToolGateway';
+export { InMemoryItemLog } from './InMemoryItemLog';
+export { itemLogContract } from './itemLogContract';
+export type { ItemLogSubject } from './itemLogContract';
+export { callTool, say, ScriptedModel } from './ScriptedModel';
+export type { ScriptedStep } from './ScriptedModel';
