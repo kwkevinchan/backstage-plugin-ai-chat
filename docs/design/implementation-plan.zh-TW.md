@@ -381,7 +381,7 @@ flowchart LR
 | P2-04 | 分享的 use case 和 API      | M    | SH-02、SH-03、SH-06、SH-10、SH-11、IN-19（讀取） | 被分享的人送訊息和核准都被拒絕。到期後變成快照。每個動作有稽核紀錄                                                                                                                                                                                                               |
 | P2-05 | 分享的畫面和複製            | M    | SH-04、SH-07、SH-10、SH-12、IN-19（複製）        | 分享對話框的說明文字。持續更新時上方的提示列。複製出來的 Session 沒有工具輸出                                                                                                                                                                                                    |
 | P2-06 | 斷線接回和即時狀態          | M    | A-07、B-05                                       | 斷線後接回：從目前 Run 的第一個 Item 重送再接新的，先送 `start`，未完成的文字補送 `text-start` 加已累積的文字（Run 在別台時等它完成再整段送），Item 不重複不遺漏。逐字輸出到一半時重新整理，畫面接得上。Run 在別台時，每秒查一次新的 Item（沒有逐字片段）。沒裝 Signals 也能運作 |
-| P2-07 | 側邊面板和入口元件          | M    | B-02                                             | 新增 `ai-chat-react`。面板在換頁時保留。別的 plugin 用 `<AiChatLauncher>` 開啟對話                                                                                                                                                                                               |
+| P2-07 | 側邊面板和入口元件          | M    | B-02                                             | 新增 `ai-chat-react`。面板在換頁時保留。別的 plugin 用 `<AiChatLauncher>` 開啟對話。逐項驗收見下方 P2-07                                                                                                                                                                         |
 
 ### P2-02 保存期限
 
@@ -401,6 +401,31 @@ flowchart LR
   - 預設 90，和規格的設定範例一樣。`0` 代表保留，不刪。
   - 進行中的 Run 留下，和 `DeleteSession` 拒絕刪除一樣。釘選和封存不留下。
   - 每小時，和 `PurgeUnusedAttachments` 一樣。排程用 Backstage scheduler 的預設 global scope（同一時間只有一台執行）；列鎖是兩次工作重疊時的第二層。
+
+### P2-07 側邊面板和入口元件
+
+- **範圍**：新增 `plugins/ai-chat-react`（公開名稱 `@kwkevinchan/backstage-plugin-ai-chat-react`，`web-library`）。公開出口是 `<AiChatLauncher prompt="…" entityRef="…" />` 和 `useAiChatPanel()`。`ai-chat-react` 依賴 `ai-chat-common`；`ai-chat` 前端依賴 `ai-chat-react`。別的 frontend plugin 只依賴 `ai-chat-react`，不 import 宿主或核心的內部檔案。側邊面板由 `ai-chat` 畫在路由外面：換頁不卸下進行中的對話。Launcher 開啟面板，並把 prompt 和 entity 帶進那一次開啟的對話。不做結果顯示元件（B-03，P3）和 client tool（B-04，P4）。
+- **依賴**：無。P2-06 獨立，可以平行。頁面上下文沿用已完成的 B-01（`isEntityRef`、`isPagePath`）。
+- **驗收**（規則在 `ai-chat-react` 的 domain，畫面行為在 `ai-chat` 的 ui；不靠煙霧測試）：
+  - 套件：`package.json` 的 role 是 `web-library`，名稱是 `@kwkevinchan/backstage-plugin-ai-chat-react`。runtime dependency 有 `ai-chat-common`，沒有 `ai-chat`、`ai-chat-backend`、`ai-chat-harness`。測試讀這份 `package.json`。
+  - 出口：套件匯出 `AiChatLauncher` 和 `useAiChatPanel`。沒有 `AiChatToolResultBlueprint`，沒有 `AiChatClientToolBlueprint`。測試對照出口。
+  - 帶入的上下文（domain，`launchContextOf`）：`prompt` 去掉前後空白後還有字才算有 prompt，送出的文字是去掉前後空白的那段。只有空白不算有 prompt。`entityRef` 通過 `isEntityRef` 才留下，不合格就沒有 entity。
+  - 送出時的頁面（domain，`panelMessagePage`）：有帶入合格的 entity 時，訊息的 `page.entityRef` 用它，不用網址上另一個 `entityRef` 蓋掉。沒有帶入 entity 時，沿用畫面自己的 page context（B-01）。`page.path` 用送出當下的路徑：換頁之後再送，路徑換成新的那一頁。
+  - 面板狀態（domain，`applyLaunch`、`applyClose`、`applySession`）：`open` 把面板打開。這次有 prompt 時清掉目前的 session（換成新的對話）；沒有 prompt 時 session 留著。`close` 只把 `open` 設成關，session 和帶入的上下文都還在。沒有任何轉移會因為路由改變而關面板或清 session：狀態裡不放路由。
+  - `useAiChatPanel()`：`open({ prompt, entityRef })` 之後 `isOpen` 為真，帶入的上下文等於 `launchContextOf` 的結果；`close()` 之後 `isOpen` 為假，session 還在。沒有包 provider 時用套件預設的那一份狀態，所以頁面裡的 Launcher 和掛在 app root 的面板看得到同一份（新前端系統兩者不在同一棵 React context 下）。測試可以換一份自己的 store。
+  - `<AiChatLauncher prompt entityRef>`：是一顆按鈕。按下之後開啟面板，並帶上這兩個 prop。沒有 prop 時仍開啟面板，不帶 prompt、不帶 entity。
+  - 換頁仍保留（ui）：面板畫在 `<Routes>` 外面。面板裡已經有一段對話（使用者訊息在畫面上、session id 不變）時，路由從一個頁面換到另一個，同一段文字還在，而且不會再向 API 要一次這段 session。
+  - Launcher 開啟並帶入上下文（ui，假的 `AiChatApi`）：按下 Launcher（有 prompt、有合格的 entityRef）之後，面板打開，建立 session，`sendMessage` 的文字是那個 prompt，`page.entityRef` 是那個 entity，`page.path` 是按下時的路徑。entityRef 不合格時，訊息仍送出，`page` 沒有 `entityRef`。只有 entity、沒有 prompt 時，不建立 session；下一則從面板送出的訊息帶那個 entity。
+  - 從面板自己開對話（ui）：面板有輸入框。送出後建立 session 並送出那段文字。沒有 Launcher 時，`page` 用目前路由（B-01）。
+  - 關上再打開（ui）：進行中的對話還在，session 沒有清掉，也不重新跟 API 要這段 session。
+  - 既有的 `/ai-chat` 頁面不改行為（既有的頁面測試仍通過）。新前端系統的 plugin 多掛一個 app root 上的面板，註冊 plugin 就有，不要求 app 再包一層。
+- **規格沒寫、實作選定的地方**（程式架構第 6.2 節和第 9 節照這份選定更新）：
+  - 面板在畫面右側，每一頁都在，預設關上。邊上有一顆「AI chat」按鈕可以打開，面板裡有關閉。關上時，已經開始的對話元件不卸載，所以進行中的 Run 不會因為關上或換頁而停。還沒開始對話時，關上的面板只有那顆按鈕，不畫第二個對話區。
+  - 有 prompt 的開啟會開始一段新的對話，並立刻送出那個 prompt（跟聊天頁的第一則訊息一樣：先 `POST /sessions`，再送出）。沒有 prompt 時只打開面板，entity 留給下一則從面板送出的訊息。
+  - 帶入的 entity 在這段面板對話之後的訊息也用，直到下一次有 prompt 的開啟換成新的對話。路徑每次送出時用當時的頁面。
+  - 面板一次一段對話，不做列表（列表是 P2-01）。`/ai-chat` 的完整頁面保持原樣。
+  - 舊前端系統要在路由外面掛一次面板（開發用的 `packages/app` 已掛）。新前端系統用 app root element 掛同一塊面板。
+  - 開發用的舊版 app 在側邊欄放一顆 `<AiChatLauncher>`，prompt 問目前的頁面，entity 是 `component:default/example.com`。這是別的 plugin 的接法，不是另一項產品功能。
 
 順序：P2-01 和 P2-02 互相獨立。P2-03 之後才能做 P2-04 和 P2-05。P2-06 和 P2-07 跟分享無關，可以平行。
 
@@ -562,3 +587,4 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-24 | 1.1  | PI 審查後：暫停時直接送出的順序寫進 IN-15、IN-18；複製帶走圖片（IN-19，P2-05 驗收）；模型輸出的 `append` 取 `FOR NO KEY UPDATE`、取鎖順序表；`readUpToSeq` 定義為這一輪開始讀紀錄時的最大序號；`afterRun` 對 `waiting_approval` 不送出；已結束 Run 的 `unread` 插入訊息不再送給模型；`message.read` 不走 `seq` 去重；插入 409 的三種處理；圖片位元組上限 `maxBytesPerInput`；`Cache-Control` 改 `private, no-cache`；`ModelClient.stream` 帶 `sessionId`；設定統一用 `aiChat.llm.images`；SQLite 的理由改寫                                                                                                                                                                                          |
 | 2026-11-24 | 1.1  | PI-05 後續：刪除 Session 先鎖 `runs`（`FOR UPDATE`，依 `id`）再鎖 `sessions`，和 13.8 的取鎖順序一致，並加 PostgreSQL 的並行測試。SQLite 多連線實測是 `SQLITE_BUSY` 而不是「插入先」或「結束先」，啟動時要求 pool `max` 是 1。上傳路由的 OpenAPI 說明錯字改正；二進位 `requestBody` 仍不寫進規格（repo-tools 的 lint 仍要求 `application/json`）                                                                                                                                                                                                                                                                                                                                                     |
 | 2026-11-25 | 1.1  | P2-02 完成（SE-05）：`aiChat.retention.days` 預設 90，`0` 不刪。每小時刪除 `updated_at` 早於期限的 Session（runs、items、queued messages、attachments 連帶刪除）。進行中的 Run 不刪；釘選和封存不例外。稽核在 Auditor，刪除不碰它。PostgreSQL 用 `FOR UPDATE SKIP LOCKED`，兩台同時跑不重複刪、也不等已鎖的列。程式架構第 5.3 節和第 13.8 節照實作更新                                                                                                                                                                                                                                                                                                                                               |
+| 2026-11-25 | 1.1  | P2-07 補上逐項驗收（B-02）：新增 `ai-chat-react`；面板畫在路由外面，換頁不卸下進行中的對話；`<AiChatLauncher>` 和 `useAiChatPanel()` 開啟對話並帶入 prompt 與 entity。規則在 domain，畫面行為在 ui。不做 B-03、B-04。表的 PR 和狀態等 PR 開出來再填                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
