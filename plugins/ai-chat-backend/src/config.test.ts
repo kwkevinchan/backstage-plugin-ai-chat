@@ -15,6 +15,10 @@
  */
 
 import { mockServices } from '@backstage/backend-test-utils';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+import { parse } from 'yaml';
+import { ConfigAgentCatalog } from './adapters/backstage/ConfigAgentCatalog';
 import { readAiChatConfig } from './config';
 
 const llm = { baseUrl: 'https://llm.test/v1/', model: 'm' };
@@ -106,4 +110,45 @@ describe('readAiChatConfig', () => {
       ).toThrow(new RegExp(key));
     }
   });
+});
+
+describe('the configuration in the READMEs', () => {
+  // The first YAML block of each README is the example of the settings. It is
+  // what a reader pastes, so the backend has to accept it.
+  const readme = (name: string) =>
+    readFileSync(resolve(__dirname, '../../..', name), 'utf8');
+  const exampleOf = (text: string) => {
+    const block = /```yaml\n([\s\S]*?)```/.exec(
+      text.slice(text.indexOf('## ')),
+    );
+    return parse(block![1]);
+  };
+
+  it.each(['README.md', 'README.zh-TW.md'])(
+    'is accepted by the backend: %s',
+    async name => {
+      const data = exampleOf(readme(name));
+      const root = mockServices.rootConfig({ data });
+      const logger = mockServices.logger.mock();
+
+      const config = readAiChatConfig(root);
+      expect(config).toMatchObject({
+        llm: { model: 'gpt-4o-mini' },
+        maxTurns: 10,
+        maxToolCallsPerRun: 30,
+        runTimeoutSeconds: 300,
+        context: { tokenBudget: 100000, keepRecentSteps: 6 },
+        maxToolOutputChars: 20000,
+      });
+      const catalog = new ConfigAgentCatalog(root, logger);
+      expect((await catalog.toolsets()).map(t => t.id)).toEqual(
+        expect.arrayContaining(['catalog', 'web']),
+      );
+      expect((await catalog.policy()).byTool).toMatchObject({
+        'catalog:get-entity': 'allow',
+        'temporal:terminate-workflow': 'deny',
+      });
+      expect(logger.warn).not.toHaveBeenCalled();
+    },
+  );
 });

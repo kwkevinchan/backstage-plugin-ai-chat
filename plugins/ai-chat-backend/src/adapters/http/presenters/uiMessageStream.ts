@@ -73,6 +73,8 @@ export class UiMessageStreamPresenter {
   private readonly calls = new Map<string, ToolCallItem>();
   /** The steps up to this number were replayed: their step events are skipped. */
   private replayedStep = 0;
+  /** The steps that the replay opened, one for each step of the run that has an item. */
+  private replayedSteps = 0;
 
   /**
    * `afterStart` goes out right after `start`: the decisions of the request
@@ -147,9 +149,12 @@ export class UiMessageStreamPresenter {
     for (const item of items) chunks.push(...this.item(item));
     this.replaying = false;
     this.lastSeq = Math.max(this.lastSeq, upToSeq);
+    // A step that wrote a call has its number in the call. A step that wrote
+    // only an `agent_message` has no number in the log: the steps of a run
+    // come one after the other, so the count of the steps opened stands for it.
     this.replayedStep = [...this.calls.values()].reduce(
       (max, call) => Math.max(max, call.step),
-      0,
+      this.replayedSteps,
     );
     return chunks;
   }
@@ -183,6 +188,7 @@ export class UiMessageStreamPresenter {
   private openStep(): UiMessageChunk[] {
     if (this.stepOpen) return [];
     this.stepOpen = true;
+    if (this.replaying) this.replayedSteps += 1;
     return [{ type: 'start-step' }];
   }
 

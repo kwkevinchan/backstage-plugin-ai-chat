@@ -36,8 +36,8 @@ export interface Config {
       timeoutSeconds?: number;
     };
     /**
-     * Most model calls for one user message, tool calls and decisions
-     * included. Defaults to 10.
+     * Most model calls in one run. A run is one message of the user and the
+     * approvals that follow it. Defaults to 10.
      */
     maxTurns?: number;
     /**

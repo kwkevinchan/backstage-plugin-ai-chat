@@ -2,8 +2,9 @@
 
 Frontend plugin of the unofficial
 [AI chat for Backstage](https://github.com/kwkevinchan/backstage-plugin-ai-chat):
-the chat page with streaming answers, tool calls and an approval card for every
-action that is not read-only. It needs
+the chat page with streaming answers, tool calls and an approval card (Allow
+and Deny) for every action that is not read-only. A list of toolsets above the
+message box switches the toolsets of the session on and off. It needs
 [`@kwkevinchan/backstage-plugin-ai-chat-backend`](https://www.npmjs.com/package/@kwkevinchan/backstage-plugin-ai-chat-backend).
 
 ```sh

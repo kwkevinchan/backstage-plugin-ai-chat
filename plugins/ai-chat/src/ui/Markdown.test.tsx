@@ -51,6 +51,16 @@ describe('Markdown', () => {
     expect(container).toHaveTextContent('<script>alert(1)</script>');
   });
 
+  it('loads no image or other resource: the syntax of an image gives no element that fetches', () => {
+    const text =
+      '![logo](https://example.test/logo.png) ![x](data:image/png;base64,AAAA) <iframe src="https://example.test"></iframe>';
+    const { container } = render(<Markdown text={text} />);
+    expect(
+      container.querySelectorAll('img, iframe, object, embed, video, audio'),
+    ).toHaveLength(0);
+    expect(container.querySelectorAll('[src]')).toHaveLength(0);
+  });
+
   it('makes links of http, https and mailto only', () => {
     const text =
       '[ok](https://example.test/a) [mail](mailto:a@example.test) [bad](javascript:alert(1)) [data](data:text/html,x) and https://example.test/b.';

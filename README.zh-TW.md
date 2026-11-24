@@ -7,10 +7,15 @@ Backstage actions registry 裡的 action：
 
 - 只讀取的 action（`readOnly: true`）立刻執行。
 - **其他所有 action 都會停下來，等使用者在對話裡核准。** 核准卡片會顯示完整的輸入；
-  按 **Allow** 只會執行那份輸入。
+  按 **Allow** 只會執行那份輸入，按 **Deny** 就不執行。
 
 對話本身不認識任何 action 來源。後端有註冊 action 的外掛都能用：catalog、
 [Temporal 外掛](https://github.com/kwkevinchan/backstage-plugin-temporal)、自己寫的外掛。
+
+迴圈寫在獨立的套件 [`@kwkevinchan/ai-chat-harness`](packages/ai-chat-harness)，不依賴
+Backstage。後端外掛把它接上資料庫、actions service 和 HTTP。設計文件在
+[docs/design](docs/design/README.zh-TW.md)；P1 每一條需求對到哪個測試，見
+[p1-coverage.zh-TW.md](docs/design/p1-coverage.zh-TW.md)。
 
 ## 安裝
 
@@ -25,7 +30,11 @@ backend.add(import('@kwkevinchan/backstage-plugin-ai-chat-backend'));
 ```
 
 前端（新前端系統）：`import aiChatPlugin from '@kwkevinchan/backstage-plugin-ai-chat/alpha'`，
-頁面在 `/ai-chat`。舊前端系統的接法見[英文 README](README.md#frontend-legacy-frontend-system)。
+頁面在 `/ai-chat`，每一段對話有自己的網址 `/ai-chat/<session id>`。
+`/ai-chat?entityRef=component:default/my-service` 會以那個 entity 開啟對話。
+舊前端系統的接法見[英文 README](README.md#frontend-legacy-frontend-system)。
+
+後端用自己的資料庫存狀態（`sessions`、`runs`、`items` 三張表），啟動時自己跑 migration。
 
 ## 設定
 
@@ -35,28 +44,79 @@ aiChat:
     baseUrl: https://api.openai.com/v1 # 任何相容 OpenAI Chat Completions 的伺服器
     apiKey: ${AI_CHAT_API_KEY}
     model: gpt-4o-mini
-  maxTurns: 10
-  actions: # 已淘汰，改用 toolsets；啟動時會記警告
-    include: ['catalog:*']
+  toolsets: # 工具分組
+    catalog:
+      title: Catalog
+      actions: ['catalog:*'] # * 代表任意字元
+      exclude: ['catalog:unregister-*'] # 選用：不屬於這一組
+      default: true # 新對話預設開啟；預設 false
+    web:
+      actions: ['web:*']
+      egress: true # 會把資料送出組織：即使唯讀也要核准
+  policy: # 用完整的 action ID：allow、ask 或 deny
+    'catalog:get-entity': allow
+    'temporal:terminate-workflow': deny
+  maxTurns: 10 # 一次 Run 的模型呼叫數；預設 10
+  maxToolCallsPerRun: 30 # 一次 Run 的工具呼叫數；預設 30
+  runTimeoutSeconds: 300 # 一次 Run 的工作時間（不含等核准）；預設 300，最大 600
+  context:
+    tokenBudget: 100000 # 送給模型的內容的 token 預算（估計值）；預設 100000
+    keepRecentSteps: 6 # 最近幾步一律保留；預設 6
+  maxToolOutputChars: 20000 # 工具輸出存下並送給模型的字元上限；預設 20000，最小 100
 backend:
   actions:
     pluginSources: [catalog] # 對話只看得到這些外掛的 action
 ```
 
-`aiChat.toolsets`（工具分組，`default: true` 的組在新對話預設開啟，`egress: true`
-的組即使唯讀也要核准）和 `aiChat.policy`（`{action id: allow|ask|deny}`）取代
-`actions.include`、`actions.exclude`。啟動時會讀取並檢查，值不對會讓後端無法啟動。
-`allow` 只對標了 `readOnly: true` 的 action 有效；沒標的當成不是唯讀，仍然要核准，
-並在 log 記一筆警告。沒有設定 `toolsets` 時，`include`、`exclude` 組成預設的那一組；
-有設定時它們被忽略。細節見[英文 README](README.md#toolsets-and-policy)。
+只有 `aiChat.llm` 是必填。啟動時會讀取並檢查整段設定，值不對會讓後端無法啟動。
+
+- **Toolset**：對話只看得到自己開啟的工具組裡的 action。不在任何一組裡的 action 不會出現。
+  使用者在自己的對話裡開關工具組（對話欄最上面、訊息列表之上的 **Toolsets**），範圍不超過你定義的。
+  沒設定 `toolsets` 時，所有 action 在同一組，預設開啟。
+- **Policy**：`deny` 永遠不執行也不提供；`ask` 每次都問；`allow` 只對標了
+  `readOnly: true` 而且不在 `egress` 工具組的 action 有效。沒標 `readOnly` 的
+  action 當成不是唯讀，仍然要核准；只有 `policy` 把這種 action（或 `egress` 工具組裡的唯讀 action）設成
+  `allow` 時，才會在 log 記一筆警告。
+- **上限**：一次 Run 是一則使用者訊息加上之後的核准。步數、工具呼叫數、工作時間任何一個到上限
+  就停下來。工作時間不含等核准的時間，而且 Run 會在使用者 token 過期之前結束。
+- **上下文**：超過 `tokenBudget` 時，先把舊的工具輸出縮成一行；還是超過，就把舊的步驟換成模型寫的摘要，
+  畫面會提示較早的內容被省略。紀錄本身不變。
+- `actions.include`、`actions.exclude` 已淘汰：沒設定 `toolsets` 時它們組成預設的那一組，
+  有設定時被忽略，啟動時會記警告。
+
+細節見[英文 README](README.md#toolsets-and-policy)。
 
 ## 核准的規則
 
-- 核准時執行的是**後端存起來的輸入**；`decision` 路由不接受請求帶來的新輸入。
-- 一次決定只會被接受一次（資料庫裡的條件式更新），而且只有對話的擁有者能決定。
+- 核准時執行的是**後端存起來的輸入**；`decision` 路由不接受請求帶來的新輸入。執行前會用
+  action 現在的 schema 和政策再檢查一次，變了就不執行。
+- 一次決定只會被接受一次（資料庫的唯一索引），而且只有對話的擁有者能決定；別人得到 `404`。
 - 不是唯讀的 action，沒有核准就絕不執行；唯讀與否看 actions service 的屬性，不看模型的說法。
-- 只有不是唯讀的 action 的核准、拒絕與執行會寫入 Backstage auditor；唯讀的 action 執行時不稽核。
-- 完整的安全說明、API 與試用方式見[英文 README](README.md)。
+- 一步裡有多個要核准的呼叫時，各自決定；全部決定後，核准的照順序執行。
+- 等核准的 Run 會佔住那段對話：新訊息得到 `409`。按 **Stop** 會結束它，那些呼叫不會執行。
+- 不是唯讀的 action 執行前先記「開始執行」。後端在執行中途停掉時不會重跑，畫面顯示「Result unknown」。
+- 不是唯讀的 action 的核准、拒絕與執行會寫入 Backstage auditor
+  （`tool-call-approve`、`tool-call-deny`、`tool-call-invoke`）；唯讀的 action 執行時不稽核。
+
+## 多台 backend
+
+Run 的狀態在資料庫，不在行程裡，所以可以部署多台，也可以重啟。
+
+- 關掉分頁或斷線不會停止 Run。它會跑完並存檔，重新打開就看得到。
+- 執行中的 Run 在資料庫持有租約，由那一台每 10 秒續約。等核准的 Run 沒有租約，所以收到最後一個決定的那一台
+  （不一定是當初開 Run 的）接手繼續，工具只執行一次。
+- 一台 backend 關機時，不再接新的 Run，最多給進行中的 Run 20 秒，沒跑完的標成 `expired`。它只動自己的 Run。
+- 一台 backend 沒有關機就當掉時，租約過期（30 秒，每 30 秒檢查一次）後，別台把它的 Run 標成 `expired`，
+  那段對話就可以送新訊息。畫面對 `expired` 的 Run 顯示「The last run stopped before it gave an answer.」和重送的按鈕。
+
+## 已知限制
+
+- 打開正在跑 Run 的對話時，只有跑那個 Run 的那一台能接回串流；別台的
+  `GET /sessions/:id/stream` 回 `204`，畫面顯示目前存下的內容。
+- 摘要涵蓋最新使用者訊息之前的步驟；同一個 Run 裡的舊步驟只縮短和省略，不做摘要。
+- 對話列表在 P1 沒有自動標題，每一段都顯示 `New conversation`。
+
+完整的安全說明、API 與試用方式見[英文 README](README.md)。
 
 ## 授權
 

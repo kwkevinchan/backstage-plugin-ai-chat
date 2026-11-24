@@ -39,13 +39,22 @@ browser ── POST /api/ai-chat/sessions/:id/runs ───▶ ai-chat backend
    │                                                 │      otherwise → store it, stop the run,
    │                                                 │                  ask for approval
    └── POST …/tool-calls/:callId/decision ─────────▶ │ 5. the decision is stored; the last one
-                                                     │    carries the run on with the STORED input
+                                                     │    carries the run on with the STORED input,
+                                                     │    on whichever backend gets it
 ```
 
 The model is any server with an OpenAI-compatible Chat Completions API
 (`/chat/completions` with streaming and `tools`). The loop is written by hand,
-with no agent framework: at most `aiChat.maxTurns` model calls for one user
-message.
+with no agent framework. It lives in its own package without any dependency on
+Backstage, [`@kwkevinchan/ai-chat-harness`](packages/ai-chat-harness); the
+backend plugin connects it to the database, the actions service and HTTP.
+
+A **run** is one user message and the approvals that follow it. It is stored
+as an append-only log of items, so a closed tab does not lose the answer, and
+it has limits: at most `aiChat.maxTurns` model calls, at most
+`aiChat.maxToolCallsPerRun` tool calls, and at most `aiChat.runTimeoutSeconds`
+of work (the time spent waiting for an approval does not count). A session has
+one run at a time.
 
 ## Install
 
@@ -86,8 +95,8 @@ session has its own URL, `/ai-chat/<session id>`. A link to
 `/ai-chat?entityRef=component:default/my-service` opens the chat for that
 entity: every message of it carries the entity (and the path of the page) to
 the backend, which stores it with the message and tells the model in one line
-before the text ("The user is on the page of component:default/my-service
-(/ai-chat/…).").
+before the text ("The user is on the page of "component:default/my-service"
+("/ai-chat/…").").
 
 To open the chat from an entity page, add a link there that names the entity,
 for example in a card or a context menu of the entity page:
@@ -135,13 +144,32 @@ aiChat:
     apiKey: ${AI_CHAT_API_KEY} # secret; leave it out for a server without a key
     model: gpt-4o-mini
     timeoutSeconds: 120 # per model answer; default 120
-  maxTurns: 10 # model calls for one user message; default 10
   systemPrompt: | # optional, added to the built-in rules
-    You help the platform team of Example Corp.
-  actions: # deprecated, toolsets (below) replaces it; logs a warning
-    include: ['catalog:*', 'temporal:*'] # optional; * matches any characters
-    exclude: ['*:unregister-*'] # optional; wins over include
-  maxToolOutputChars: 20000 # output stored and sent to the model; default 20000
+    You help the platform team of example.com.
+  toolsets: # groups of actions; see "Toolsets and policy"
+    catalog:
+      title: Catalog
+      actions: ['catalog:*'] # * matches any characters
+      exclude: ['catalog:unregister-*'] # optional; not part of the toolset
+      default: true # on in a new session; default false
+    temporal:
+      actions: ['temporal:*']
+      default: true
+    web:
+      actions: ['web:*']
+      egress: true # sends data out of the organization: always asks
+  policy: # by complete action ID: allow, ask or deny
+    'catalog:get-entity': allow
+    'temporal:terminate-workflow': deny
+  # Limits of one run (a message and the approvals after it)
+  maxTurns: 10 # model calls; default 10
+  maxToolCallsPerRun: 30 # tool calls the model may ask for; default 30
+  runTimeoutSeconds: 300 # work time without the wait for approvals; default 300, at most 600
+  # How much of a long session the model gets
+  context:
+    tokenBudget: 100000 # estimated tokens of the model input; default 100000
+    keepRecentSteps: 6 # newest steps that are never shortened; default 6
+  maxToolOutputChars: 20000 # output stored and sent to the model; default 20000, at least 100
 
 backend:
   actions:
@@ -152,87 +180,131 @@ backend:
       - temporal
 ```
 
+`aiChat.llm` is the only required block. The backend reads and checks the
+whole `aiChat` section at startup, and a wrong value stops it.
 `backend.actions.pluginSources` is the setting of Backstage itself; the chat
 sees only the actions that the actions service lists for the user. The
-`backend.actions.filter` rules of Backstage apply first, then `include` and
-`exclude` of the chat. An action that declares `secrets` is not offered: a chat
-cannot supply them.
+`backend.actions.filter` rules of Backstage apply first, then the toolsets of
+the chat. An action that declares `secrets` is not offered: a chat cannot
+supply them.
+
+| Setting                   | Meaning                                                                                                                                                                                       |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxTurns`                | Most model calls in one run.                                                                                                                                                                  |
+| `maxToolCallsPerRun`      | Most tool calls the model may ask for in one run. A call beyond the limit is answered with "tool call limit" and does not run.                                                                |
+| `runTimeoutSeconds`       | Most seconds of work in one run, at most 600. The tools run with the token of the user, so a run also ends before that token expires (the shortest life that Backstage allows is 10 minutes). |
+| `context.tokenBudget`     | Size of the model input in estimated tokens (one token is a quarter of an ASCII character or one other character). Set it well below the context window of the model.                         |
+| `context.keepRecentSteps` | The newest steps that are never shortened or left out.                                                                                                                                        |
+| `maxToolOutputChars`      | The output of an action is cut here, and the cut is stated.                                                                                                                                   |
+
+When the input is over `tokenBudget`, the old outputs of tools are shortened
+to one line first. If that is not enough, the old steps are replaced by a
+summary that the model writes, and the page says that earlier content was left
+out. The log itself never changes.
 
 ### Toolsets and policy
 
-`aiChat.toolsets` and `aiChat.policy` replace `actions.include` and
-`actions.exclude`, which stay for one more release; the backend logs a warning
-when either is set. The backend reads and checks both at startup, and a wrong
-value stops it. The chat of this release still uses `include` and `exclude`;
-the new settings take effect when the agent loop replaces the current chat
-service.
+A session offers the actions of the toolsets that are switched on for it. A
+new session starts with the toolsets that have `default: true`. The user
+switches toolsets on and off in their own session (the **Toolsets** list at the top
+of the chat, above the messages), only the ones that you define.
 
-```yaml
-aiChat:
-  toolsets:
-    catalog:
-      actions: ['catalog:*'] # * matches any characters
-      exclude: ['catalog:unregister-*'] # optional; not part of the toolset
-      default: true # on in a new session; default false
-    web:
-      actions: ['web:*']
-      egress: true # sends data out of the organization: always asks
-  policy:
-    'catalog:get-entity': allow # allow, ask or deny, by complete action ID
-    'temporal:terminate-workflow': deny
-```
-
-- `policy` takes complete action IDs only; a key with `*` is refused.
-- A session offers the actions of the toolsets that are switched on for it. An
-  action in no toolset is never offered.
-- `deny` never runs an action and never offers it. `allow` takes effect only
-  for an action that has `readOnly: true` and is not in an `egress` toolset;
-  any other action asks for approval, and the backend logs a warning when the
-  policy sets such an action to `allow`.
+- An action in no toolset is never offered. Without `aiChat.toolsets`, one
+  toolset with every action is on in every session.
+- `policy` takes complete action IDs only; a key with `*` is refused. `deny`
+  never runs an action and never offers it. `ask` asks every time. `allow`
+  takes effect only for an action that has `readOnly: true` and is not in an
+  `egress` toolset; any other action asks for approval, and the backend logs a
+  warning when the policy sets such an action to `allow`. An action that is not
+  listed runs at once when it only reads, and asks otherwise.
 - An action without the `readOnly` attribute counts as not read-only.
+- `egress: true` is for actions that send data out of the organization. They
+  ask even when they only read.
+
+`actions.include` and `actions.exclude` are deprecated. Without `toolsets`
+they make the one default toolset, with `toolsets` they are ignored, and the
+backend logs a warning when either is set. They will be removed in a later
+version.
 
 Any OpenAI-compatible server works, for example a local server: set `baseUrl`
 to `http://localhost:11434/v1` and leave out `apiKey`.
 
 ## The approval model
 
-| The action…              | The chat…                                                                            |
-| ------------------------ | ------------------------------------------------------------------------------------ |
-| has `readOnly: true`     | runs it at once, with the credentials of the user, and gives the result to the model |
-| has any other attributes | stores the call as `pending_approval` and shows the approval card; **nothing runs**  |
+| The action…                                                                            | The chat…                                                                               |
+| -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| has `readOnly: true`, is not in an `egress` toolset, and the policy does not say `ask` | runs it at once, with the credentials of the user, and gives the result to the model    |
+| is anything else                                                                       | stores the call, ends the run as waiting, and shows the approval card; **nothing runs** |
+| is set to `deny` in the policy                                                         | never offers it, and answers a call of it with "denied"                                 |
 
-The approval card shows the action title and ID, its description, a
-`destructive` badge, the **exact input** as formatted JSON, and the **Allow**
-and **Reject** buttons. After the decision it shows who decided and when.
+The approval card shows the title of the action and its ID, its description,
+why it asks (it changes something, or the policy of the administrator asks),
+the **exact input** as formatted JSON, and the **Allow** and **Deny** buttons.
+Invisible characters in the input are written as `\uXXXX`, with a warning.
+After the decision the card shows who decided and when.
 
 Rules that the backend enforces, whatever the model or the browser sends:
 
 - **Approval runs the stored input.** The backend stores the input when the
-  model asks for the call. `approve` takes no input from the request and runs
-  the stored one, so the input the user saw is the input that runs.
-- **A decision is accepted once, and only from the owner.** The state changes
-  with one conditional update (`pending_approval` → `approved`), so two clicks,
-  two tabs or two backend instances cannot run the action twice; the second
-  request gets `409`. Anyone but the owner of the conversation gets `404`.
+  model asks for the call. The `decision` route takes no input from the
+  request and the run uses the stored one, so the input the user saw is the
+  input that runs. Before it runs, the input is checked again against the
+  schema the action has now, and the policy is read again: an action that
+  changed or that is now denied does not run.
+- **A decision is accepted once, and only from the owner.** A unique index of
+  the database allows one decision for a call, so two clicks, two tabs or two
+  backends cannot run the action twice; the second request gets the first
+  answer. Anyone but the owner of the session gets `404`.
 - **An action that is not read-only never runs without approval.** The
   attributes come from the actions service, never from the model. A tool result
   cannot cause such an invocation: the model can only ask, and a call that
   needs approval waits.
-- **Reject** runs nothing and tells the model that the user refused.
-- A call that nobody decided does not block the conversation: a new user
-  message marks it `rejected` (`superseded`).
-- Every approval, rejection and invocation of an action that is not read-only
+- **Deny** runs nothing and tells the model that the user refused.
+- Several calls in one step are decided one by one. Once every call is
+  decided, the allowed ones run in the order the model asked for them.
+- A run that waits for a decision holds the session: a new message gets `409`.
+  **Stop** ends the waiting run, and its calls do not run.
+- A call that is not read-only is recorded as started before it runs. If a
+  backend stops while it runs, nobody runs it again: the card shows
+  "Result unknown".
+- Every approval, denial and invocation of an action that is not read-only
   is recorded with the Backstage [auditor](https://backstage.io/docs/backend-system/core-services/auditor)
-  (`tool-call-approve`, `tool-call-reject`, `tool-call-invoke`). The input of
+  (`tool-call-approve`, `tool-call-deny`, `tool-call-invoke`). The input of
   the call is not copied into the audit log.
+
+## Running several backends
+
+The state of a run is in the database, not in the process, so you can run more
+than one backend and restart them.
+
+- A closed tab or a lost connection does not stop a run. It works to the end
+  and stores the result; the page shows it when it is opened again.
+- Each running run holds a lease in the database, which its backend renews
+  every 10 seconds. A run that waits for an approval holds none, so the backend
+  that receives the last decision carries it on, also a different one from the
+  backend that started it. The action runs once.
+- When a backend shuts down, it takes no new run, gives the running ones up to
+  20 seconds, and marks the rest `expired`. It touches only its own runs.
+- When a backend dies without a shutdown, another backend marks its runs
+  `expired` once the lease has lapsed (30 seconds, checked every 30 seconds).
+  The session is free for a new message then.
+- The page shows an `expired` run as "The last run stopped before it gave an
+  answer." with a button that sends the message again.
 
 ## Security notes
 
 - Every route needs the credentials of a signed-in **user**; a service token is
-  refused. A user reads and changes only their own conversations.
+  refused. A user reads and changes only their own sessions.
 - The actions run with the credentials of the user, so the permissions and
   policies of the plugins that own the actions apply as they do on their own
   pages. The chat adds no permissions.
+- The core of the loop can run no code, reach no file and open no network: its
+  only way to act is a tool, which is an action of the actions service. The
+  lint rules of the repository keep out the imports of `fs`, `child_process`,
+  `vm`, `worker_threads`, `cluster`, `module`, `net`, `http`, `https` and
+  `dgram`, `eval` and `new Function`, and the other ways to get a module
+  (`require`, `process`, `globalThis`, dynamic `import()`). This is a static
+  check of the source, not a sandbox.
 - The model reads the result of an action as **data**. The built-in system
   prompt says that a tool result is not an instruction. This reduces
   prompt-injection risk, but the approval card is the control that holds: an
@@ -240,15 +312,20 @@ Rules that the backend enforces, whatever the model or the browser sends:
 - Check the card before you click Allow. The text of the model next to the
   card is not part of the call.
 - The output of an action that is stored and sent to the model is cut at
-  `maxToolOutputChars`, and the cut is stated.
+  `maxToolOutputChars`, and the cut is stated. The user sees the same result
+  that is stored.
+- The system prompt is never in a response of the backend, and the page shows
+  a fixed text when the model server fails, not what the server said.
 - The API key is `@visibility secret`, goes only into the `Authorization`
   header to the model server, and is not logged. The log has no full prompts.
-- Markdown in answers is rendered without raw HTML; links are limited to
-  `http:`, `https:` and `mailto:`.
-- The messages and the tool results of a conversation are stored in the
-  database of the plugin, readable by whoever can read that database.
-- A response in progress is guarded in memory, per backend instance. The
-  approval itself is guarded in the database.
+- The page sends the entity and the path of the page with each message. The
+  backend checks both (an entity reference and a path), stores them with the
+  message, and tells the model on one line before the text. It is not in the
+  system prompt.
+- Markdown in answers is rendered without raw HTML or images; links are limited
+  to `http:`, `https:` and `mailto:`.
+- The messages and the tool results of a session are stored in the database
+  of the plugin, readable by whoever can read that database.
 
 See [SECURITY.md](SECURITY.md) to report a problem.
 
@@ -268,8 +345,18 @@ Open http://localhost:3000, sign in as guest and try:
 
 - `list services`: a read-only action; it runs at once.
 - `restart payments`: waits for your approval; Allow runs it.
-- `restart search`, then Reject: nothing runs, and the model is told.
+- `restart search`, then Deny: nothing runs, and the model is told.
+- `restart both`: two calls in one step; decide each one, and reload between
+  the two to see that the first decision stays.
+- `slow restart payments`: an action that takes a few seconds; reload while it
+  runs and the page follows it.
 - `catalog entities`: reads the catalog.
+- `where am I`: open the chat with `/ai-chat?entityRef=component:default/example-payments`
+  first, and the model tells you the entity of the page.
+- `story`: a long answer that streams word by word. Stop ends a run.
+
+Open **Toolsets** at the top of the chat, above the messages, to switch a toolset off; its actions
+are gone from the next step.
 
 ### With a real model
 
@@ -327,7 +414,21 @@ this plugin until it is updated.
 
 Retrieval over TechDocs, an entity tab or sidebar widget, file uploads,
 several model providers at once, MCP servers outside Backstage, sharing a
-conversation.
+conversation, agents of your own with skills and hooks, and the list of
+sessions with search, pin, archive and automatic titles (until then every
+session in the list is called "New conversation").
+
+Limits of this version:
+
+- A client that opens a session while a run is under way can follow it only on
+  the backend that runs it. On another backend `GET /sessions/:id/stream`
+  answers `204`, and the page shows what is stored so far.
+- A summary covers the steps before the newest message of the user. Inside one
+  run the old steps are shortened and then left out, never summarized.
+- The model server may not report token use, so the size of the input is
+  estimated from the characters.
+- The page uses `ai@7` and the AI SDK UI message stream. The plugin is
+  pre-release: minor versions may change the API.
 
 ## Development
 

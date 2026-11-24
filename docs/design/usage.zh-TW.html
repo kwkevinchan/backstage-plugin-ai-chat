@@ -4,11 +4,6 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AI Chat 用途說明</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap"
-    />
     <style>
       /* Layout: one reading column. Same tokens as the design page, so the two read as one set. */
       :root {
@@ -26,9 +21,11 @@
         --ok: #1d7a3e;
         --ok-soft: #dff2e5;
         --no: #b3261e;
-        --font-display: 'Space Grotesk', 'Noto Sans TC', system-ui, sans-serif;
-        --font-body: 'Inter', 'Noto Sans TC', system-ui, sans-serif;
-        --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+        --font-display: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei',
+          system-ui, sans-serif;
+        --font-body: system-ui, 'Noto Sans TC', 'PingFang TC',
+          'Microsoft JhengHei', sans-serif;
+        --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
       }
       @media (prefers-color-scheme: dark) {
         :root:not([data-theme='light']) {
@@ -668,9 +665,79 @@
         color: var(--muted);
         border: 1px solid var(--line);
       }
+      .mock.mock-one {
+        grid-template-columns: minmax(0, 1fr);
+      }
       .mock-note {
         font-size: 12.5px;
         color: var(--muted);
+      }
+      .approval .desc,
+      .approval .why,
+      .approval .decision {
+        margin: 0;
+        font-size: 12.5px;
+      }
+      .approval .why,
+      .approval .decision {
+        color: var(--muted);
+      }
+      .approval .head {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        font-weight: 600;
+        font-size: 13px;
+      }
+      .approval .head .mono {
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        font-weight: 400;
+        color: var(--muted);
+      }
+      .approval .label {
+        font-size: 11.5px;
+        color: var(--muted);
+      }
+      .approval pre {
+        margin: 2px 0 0;
+        padding: 6px 8px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: var(--surface);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        overflow-x: auto;
+      }
+      .approval.decided {
+        border-color: var(--line);
+        background: var(--surface);
+      }
+      .pill.wait {
+        background: var(--gate-soft);
+        color: var(--gate);
+        border: 1px solid var(--gate);
+      }
+      .toolsets summary {
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 12.5px;
+      }
+      .toolsets label {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        font-size: 12.5px;
+        margin-top: 6px;
+      }
+      .toolsets .mono {
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+      }
+      .toolsets .egress {
+        color: var(--muted);
+        font-size: 11.5px;
       }
       td.who {
         font-weight: 600;
@@ -711,8 +778,8 @@
         </div>
         <div class="status">
           <span>設計：已定案</span>
-          <span>實作：第 0 版（PR #1）可以對話、查詢、核准</span>
-          <span>下一步：P1</span>
+          <span>實作：P1 已完成（對話、查詢、核准、工具組、多台部署）</span>
+          <span>下一步：P2</span>
         </div>
         <nav class="toc" aria-label="目錄">
           <a href="#what">用來做什麼</a>
@@ -1065,7 +1132,7 @@
                   問問題。看它查了什麼。核准或拒絕改動。隨時停止。決定這段對話要開哪些工具組
                 </td>
                 <td>不用</td>
-                <td>第 0 版已有；工具組開關是 P1</td>
+                <td>P1（核准和查詢第 0 版就有）</td>
               </tr>
               <tr>
                 <td class="who">被分享的人</td>
@@ -1115,71 +1182,99 @@
           一段對話裡，查詢和改動看起來不一樣。查詢顯示成一行紀錄，可以點開看。改動顯示成一張卡片，停在那裡等你。
         </p>
         <div
-          class="mock"
+          class="mock mock-one"
           role="img"
-          aria-label="示意畫面：左邊是對話。使用者問部署為什麼失敗，Agent 直接執行兩個唯讀查詢並回答。使用者要求重跑，畫面出現核准卡片，列出工具名稱和參數，以及 Allow 和 Deny 兩個按鈕。右邊列出這段對話開啟的工具組"
+          aria-label="示意畫面：最上面是可以展開的工具組清單，每一組有一個核取方塊，下面是對話。使用者問部署為什麼失敗，Agent 直接執行兩個唯讀查詢並回答。使用者要求重跑，畫面出現核准卡片，寫著工具標題、說明、為什麼要核准、以 JSON 顯示的輸入，以及 Allow 和 Deny 兩個按鈕。按過 Allow 的卡片收成一行，寫著誰在什麼時候決定"
         >
           <div class="mock-main">
             <div class="mock-h">對話</div>
+            <details class="toolsets" open>
+              <summary>Toolsets (3 of 4 on)</summary>
+              <label
+                ><input type="checkbox" checked disabled /><span class="mono"
+                  >catalog</span
+                ></label
+              >
+              <label
+                ><input type="checkbox" checked disabled /><span class="mono"
+                  >techdocs</span
+                ></label
+              >
+              <label
+                ><input type="checkbox" checked disabled /><span class="mono"
+                  >temporal</span
+                ></label
+              >
+              <label
+                ><input type="checkbox" disabled /><span class="mono">web</span
+                ><span class="egress">sends data out</span></label
+              >
+            </details>
+            <div class="side-note">
+              沒開的工具組，Agent 完全看不到。能開哪些由管理員決定。標了
+              <code>sends data out</code>
+              的工具組會把資料送到組織外，即使只讀取也要你核准。
+            </div>
             <div class="msg me">payments-api 昨天的部署為什麼失敗？</div>
             <div class="group">
-              <div class="gh">查詢 · 直接執行</div>
+              <div class="gh">查詢 · 直接執行 · 點開看輸入和輸出</div>
               <div class="row">
-                <span class="mono">catalog:get-entity</span
-                ><span class="pill ok">唯讀</span><span>完成</span>
+                <span class="pill ok">Done</span><span>Get entity</span
+                ><span class="mono">catalog:get-entity</span>
               </div>
               <div class="row">
-                <span class="mono">temporal:list-workflows</span
-                ><span class="pill ok">唯讀</span><span>完成</span>
+                <span class="pill ok">Done</span><span>List workflows</span
+                ><span class="mono">temporal:list-workflows</span>
               </div>
             </div>
             <div class="msg">
               昨天 14:02 的部署在「資料庫
               migration」這一步逾時，重試三次後失敗。
             </div>
-            <div class="cite">
-              來源：<u>workflow deploy-payments-api-1123</u> ·
-              <u>處理文件：部署逾時</u>
-            </div>
             <div class="msg me">幫我重跑</div>
             <div class="approval">
-              <div class="ah">等你核准 · 這個工具會改東西</div>
-              <dl>
-                <dt>工具</dt>
-                <dd>temporal:start-workflow</dd>
-                <dt>workflowType</dt>
-                <dd>deploy</dd>
-                <dt>service</dt>
-                <dd>payments-api</dd>
-                <dt>version</dt>
-                <dd>2.31.4</dd>
-              </dl>
+              <div class="head">
+                <span>Start workflow</span
+                ><span class="mono">temporal:start-workflow</span
+                ><span class="pill wait">Waiting for approval</span>
+              </div>
+              <p class="desc">Starts a workflow of the given type.</p>
+              <p class="why">
+                This action changes something. It runs only after you approve
+                it.
+              </p>
+              <div>
+                <div class="label">Input that will run, exactly as shown</div>
+                <pre>
+{
+  "workflowType": "deploy",
+  "service": "payments-api",
+  "version": "2.31.4"
+}</pre
+                >
+              </div>
               <div class="btns">
                 <span class="btn primary">Allow</span
                 ><span class="btn">Deny</span>
               </div>
             </div>
-          </div>
-          <div class="mock-side">
-            <div class="mock-h">這段對話的工具組</div>
-            <div class="toggle">
-              <span class="mono">catalog</span><span class="pill ok">開</span>
-            </div>
-            <div class="toggle">
-              <span class="mono">techdocs</span><span class="pill ok">開</span>
-            </div>
-            <div class="toggle">
-              <span class="mono">temporal</span><span class="pill ok">開</span>
-            </div>
-            <div class="toggle">
-              <span class="mono">web</span><span class="pill off">關</span>
-            </div>
-            <div class="side-note">
-              沒開的工具組，Agent 完全看不到。能開哪些由管理員決定。
+            <div class="approval decided">
+              <div class="head">
+                <span>Start workflow</span
+                ><span class="mono">temporal:start-workflow</span
+                ><span class="pill ok">Done</span>
+              </div>
+              <p class="decision">
+                Allowed by user:default/jane at 11/24/2026, 3:04:12 PM.
+              </p>
             </div>
           </div>
         </div>
-        <p class="mock-note">這是示意畫面，不能操作。工具名稱和參數是例子。</p>
+        <p class="mock-note">
+          這是示意畫面，不能操作。工具名稱、說明和參數是例子。P1
+          的左側對話列表沒有自動標題，每一段都顯示
+          <code>New conversation</code>；第一輪結束後自動產生標題是 P2。
+        </p>
         <ul class="rules">
           <li>
             <b>核准的是卡片上那組參數。</b>按下 Allow
@@ -1538,16 +1633,18 @@
                 <td>對話、查詢、核准後執行</td>
               </tr>
               <tr>
-                <td class="who">P1 核心</td>
+                <td class="who">P1 核心（已完成）</td>
                 <td>
                   功能相同，底層換新：關掉分頁不丟結果、可以部署多台、長對話不會塞爆。新增：開關工具組、每段對話有自己的網址、Agent
-                  知道你正在看哪一頁
+                  知道你正在看哪一頁。部署時被中斷的一次執行會停在「The last run
+                  stopped before it gave an answer.」，旁邊有「Send the message
+                  again」可以重送。對話列表還沒有自動標題
                 </td>
               </tr>
               <tr>
                 <td class="who">P2 Session</td>
                 <td>
-                  對話列表的搜尋、釘選、封存。分享和複製。斷線後接回。每一頁旁邊的側邊面板
+                  對話列表的自動標題、搜尋、釘選、封存。分享和複製。斷線後接回。每一頁旁邊的側邊面板
                 </td>
               </tr>
               <tr>
