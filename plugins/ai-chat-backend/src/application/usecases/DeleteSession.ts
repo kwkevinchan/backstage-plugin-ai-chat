@@ -19,10 +19,10 @@ import type { RunRepository, SessionRepository } from '../ports';
 
 /**
  * Deletes a session of the signed-in user with its runs, items, queued
- * messages and images. A session
- * with a run that has not ended is not deleted: the database locks the session
- * and then its runs when it deletes, and the log locks a run and then the
- * session when it appends, so the two can wait for each other.
+ * messages and images. A session with a run that has not ended is refused
+ * (`RunAlreadyActive`). The delete locks that session's runs first and the
+ * session row after them, the same order as an append, so the two wait
+ * instead of deadlocking.
  */
 export class DeleteSession {
   constructor(

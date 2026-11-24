@@ -29,6 +29,7 @@ import { inputConfigOf } from './adapters/http/controllers/attachments';
 import { OpenAiCompatibleClient } from './adapters/model/OpenAiCompatibleClient';
 import { OpenAiCompatibleModelClient } from './adapters/model/OpenAiCompatibleModelClient';
 import {
+  assertSingleSqliteConnection,
   KnexAttachmentStore,
   KnexItemLog,
   KnexQueuedMessageRepository,
@@ -94,6 +95,9 @@ export const aiChatPlugin = createBackendPlugin({
           `AI chat toolsets: ${toolsets.map(t => t.id).join(', ') || 'none'}`,
         );
         const db = await database.getClient();
+        // SQLite has no row locks. More than one connection can fail a
+        // transaction with SQLITE_BUSY instead of waiting in lock order.
+        assertSingleSqliteConnection(db);
         if (!database.migrations?.skip) {
           await db.migrate.latest({
             directory: resolvePackagePath(

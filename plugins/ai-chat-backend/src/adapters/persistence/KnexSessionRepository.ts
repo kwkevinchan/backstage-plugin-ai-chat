@@ -18,6 +18,7 @@ import type { Clock, IdGenerator } from '@kwkevinchan/ai-chat-harness';
 import type { Knex } from 'knex';
 import type { SessionRepository } from '../../application/ports';
 import {
+  RunAlreadyActive,
   SessionNotFound,
   type NewSession,
   type Session,
@@ -38,6 +39,17 @@ type SessionRow = {
   created_at: string;
   updated_at: string;
 };
+
+/** How often a delete starts over when a run is inserted while it locks. */
+const DELETE_ATTEMPTS = 8;
+
+/** Rolls the delete back so it can lock the new run before the session. */
+class DeleteRestart extends Error {
+  constructor() {
+    super('A run was inserted while the session was being deleted');
+    this.name = 'DeleteRestart';
+  }
+}
 
 /** The sessions in the `sessions` table. */
 export class KnexSessionRepository implements SessionRepository {
@@ -108,10 +120,85 @@ export class KnexSessionRepository implements SessionRepository {
     return this.get(sessionId);
   }
 
+  /**
+   * Deletes the session and, through the foreign keys, its runs, items,
+   * queued messages and images.
+   *
+   * The runs are locked first (`FOR UPDATE`, one row at a time, in the order
+   * of `id`), and the session after them. A plain `DELETE` locks the session
+   * and only then the runs, which is the opposite of an append (the run, then
+   * the session): each would wait for the lock the other holds. A run that is
+   * inserted after the runs were locked makes this attempt roll back and
+   * start over, so the session lock is never held while waiting for that run.
+   */
   async delete(sessionId: string): Promise<void> {
-    const count = await this.knex('sessions').where({ id: sessionId }).delete();
-    if (count === 0) throw new SessionNotFound(sessionId);
+    for (let attempt = 0; attempt < DELETE_ATTEMPTS; attempt++) {
+      try {
+        await this.knex.transaction(async trx => {
+          const held = await lockRuns(trx, sessionId);
+          const session = await trx('sessions')
+            .where({ id: sessionId })
+            .forUpdate()
+            .first('id');
+          if (!session) throw new SessionNotFound(sessionId);
+          const now = await runIds(trx, sessionId);
+          if (!sameIds(held, now)) throw new DeleteRestart();
+          const count = await trx('sessions').where({ id: sessionId }).delete();
+          if (count === 0) throw new SessionNotFound(sessionId);
+        });
+        return;
+      } catch (error) {
+        if (
+          attempt < DELETE_ATTEMPTS - 1 &&
+          (error instanceof DeleteRestart || isDeadlock(error))
+        ) {
+          continue;
+        }
+        if (error instanceof DeleteRestart) {
+          throw new RunAlreadyActive(sessionId);
+        }
+        throw error;
+      }
+    }
   }
+}
+
+async function lockRuns(
+  trx: Knex.Transaction,
+  sessionId: string,
+): Promise<string[]> {
+  const ids = await runIds(trx, sessionId);
+  for (const id of ids) {
+    await trx('runs').where({ id }).forUpdate().first('id');
+  }
+  return ids;
+}
+
+async function runIds(
+  trx: Knex.Transaction,
+  sessionId: string,
+): Promise<string[]> {
+  const rows: { id: string }[] = await trx('runs')
+    .where({ session_id: sessionId })
+    .orderBy('id', 'asc')
+    .select('id');
+  return rows.map(row => row.id);
+}
+
+function sameIds(left: string[], right: string[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((id, index) => id === right[index])
+  );
+}
+
+function isDeadlock(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === '40P01'
+  );
 }
 
 function toSession(row: SessionRow): Session {

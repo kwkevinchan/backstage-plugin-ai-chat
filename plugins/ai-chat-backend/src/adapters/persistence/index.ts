@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+export { assertSingleSqliteConnection } from './sqliteConnection';
 export { KnexAttachmentStore } from './KnexAttachmentStore';
 export { KnexItemLog } from './KnexItemLog';
 export { KnexQueuedMessageRepository } from './KnexQueuedMessageRepository';

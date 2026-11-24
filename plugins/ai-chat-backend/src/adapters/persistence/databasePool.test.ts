@@ -23,6 +23,8 @@ import { createPersistence } from './__testUtils__';
  * PostgreSQL they run on separate connections and the locks decide. The tests
  * of the races (`postgresConcurrency.test.ts`) mean nothing if the pool had one
  * connection, so this checks the pool of the database the tests run on.
+ * A SQLite pool with room for a second connection is refused at startup
+ * (`assertSingleSqliteConnection`).
  */
 const onPostgres = Boolean(
   process.env.BACKSTAGE_TEST_DATABASE_POSTGRES16_CONNECTION_STRING,
