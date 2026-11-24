@@ -104,7 +104,7 @@ describe('the host on a real database', () => {
         }),
       ).rejects.toMatchObject({ code: 'NOT_SESSION_OWNER' });
       expect(await world.items.read(session.id)).toEqual([]);
-      expect(await world.knex('runs').count({ n: '*' })).toEqual([{ n: 0 }]);
+      expect(await world.runCount()).toBe(0);
     });
 
     it('writes the message only after the run exists: a second message while a run is active leaves no message behind (H-03)', async () => {
@@ -155,7 +155,7 @@ describe('the host on a real database', () => {
           text: 'Hi',
         }),
       ).rejects.toMatchObject({ code: 'SHUTTING_DOWN' });
-      expect(await world.knex('runs').count({ n: '*' })).toEqual([{ n: 0 }]);
+      expect(await world.runCount()).toBe(0);
     });
   });
 

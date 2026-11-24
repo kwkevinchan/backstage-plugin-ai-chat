@@ -220,6 +220,11 @@ export async function createWorld(
     async runRow(runId: string) {
       return knex('runs').where({ id: runId }).first();
     },
+    /** PostgreSQL gives a count as text, SQLite as a number. */
+    async runCount() {
+      const [row] = await knex('runs').count({ n: '*' });
+      return Number(row.n);
+    },
     async runningRows() {
       return knex('runs').whereIn('status', ['running']).select('id');
     },
