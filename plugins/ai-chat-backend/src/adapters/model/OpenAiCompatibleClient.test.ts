@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { LlmServer, sseBody, startLlmServer } from '../__testUtils__';
+import { LlmServer, sseBody, startLlmServer } from '../../__testUtils__';
 import { LlmError, OpenAiCompatibleClient } from './OpenAiCompatibleClient';
 
 const chunk = (delta: unknown) => ({ choices: [{ index: 0, delta }] });

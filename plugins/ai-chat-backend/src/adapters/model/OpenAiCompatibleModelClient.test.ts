@@ -15,7 +15,7 @@
  */
 
 import type { ModelChunk, ModelInput } from '@kwkevinchan/ai-chat-harness';
-import type { LlmClient, LlmRequest } from '../../llm/OpenAiCompatibleClient';
+import type { LlmClient, LlmRequest } from './OpenAiCompatibleClient';
 import { OpenAiCompatibleModelClient } from './OpenAiCompatibleModelClient';
 
 const input: ModelInput = {

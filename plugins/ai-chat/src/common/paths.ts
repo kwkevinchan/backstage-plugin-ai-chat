@@ -14,9 +14,6 @@
  * limitations under the License.
  */
 
-// Copy of plugins/ai-chat-backend/src/common/paths.ts, written by scripts/sync-common.mjs.
-// Edit the backend file and run `yarn sync:common`.
-
 /**
  * Paths of the routes of the plugin, relative to `/api/ai-chat`.
  *

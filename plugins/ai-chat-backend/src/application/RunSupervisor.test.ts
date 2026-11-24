@@ -238,6 +238,43 @@ describe('RunSupervisor', () => {
     });
   });
 
+  it('tells the subscribers the run is cancelled, not waiting, when a stop request turns the wait into a cancellation', async () => {
+    const pending = [{ kind: 'tool_call', callId: 'c1' }] as any;
+    const { supervisor } = setup(
+      () => ending({ status: 'waiting_approval', pending }),
+      {
+        transition: jest.fn(async (id: string, to: string) => ({
+          id,
+          status: to,
+          cancelRequested: to === 'waiting_approval',
+        })),
+      },
+    );
+    const handle = supervisor.launch(leased('r1', 'lease-1'), request);
+    const ended: HarnessEvent[] = [];
+    for await (const event of handle.events) {
+      if (event.type === 'run.ended') ended.push(event);
+    }
+    expect(ended).toEqual([
+      { type: 'run.ended', outcome: { status: 'cancelled' } },
+    ]);
+  });
+
+  it('tells the subscribers the run waits for an approval when no stop request came', async () => {
+    const pending = [{ kind: 'tool_call', callId: 'c1' }] as any;
+    const { supervisor } = setup(() =>
+      ending({ status: 'waiting_approval', pending }),
+    );
+    const handle = supervisor.launch(leased('r1', 'lease-1'), request);
+    const ended: HarnessEvent[] = [];
+    for await (const event of handle.events) {
+      if (event.type === 'run.ended') ended.push(event);
+    }
+    expect(ended).toEqual([
+      { type: 'run.ended', outcome: { status: 'waiting_approval', pending } },
+    ]);
+  });
+
   it('keeps the fence of a run until its loop ends, and drops it when the loop throws', async () => {
     let release!: () => void;
     const gate = new Promise<void>(resolve => (release = resolve));

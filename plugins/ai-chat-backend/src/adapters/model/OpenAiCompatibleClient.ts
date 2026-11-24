@@ -16,7 +16,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { JSONSchema7 } from 'json-schema';
-import type { AiChatConfig } from '../config';
+import type { AiChatConfig } from '../../config';
 
 /** A message in the form of the Chat Completions API. */
 export type LlmMessage =

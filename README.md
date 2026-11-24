@@ -24,21 +24,22 @@ the chat shows the link that the action returns.
 
 | Package                                                                    | Role                                                                       |
 | -------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| [`@kwkevinchan/backstage-plugin-ai-chat-backend`](plugins/ai-chat-backend) | Backend plugin (`ai-chat`): conversations, the loop, the approval, SSE     |
+| [`@kwkevinchan/backstage-plugin-ai-chat-backend`](plugins/ai-chat-backend) | Backend plugin (`ai-chat`): sessions, the loop, the approval, SSE          |
 | [`@kwkevinchan/backstage-plugin-ai-chat`](plugins/ai-chat)                 | Frontend plugin: the chat page, for the new and the legacy frontend system |
 
 ## How it works
 
 ```
-browser ── POST /api/ai-chat/conversations/:id/messages ──▶ ai-chat backend
-   ▲                                                          │ 1. store the message
-   │  text/event-stream                                       │ 2. list the actions of the user
-   │  (text, tool calls, approval cards)                      │ 3. call the model (streamed)
-   │                                                          │ 4. for each tool call the model asks for:
-   │                                                          │      readOnly  → invoke now, as the user
-   │                                                          │      otherwise → store as pending_approval,
-   │                                                          │                  stop, tell the browser
-   └── POST …/tool-calls/:callId/approve | reject ──────────▶ │ 5. Allow: invoke the STORED input, go on
+browser ── POST /api/ai-chat/sessions/:id/runs ───▶ ai-chat backend
+   ▲                                                 │ 1. start a run, store the message
+   │  text/event-stream                              │ 2. list the actions of the user
+   │  (AI SDK UI message stream: text, tool calls,   │ 3. call the model (streamed)
+   │   approval requests)                            │ 4. for each tool call the model asks for:
+   │                                                 │      readOnly  → invoke now, as the user
+   │                                                 │      otherwise → store it, stop the run,
+   │                                                 │                  ask for approval
+   └── POST …/tool-calls/:callId/decision ─────────▶ │ 5. the decision is stored; the last one
+                                                     │    carries the run on with the STORED input
 ```
 
 The model is any server with an OpenAI-compatible Chat Completions API
@@ -62,7 +63,7 @@ backend.add(import('@kwkevinchan/backstage-plugin-ai-chat-backend'));
 ```
 
 The plugin keeps its state in its own database (`ai-chat`; tables
-`conversations`, `messages`, `tool_calls`), with migrations that it runs when
+`sessions`, `runs`, `items`), with migrations that it runs when
 it starts. It uses the actions service of Backstage (`@alpha` in
 `@backstage/backend-plugin-api/alpha`), which `createBackend()` provides.
 
@@ -109,7 +110,7 @@ aiChat:
   maxTurns: 10 # model calls for one user message; default 10
   systemPrompt: | # optional, added to the built-in rules
     You help the platform team of Example Corp.
-  actions: # deprecated, toolsets (below) replaces it later; logs a warning
+  actions: # deprecated, toolsets (below) replaces it; logs a warning
     include: ['catalog:*', 'temporal:*'] # optional; * matches any characters
     exclude: ['*:unregister-*'] # optional; wins over include
   maxToolOutputChars: 20000 # output stored and sent to the model; default 20000
@@ -266,16 +267,23 @@ with `workflowUrl`, which the chat shows as a link.
 The routes are under `/api/ai-chat`; the spec is
 [`openapi.yaml`](plugins/ai-chat-backend/src/schema/openapi.yaml).
 
-| Route                                                 | Does                                       |
-| ----------------------------------------------------- | ------------------------------------------ |
-| `GET /conversations`, `POST /conversations`           | List, create                               |
-| `GET /conversations/:id`, `DELETE /conversations/:id` | Read with messages and tool calls, delete  |
-| `POST /conversations/:id/messages`                    | Send a message; `text/event-stream`        |
-| `POST /conversations/:id/tool-calls/:callId/approve`  | Allow a waiting call; `text/event-stream`  |
-| `POST /conversations/:id/tool-calls/:callId/reject`   | Refuse a waiting call; `text/event-stream` |
+| Route                                            | Does                                                                                |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `GET /sessions`, `POST /sessions`                | List, create                                                                        |
+| `GET /sessions/:id`                              | Read with the items, the run that has not ended, `awaitingDecision` and `resumable` |
+| `PATCH /sessions/:id`, `DELETE /sessions/:id`    | Change title, pin, archive or toolsets; delete                                      |
+| `POST /sessions/:id/runs`                        | Send a message and stream the run; `text/event-stream`                              |
+| `POST /sessions/:id/runs/:runId/cancel`          | Ask a run to stop (`202`)                                                           |
+| `POST /sessions/:id/tool-calls/:callId/decision` | Allow or deny a waiting call; JSON, or the stream when it was the last one          |
+| `POST /sessions/:id/resume`                      | Carry on a run whose decisions are all stored (`204` if none)                       |
+| `GET /sessions/:id/stream`                       | Join a run that is under way (`204` if none)                                        |
+| `GET /toolsets`                                  | The toolsets the user can switch on in a session                                    |
 
-The stream has the events `user_message`, `text_delta`, `assistant_message`,
-`tool_call`, `tool_result`, `approval_required`, `notice`, `error` and `done`.
+The streams are the [AI SDK UI message stream](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol)
+(`ai@7`): a call that needs approval is a `tool-approval-request`, and the
+transient `data-run` part tells the state of the run before the stream ends.
+A failed run ends with a fixed error text. The types are in
+`@kwkevinchan/backstage-plugin-ai-chat-common`.
 
 ## Compatibility
 

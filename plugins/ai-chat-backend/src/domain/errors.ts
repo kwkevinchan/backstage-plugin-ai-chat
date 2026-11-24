@@ -54,8 +54,11 @@ export class RunAlreadyActive extends ChatDomainError {
 
 /** The caller is not the owner of the session. */
 export class NotSessionOwner extends ChatDomainError {
+  readonly sessionId: string;
+
   constructor(sessionId: string) {
     super('NOT_SESSION_OWNER', `Not the owner of session ${sessionId}`);
+    this.sessionId = sessionId;
   }
 }
 

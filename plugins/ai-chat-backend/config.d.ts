@@ -72,9 +72,9 @@ export interface Config {
     systemPrompt?: string;
     /**
      * Which actions of the actions registry the chat can use.
-     * @deprecated `toolsets` replaces these two lists once the new agent loop
-     * is connected. Until then the chat still filters actions with them, with
-     * or without `toolsets`, and the backend logs a warning when they are set.
+     * @deprecated `toolsets` replaces these two lists. Without `toolsets` they
+     * make the one `default` toolset; with `toolsets` they are ignored. The
+     * backend logs a warning when they are set.
      */
     actions?: {
       /**

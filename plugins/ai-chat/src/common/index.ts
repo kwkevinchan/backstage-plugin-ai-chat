@@ -14,12 +14,10 @@
  * limitations under the License.
  */
 
-// Copy of plugins/ai-chat-backend/src/common/index.ts, written by scripts/sync-common.mjs.
-// Edit the backend file and run `yarn sync:common`.
-
 /**
- * Definitions shared by the frontend and the backend: the types of the API
- * and of the response stream, and the paths of the routes.
+ * The types and the paths of the first version of the API, which the screen
+ * still uses. The sessions API of the backend has its types in
+ * `@kwkevinchan/backstage-plugin-ai-chat-common`.
  *
  * @packageDocumentation
  */

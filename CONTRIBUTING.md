@@ -12,7 +12,7 @@ discuss larger changes before sending a pull request.
 
    ```sh
    yarn tsc && yarn lint:all && yarn test && yarn build:all
-   yarn constraints && yarn boundaries && yarn sync:common:check
+   yarn constraints && yarn boundaries
    yarn prettier:check && yarn lint:openapi && yarn build:api-reports
    ```
 
@@ -67,48 +67,45 @@ dependency, and its lint rules (`packages/ai-chat-harness/.eslintrc.js`, tested 
 The backend has the same rules for its `domain/` and `application/` folders
 (`plugins/ai-chat-backend/.eslintrc.js`, tested in `src/lintRules.test.ts`):
 they import no `@backstage/*`, `express`, `knex` or Node.js module, and
-`domain/` imports nothing but `domain/`. The old `chat/`, `routes/`,
-`database/` and `llm/` folders are outside the rules until they are removed.
+`domain/` imports nothing but `domain/`. `adapters/http` and
+`adapters/persistence` do not import each other.
 
 ### Backend (`plugins/ai-chat-backend/src`)
 
-| Folder / file           | Holds                                                                                     |
-| ----------------------- | ----------------------------------------------------------------------------------------- |
-| `routes/`               | Express routes: authenticate the user, validate the request, stream the events (`sse.ts`) |
-| `chat/ChatService.ts`   | The loop and the approval. The only place that invokes an action (`invokeAndStore`)       |
-| `chat/ToolCatalog.ts`   | The actions offered to the model: filters and safe tool names                             |
-| `database/ChatStore.ts` | The queries; the conditional updates that make a decision count once                      |
-| `domain/`               | Sessions, runs, principals and pure rules of the host; no I/O, no `async`                 |
-| `application/`          | The use cases, `RunSupervisor` and the ports of the host (`application/ports/`)           |
-| `host.ts`               | `createHost()`: wires the loop, the supervisor and the use cases on the ports             |
-| `adapters/persistence/` | `Knex*` implementations of the ports, on the tables of `migrations/`                      |
-| `adapters/backstage/`   | Tools (Actions Registry), agent catalog (configuration), auditor, `principalFromRequest`  |
-| `adapters/model/`       | The `ModelClient` of the core on an OpenAI-compatible server                              |
-| `adapters/system/`      | The clock and the UUID generator                                                          |
-| `llm/`                  | The client of the OpenAI-compatible server                                                |
-| `common/`               | Types and paths shared with the frontend                                                  |
-| `migrations/`           | Knex migrations (a folder of the package, not of `src`)                                   |
+| Folder / file           | Holds                                                                                                                                                             |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `domain/`               | Sessions, runs, principals and pure rules of the host; no I/O, no `async`                                                                                         |
+| `application/`          | The use cases, `RunSupervisor` and the ports of the host (`application/ports/`)                                                                                   |
+| `host.ts`               | `createHost()`: wires the loop, the supervisor and the use cases on the ports                                                                                     |
+| `adapters/http/`        | The router, the controllers, `presenters/uiMessageStream.ts` (the only place that knows the stream protocol), `sse.ts`, the request schemas and `errorMapping.ts` |
+| `adapters/persistence/` | `Knex*` implementations of the ports, on the tables of `migrations/`                                                                                              |
+| `adapters/backstage/`   | Tools (Actions Registry), agent catalog (configuration), auditor, `principalFromRequest`                                                                          |
+| `adapters/model/`       | The `ModelClient` of the core on an OpenAI-compatible server                                                                                                      |
+| `adapters/system/`      | The clock and the UUID generator                                                                                                                                  |
+| `migrations/`           | Knex migrations (a folder of the package, not of `src`)                                                                                                           |
 
 The tests that matter most for the security rules are in
-`chat/ChatService.test.ts` (approval runs the stored input, once, from the
-owner only; nothing that is not read-only runs without approval).
+`integration/http.test.ts` (every route: status codes, the content of the
+streams read back with the parser of the AI SDK, nothing of the system prompt
+or of an error of the model server in a response, a user reads only their own
+sessions) and `integration/hostFlows.test.ts` (approval runs the stored input,
+once, from the owner only; nothing that is not read-only runs without
+approval).
 
 ## Shared definitions
 
-`plugins/ai-chat-backend/src/common` (exported as
-`@kwkevinchan/backstage-plugin-ai-chat-backend/common`) has the types of the
-API and of the response stream. Backstage does not let a frontend plugin
-import a backend plugin, so the frontend package has a copy in
-`plugins/ai-chat/src/common`. Edit the backend files and run
-`yarn sync:common`; the `pre-commit` hook and CI fail when the copy is out of
-date.
+`plugins/ai-chat-common` (`@kwkevinchan/backstage-plugin-ai-chat-common`) has
+the types of the API and of the response stream, the paths of the routes and
+the id of the assistant message of a run. The backend imports it (and the
+frontend, once it uses the sessions API). Backstage does not let a frontend
+plugin import a backend plugin, so anything both sides need goes there.
 
 ## HTTP API spec
 
 `plugins/ai-chat-backend/src/schema/openapi.yaml` describes every route.
 `yarn lint:openapi` lints and validates it, and `src/schema/openapi.test.ts`
 compares it with the routes of the router. Change it together with the routes
-and the types in `src/common`.
+and the types in `plugins/ai-chat-common`.
 
 ## Releasing
 

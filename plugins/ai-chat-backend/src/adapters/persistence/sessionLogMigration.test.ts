@@ -100,19 +100,17 @@ describe('the migration of the session log', () => {
     ).resolves.toMatch(CONSTRAINT_ERROR);
   });
 
-  it('keeps the tables of the first version', async () => {
-    for (const table of ['conversations', 'messages', 'tool_calls']) {
-      expect(await knex.schema.hasTable(table)).toBe(true);
-    }
-  });
-
   it('can be undone, which leaves the tables of the first version', async () => {
-    await knex.migrate.down({
+    const config = {
       directory: resolvePackagePath(
         '@kwkevinchan/backstage-plugin-ai-chat-backend',
         'migrations',
       ),
-    });
+    };
+    // The later migration drops the tables of the first version; undoing it
+    // brings them back, and undoing this one drops the tables of the log.
+    await knex.migrate.down(config);
+    await knex.migrate.down(config);
     for (const table of ['sessions', 'runs', 'items']) {
       expect(await knex.schema.hasTable(table)).toBe(false);
     }

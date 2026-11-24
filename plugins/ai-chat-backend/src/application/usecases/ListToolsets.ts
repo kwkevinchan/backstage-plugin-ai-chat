@@ -14,12 +14,14 @@
  * limitations under the License.
  */
 
-/**
- * Definitions shared by the frontend and the backend: the types of the API
- * and of the response stream, and the paths of the routes.
- *
- * @packageDocumentation
- */
+import type { Toolset } from '../../domain';
+import type { AgentCatalog } from '../ports';
 
-export * from './types';
-export * from './paths';
+/** The toolsets the administrator defined; the user switches them per session (T-11). */
+export class ListToolsets {
+  constructor(private readonly deps: { agents: AgentCatalog }) {}
+
+  execute(): Promise<readonly Toolset[]> {
+    return this.deps.agents.toolsets();
+  }
+}

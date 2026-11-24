@@ -56,8 +56,8 @@ export class ConfigAgentCatalog implements AgentCatalog {
     if (include.length > 0 || exclude.length > 0) {
       logger.warn(
         toolsetsConfig
-          ? 'aiChat.actions.include and aiChat.actions.exclude are deprecated. The chat still filters actions with them for now; aiChat.toolsets replaces them once the new agent loop is connected.'
-          : 'aiChat.actions.include and aiChat.actions.exclude are deprecated. The chat still uses them for now; define aiChat.toolsets, which replaces them once the new agent loop is connected.',
+          ? 'aiChat.actions.include and aiChat.actions.exclude are deprecated, and ignored because aiChat.toolsets is set.'
+          : 'aiChat.actions.include and aiChat.actions.exclude are deprecated. They make the default toolset; define aiChat.toolsets instead.',
       );
     }
 

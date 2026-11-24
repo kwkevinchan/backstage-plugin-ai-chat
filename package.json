@@ -34,8 +34,6 @@
     "new": "backstage-cli new",
     "boundaries": "node scripts/check-boundaries.mjs",
     "boundaries:selftest": "node scripts/check-boundaries.test.mjs",
-    "sync:common": "node scripts/sync-common.mjs",
-    "sync:common:check": "node scripts/sync-common.mjs --check",
     "changeset": "changeset",
     "prepare": "husky"
   },

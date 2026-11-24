@@ -14,4 +14,5 @@
  * limitations under the License.
  */
 
-export { buildSystemPrompt } from '../domain/systemPrompt';
+export { createRouter } from './router';
+export type { RouterOptions } from './router';

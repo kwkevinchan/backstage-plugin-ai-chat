@@ -14,9 +14,6 @@
  * limitations under the License.
  */
 
-// Copy of plugins/ai-chat-backend/src/common/types.ts, written by scripts/sync-common.mjs.
-// Edit the backend file and run `yarn sync:common`.
-
 import type { JsonObject, JsonValue } from '@backstage/types';
 
 /**

@@ -220,18 +220,20 @@ export class RunSupervisor {
       for (;;) {
         const next = await generator.next();
         if (next.done) break;
-        if (next.value.type === 'run.ended') {
-          await this.settle(loop, next.value.outcome);
+        let event: HarnessEvent = next.value;
+        if (event.type === 'run.ended') {
+          const outcome = await this.settle(loop, event.outcome);
           ended = true;
+          if (outcome !== event.outcome) event = { ...event, outcome };
         }
-        if (next.value.type === 'summary.failed') {
+        if (event.type === 'summary.failed') {
           // The cause is the original error: it goes to the log only.
           this.deps.logger.warn('A summary could not be made', {
             runId: run.id,
-            cause: describe(next.value.cause),
+            cause: describe(event.cause),
           });
         }
-        this.publish(loop, forSubscribers(next.value));
+        this.publish(loop, forSubscribers(event));
       }
     } catch (error) {
       if (!ended) await this.settleError(loop, error);
@@ -266,9 +268,13 @@ export class RunSupervisor {
     }
   }
 
-  /** Writes the status the outcome gives the run. */
-  private async settle(loop: Loop, outcome: RunOutcome): Promise<void> {
-    if (loop.shuttingDown) return;
+  /**
+   * Writes the status the outcome gives the run. Returns the outcome the
+   * subscribers get: the same one, except when a stop request turns a wait for
+   * an approval into `cancelled`.
+   */
+  private async settle(loop: Loop, outcome: RunOutcome): Promise<RunOutcome> {
+    if (loop.shuttingDown) return outcome;
     if (outcome.status === 'failed') {
       this.deps.logger.error('A run failed', {
         runId: loop.run.id,
@@ -282,7 +288,10 @@ export class RunSupervisor {
     // the user no longer wants.
     if (to === 'waiting_approval' && run?.cancelRequested) {
       await this.end(loop, 'cancelled', 'user', false);
+      // The subscribers must not show approval buttons of a cancelled run.
+      return { status: 'cancelled' };
     }
+    return outcome;
   }
 
   /** The loop ended with an error of a port, so there is no `run.ended` yet. */

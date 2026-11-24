@@ -1,0 +1,76 @@
+/*
+ * Copyright 2026 The backstage-plugin-ai-chat Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import type {
+  ChatItem,
+  ChatRun,
+  ChatSession,
+  ChatSessionDetail,
+  ChatToolset,
+} from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { SessionView } from '../../../application';
+import type { Run, Session, Toolset } from '../../../domain';
+
+/** The fields of a session that the owner gets, and no others. */
+export function toChatSession(session: Session): ChatSession {
+  return {
+    id: session.id,
+    ownerRef: session.ownerRef,
+    agentId: session.agentId,
+    ...(session.title !== undefined && { title: session.title }),
+    ...(session.entityRef !== undefined && { entityRef: session.entityRef }),
+    enabledToolsets: session.enabledToolsets,
+    pinned: session.pinned,
+    ...(session.archivedAt !== undefined && { archivedAt: session.archivedAt }),
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+  };
+}
+
+/** A run without the lease, which only the backends use. */
+export function toChatRun(run: Run): ChatRun {
+  return {
+    id: run.id,
+    sessionId: run.sessionId,
+    status: run.status,
+    cancelRequested: run.cancelRequested,
+    ...(run.endReason !== undefined && { endReason: run.endReason }),
+    startedAt: run.startedAt,
+    ...(run.endedAt !== undefined && { endedAt: run.endedAt }),
+  };
+}
+
+export function toChatSessionDetail(view: SessionView): ChatSessionDetail {
+  // The items are the log as it is stored; the type of the API is checked
+  // against the type of the core here.
+  const items: ChatItem[] = view.items;
+  return {
+    session: toChatSession(view.session),
+    ...(view.run && { run: toChatRun(view.run) }),
+    items,
+    awaitingDecision: view.awaitingDecision,
+    resumable: view.resumable,
+  };
+}
+
+export function toChatToolset(toolset: Toolset): ChatToolset {
+  return {
+    id: toolset.id,
+    ...(toolset.title !== undefined && { title: toolset.title }),
+    default: toolset.default,
+    egress: toolset.egress,
+  };
+}

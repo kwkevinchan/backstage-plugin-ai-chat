@@ -34,10 +34,6 @@ async function lint(file: string, code: string) {
 const rules = (messages: { rule: string | null }[]) =>
   messages.map(m => m.rule);
 
-// The rule that keeps `adapters/http` and `adapters/persistence` apart is in
-// the configuration, but the plugin only applies a zone whose folder exists.
-// The test for it comes with `adapters/http`.
-
 describe('dependency rules of the host', () => {
   it('accepts imports that point inward', async () => {
     expect(
@@ -79,13 +75,53 @@ describe('dependency rules of the host', () => {
     ['src/application/example.ts', '../adapters/backstage/AuditorAuditLog'],
     ['src/application/example.ts', '../config'],
     ['src/application/example.ts', '../plugin'],
-    ['src/application/example.ts', '../chat/ChatService'],
+    ['src/application/example.ts', '../adapters/http/router'],
   ])('%s rejects an import of %s', async (file, source) => {
     const messages = await lint(
       file,
       `import {} from '${source}';\n\nexport {};\n`,
     );
     expect(rules(messages)).toContain('import/no-restricted-paths');
+  });
+
+  it.each([
+    [
+      'src/adapters/http/example.ts',
+      '../persistence/KnexItemLog',
+      'import/no-restricted-paths',
+    ],
+    [
+      'src/adapters/http/controllers/example.ts',
+      '../../persistence/index',
+      'import/no-restricted-paths',
+    ],
+    [
+      'src/adapters/persistence/example.ts',
+      '../http/router',
+      'import/no-restricted-paths',
+    ],
+    [
+      'src/adapters/persistence/example.ts',
+      '../http/presenters/uiMessageStream',
+      'import/no-restricted-paths',
+    ],
+  ])('%s rejects an import of %s', async (file, source, rule) => {
+    const messages = await lint(
+      file,
+      `import {} from '${source}';\n\nexport {};\n`,
+    );
+    expect(rules(messages)).toContain(rule);
+  });
+
+  it.each([
+    ['src/adapters/http/example.ts', '../backstage/principalFromRequest'],
+    ['src/adapters/http/example.ts', '../../application/index'],
+    ['src/adapters/http/example.ts', '../../domain/index'],
+    ['src/adapters/persistence/example.ts', '../../domain/index'],
+  ])('%s may import %s', async (file, source) => {
+    expect(
+      await lint(file, `import {} from '${source}';\n\nexport {};\n`),
+    ).toEqual([]);
   });
 
   it.each([
@@ -147,6 +183,7 @@ describe('dependency rules of the host', () => {
 
   it.each([
     ['src/adapters/backstage/example.ts'],
+    ['src/adapters/http/example.ts'],
     ['src/adapters/persistence/example.ts'],
     ['src/plugin.ts'],
   ])(

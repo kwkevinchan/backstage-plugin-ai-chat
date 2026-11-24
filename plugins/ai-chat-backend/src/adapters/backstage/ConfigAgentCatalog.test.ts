@@ -127,14 +127,14 @@ describe('ConfigAgentCatalog', () => {
     );
   });
 
-  it('warns that the chat still uses the deprecated lists when toolsets are set', async () => {
+  it('warns that the deprecated lists are ignored when toolsets are set', async () => {
     const { catalog, logger } = catalogFor({
       actions: { include: ['x:*'] },
       toolsets: { a: { actions: ['a:*'] } },
     });
     expect((await catalog.toolsets()).map(t => t.id)).toEqual(['a']);
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('still filters actions'),
+      expect.stringContaining('ignored because aiChat.toolsets is set'),
     );
   });
 
