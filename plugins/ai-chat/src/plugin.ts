@@ -21,7 +21,8 @@ import {
   discoveryApiRef,
   fetchApiRef,
 } from '@backstage/core-plugin-api';
-import { AiChatClient, aiChatApiRef } from './api';
+import { aiChatApiRef } from './api';
+import { AiChatClient } from './adapters/AiChatClient';
 import { rootRouteRef } from './routes';
 
 /**
@@ -54,8 +55,7 @@ export const aiChatPlugin = createPlugin({
 export const AiChatPage: () => JSX.Element = aiChatPlugin.provide(
   createRoutableExtension({
     name: 'AiChatPage',
-    component: () =>
-      import('./components/ChatPage').then(m => m.ChatPageWithHeader),
+    component: () => import('./ui/ChatPage').then(m => m.ChatPageWithHeader),
     mountPoint: rootRouteRef,
   }),
 );

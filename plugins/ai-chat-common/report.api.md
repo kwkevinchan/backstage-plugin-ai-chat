@@ -37,6 +37,7 @@ export type ChatItemBody =
   | {
       kind: 'user_message';
       text: string;
+      page?: ChatPageContext;
     }
   | {
       kind: 'agent_message';
@@ -121,6 +122,7 @@ export const chatPaths: {
   decision: (id: string, callId: string) => string;
   resume: (id: string) => string;
   stream: (id: string) => string;
+  tools: (id: string) => string;
   toolsets: () => string;
 };
 
@@ -211,6 +213,21 @@ export interface ChatSessionList {
   items: ChatSession[];
 }
 
+// @public
+export interface ChatTool {
+  description: string;
+  id: string;
+  readOnly: boolean;
+  // (undocumented)
+  title?: string;
+}
+
+// @public
+export interface ChatToolList {
+  // (undocumented)
+  items: ChatTool[];
+}
+
 // @public (undocumented)
 export type ChatToolResultStatus =
   | 'ok'
@@ -257,6 +274,12 @@ export interface DecideToolCallRequest {
 }
 
 // @public
+export function isEntityRef(value: string): boolean;
+
+// @public
+export function isPagePath(value: string): boolean;
+
+// @public
 export const MAX_MESSAGE_LENGTH = 8000;
 
 // @public
@@ -278,6 +301,9 @@ export interface SendChatMessageRequest {
   // (undocumented)
   text: string;
 }
+
+// @public
+export const TOOL_RESULT_NOT_KNOWN = 'The result of the call is not known.';
 
 // @public
 export interface UpdateChatSessionRequest {

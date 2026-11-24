@@ -14,7 +14,10 @@
  * limitations under the License.
  */
 
-import { messageIdOfRun } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import {
+  messageIdOfRun,
+  TOOL_RESULT_NOT_KNOWN,
+} from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type {
   ChatRunStatus,
   ChatNoticeData,
@@ -98,6 +101,7 @@ export class UiMessageStreamPresenter {
         if (event.step <= this.replayedStep) return [];
         return [...this.closeStep(), ...this.openStep()];
       case 'step.ended':
+        if (event.step <= this.replayedStep) return [];
         return this.closeStep();
       case 'item.started':
         if (event.kind !== 'agent_message' || this.options.typing === false) {
@@ -354,7 +358,7 @@ function toolOutput(item: Item & { kind: 'tool_result' }): UiMessageChunk {
       return {
         type: 'tool-output-error',
         toolCallId,
-        errorText: item.message ?? 'The result of the tool call is not known.',
+        errorText: TOOL_RESULT_NOT_KNOWN,
       };
     default:
       return {

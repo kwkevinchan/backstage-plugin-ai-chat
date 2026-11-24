@@ -19,6 +19,7 @@ import type {
   Item,
   ToolCallItem,
 } from '@kwkevinchan/ai-chat-harness';
+import { TOOL_RESULT_NOT_KNOWN } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import { readMessage, throughSdk } from '../__testUtils__/uiMessageStream';
 import type { UiMessageChunk } from './uiMessageChunk';
 import { UiMessageStreamPresenter } from './uiMessageStream';
@@ -331,7 +332,9 @@ describe('UiMessageStreamPresenter', () => {
   it.each([
     ['timeout', 'The tool call timed out.', undefined],
     ['invalid', 'The input of the tool call is not valid.', undefined],
-    ['unknown', 'The result of the tool call is not known.', undefined],
+    ['unknown', TOOL_RESULT_NOT_KNOWN, undefined],
+    // The text of the tool never replaces the mark that the screen knows.
+    ['unknown', TOOL_RESULT_NOT_KNOWN, 'lost in a crash'],
     ['error', 'The tool call failed.', undefined],
     [
       'invalid',
@@ -645,6 +648,39 @@ describe('UiMessageStreamPresenter', () => {
       // Only step 2 is new; it is empty, so it opens and closes once.
       expect(live.map(c => c.type)).toEqual(['start-step', 'finish-step']);
       expect(head.filter(c => c.type === 'finish-step')).toHaveLength(1);
+    });
+
+    it('skips the end of a replayed step that is still open, and closes it with the next step', () => {
+      const presenter = new UiMessageStreamPresenter({
+        runId: RUN,
+        typing: false,
+      });
+      // The log ends with the call of step 1: the replay leaves step 1 open.
+      const head = presenter.replay(
+        'running',
+        [
+          { ...base(1), kind: 'user_message', text: 'hi' },
+          agentMessage(2, 'Thinking.'),
+          toolCall(3, 'a', { readOnly: true, policy: 'allow' }),
+        ] as Item[],
+        3,
+      );
+      expect(head.filter(c => c.type === 'finish-step')).toHaveLength(0);
+
+      expect(
+        presenter.present({ type: 'step.ended', step: 1 } as HarnessEvent),
+      ).toEqual([]);
+      expect(
+        presenter
+          .present({ type: 'step.started', step: 2 } as HarnessEvent)
+          .map(c => c.type),
+      ).toEqual(['finish-step', 'start-step']);
+      // The end of a step that was not replayed closes it.
+      expect(
+        presenter
+          .present({ type: 'step.ended', step: 2 } as HarnessEvent)
+          .map(c => c.type),
+      ).toEqual(['finish-step']);
     });
 
     it('skips the events of items the log had when it was read, also those left out by afterSeq', () => {

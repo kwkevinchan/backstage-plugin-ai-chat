@@ -77,7 +77,7 @@ export interface ChatPlan {
 
 /** @public */
 export type ChatItemBody =
-  | { kind: 'user_message'; text: string }
+  | { kind: 'user_message'; text: string; page?: ChatPageContext }
   | { kind: 'agent_message'; text: string }
   | {
       kind: 'tool_call';
@@ -216,6 +216,22 @@ export interface ChatToolset {
   egress: boolean;
 }
 
+/** A tool that a session offers to the model, as the screen shows a call. @public */
+export interface ChatTool {
+  /** The id of the action in the actions registry; the name of a call. */
+  id: string;
+  title?: string;
+  /** What the tool does. */
+  description: string;
+  /** Whether the tool only reads. Any other tool asks for approval. */
+  readOnly: boolean;
+}
+
+/** The answer of `GET /sessions/:id/tools`. @public */
+export interface ChatToolList {
+  items: ChatTool[];
+}
+
 /** The answer of `GET /toolsets`. @public */
 export interface ChatToolsetList {
   items: ChatToolset[];
@@ -275,3 +291,13 @@ export interface ChatDataParts {
   notice: ChatNoticeData;
   plan: ChatPlan;
 }
+
+/**
+ * The `errorText` of the `tool-output-error` part for a call whose result is
+ * not known: the tool may have run, but its result was lost. The stream sends
+ * it for a result with status `unknown`, and the screen shows "result unknown"
+ * for it, live and after a reload.
+ *
+ * @public
+ */
+export const TOOL_RESULT_NOT_KNOWN = 'The result of the call is not known.';

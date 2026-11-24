@@ -20,16 +20,21 @@ import {
 } from '@backstage/backend-plugin-api';
 import { actionsRegistryServiceRef } from '@backstage/backend-plugin-api/alpha';
 
+/** How long `restart-service-slowly` takes. */
+const SLOW_ACTION_MS = 4000;
+
 type ServiceState = { status: 'running' | 'restarting'; restarts: number };
 
 /**
- * Development only. A plugin with three actions on a few made-up services,
+ * Development only. A plugin with four actions on a few made-up services,
  * so that the chat can show the approval without another action source:
  *
  * - `dev-actions:list-services` only reads (`readOnly: true`): it runs at
  *   once.
  * - `dev-actions:restart-service` changes a service (`readOnly: false`): it
  *   waits for the approval of the user. It returns a link to the status page.
+ * - `dev-actions:restart-service-slowly` is the same change, but the action
+ *   takes a few seconds, so that a screen can be tried while a call runs.
  * - `dev-actions:remove-service` is destructive: the approval card shows the
  *   badge.
  *
@@ -123,6 +128,42 @@ export const devActionsPlugin = createBackendPlugin({
                 status: 'restarting',
                 restarts: state.restarts,
                 statusUrl: urlOf(input.name),
+              },
+            };
+          },
+        });
+
+        actionsRegistry.register({
+          name: 'restart-service-slowly',
+          title: 'Restart a service, slowly',
+          description:
+            'Restarts one of the example services. The action takes a few seconds to finish.',
+          attributes: {
+            readOnly: false,
+            destructive: false,
+            idempotent: false,
+          },
+          schema: {
+            input: z => z.object({ name: z.string() }),
+            output: z =>
+              z.object({
+                name: z.string(),
+                status: z.string(),
+                restarts: z.number(),
+              }),
+          },
+          action: async ({ input }) => {
+            const state = services.get(input.name);
+            if (!state) {
+              throw new Error(`There is no service named ${input.name}`);
+            }
+            await new Promise(resolve => setTimeout(resolve, SLOW_ACTION_MS));
+            state.restarts += 1;
+            return {
+              output: {
+                name: input.name,
+                status: 'restarting',
+                restarts: state.restarts,
               },
             };
           },

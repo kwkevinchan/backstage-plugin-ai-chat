@@ -107,6 +107,12 @@ export function createRouter(options: RouterOptions): express.Router {
     }),
   );
   router.get(
+    '/sessions/:id/tools',
+    route(async (user, req, res) => {
+      res.json(await sessions.tools(user, req.params.id));
+    }),
+  );
+  router.get(
     '/toolsets',
     route(async (_user, _req, res) => {
       res.json(await sessions.toolsets());

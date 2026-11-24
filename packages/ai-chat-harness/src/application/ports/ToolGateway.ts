@@ -31,7 +31,11 @@ export interface CallContext {
   sessionId: string;
   runId: string;
   principal: unknown;
-  /** Where the user is (B-01). It is not stored in the log. */
+  /**
+   * Where the user is (B-01), as the message that started or carries on the
+   * run says. The log keeps it with the message (`user_message`); a call that
+   * a decision or a resume carries on has the page of that request.
+   */
   page?: { path: string; entityRef?: string };
 }
 

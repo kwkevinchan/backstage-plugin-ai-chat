@@ -142,7 +142,11 @@ packages/ai-chat-harness/src/
 
 ```ts
 export type ItemBody =
-  | { kind: 'user_message'; text: string }
+  | {
+      kind: 'user_message';
+      text: string;
+      page?: { path: string; entityRef?: string };
+    } // 規格 B-01
   | { kind: 'agent_message'; text: string }
   | {
       kind: 'tool_call';
@@ -209,7 +213,10 @@ export type NextAction =
   | { type: 'complete' }
   | { type: 'stop'; reason: 'max_steps' | 'max_tool_calls' | 'timeout' };
 
-// 規格 A-05、H-09
+// 規格 A-05、H-09、B-01：user_message 有 page 時，那則 user 訊息的內容前面加一行
+// 「The user is on the page of "<entityRef>" ("<path>").」（沒有 entity 時「The user is on the page "<path>".」），
+// 值用 JSON.stringify 寫（page 是用戶端給的，換行和引號不能讓這一行結束），
+// 空一行後是原文；這一行在訊息裡，不在 system prompt。
 export function buildModelInput(
   items: readonly Item[],
   agent: AgentDefinition,
@@ -361,7 +368,7 @@ export interface CallContext {
   sessionId: string;
   runId: string;
   principal: unknown;
-  page?: { path: string; entityRef?: string }; // 規格 B-01，不存進紀錄
+  page?: { path: string; entityRef?: string }; // 規格 B-01：這個請求的頁面。送訊息的請求另外存在 user_message
 }
 
 /** 寫入時帶著，資料庫用它確認「這個 Run 的租約還是我的」。 */
@@ -685,7 +692,13 @@ export class SendMessage {
       const request = await buildRunRequest(/* agent、政策、限制、用量 */);
       await this.deps.items.append(
         session.id,
-        [{ kind: 'user_message', text: input.text }],
+        [
+          {
+            kind: 'user_message',
+            text: input.text,
+            ...(input.page && { page: input.page }),
+          },
+        ],
         run.fence,
       );
       return this.deps.supervisor.launch(run, request);
@@ -961,22 +974,23 @@ SQLite 和 PostgreSQL 對唯一索引裡的空值的行為相同：空值之間�
 
 路徑都在 `/api/ai-chat` 底下。
 
-| 方法和路徑                                                                    | Use case                  | 回應                                              | 分期                      |
-| ----------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------- | ------------------------- |
-| `GET /sessions`                                                               | ListSessions              | JSON                                              | P1                        |
-| `POST /sessions`                                                              | CreateSession             | JSON                                              | P1                        |
-| `GET /sessions/:id`                                                           | GetSession                | JSON：Session、Run 狀態、Item                     | P1                        |
-| `PATCH /sessions/:id`                                                         | UpdateSession             | JSON                                              | P1（Toolset）、P2（其他） |
-| `DELETE /sessions/:id`                                                        | DeleteSession             | 204                                               | P1                        |
-| `POST /sessions/:id/runs`                                                     | SendMessage               | SSE                                               | P1                        |
-| `POST /sessions/:id/runs/:runId/cancel`                                       | CancelRun                 | 202；Run 已結束時 409                             | P1                        |
-| `POST /sessions/:id/tool-calls/:callId/decision`                              | DecideApproval            | 還有別的要決定：JSON。全部決定了：SSE             | P1                        |
-| `POST /sessions/:id/resume`                                                   | ResumeRun                 | SSE；沒有東西可接續時 204                         | P1                        |
-| `GET /sessions/:id/stream?afterSeq=`（`afterSeq` 選用）                       | FollowSession             | SSE；這一台跑的 Run 是 running 時才串流，否則 204 | P1（跨 backend 是 P2）    |
-| `GET/POST /sessions/:id/shares`、`PATCH/DELETE /sessions/:id/shares/:shareId` | ShareSession、UpdateShare | JSON                                              | P2                        |
-| `POST /sessions/:id/fork`                                                     | ForkSession               | JSON                                              | P2                        |
-| `GET /toolsets`                                                               | ListToolsets              | JSON                                              | P1                        |
-| `GET /agents`                                                                 | AgentCatalog              | JSON                                              | P3                        |
+| 方法和路徑                                                                    | Use case                  | 回應                                                                    | 分期                      |
+| ----------------------------------------------------------------------------- | ------------------------- | ----------------------------------------------------------------------- | ------------------------- |
+| `GET /sessions`                                                               | ListSessions              | JSON                                                                    | P1                        |
+| `POST /sessions`                                                              | CreateSession             | JSON                                                                    | P1                        |
+| `GET /sessions/:id`                                                           | GetSession                | JSON：Session、Run 狀態、Item                                           | P1                        |
+| `PATCH /sessions/:id`                                                         | UpdateSession             | JSON                                                                    | P1（Toolset）、P2（其他） |
+| `DELETE /sessions/:id`                                                        | DeleteSession             | 204                                                                     | P1                        |
+| `POST /sessions/:id/runs`                                                     | SendMessage               | SSE                                                                     | P1                        |
+| `POST /sessions/:id/runs/:runId/cancel`                                       | CancelRun                 | 202；Run 已結束時 409                                                   | P1                        |
+| `POST /sessions/:id/tool-calls/:callId/decision`                              | DecideApproval            | 還有別的要決定：JSON。全部決定了：SSE                                   | P1                        |
+| `POST /sessions/:id/resume`                                                   | ResumeRun                 | SSE；沒有東西可接續時 204                                               | P1                        |
+| `GET /sessions/:id/stream?afterSeq=`（`afterSeq` 選用）                       | FollowSession             | SSE；這一台跑的 Run 是 running 時才串流，否則 204                       | P1（跨 backend 是 P2）    |
+| `GET/POST /sessions/:id/shares`、`PATCH/DELETE /sessions/:id/shares/:shareId` | ShareSession、UpdateShare | JSON                                                                    | P2                        |
+| `POST /sessions/:id/fork`                                                     | ForkSession               | JSON                                                                    | P2                        |
+| `GET /toolsets`                                                               | ListToolsets              | JSON                                                                    | P1                        |
+| `GET /sessions/:id/tools`                                                     | ListSessionTools          | JSON：這個 Session 現在給模型的工具（id、title、description、readOnly） | P1                        |
+| `GET /agents`                                                                 | AgentCatalog              | JSON                                                                    | P3                        |
 
 Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use case、把結果交給 presenter。請求內容用 zod 檢查（`requestSchemas.ts`），不合格是 400。回應的型別在 `ai-chat-common`（前後端共用）。
 
@@ -1001,28 +1015,29 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 
 **SSE 的格式**是 AI SDK 的 UI message stream（鎖定 `ai@7.0.166`）。`uiMessageStream.ts` 把 `HarnessEvent` 轉過去。回應的 header：`content-type: text/event-stream`、`cache-control: no-cache, no-transform`、`x-vercel-ai-ui-message-stream: v1`、`x-accel-buffering: no`。每個事件一行 `data: <JSON>`，結尾 `data: [DONE]`。`no-transform` 讓 Backstage root router 的 `compression()` 不壓縮這個回應（壓縮會把串流累積到結尾才送）；每次寫入後也 flush。串流閒置時每 15 秒寫一行 `: keep-alive` 註解（SSE 的註解行，解析器略過），避免 proxy 關掉閒置的連線，串流結束時清掉計時器。
 
-| HarnessEvent                                                    | UI message stream                                                                        |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `run.started`                                                   | `start`（`messageId` 每個 Run 一個），加 `data-run`（`transient`，Run 的 id 和狀態）     |
-| `step.started`、`step.ended`                                    | `start-step`、`finish-step`                                                              |
-| `item.started`（agent_message）、`item.delta`、`item.completed` | `text-start`、`text-delta`、`text-end`                                                   |
-| `item.completed`（tool_call）                                   | `tool-input-available`                                                                   |
-| `run.ended`（等核准）的 `pending`，每個呼叫                     | 各送一次 `tool-approval-request`（`approvalId` 等於 `toolCallId`），放在 `data-run` 之前 |
-| `approval` Item                                                 | `tool-approval-response`（`approved`），放在核准後接續串流的開頭                         |
-| `item.completed`（tool_result，成功）                           | `tool-output-available`                                                                  |
-| `item.completed`（tool_result，失敗）                           | `tool-output-error`                                                                      |
-| `item.completed`（tool_result，被拒絕）                         | `tool-output-denied`                                                                     |
-| `summary.started`                                               | `data-notice`（`transient`，`code: 'summarizing'`，「整理較早的內容」）                  |
-| `context.trimmed`                                               | `data-notice`（`transient`，`code: 'context_trimmed'`，「較早的內容已省略」）            |
-| `summary.failed`                                                | 同上，同一個串流只送一次。不含 `cause`                                                   |
-| `item.completed`（summary）                                     | 忽略：摘要不是訊息，只給模型看（還原畫面時也略過）。`data-item` 照送                     |
-| `item.completed`（plan_update）                                 | `data-plan`（固定 `id`，同一則訊息內後送的取代先送的）                                   |
-| 每一筆完成的 Item                                               | `data-item`（`transient`，序號和 kind），給 A-07 接回用                                  |
-| `run.ended`（等核准）                                           | `data-run`（`transient`），然後 `finish`（`finishReason: 'tool-calls'`）                 |
-| `item.started`（tool_call）                                     | 忽略。`tool-input-available` 在 `item.completed` 才送                                    |
-| `run.ended`（完成）                                             | `data-run`（`transient`），然後 `finish`（`finishReason: 'stop'`）                       |
-| `run.ended`（失敗）                                             | `data-run`（`transient`），然後 `error`。不送 `finish`，`useChat` 遇到 `error` 就丟例外  |
-| `run.ended`（取消）                                             | `data-run`（`transient`），然後 `abort`                                                  |
+| HarnessEvent                                                    | UI message stream                                                                                                     |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `run.started`                                                   | `start`（`messageId` 每個 Run 一個），加 `data-run`（`transient`，Run 的 id 和狀態）                                  |
+| `step.started`、`step.ended`                                    | `start-step`、`finish-step`                                                                                           |
+| `item.started`（agent_message）、`item.delta`、`item.completed` | `text-start`、`text-delta`、`text-end`                                                                                |
+| `item.completed`（tool_call）                                   | `tool-input-available`                                                                                                |
+| `run.ended`（等核准）的 `pending`，每個呼叫                     | 各送一次 `tool-approval-request`（`approvalId` 等於 `toolCallId`），放在 `data-run` 之前                              |
+| `approval` Item                                                 | `tool-approval-response`（`approved`），放在核准後接續串流的開頭                                                      |
+| `item.completed`（tool_result，成功）                           | `tool-output-available`                                                                                               |
+| `item.completed`（tool_result，失敗）                           | `tool-output-error`                                                                                                   |
+| `item.completed`（tool_result，`unknown`）                      | `tool-output-error`，`errorText` 固定為 `TOOL_RESULT_NOT_KNOWN`（`ai-chat-common`），畫面即時和還原都顯示「結果不明」 |
+| `item.completed`（tool_result，被拒絕）                         | `tool-output-denied`                                                                                                  |
+| `summary.started`                                               | `data-notice`（`transient`，`code: 'summarizing'`，「整理較早的內容」）                                               |
+| `context.trimmed`                                               | `data-notice`（`transient`，`code: 'context_trimmed'`，「較早的內容已省略」）                                         |
+| `summary.failed`                                                | 同上，同一個串流只送一次。不含 `cause`                                                                                |
+| `item.completed`（summary）                                     | 忽略：摘要不是訊息，只給模型看（還原畫面時也略過）。`data-item` 照送                                                  |
+| `item.completed`（plan_update）                                 | `data-plan`（固定 `id`，同一則訊息內後送的取代先送的）                                                                |
+| 每一筆完成的 Item                                               | `data-item`（`transient`，序號和 kind），給 A-07 接回用                                                               |
+| `run.ended`（等核准）                                           | `data-run`（`transient`），然後 `finish`（`finishReason: 'tool-calls'`）                                              |
+| `item.started`（tool_call）                                     | 忽略。`tool-input-available` 在 `item.completed` 才送                                                                 |
+| `run.ended`（完成）                                             | `data-run`（`transient`），然後 `finish`（`finishReason: 'stop'`）                                                    |
+| `run.ended`（失敗）                                             | `data-run`（`transient`），然後 `error`。不送 `finish`，`useChat` 遇到 `error` 就丟例外                               |
+| `run.ended`（取消）                                             | `data-run`（`transient`），然後 `abort`                                                                               |
 
 - 串流中，要核准的呼叫由 `run.ended`（等核准）的 `pending` 決定，每個各送一次 `tool-approval-request`。
 - 從紀錄還原畫面（重新整理、接回、GetSession）時，「要核准」是 `needsApproval(call)`、沒有 `approval`、沒有 `tool_result`，而且 Run 是 `waiting_approval`、這個呼叫在它的最後一步。不看 `policy` 欄位：立即被拒絕的呼叫存成 `ask`，但它有結果，所以不算要核准。已決定但還沒有結果的呼叫（P-04 部分決定）顯示成 `approval-responded`（見 5.5），只在 Run 是 `waiting_approval` 或 `running` 時。Run 已經結束（`completed`、`cancelled`、`expired`）時，沒有結果的呼叫一律看有沒有 `tool_started`：有就顯示成「結果不明」，沒有就顯示成沒有執行。
@@ -1048,28 +1063,66 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 ```
 plugins/ai-chat/src/
   domain/
-    itemsToMessages.ts      把 GET /sessions/:id 的 Item 轉成 UIMessage（純函式）
-    approval.ts             哪些卡片還在等、能不能送新訊息（讀 UIMessage 的 part，純函式）
-  application/              React hooks，每個對應一個使用情境。包 useChat
-    useSession.ts           useChat 加 resume、onData（記住最後的序號）
-    useSendMessage.ts
-    useApproval.ts          addToolApprovalResponse
-    useSessionList.ts
-    usePageContext.ts       B-01
+    types.ts                ChatUiMessage（UIMessage 加上 data-run、data-item、data-notice、data-plan）
+    itemsToMessages.ts      把 GET /sessions/:id 的 Item 轉成 UIMessage；lastRunInterrupted、lastUserText（純函式）
+    approval.ts             還在等的呼叫、是不是最後一個要決定的呼叫（讀 UIMessage 的 part，純函式）
+    toolView.ts             呼叫的狀態（等核准、已允許、完成、失敗、拒絕、結果不明、沒有執行）和標題
+  api/                      aiChatApiRef 和 AiChatApi（port）
   adapters/
-    AiChatClient.ts         實作 aiChatApiRef
-    AiChatTransport.ts      實作 ai 的 ChatTransport：送訊息、決定、接回串流
+    AiChatClient.ts         實作 AiChatApi；串流的路由直接回傳 Response
+    AiChatTransport.ts      實作 ai 的 ChatTransport：送訊息、決定、接續、接回串流
+    describeError.ts
+  application/              React hooks，包 useChat
+    useSessionChat.ts       一個 Session 的 useChat：還原、決定、接續、停止、重新讀取
+    useSessionList.ts       Session 列表
+    useToolsets.ts          GET /toolsets
+    useSessionTools.ts      GET /sessions/:id/tools
+    usePageContext.ts       B-01：路徑和 entityRef
   ui/
-    ChatPage.tsx  SessionList.tsx  MessageList.tsx
-    ToolCallCard.tsx  ApprovalCard.tsx
+    ChatPage.tsx            路由（SE-01）、Session 列表、新對話
+    SessionView.tsx         一個 Session：Toolset、訊息、輸入框
+    MessageList.tsx  Composer.tsx  ToolsetPanel.tsx
+    ToolCallCard.tsx        ApprovalCard、ToolCallRow
     ShareDialog.tsx（P2）  SharedBanner.tsx（P2）  PlanPanel.tsx（P3）
   alpha.tsx                 新 frontend system 的 extension
   plugin.ts                 舊 frontend system
 ```
 
-前端用 `@ai-sdk/react` 的 `useChat`，加我們的 `ChatTransport`。`AiChatTransport` 只送最後一則使用者文字，不送整段歷史。核准由畫面明確指定：處理函式設 `pendingDecision = { callId, approved }`，呼叫 `addToolApprovalResponse({ id, approved, options: { body: pendingDecision } })`；`sendAutomaticallyWhen` 要求 `pendingDecision != null`；`sendMessages` 只讀 `body.callId`，打 `decision` 端點，用完清空。不是最後一個要決定的呼叫，處理函式先直接打 `decision` 端點存下。`reconnectToStream` 打 `GET /sessions/:id/stream`，`resumeStreamIsReplay` 設成 `true`；回 204 時 transport 回 `null`。做法和實測在 [protocol-check.zh-TW.md](protocol-check.zh-TW.md) 第 5 節。在 Backstage CLI 的 jest 裡可以 import `ai` 和 `@ai-sdk/react`，也能處理串流，已用探針確認（那份文件的 5.3 節）。
+前端用 `@ai-sdk/react` 的 `useChat`，加我們的 `ChatTransport`。型別、路徑、`messageIdOfRun` 來自 `ai-chat-common`，前端沒有自己的一份。
 
-PR #1 的 `chatState.ts` 的 Item 轉換搬到 `domain/itemsToMessages.ts`，`useChat.ts` 拆進 `application/`，`api/` 搬到 `adapters/`。
+**網址（SE-01）**。頁面掛在 `<path>/*` 底下：`<path>` 是新對話，`<path>/<sessionId>` 是那一段 Session，直接打開網址會載入它。第一則訊息先 `POST /sessions`，再導向新 Session 的網址（訊息放在 location state），該頁載入之後送出它，並把 state 清掉。
+
+**一個 Session 一個 `useChat`**。`SessionView` 以 Session id 當 key，載入 `GET /sessions/:id` 之後才建立；`useChat` 的 `messages` 是 `itemsToMessages` 還原的結果。
+
+**從紀錄還原**（`itemsToMessages`）：
+
+- `user_message` 是使用者訊息（id `item_<seq>`）。同一個 Run 的其他 Item 是一則助理訊息，id 用 `messageIdOfRun`，和串流的 `start.messageId` 相同，所以接續的串流接在這一則上。`summary`、`note`、`tool_started` 不顯示成訊息；`plan_update` 取同一個 Run 最後一個，放成 `data-plan`。
+- 每次工具結果、決定之後的下一個文字或呼叫前面放 `step-start`，`lastAssistantMessageIsCompleteWithApprovalResponses` 看最後一個 `step-start` 之後的呼叫。
+- 呼叫的狀態：有 `tool_result` 看它的 `status`（`ok` 完成、`denied` 被拒絕、`unknown` 結果不明、其他失敗）。沒有結果時：在進行中的 Run（`detail.run`）裡，`awaitingDecision` 有它是 `approval-requested`，有 `approval` Item 是 `approval-responded`，都沒有是 `input-available`；`approval-requested` 和 `approval-responded` 都帶 `approval.id` 等於 `callId`，不然 decision 串流的 `tool-approval-response` 會讓 SDK 丟 `No tool invocation found`。其他 Run（都已結束）：有 `tool_started` 是「結果不明」，沒有是「沒有執行」。
+- 「已過期可重送」：沒有進行中的 Run，而且紀錄不是以 agent 的訊息結尾（Run 過期、被取消或失敗），畫面顯示「上一次執行在給出答案前停了」和「再送一次」，按下去重送最後一則使用者訊息。
+
+**決定**。每次按 Allow 或 Reject 立刻存下。`useSessionChat.decide` 先看它是不是最後一個要決定的呼叫（`approval.ts`，看最後一步的 `approval-requested`）：
+
+- 不是最後一個：直接呼叫 `decision` 端點，成功後呼叫 `addToolApprovalResponse` 讓那張卡片更新；`pendingDecision` 不設，所以 `sendAutomaticallyWhen` 為假，不送請求。回應如果是 SSE（別的分頁已經決定了其他呼叫，這一個才是最後），關掉它的 body，改用 `resumeStream()`（`GET /stream`）接。
+- 是最後一個：設 `pendingDecision`，呼叫 `addToolApprovalResponse({ id, approved, options: { body: { callId, approved } } })`。`sendAutomaticallyWhen` 要求 `pendingDecision != null` 和全部有回應。`AiChatTransport.sendMessages` 讀 `body.callId`、`body.approved`，清空 `pendingDecision`，打 `decision` 端點：`text/event-stream` 就是 Run 的串流，接在同一則訊息上；JSON 就是別的請求搶到接續，transport 回傳沒有事件的串流，並通知畫面，畫面在請求結束後用 `resumeStream()` 接 `GET /stream`，接完再讀一次 `GET /sessions/:id`。
+- 有決定在處理時，所有核准卡片的按鈕停用。
+- 決定請求失敗（例如關機中的 503，決定已存下、迴圈沒有啟動）：畫面重新讀取 `GET /sessions/:id`，`resumable` 為真就送一次接續（這是自己的請求，確定沒有別的請求接手；再失敗不重試，直到使用者再操作）。
+
+**接續**。開啟 Session 時（只有這個時機）`resumable` 為真，送 `sendMessage(undefined, { body: { resume: true } })`，transport 打 `POST /sessions/:id/resume`。串流不重送前面的內容，要帶著還原的訊息（核准是 `approval-requested` 或 `approval-responded`）。`resume` 回 204（兩個分頁同時接續，另一邊搶到）：改用 `GET /stream` 接，接完重新讀取。自己剛送出決定之後不看 `resumable`：那個決定的回應自己會接續（決定請求失敗的例外見「決定」）。
+
+**接回**。`useChat({ resume })` 在載入時 Run 是 `running` 才為真，`reconnectToStream` 打 `GET /sessions/:id/stream`（204 回 `null`），不帶 `afterSeq`（帶了 SDK 找不到前面的 tool part）；`resumeStreamIsReplay` 為真，SDK 在第一個 `start` 把訊息重置，所以重送不會讓文字重複。
+
+**停止**。畫面有進行中的 Run（載入時的 `run`，之後由 `data-run` 更新）就顯示 Stop，也包含停在等核准的 Run（新訊息要等 Run 結束）。Stop 呼叫 `POST …/runs/:runId/cancel`（409 忽略），不呼叫 `useChat.stop()`：後端結束 Run 時串流自己以 `abort` 結束。沒有串流開著（Run 在等核准）時，畫面自己重新讀取。`data-run` 是 `failed`、`cancelled`、`expired`，或串流出錯時，結束後重新讀取 `GET /sessions/:id`，畫面以紀錄為準。
+
+**`data-notice`**。畫面用 `code` 查表顯示英文（`summarizing`、`context_trimmed`）；`text` 不用。`summary` Item 不顯示。
+
+**頁面上下文（B-01）**。`usePageContext` 從 router 讀路徑，從查詢參數 `entityRef` 讀 entity（entity 頁面連到 `…/ai-chat?entityRef=component:default/x`），每則訊息、決定、接續的請求都帶 `page`。`entityRef` 在導向 Session 網址時保留。`page` 是用戶端給的，模型會讀它，所以兩邊都檢查：前端 `usePageContext` 用 `isEntityRef`、`isPagePath`（`ai-chat-common`）檢查，不合格的值不送，聊天照常；後端的 zod（`requestSchemas.ts`，送訊息、decision、resume 都一樣）不合格回 400，OpenAPI 有同樣的 pattern。後端把送訊息帶的 `page` 存在那則 `user_message`，`buildModelInput` 在那則訊息前加一行讓模型看到（見第 4 節）；決定和接續的 `page` 只給工具的 `CallContext`。
+
+**Toolset（T-11）**。`useToolsets` 讀 `GET /toolsets`；新對話用 `default` 的 Toolset 建立 Session，Session 裡的開關呼叫 `PATCH /sessions/:id`，失敗時還原。進行中的 Run 不能改。
+
+**工具的標題、說明和「誰決定的」**。串流和紀錄只有 `toolId`，所以畫面用 `GET /sessions/:id/tools`（擁有者才能讀，用使用者的憑證列出這個 Session 現在給模型的工具）取得標題、說明和 `readOnly`，依 `toolId` 對應；列不到的工具（例如 Toolset 已關掉）把 `toolId` 最後一段轉成標題。卡片顯示標題和說明；等核准時依 `readOnly` 加一行「這個動作會改東西，要你核准才會執行」，唯讀工具（政策要求核准）則說明是管理員的政策。決定之後顯示「Allowed by <誰> at <時間>」，來源是 `approval` Item 的 `decidedBy` 和 `createdAt`；在這個分頁剛做的決定，串流沒有這兩項，Run 結束後讀一次 `GET /sessions/:id` 補上，補不到就只顯示結果。按鈕是 Allow 和 Deny。`destructive` 沒有來源，不顯示。
+
+做法和實測在 [protocol-check.zh-TW.md](protocol-check.zh-TW.md) 第 5 節。在 Backstage CLI 的 jest 裡可以 import `ai` 和 `@ai-sdk/react`，也能處理串流（那份文件的 5.3 節）。
 
 ## 10. 測試
 

@@ -15,23 +15,33 @@
  */
 
 import { Button } from '@backstage/ui';
-import type { ChatToolCall, ChatToolCallStatus } from '../common';
+import type { ChatTool } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { DecisionInfo } from '../domain/itemsToMessages';
+import {
+  statusOfTool,
+  titleOfTool,
+  toolIdOf,
+  type ToolStatus,
+} from '../domain/toolView';
+import type { ToolPart } from '../domain/types';
 import { LinkedText } from './Markdown';
 import { cx } from './styles';
 
 const STATUS: Record<
-  ChatToolCallStatus,
+  ToolStatus,
   { label: string; tone: 'success' | 'danger' | 'warning' | 'info' | undefined }
 > = {
-  pending_approval: { label: 'Waiting for approval', tone: 'warning' },
-  approved: { label: 'Allowed', tone: 'info' },
-  rejected: { label: 'Rejected', tone: 'danger' },
+  waiting: { label: 'Waiting for approval', tone: 'warning' },
+  allowed: { label: 'Allowed', tone: 'info' },
   running: { label: 'Running', tone: 'info' },
-  succeeded: { label: 'Done', tone: 'success' },
+  done: { label: 'Done', tone: 'success' },
   failed: { label: 'Failed', tone: 'danger' },
+  rejected: { label: 'Denied', tone: 'danger' },
+  unknown: { label: 'Result unknown', tone: 'warning' },
+  not_run: { label: 'Did not run', tone: undefined },
 };
 
-export function StatusBadge({ status }: { status: ChatToolCallStatus }) {
+export function StatusBadge({ status }: { status: ToolStatus }) {
   const { label, tone } = STATUS[status];
   return (
     <span className={cx('chat-badge', tone && `chat-tone-${tone}`)}>
@@ -96,19 +106,19 @@ function isCutOutput(
 }
 
 /** The input, and the output or the error, of a call. */
-export function ToolCallDetails({ toolCall }: { toolCall: ChatToolCall }) {
-  const { output } = toolCall;
+export function ToolCallDetails({ part }: { part: ToolPart }) {
+  const output = part.state === 'output-available' ? part.output : undefined;
   return (
     <>
       <div>
         <div className={cx('chat-tool-label')}>Input</div>
-        <InvisibleWarning input={toolCall.input} />
-        <pre className={cx('chat-code')}>{formatJson(toolCall.input)}</pre>
+        <InvisibleWarning input={part.input} />
+        <pre className={cx('chat-code')}>{formatJson(part.input)}</pre>
       </div>
-      {toolCall.error && toolCall.status === 'failed' && (
+      {part.state === 'output-error' && statusOfTool(part) === 'failed' && (
         <div>
           <div className={cx('chat-tool-label')}>Error</div>
-          <pre className={cx('chat-code')}>{toolCall.error}</pre>
+          <pre className={cx('chat-code')}>{part.errorText}</pre>
         </div>
       )}
       {output !== undefined && (
@@ -130,85 +140,122 @@ export function ToolCallDetails({ toolCall }: { toolCall: ChatToolCall }) {
 }
 
 /** A compact row of a call that needed no decision, with its details folded. */
-export function ToolCallRow({ toolCall }: { toolCall: ChatToolCall }) {
+export function ToolCallRow({
+  part,
+  tool,
+}: {
+  part: ToolPart;
+  tool?: ChatTool;
+}) {
+  const toolId = toolIdOf(part);
   return (
     <details className={cx('chat-tool')}>
       <summary>
-        <StatusBadge status={toolCall.status} />
-        <span>{toolCall.title}</span>
-        <span className={cx('chat-id')}>{toolCall.actionId}</span>
+        <StatusBadge status={statusOfTool(part)} />
+        <span>{tool?.title ?? titleOfTool(toolId)}</span>
+        <span className={cx('chat-id')}>{toolId}</span>
       </summary>
       <div className={cx('chat-tool-body')}>
-        <ToolCallDetails toolCall={toolCall} />
+        <ToolCallDetails part={part} />
       </div>
     </details>
   );
 }
 
-export interface ApprovalCardProps {
-  toolCall: ChatToolCall;
-  /** Set while a decision is being sent. */
-  disabled?: boolean;
-  onApprove(toolCall: ChatToolCall): void;
-  onReject(toolCall: ChatToolCall): void;
+/** Whether a call shows as a card: it waited for a decision, or got one. */
+export function needsCard(part: ToolPart): boolean {
+  return (
+    part.state === 'approval-requested' ||
+    part.state === 'approval-responded' ||
+    part.state === 'output-denied' ||
+    Boolean(part.approval)
+  );
 }
 
-function decisionText(toolCall: ChatToolCall): string | undefined {
-  if (toolCall.status === 'pending_approval') return undefined;
-  if (toolCall.status === 'rejected' && toolCall.error === 'superseded') {
-    return 'Not decided: a new message was sent, so this action did not run.';
+export interface ApprovalCardProps {
+  part: ToolPart;
+  /** What the session knows of the tool: its title, what it does, whether it only reads. */
+  tool?: ChatTool;
+  /** Who decided the call and when, when the log says. */
+  decision?: DecisionInfo;
+  /** Set while a decision is being sent, or a response is under way. */
+  disabled?: boolean;
+  onDecide(callId: string, approved: boolean): void;
+}
+
+const EXPLANATION: Partial<Record<ToolStatus, string>> = {
+  unknown: 'The call may have run, but its result was not stored.',
+  not_run: 'The run ended before the call ran.',
+};
+
+function decisionText(
+  part: ToolPart,
+  status: ToolStatus,
+  info?: DecisionInfo,
+): string | undefined {
+  if (status === 'waiting') return undefined;
+  const approved = part.approval?.approved;
+  let decision: string | undefined;
+  if (approved !== undefined) {
+    const word = approved ? 'Allowed' : 'Denied';
+    decision = info
+      ? `${word} by ${info.by} at ${new Date(info.at).toLocaleString()}.`
+      : `${word}.`;
   }
-  const at = toolCall.decidedAt
-    ? ` at ${new Date(toolCall.decidedAt).toLocaleString()}`
-    : '';
-  const who = toolCall.decidedBy ?? 'a user';
-  return toolCall.status === 'rejected'
-    ? `Rejected by ${who}${at}.`
-    : `Allowed by ${who}${at}.`;
+  return [decision, EXPLANATION[status]].filter(Boolean).join(' ') || undefined;
+}
+
+/** Why the call asks, when the tool is known. */
+function whyAsks(tool?: ChatTool): string | undefined {
+  if (!tool) return undefined;
+  return tool.readOnly
+    ? 'The policy of your administrator asks for your approval before this action runs.'
+    : 'This action changes something. It runs only after you approve it.';
 }
 
 /**
  * The card for an action that is not read-only. While the call waits it
- * shows the exact input that will run and the Allow and Reject buttons; after
- * the decision it shows who decided and when.
+ * shows the exact input that will run and the Allow and Deny buttons; after
+ * the decision it shows what was decided.
  */
 export function ApprovalCard(props: ApprovalCardProps) {
-  const { toolCall, disabled } = props;
-  const waiting = toolCall.status === 'pending_approval';
-  const decision = decisionText(toolCall);
+  const { part, disabled } = props;
+  const status = statusOfTool(part);
+  const toolId = toolIdOf(part);
+  const title = props.tool?.title ?? titleOfTool(toolId);
+  const waiting = status === 'waiting';
+  const decision = decisionText(part, status, props.decision);
   return (
     <section
       className={cx('chat-approval', !waiting && 'chat-approval-decided')}
-      aria-label={`Approval: ${toolCall.title}`}
+      aria-label={`Approval: ${title}`}
     >
       <div className={cx('chat-approval-head')}>
-        <span>{toolCall.title}</span>
-        <span className={cx('chat-id')}>{toolCall.actionId}</span>
-        {toolCall.attributes.destructive && (
-          <span className={cx('chat-badge', 'chat-tone-danger')}>
-            destructive
-          </span>
-        )}
-        <StatusBadge status={toolCall.status} />
+        <span>{title}</span>
+        <span className={cx('chat-id')}>{toolId}</span>
+        <StatusBadge status={status} />
       </div>
-      {toolCall.description && (
+      {props.tool?.description && (
         <p className={cx('chat-approval-description')}>
-          {toolCall.description}
+          {props.tool.description}
         </p>
+      )}
+      {waiting && whyAsks(props.tool) && (
+        <p className={cx('chat-approval-description')}>{whyAsks(props.tool)}</p>
       )}
       {waiting ? (
         <div>
           <div className={cx('chat-tool-label')}>
             Input that will run, exactly as shown
           </div>
-          <InvisibleWarning input={toolCall.input} />
-          <pre className={cx('chat-code')}>{formatJson(toolCall.input)}</pre>
+          <InvisibleWarning input={part.input} />
+          <pre className={cx('chat-code')}>{formatJson(part.input)}</pre>
         </div>
       ) : (
         <details>
           <summary className={cx('chat-tool-label')}>Input and result</summary>
           <div className={cx('chat-tool-body')}>
-            <ToolCallDetails toolCall={toolCall} />
+            <ToolCallDetails part={part} />
           </div>
         </details>
       )}
@@ -216,18 +263,17 @@ export function ApprovalCard(props: ApprovalCardProps) {
         <div className={cx('chat-approval-actions')}>
           <Button
             variant="primary"
-            destructive={toolCall.attributes.destructive}
             isDisabled={disabled}
-            onPress={() => props.onApprove(toolCall)}
+            onPress={() => props.onDecide(part.toolCallId, true)}
           >
             Allow
           </Button>
           <Button
             variant="secondary"
             isDisabled={disabled}
-            onPress={() => props.onReject(toolCall)}
+            onPress={() => props.onDecide(part.toolCallId, false)}
           >
-            Reject
+            Deny
           </Button>
         </div>
       )}

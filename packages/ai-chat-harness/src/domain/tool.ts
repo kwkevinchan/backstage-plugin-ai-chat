@@ -24,6 +24,8 @@ import type { JsonObject } from './item';
  */
 export type ToolDescriptor = {
   id: string;
+  /** A short name for the screen. */
+  title?: string;
   description: string;
   /** JSON Schema of the input. */
   inputSchema: JsonObject;
