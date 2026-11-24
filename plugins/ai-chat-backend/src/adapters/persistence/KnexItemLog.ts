@@ -173,10 +173,10 @@ export class KnexItemLog implements ItemLog {
         await this.checkFence(trx, sessionId, kind, fence);
         if (drafts.length === 0) return [];
 
+        const firstSeq = await reserveSeq(trx, sessionId, drafts.length);
         if (kind === 'model') {
           await this.markRead(trx, fence.runId, readUpToSeqOf(drafts));
         }
-        const firstSeq = await reserveSeq(trx, sessionId, drafts.length);
         if (kind === 'insert') {
           await this.checkInsertLimit(trx, sessionId, fence.runId);
         }
@@ -203,10 +203,7 @@ export class KnexItemLog implements ItemLog {
     fence: RunFence,
   ): Promise<void> {
     const query = trx('runs').where({ id: fence.runId });
-    const run = await (kind === 'model'
-      ? query.forNoKeyUpdate()
-      : query.forShare()
-    ).first<{
+    const run = await query.forShare().first<{
       session_id: string;
       status: RunStatus;
       lease_owner: string | null;
