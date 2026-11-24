@@ -2,7 +2,7 @@
 
 | 欄位 | 內容                                                                                                                         |
 | ---- | ---------------------------------------------------------------------------------------------------------------------------- |
-| 狀態 | 已驗證，一項待補（第 5 節的 jest 探針）                                                                                      |
+| 狀態 | 已驗證                                                                                                                       |
 | 日期 | 2026-11-24                                                                                                                   |
 | 對應 | 實作規劃 P1-01、V-01；規格 D-05、D-19、A-03、A-07；程式架構第 8、9 節                                                        |
 | 鎖定 | `ai@7.0.166`（2026-11-09 發佈）、`@ai-sdk/react@4.0.170`（2026-11-09）、`zod@4.1.12`（`ai` 的 peer：`^3.25.76 \|\| ^4.1.8`） |
@@ -12,7 +12,7 @@
 - **對照表的事件名稱大致正確，有三處要改。** 核准用原生的 `tool-approval-request`，不用 `data-approval-request`。被拒絕的結果用 `tool-output-denied`。失敗和取消用 `error` 和 `abort`。
 - **「停在核准上，之後由另一個請求繼續」協定有原生的表示法。** 用 `tool-approval-request` 和 `tool-approval-response`。協定不要求核准走哪個 URL，所以我們的 `POST .../decision` 照舊。`approvalId` 用 `toolCallId`，任何一台 backend 都能從紀錄查到。
 - **前端用 `@ai-sdk/react` 的 `useChat`，加我們自己的 `ChatTransport`。** 載入已存的訊息、核准後在同一則訊息接續、重新整理後接回串流，三件事都實測過。接回串流要改 A-07 的做法：從目前 Run 的第一個 Item 重送，不是只送缺的。
-- **還沒驗證：在 Backstage CLI 的 jest 裡 import 得起來嗎。** 第 5 節有探針和判讀方式。探針不過時，第 9 節的分層要退回「只用協定」。
+- **在 Backstage CLI 的 jest 裡 import 得起來。** 探針通過（5.3 節）：`ai` 和 `@ai-sdk/react` 不需要改 jest 設定，`useChat` 在 jsdom 裡能處理串流。
 
 ## 2. 怎麼驗證的
 
@@ -193,7 +193,7 @@ message after decision approved=false: msg_1 [
 
 用 `useChat`，加自己寫的 `ChatTransport`。理由是下面四項都實測成功。自己寫的話，這四項的狀態機都要自己做。
 
-在 Backstage CLI 的 jest 裡能不能 import，還沒跑過。第 5.3 節。
+在 Backstage CLI 的 jest 裡可以 import，也能處理串流（5.3 節）。
 
 ### 5.2 實測
 
@@ -247,19 +247,21 @@ GET  /sessions/s1/stream?afterSeq=4&mode=none
 POST /sessions/s1/tool-calls/call_2/decision {"approved":false}
 ```
 
-### 5.3 在 Backstage CLI 的 jest 裡 import（沒驗證）
+### 5.3 在 Backstage CLI 的 jest 裡 import
 
-我沒有在 Backstage CLI 的 jest 裡跑過。判斷是：
+結論：可以，不需要改 jest 設定。
 
-- `ai`、`@ai-sdk/react`、`@ai-sdk/provider-utils`、`@ai-sdk/provider`、`@ai-sdk/gateway` 都是 `"type": "module"`。
-- 它們的 `exports` 有 `default` 條件，所以 jest 找得到檔案。這點和 `react-markdown` 不同。
-- 前端套件的 jest 設定（`jest.js` 的 `transformIgnorePatterns`）只排除固定幾個套件，這幾個都不是 `ai`。所以 `ai` 會被 swc 轉成 CommonJS。
-- 這五個檔案裡沒有 `import.meta`、動態 `import()`、頂層 `await`。這些是 swc 轉 CJS 會失敗的寫法。
+為什麼預期可以：
 
-所以預期可以。但這是讀程式的判斷，要跑一次才算數。探針：
+- `ai`、`@ai-sdk/react` 等五個套件都是 `"type": "module"`，但 `exports` 有 `default` 條件，jest 找得到檔案。這點和 `react-markdown` 不同。
+- 前端套件的 jest 設定（`jest.js` 的 `transformIgnorePatterns`）只排除固定幾個套件，沒有 `ai`。所以 `ai` 被 swc 轉成 CommonJS。
+- 這五個檔案裡沒有 `import.meta`、動態 `import()`、頂層 `await`。
+
+實測：在 repo 的 `plugins/ai-chat` 加 `ai@7.0.166` 和 `@ai-sdk/react@4.0.170`（`yarn add -E`），放兩個探針測試，跑 `CI=true yarn test --maxWorkers=2 protocolProbe`。測完刪掉探針，還原 `package.json` 和 `yarn.lock`，不提交。
+
+探針 1：import 加 `renderHook(useChat)`。
 
 ```tsx
-// plugins/ai-chat/src/protocolProbe.test.tsx（用完刪掉）
 import { renderHook } from '@testing-library/react';
 import { useChat } from '@ai-sdk/react';
 import { uiMessageChunkSchema, parseJsonEventStream } from 'ai';
@@ -272,12 +274,19 @@ it('imports ai and useChat', () => {
 });
 ```
 
-跑法：`yarn add --cwd plugins/ai-chat ai@7.0.166 @ai-sdk/react@4.0.170`，然後 `CI=true yarn test --maxWorkers=2 protocolProbe`。
+探針 2：在 jsdom 裡用 `ReadableStream` 送一段 SSE 文字，經 `parseJsonEventStream` 和自訂 transport，由 `useChat` 的 `sendMessage` 讀回。斷言最後一則助理訊息的文字是 `hi`。
 
-- 通過：照第 9 節的 `useChat` 分層。
-- 失敗，而且是 ESM 的錯誤：先試 `transformIgnorePatterns`（在 `package.json` 的 `jest` 欄位）或 `moduleNameMapper`。都不行時，退回「只用協定」：只用 `parseJsonEventStream` 和 `readUIMessageStream`，但它們也在 `ai` 裡，同樣會失敗。這時要把解析自己寫一份（事件是一行一個 JSON，不難），狀態機（核准、接回）也自己寫。
+輸出：
 
-後端不受影響：presenter 只輸出 `data: <JSON>`，不需要 import `ai`。型別可以用 `import type`，編譯後會消失。
+```
+PASS src/protocolProbe2.test.tsx
+PASS src/protocolProbe.test.tsx
+
+Test Suites: 2 passed, 2 total
+Tests:       2 passed, 2 total
+```
+
+所以第 9 節的 `useChat` 分層成立。後端不受影響：presenter 只輸出 `data: <JSON>`，不需要 import `ai`。
 
 ### 5.4 對設計的影響
 
@@ -303,7 +312,7 @@ it('imports ai and useChat', () => {
 
 ## 6. 沒有驗證的事
 
-- Backstage CLI 的 jest 裡 import `ai` 和 `@ai-sdk/react`（5.3）。
+- jest 探針只測了 import 和一段簡單的文字串流，沒有測核准和接回（那兩項在 Node 加 jsdom 的腳本裡測過，見 5.2）。
 - TypeScript 5.8 編譯 `ai` 的型別定義。
 - 真正的瀏覽器：`useChat` 的 `resume` 只測了掛載時重連，沒測分頁回到前景時的重連。
 - 多個核准同時進行（5.5 的做法只靠讀 `useChat` 的程式判斷，沒有實測）。
