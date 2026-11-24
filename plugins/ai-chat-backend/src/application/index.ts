@@ -15,6 +15,7 @@
  */
 
 export { AuditedToolGateway } from './AuditedToolGateway';
+export { OwnerOrShareAccessControl } from './OwnerOrShareAccessControl';
 export { bindAttachments, toAttachmentRef } from './attachments';
 export type { ImageSettings } from './attachments';
 export { createAfterRun } from './afterRun';

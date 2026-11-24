@@ -186,6 +186,11 @@ aiChat:
       maxBytesPerInput: 20971520 # image bytes in one run and in one model call; default 20 MB, at least maxPerMessage times maxBytes
       maxPendingPerSession: 12 # uploaded images that are in no message yet; default 12
       tokensPerImage: 1600 # estimated tokens per image in the budget; default 1600
+  sharing: # read at startup; sharing a conversation is not in this version
+    live:
+      enabled: true # a share may keep updating; default true
+      defaultHours: 24 # life of a live share when nobody picks one; default 24
+      maxHours: 72 # longest life, in hours; default 72
   retention:
     days: 90 # delete a session this many days after its last change; 0 keeps every session; default 90
 
@@ -205,6 +210,14 @@ sees only the actions that the actions service lists for the user. The
 `backend.actions.filter` rules of Backstage apply first, then the toolsets of
 the chat. An action that declares `secrets` is not offered: a chat cannot
 supply them.
+
+**Sharing limits.** `aiChat.sharing.live` is read at startup. `enabled`
+(default true) is whether a share may keep updating. `defaultHours` (default 24) is how long a live share lasts when nobody picks a life, and `maxHours`
+(default 72) is the longest life. Leave `sharing` or `live` out and these
+defaults are used. `enabled: false` is stored as false. Both hour values must
+be positive integers, and `defaultHours` must not be greater than `maxHours`;
+otherwise the backend does not start. Creating or changing a share is not in
+this version, so the values are only checked and kept.
 
 **Images.** With `aiChat.llm.images: true`, a user can attach PNG, JPEG, WebP
 or GIF images to a message. **The images are sent to the model server** as part
@@ -228,17 +241,20 @@ pin, an archive or a change of toolsets does count as a change, and so does a
 new message. Set `days` to `0` to keep every session. A session changed
 exactly `days` ago is kept.
 
-| Setting                   | Meaning                                                                                                                                                                                                                                                                                                                     |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maxTurns`                | Most model calls in one run.                                                                                                                                                                                                                                                                                                |
-| `maxToolCallsPerRun`      | Most tool calls the model may ask for in one run. A call beyond the limit is answered with "tool call limit" and does not run.                                                                                                                                                                                              |
-| `runTimeoutSeconds`       | Most seconds of work in one run, at most 600. The tools run with the token of the user, so a run also ends before that token expires (the shortest life that Backstage allows is 10 minutes).                                                                                                                               |
-| `context.tokenBudget`     | Size of the model input in estimated tokens (one token is a quarter of an ASCII character or one other character). Set it well below the context window of the model.                                                                                                                                                       |
-| `context.keepRecentSteps` | The newest steps that are never shortened or left out.                                                                                                                                                                                                                                                                      |
-| `input.insert.maxPerRun`  | Most messages the user may insert into one run that is going on (at most 20). The model reads an inserted message in its next call, and a run that is about to end reads it first. A run that stops without reading it (a limit, an error, Stop) leaves it marked as not read.                                              |
-| `input.queue.maxMessages` | Most messages in the queue of one session. A queued message waits for the run to end; when the run ends the normal way (the model answered, no limit stopped it) and the credentials of the user last for another run, the first message starts a new run. After any other end the queue waits until the user continues it. |
-| `maxToolOutputChars`      | The output of an action is cut here, and the cut is stated.                                                                                                                                                                                                                                                                 |
-| `retention.days`          | Days after the last change of a session before it is deleted, with its runs, messages, queued messages and images. Default 90. `0` keeps every session. A session with a run that has not ended is kept until the run ends. The audit log is kept.                                                                          |
+| Setting                     | Meaning                                                                                                                                                                                                                                                                                                                     |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxTurns`                  | Most model calls in one run.                                                                                                                                                                                                                                                                                                |
+| `maxToolCallsPerRun`        | Most tool calls the model may ask for in one run. A call beyond the limit is answered with "tool call limit" and does not run.                                                                                                                                                                                              |
+| `runTimeoutSeconds`         | Most seconds of work in one run, at most 600. The tools run with the token of the user, so a run also ends before that token expires (the shortest life that Backstage allows is 10 minutes).                                                                                                                               |
+| `context.tokenBudget`       | Size of the model input in estimated tokens (one token is a quarter of an ASCII character or one other character). Set it well below the context window of the model.                                                                                                                                                       |
+| `context.keepRecentSteps`   | The newest steps that are never shortened or left out.                                                                                                                                                                                                                                                                      |
+| `input.insert.maxPerRun`    | Most messages the user may insert into one run that is going on (at most 20). The model reads an inserted message in its next call, and a run that is about to end reads it first. A run that stops without reading it (a limit, an error, Stop) leaves it marked as not read.                                              |
+| `input.queue.maxMessages`   | Most messages in the queue of one session. A queued message waits for the run to end; when the run ends the normal way (the model answered, no limit stopped it) and the credentials of the user last for another run, the first message starts a new run. After any other end the queue waits until the user continues it. |
+| `maxToolOutputChars`        | The output of an action is cut here, and the cut is stated.                                                                                                                                                                                                                                                                 |
+| `sharing.live.enabled`      | Whether a share may keep updating. Default true. Creating or changing a share is not in this version, so this is only checked and kept.                                                                                                                                                                                     |
+| `sharing.live.defaultHours` | Hours a live share lasts when nobody picks a life. Default 24. A positive integer, at most `maxHours`.                                                                                                                                                                                                                      |
+| `sharing.live.maxHours`     | Longest life of a live share, in hours. Default 72. A positive integer, at least `defaultHours`.                                                                                                                                                                                                                            |
+| `retention.days`            | Days after the last change of a session before it is deleted, with its runs, messages, queued messages and images. Default 90. `0` keeps every session. A session with a run that has not ended is kept until the run ends. The audit log is kept.                                                                          |
 
 When the input is over `tokenBudget`, the old outputs of tools are shortened
 to one line first. If that is not enough, the old steps are replaced by a

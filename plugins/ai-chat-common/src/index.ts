@@ -17,7 +17,8 @@
 /**
  * Types and definitions shared by the frontend and the backend of the AI chat:
  * the types of the HTTP API and of the response stream, the paths of the
- * routes and the ids that both sides derive in the same way.
+ * routes, the permission to read a session, and the ids that both sides
+ * derive in the same way.
  *
  * @packageDocumentation
  */
@@ -25,3 +26,4 @@
 export * from './types';
 export * from './paths';
 export * from './page';
+export * from './permissions';

@@ -3,4 +3,5 @@
 Types and definitions shared by the frontend and the backend of the unofficial
 [AI chat for Backstage](https://github.com/kwkevinchan/backstage-plugin-ai-chat).
 It has the types of the HTTP API and of the response stream (the AI SDK
-UI message stream), and the paths of the routes.
+UI message stream), the paths of the routes, and the permission to read a
+session.
