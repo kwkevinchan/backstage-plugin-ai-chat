@@ -26,6 +26,8 @@
 //    `src/testing`, is refused. Test files may also import `src/testing`.
 // 3. `domain/` and `application/` also never import `express` or `knex`, and
 //    do not use `fetch`.
+// 4. `domain/` has no `async` function, no `await`, no `Promise`, and imports
+//    no Node.js built-in module (`fs`, `path`, `crypto`, `node:*` and so on).
 //
 // `src/lintRules.test.ts` lints sample files against this configuration.
 
@@ -38,9 +40,14 @@ const baseRestrictedPatterns = [
   '**/__mocks__/**',
 ];
 
+const { builtinModules } = require('module');
+
 const noBackstage = '@backstage/*';
 const noFrameworkPaths = ['express', 'knex'];
 const noFrameworkPatterns = ['express/*', 'knex/*'];
+// Every Node.js built-in module, with and without the `node:` prefix.
+const noNodePaths = builtinModules;
+const noNodePatterns = ['node:*', ...builtinModules.map(name => `${name}/*`)];
 
 // The test files of the shared configuration (@backstage/cli, eslint-factory).
 const testFiles = [
@@ -116,6 +123,39 @@ module.exports = require('@backstage/cli/config/eslint-factory')(__dirname, {
         'no-restricted-globals': [
           'error',
           { name: 'fetch', message: 'Use a port instead of fetch.' },
+        ],
+      },
+    },
+    {
+      // Pure code: no I/O and nothing asynchronous.
+      files: ['src/domain/**'],
+      rules: {
+        'no-restricted-imports': [
+          'error',
+          {
+            paths: [...noFrameworkPaths, ...noNodePaths],
+            patterns: [
+              ...baseRestrictedPatterns,
+              noBackstage,
+              ...noFrameworkPatterns,
+              ...noNodePatterns,
+            ],
+          },
+        ],
+        'no-restricted-syntax': [
+          'error',
+          {
+            selector: ':function[async=true]',
+            message: 'The domain circle has no async function.',
+          },
+          {
+            selector: 'AwaitExpression',
+            message: 'The domain circle has no await.',
+          },
+          {
+            selector: "Identifier[name='Promise']",
+            message: 'The domain circle has no Promise.',
+          },
         ],
       },
     },

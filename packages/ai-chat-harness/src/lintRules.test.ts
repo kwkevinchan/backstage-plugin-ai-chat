@@ -148,6 +148,66 @@ describe('the circles are an allow list', () => {
   );
 });
 
+describe('the domain circle is pure', () => {
+  it.each([
+    [
+      'an async function',
+      'export async function f() {\n  return 1;\n}\n',
+      'no async function',
+    ],
+    [
+      'an async arrow function',
+      'export const f = async () => 1;\n',
+      'no async function',
+    ],
+    ['await', 'export const f = async () => {\n  await 1;\n};\n', 'no await'],
+    ['a Promise type', 'export type P = Promise<number>;\n', 'no Promise'],
+    [
+      'fetch',
+      "export const f = () => fetch('https://example.com');\n",
+      'instead of fetch',
+    ],
+  ])('rejects %s', async (_name, code, text) => {
+    const messages = await lint('src/domain/example.ts', code);
+    expect(messages.map(m => m.message).join('\n')).toContain(text);
+  });
+
+  it.each([
+    ['fs'],
+    ['fs/promises'],
+    ['node:fs'],
+    ['node:crypto'],
+    ['path'],
+    ['crypto'],
+    ['http'],
+    ['child_process'],
+  ])('rejects an import of %s', async source => {
+    const messages = await lint(
+      'src/domain/example.ts',
+      `import {} from '${source}';\n`,
+    );
+    expect(messages.map(m => m.rule)).toContain('no-restricted-imports');
+  });
+
+  it('accepts plain synchronous code', async () => {
+    expect(
+      await lint(
+        'src/domain/example.ts',
+        'export const double = (n: number): number => n * 2;\n',
+      ),
+    ).toEqual([]);
+  });
+
+  it('leaves the application circle free to be asynchronous', async () => {
+    expect(
+      await lint(
+        'src/application/example.ts',
+        'export async function run(): Promise<number> {\n  return 1;\n}\n',
+      ),
+    ).toEqual([]);
+  });
+});
+
 describe('manifest of the core', () => {
   it('lists no @backstage package as a runtime dependency', () => {
     const manifest = JSON.parse(

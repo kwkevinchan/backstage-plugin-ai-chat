@@ -21,4 +21,4 @@
  * @packageDocumentation
  */
 
-export {};
+export * from './domain';
