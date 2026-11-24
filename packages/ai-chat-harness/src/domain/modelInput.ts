@@ -15,7 +15,7 @@
  */
 
 import type { AgentDefinition } from './agent';
-import { withoutLostInserts } from './inputs';
+import { inCausalOrder, withoutLostInserts } from './inputs';
 import type {
   Item,
   JsonObject,
@@ -118,8 +118,11 @@ const STEPS_OMITTED = 'Some earlier steps of this answer were left out.';
  *   those are not sent, and the text of the summary is the first message.
  * - The messages of the run are always sent as written: the first message
  *   (the newest `user_message` that is not inserted) and the messages
- *   inserted after it. A message inserted while a step was under way comes
- *   after all the tool results of that step.
+ *   inserted after it. An inserted message comes before the first model
+ *   output that read it (`readUpToSeq`), so after every output that did not,
+ *   with the tool results of those steps; a message no output has read comes
+ *   last. A summary covers by `seq`, up to the first message of the run, so
+ *   the order does not matter to it.
  * - An inserted message that the model never read, in a run that has ended, is
  *   not sent: the user is told it was not read and may send it again.
  *
@@ -605,7 +608,7 @@ function layoutOf(
   const live = items.filter(
     item => item.kind !== 'summary' && item.seq > coveredUpTo,
   );
-  const segments = toSegments(live, lookupOf(live));
+  const segments = toSegments(inCausalOrder(live), lookupOf(live));
 
   const system = [agent.systemPrompt, UNTRUSTED_OUTPUT_NOTICE, ...extra.context]
     .filter(part => part.length > 0)

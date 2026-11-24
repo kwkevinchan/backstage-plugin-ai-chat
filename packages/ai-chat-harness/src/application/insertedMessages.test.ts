@@ -86,14 +86,13 @@ describe('AdvanceRun: a message inserted while the model answers (IN-10, IN-11)'
     expect(log[2]).toMatchObject({ text: 'first answer', readUpToSeq: 1 });
     expect(log[3]).toMatchObject({ text: 'second answer', readUpToSeq: 3 });
     expect(insertStatesOf(log).get(2)).toBe('read');
-    // The first input does not have the message, the second one does. The
-    // log is read in the order of `seq`: the message came before the answer
-    // that did not read it.
+    // The first input does not have the message, the second one does, after
+    // the answer that did not read it although its `seq` is smaller.
     expect(texts(t.model.inputs[0])).toEqual(['question']);
     expect(texts(t.model.inputs[1])).toEqual([
       'question',
-      'also check the owner',
       'first answer',
+      'also check the owner',
     ]);
   });
 
@@ -154,6 +153,53 @@ describe('AdvanceRun: a message inserted while the model answers (IN-10, IN-11)'
     expect(t.model.inputs).toHaveLength(1);
     expect(insertStatesOf(await t.read()).get(2)).toBe('unread');
     expect(t.lastUsage().stepsUsed).toBe(1);
+  });
+});
+
+describe('AdvanceRun: the order of an inserted message in the input', () => {
+  it('comes after the first answer with its tool and result when it arrived while that answer streamed', async () => {
+    const holder: { t?: Kit } = {};
+    const t = await kit({
+      script: [
+        () => {
+          insert(holder.t!, 'also the owner');
+          return [say('looking'), callTool('m1', 'catalog:get-entity')];
+        },
+        [say('done')],
+      ],
+      tools: [readTool],
+    });
+    holder.t = t;
+    await t.execute();
+    const second = t.model.inputs[1];
+    expect(roles(second)).toEqual(['user', 'assistant', 'tool', 'user']);
+    expect(second.messages[3].content).toBe('also the owner');
+  });
+
+  it('comes after two steps that did not read it, and before the step that did', async () => {
+    const holder: { t?: Kit } = {};
+    const t = await kit({
+      script: [
+        [callTool('m1', 'catalog:get-entity')],
+        () => {
+          insert(holder.t!, 'late');
+          return [callTool('m2', 'catalog:get-entity')];
+        },
+        [say('done')],
+      ],
+      tools: [readTool],
+    });
+    holder.t = t;
+    await t.execute();
+    expect(roles(t.model.inputs[2])).toEqual([
+      'user',
+      'assistant',
+      'tool',
+      'assistant',
+      'tool',
+      'user',
+    ]);
+    expect(t.model.inputs[2].messages[5].content).toBe('late');
   });
 });
 

@@ -1194,6 +1194,96 @@ describe('buildModelInput: messages inserted into the run (IN-10)', () => {
     });
   });
 
+  describe('the causal order', () => {
+    const marked = (n: number, mark: number): ItemBody[] => [
+      agentSays(`step ${n}`, mark),
+      call(`c${n}`, { step: n, readUpToSeq: mark }),
+      result(`c${n}`),
+    ];
+
+    it('puts the message after the steps that did not read it and their results', () => {
+      // 1 question, 2-4 step 1, 5-7 step 2, 8 inserted (during step 3), 9-11 step 3 read it
+      const input = build([
+        user('Q'),
+        ...marked(1, 1),
+        ...marked(2, 4),
+        inserted('late'),
+        ...marked(3, 8),
+      ]);
+      expect(text(input.messages)).toEqual([
+        'Q',
+        'step 1',
+        expect.stringContaining('"status":"ok"'),
+        'step 2',
+        expect.stringContaining('"status":"ok"'),
+        'late',
+        'step 3',
+        expect.stringContaining('"status":"ok"'),
+      ]);
+      expectPaired(input.messages);
+    });
+
+    it('puts a message that arrived while a step streamed after that step', () => {
+      // 2 inserted while step 1 (3-5) streamed, read by step 2 (6)
+      const input = build([
+        user('Q'),
+        inserted('during'),
+        agentSays('step 1', 1),
+        call('c1', { readUpToSeq: 1 }),
+        result('c1'),
+        agentSays('step 2', 5),
+      ]);
+      expect(text(input.messages).filter(t => !t.startsWith('{'))).toEqual([
+        'Q',
+        'step 1',
+        'during',
+        'step 2',
+      ]);
+    });
+
+    it('puts a message that no step read last, after the results of all steps', () => {
+      const input = build([
+        user('Q'),
+        ...marked(1, 1),
+        inserted('waiting'),
+        ...marked(2, 1),
+      ]);
+      const last = input.messages[input.messages.length - 1];
+      expect(last).toEqual({ role: 'user', content: 'waiting' });
+      expectPaired(input.messages);
+    });
+
+    it('keeps the order of seq for outputs with no mark (P1)', () => {
+      const input = build([
+        user('Q'),
+        agentSays('a'),
+        inserted('x'),
+        agentSays('b'),
+      ]);
+      expect(text(input.messages)).toEqual(['Q', 'a', 'x', 'b']);
+    });
+
+    it('does not let a summary cover a message that moved behind an older seq', () => {
+      const bodies: ItemBody[] = [
+        user('Q'),
+        ...marked(1, 1),
+        ...marked(2, 4),
+        inserted('late'),
+        ...marked(3, 8),
+      ];
+      const items = log(...bodies);
+      const found = planSummary(items, agent, extra, {
+        tokenBudget: 1,
+        keepRecentSteps: 1,
+      });
+      const late = items.find(
+        i => i.kind === 'user_message' && i.text === 'late',
+      );
+      expect(found?.coversUpToSeq ?? 0).toBeLessThan(late!.seq);
+      expect(found?.items.some(i => i.seq >= late!.seq) ?? false).toBe(false);
+    });
+  });
+
   describe('with a small budget', () => {
     const run = (): ItemBody[] => [
       user('old question'),

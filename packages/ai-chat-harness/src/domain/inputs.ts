@@ -102,3 +102,51 @@ export function withoutLostInserts(items: readonly Item[]): readonly Item[] {
       ),
   );
 }
+
+/**
+ * The log in the order the model should read it: each inserted message goes
+ * before the first model output that read it (`readUpToSeq` at least its
+ * `seq`), so after every output that did not read it and after the tool
+ * results of those steps. A message no output has read goes to the end of its
+ * run. An output with no mark (P1) counts as having read up to its own `seq`,
+ * so a log of P1 keeps the order of `seq`. Only the position changes; `seq`
+ * does not, so a summary still covers by `seq` and never reaches a message
+ * inserted after the first message of the run.
+ */
+export function inCausalOrder(items: readonly Item[]): readonly Item[] {
+  if (!items.some(isInserted)) return items;
+  const ordered: Item[] = [];
+  let run: Item[] = [];
+  for (const item of items) {
+    if (item.kind === 'user_message' && !isInserted(item)) {
+      ordered.push(...placeInserted(run));
+      run = [];
+    }
+    run.push(item);
+  }
+  ordered.push(...placeInserted(run));
+  return ordered;
+}
+
+function placeInserted(run: Item[]): Item[] {
+  const inserted = run.filter(isInserted);
+  if (inserted.length === 0) return run;
+  const before = new Map<number, Item[]>();
+  const unread: Item[] = [];
+  for (const message of inserted) {
+    const at = run.findIndex(
+      item =>
+        (item.kind === 'agent_message' || item.kind === 'tool_call') &&
+        (item.readUpToSeq ?? item.seq) >= message.seq,
+    );
+    if (at < 0) unread.push(message);
+    else before.set(at, [...(before.get(at) ?? []), message]);
+  }
+  const placed = new Set(inserted);
+  const ordered: Item[] = [];
+  run.forEach((item, index) => {
+    ordered.push(...(before.get(index) ?? []));
+    if (!placed.has(item)) ordered.push(item);
+  });
+  return [...ordered, ...unread];
+}

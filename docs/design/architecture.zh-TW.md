@@ -1483,9 +1483,9 @@ Run 正常結束（`completed`、沒有 `endReason`）時，`RunSupervisor` 用 
 
 **seq 的位置**
 
-插入的 `user_message` 的序號可能夾在 `tool_call` 和它的 `tool_result` 之間：工具正在執行時插入。`buildModelInput` 已經用 `callId` 查結果，不看序號：遇到 `user_message` 先結束目前的 assistant 訊息，並在它後面接上這一步所有呼叫的 `tool` 訊息。所以模型看到的順序是：assistant（含呼叫）、每個呼叫的 `tool` 訊息、插入的 `user` 訊息。這一點寫成一條測試（PI-02）。
+插入的 `user_message` 的序號可能夾在 `tool_call` 和它的 `tool_result` 之間（工具正在執行時插入），也可能比模型那一次輸出的序號小（串流到一半時插入）。`buildModelInput` 不照序號排它，照因果順序：**插入的訊息放在第一個 `readUpToSeq` 大於等於它的序號的模型輸出之前**，也就是所有沒讀到它的輸出、和那些 Step 的所有工具結果與 `approval` 之後。沒有任何輸出讀到它（Run 裡還沒讀的）放在最後。沒有 `readUpToSeq` 的舊輸出（P1 的紀錄）當成讀到自己的序號，所以照序號排。畫面用同一條規則（13.9）。模型輸入照樣合法：assistant（含呼叫）後面緊接每個呼叫的 `tool` 訊息，`user` 訊息不插在中間（`buildModelInput` 用 `callId` 查結果，遇到 `user_message` 先結束目前的 assistant 訊息並補上 `tool` 訊息）。實作是 `domain/inputs.ts` 的 `inCausalOrder`，只改位置，不改 `seq`。測試在 PI-02。
 
-等核准的呼叫：Run 是 `waiting_approval` 時不能插入（409），所以插入不會夾在要核准的呼叫之間。唯一的例外是插入先 commit、Run 才轉成 `waiting_approval`（上面的競爭）：這時迴圈在 `wait_approval`，不呼叫模型；核准後工具先執行，下一次模型呼叫時，插入的訊息排在所有工具結果之後。
+等核准的呼叫：Run 是 `waiting_approval` 時不能插入（409），所以插入不會夾在要核准的呼叫之間。唯一的例外是插入先 commit、Run 才轉成 `waiting_approval`（上面的競爭）：這時迴圈在 `wait_approval`，不呼叫模型；核准後工具先執行，下一次模型呼叫時，插入的訊息排在所有工具結果之後（沒有輸出讀過它，放在最後）。
 
 **Step 和上限**
 
@@ -1501,7 +1501,7 @@ Run 正常結束（`completed`、沒有 `endReason`）時，`RunSupervisor` 用 
 - 它們都原文送出（含圖片），不縮短、不省略、不被摘要。摘要最多涵蓋到第一則之前（`coversUpToSeq` 最多到它的 `seq` 減 1）。
 - 數量受 `insert.maxPerRun` 限制（5 則，每則最多 8000 字），所以這一塊的大小有上限。它和最近的 Step 加起來超過預算時，輸入會超過預算，跟「最近的部分太大」同一種情形。
 - 實作：`pinned` 只放第一則（這個 Run 最後一則 `delivery` 不是 `inserted` 的 `user_message`）；插入的訊息留在原來的位置，在預算不夠時不被省略（`mid` 裡跳過它們、`recent` 本來就不動）。`boundarySeq` 是第一則的 `seq`，所以摘要不涵蓋第一則，也不涵蓋它之後的插入訊息。`planSummary` 算「留下的部分」時把這些插入訊息加進去。
-- 插入的訊息仍依 `seq` 的順序排進輸入（除了上面說的：同一步的工具結果先於它）。模型串流到一半時插入的訊息，`seq` 比那一次輸出小，所以在輸入裡排在那次輸出之前。
+- 插入的訊息依因果順序排進輸入（見「seq 的位置」）。摘要和省略仍用 `seq`：摘要最多涵蓋到第一則之前，插入的訊息在第一則之後，所以重排不會讓摘要吞掉它；`mid` 裡省略 Step 時跳過插入的訊息，它們留在重排後的位置。
 
 **Stop 和租約過期**
 
