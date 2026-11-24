@@ -42,7 +42,10 @@ import type {
  * @public
  */
 export interface AiChatApi {
-  listSessions(): Promise<ChatSession[]>;
+  listSessions(options?: {
+    query?: string;
+    includeArchived?: boolean;
+  }): Promise<ChatSession[]>;
   createSession(request?: CreateChatSessionRequest): Promise<ChatSession>;
   getSession(id: string): Promise<ChatSessionDetail>;
   updateSession(

@@ -58,6 +58,17 @@ describe('AiChatClient', () => {
     ]);
   });
 
+  it('sends a title search and the archived flag as query parameters', async () => {
+    const { client, fetch } = setup(json({ items: [] }));
+    await client.listSessions({ query: 'Build', includeArchived: true });
+    expect(urls(fetch)).toEqual([
+      [
+        'GET',
+        'http://backend/api/ai-chat/sessions?q=Build&includeArchived=true',
+      ],
+    ]);
+  });
+
   it('creates, updates and deletes with the right methods and bodies', async () => {
     const { client, fetch } = setup(() => json({ id: 'new' }));
     await client.createSession({ enabledToolsets: ['read'] });

@@ -20,6 +20,8 @@ import type { SessionRepository } from '../../application/ports';
 import {
   RunAlreadyActive,
   SessionNotFound,
+  normalizeSearchQuery,
+  searchLikePattern,
   type NewSession,
   type Session,
   type SessionPatch,
@@ -89,15 +91,24 @@ export class KnexSessionRepository implements SessionRepository {
 
   async listByOwner(
     ownerRef: string,
-    opts: { includeArchived?: boolean; limit?: number } = {},
+    opts: { includeArchived?: boolean; limit?: number; query?: string } = {},
   ): Promise<Session[]> {
-    const query = this.knex<SessionRow>('sessions')
-      .where({ owner_ref: ownerRef })
-      .orderBy([
-        { column: 'updated_at', order: 'desc' },
-        { column: 'id', order: 'asc' },
-      ]);
+    const query = this.knex<SessionRow>('sessions').where({
+      owner_ref: ownerRef,
+    });
     if (!opts.includeArchived) query.whereNull('archived_at');
+    // Same rule as `sessionMatchesSearch`: the stored title, ASCII case
+    // folded. `%` and `_` in the query are ordinary characters.
+    if (normalizeSearchQuery(opts.query).length > 0) {
+      query.whereRaw("lower(title) like ? escape '!'", [
+        searchLikePattern(opts.query ?? ''),
+      ]);
+    }
+    query.orderBy([
+      { column: 'pinned', order: 'desc' },
+      { column: 'updated_at', order: 'desc' },
+      { column: 'id', order: 'asc' },
+    ]);
     if (opts.limit !== undefined) query.limit(opts.limit);
     return (await query).map(toSession);
   }
@@ -118,6 +129,15 @@ export class KnexSessionRepository implements SessionRepository {
       .update(changes);
     if (count === 0) throw new SessionNotFound(sessionId);
     return this.get(sessionId);
+  }
+
+  async setTitleIfAbsent(sessionId: string, title: string): Promise<boolean> {
+    const now = this.clock.now().toISOString();
+    const count = await this.knex('sessions')
+      .where({ id: sessionId })
+      .whereNull('title')
+      .update({ title, updated_at: now });
+    return count > 0;
   }
 
   /**

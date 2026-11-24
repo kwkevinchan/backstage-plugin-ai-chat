@@ -118,6 +118,85 @@ describe('RunSupervisor', () => {
     ]);
   });
 
+  it('names the session on a normal end, before the subscribers see that it ended', async () => {
+    let sawEnd = false;
+    const { supervisor, calls } = setup(
+      () => ending({ status: 'completed' }),
+      {
+        transition: jest.fn(async (id: string, to: string, opts: any) => {
+          calls.push(`transition ${id} ${to} ${opts?.leaseOwner ?? '-'}`);
+          return { id, sessionId: 's1', status: to };
+        }),
+      },
+      {
+        nameSession: async info => {
+          expect(sawEnd).toBe(false);
+          expect(info.outcome).toEqual({ status: 'completed' });
+          calls.push('nameSession');
+        },
+      },
+    );
+    const handle = supervisor.launch(leased('r1', 'lease-1'), request);
+    for await (const event of handle.events) {
+      if (event.type === 'run.ended') {
+        sawEnd = true;
+        calls.push('subscriber saw run.ended');
+      }
+    }
+    expect(calls).toEqual([
+      'transition r1 completed lease-1',
+      'nameSession',
+      'subscriber saw run.ended',
+    ]);
+  });
+
+  it.each([
+    { status: 'waiting_approval' as const, pending: [] },
+    { status: 'completed' as const, endReason: 'max_steps' as const },
+    { status: 'failed' as const, message: 'm' },
+    { status: 'cancelled' as const },
+  ])('does not name the session for %j', async outcome => {
+    const nameSession = jest.fn(async () => undefined);
+    const { supervisor } = setup(
+      () => ending(outcome),
+      {
+        transition: jest.fn(async () => ({ id: 'r1', sessionId: 's1' })),
+      },
+      { nameSession },
+    );
+    await supervisor.launch(leased('r1', 'lease-1'), request).done;
+    expect(nameSession).not.toHaveBeenCalled();
+  });
+
+  it('still publishes a completed end when naming the session throws', async () => {
+    const { supervisor, logger } = setup(
+      () => ending({ status: 'completed' }),
+      {
+        transition: jest.fn(async () => ({
+          id: 'r1',
+          sessionId: 's1',
+          status: 'completed',
+        })),
+      },
+      {
+        nameSession: async () => {
+          throw new Error('title model down');
+        },
+      },
+    );
+    const handle = supervisor.launch(leased('r1', 'lease-1'), request);
+    const seen: HostEvent[] = [];
+    for await (const event of handle.events) seen.push(event);
+    expect(seen[seen.length - 1]).toEqual({
+      type: 'run.ended',
+      outcome: { status: 'completed' },
+    });
+    expect(logger.error).toHaveBeenCalledWith(
+      'Could not name the session',
+      expect.objectContaining({ runId: 'r1', error: 'title model down' }),
+    );
+  });
+
   it.each([
     [{ status: 'completed' as const }, 'completed'],
     [

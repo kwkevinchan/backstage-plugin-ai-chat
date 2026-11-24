@@ -1110,4 +1110,65 @@ describe('the host on a real database', () => {
       expect(world.actions.invocations).toHaveLength(0);
     });
   });
+
+  describe('a title after the first normal end (SE-04)', () => {
+    it('writes a title after the first normal end, including when an earlier run failed', async () => {
+      const failed = backend([new Error('down')]);
+      const session = await world.newSession();
+      const bad = await failed.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'Hi',
+      });
+      expect((await drain(bad)).at(-1)).toMatchObject({
+        type: 'run.ended',
+        outcome: { status: 'failed' },
+      });
+      expect((await world.sessions.get(session.id)).title).toBeUndefined();
+
+      const ok = backend([[say('Hello')]]);
+      await drain(
+        await ok.useCases.sendMessage.execute({
+          principal: jane,
+          sessionId: session.id,
+          text: 'Hi again',
+        }),
+      );
+      expect((await world.sessions.get(session.id)).title).toBe(
+        'Generated title',
+      );
+      expect(ok.model.inputs).toHaveLength(1);
+
+      const again = backend([[say('Still here')]]);
+      await drain(
+        await again.useCases.sendMessage.execute({
+          principal: jane,
+          sessionId: session.id,
+          text: 'And then',
+        }),
+      );
+      expect((await world.sessions.get(session.id)).title).toBe(
+        'Generated title',
+      );
+      expect(again.model.inputs).toHaveLength(1);
+    });
+
+    it('keeps a title the user set', async () => {
+      const a = backend([[say('Hello')]]);
+      const session = await world.newSession();
+      await a.useCases.updateSession.execute({
+        principal: jane,
+        sessionId: session.id,
+        patch: { title: 'Mine' },
+      });
+      await drain(
+        await a.useCases.sendMessage.execute({
+          principal: jane,
+          sessionId: session.id,
+          text: 'Hi',
+        }),
+      );
+      expect((await world.sessions.get(session.id)).title).toBe('Mine');
+    });
+  });
 });

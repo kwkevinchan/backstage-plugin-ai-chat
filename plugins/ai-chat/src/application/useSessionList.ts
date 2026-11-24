@@ -14,24 +14,48 @@
  * limitations under the License.
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import type { ChatSession } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type {
+  ChatSession,
+  UpdateChatSessionRequest,
+} from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { AiChatApi } from '../api';
 import { describeError } from '../adapters/describeError';
 
-/** The sessions of the user, the most recently changed first. */
+/**
+ * The sessions of the user. Pinned ones come first, then the most recently
+ * changed. `query` searches the stored title. Archived sessions stay out
+ * until `includeArchived` is set (SE-03).
+ */
 export function useSessionList(api: AiChatApi) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [error, setError] = useState<string>();
+  const [query, setQuery] = useState('');
+  const [includeArchived, setIncludeArchived] = useState(false);
+  const generation = useRef(0);
 
   const refresh = useCallback(async () => {
+    const mine = ++generation.current;
+    const trimmed = query.trim();
+    const options =
+      trimmed || includeArchived
+        ? {
+            ...(trimmed && { query: trimmed }),
+            ...(includeArchived && { includeArchived: true }),
+          }
+        : undefined;
     try {
-      setSessions(await api.listSessions());
+      const next = options
+        ? await api.listSessions(options)
+        : await api.listSessions();
+      if (mine !== generation.current) return;
+      setSessions(next);
       setError(undefined);
     } catch (e) {
+      if (mine !== generation.current) return;
       setError(describeError(e));
     }
-  }, [api]);
+  }, [api, query, includeArchived]);
 
   useEffect(() => {
     refresh();
@@ -51,5 +75,29 @@ export function useSessionList(api: AiChatApi) {
     [api, refresh],
   );
 
-  return { sessions, error, refresh, remove };
+  const change = useCallback(
+    async (id: string, patch: UpdateChatSessionRequest): Promise<boolean> => {
+      try {
+        await api.updateSession(id, patch);
+        await refresh();
+        return true;
+      } catch (e) {
+        setError(describeError(e));
+        return false;
+      }
+    },
+    [api, refresh],
+  );
+
+  return {
+    sessions,
+    error,
+    query,
+    setQuery,
+    includeArchived,
+    setIncludeArchived,
+    refresh,
+    remove,
+    change,
+  };
 }

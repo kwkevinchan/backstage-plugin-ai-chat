@@ -121,6 +121,56 @@ describe('KnexSessionRepository', () => {
     ).toHaveLength(3);
   });
 
+  it('lists a pinned session before a newer one that is not pinned', async () => {
+    const older = await p.sessions.create({ ...NEW_SESSION, title: 'older' });
+    await p.sessions.update(older.id, { pinned: true });
+    p.clock.advance(5);
+    const newer = await p.sessions.create({ ...NEW_SESSION, title: 'newer' });
+
+    expect(
+      (await p.sessions.listByOwner('user:default/jane')).map(s => s.id),
+    ).toEqual([older.id, newer.id]);
+  });
+
+  it('searches titles, skips a session with none, and treats % and _ as letters', async () => {
+    const plain = await p.sessions.create({
+      ...NEW_SESSION,
+      title: 'Build is red',
+    });
+    p.clock.advance(1);
+    const percent = await p.sessions.create({
+      ...NEW_SESSION,
+      title: '100%_done',
+    });
+    p.clock.advance(1);
+    await p.sessions.create(NEW_SESSION);
+    const owner = 'user:default/jane';
+    const ids = async (query?: string) =>
+      (await p.sessions.listByOwner(owner, { query })).map(s => s.id);
+
+    expect(await ids('BUILD')).toEqual([plain.id]);
+    expect(await ids('  ')).toEqual(await ids());
+    expect(await ids('100%')).toEqual([percent.id]);
+    expect(await ids('100%_')).toEqual([percent.id]);
+    expect(await ids('_')).toEqual([percent.id]);
+    expect(await ids('100X')).toEqual([]);
+    expect(await ids('red')).toEqual([plain.id]);
+  });
+
+  it('setTitleIfAbsent writes only while the title is empty', async () => {
+    const created = await p.sessions.create(NEW_SESSION);
+    expect(await p.sessions.setTitleIfAbsent(created.id, 'Generated')).toBe(
+      true,
+    );
+    expect((await p.sessions.get(created.id)).title).toBe('Generated');
+    expect(await p.sessions.setTitleIfAbsent(created.id, 'Other')).toBe(false);
+    expect((await p.sessions.get(created.id)).title).toBe('Generated');
+    await p.sessions.update(created.id, { title: 'Mine' });
+    expect(await p.sessions.setTitleIfAbsent(created.id, 'Other')).toBe(false);
+    expect((await p.sessions.get(created.id)).title).toBe('Mine');
+    expect(await p.sessions.setTitleIfAbsent('missing', 'x')).toBe(false);
+  });
+
   it('deletes a session and what belongs to it', async () => {
     const created = await p.sessions.create(NEW_SESSION);
     await p.runs.start(created.id);

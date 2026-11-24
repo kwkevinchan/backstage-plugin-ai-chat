@@ -68,6 +68,17 @@ export { CREDENTIALS_MARGIN_SECONDS, runLimits } from './runLimits';
 export type { LeasedRun, Run } from './run';
 export { assertOwner } from './session';
 export type { NewSession, Session, SessionPatch } from './session';
+export {
+  GENERATED_TITLE_MAX_CHARS,
+  TITLE_SOURCE_MAX_CHARS,
+  compareSessionsForList,
+  conversationForTitle,
+  normalizeSearchQuery,
+  searchLikePattern,
+  sessionMatchesSearch,
+  shouldAutoTitle,
+  titleFromModelAnswer,
+} from './sessionList';
 export { buildSystemPrompt } from './systemPrompt';
 export {
   defaultToolsetIds,

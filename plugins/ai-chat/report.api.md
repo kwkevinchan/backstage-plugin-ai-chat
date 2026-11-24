@@ -48,7 +48,10 @@ export interface AiChatApi {
     request: InsertChatMessageRequest,
   ): Promise<ChatItem>;
   // (undocumented)
-  listSessions(): Promise<ChatSession[]>;
+  listSessions(options?: {
+    query?: string;
+    includeArchived?: boolean;
+  }): Promise<ChatSession[]>;
   listSessionTools(id: string): Promise<ChatTool[]>;
   // (undocumented)
   listToolsets(): Promise<ChatToolset[]>;

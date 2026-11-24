@@ -273,6 +273,80 @@ describe('the HTTP routes', () => {
       await b.supervisor.shutdown(0);
       await handle.done;
     });
+
+    it('searches titles, lists a pin before a newer session, and hides archived ones', async () => {
+      const b = backend([]);
+      const alpha = await as(JANE, request(b.app).post('/sessions'))
+        .send({ title: 'Alpha build' })
+        .expect(201);
+      const beta = await as(JANE, request(b.app).post('/sessions'))
+        .send({ title: 'Beta notes' })
+        .expect(201);
+      await as(JANE, request(b.app).patch(`/sessions/${alpha.body.id}`))
+        .send({ pinned: true })
+        .expect(200);
+      await as(JANE, request(b.app).patch(`/sessions/${beta.body.id}`))
+        .send({ title: 'Beta notes revised' })
+        .expect(200);
+
+      const listed = await as(JANE, request(b.app).get('/sessions')).expect(
+        200,
+      );
+      expect(listed.body.items.map((s: { id: string }) => s.id)).toEqual([
+        alpha.body.id,
+        beta.body.id,
+      ]);
+
+      const found = await as(
+        JANE,
+        request(b.app).get('/sessions').query({ q: 'ALPHA' }),
+      ).expect(200);
+      expect(found.body.items.map((s: { id: string }) => s.id)).toEqual([
+        alpha.body.id,
+      ]);
+      const blank = await as(
+        JANE,
+        request(b.app).get('/sessions').query({ q: '  ' }),
+      ).expect(200);
+      expect(blank.body.items).toHaveLength(2);
+      expect(
+        await statusOf(
+          as(
+            JANE,
+            request(b.app)
+              .get('/sessions')
+              .query({ q: 'a'.repeat(201) }),
+          ),
+        ),
+      ).toBe(400);
+
+      await as(JANE, request(b.app).patch(`/sessions/${beta.body.id}`))
+        .send({ archived: true })
+        .expect(200);
+      const hidden = await as(JANE, request(b.app).get('/sessions')).expect(
+        200,
+      );
+      expect(hidden.body.items.map((s: { id: string }) => s.id)).toEqual([
+        alpha.body.id,
+      ]);
+      const archived = await as(
+        JANE,
+        request(b.app).get('/sessions').query({ includeArchived: 'true' }),
+      ).expect(200);
+      expect(archived.body.items.map((s: { id: string }) => s.id)).toEqual([
+        alpha.body.id,
+        beta.body.id,
+      ]);
+      await as(JANE, request(b.app).patch(`/sessions/${beta.body.id}`))
+        .send({ archived: false })
+        .expect(200);
+      const restored = await as(JANE, request(b.app).get('/sessions')).expect(
+        200,
+      );
+      expect(restored.body.items.map((s: { id: string }) => s.id)).toContain(
+        beta.body.id,
+      );
+    });
   });
 
   describe('POST /sessions/:id/runs', () => {

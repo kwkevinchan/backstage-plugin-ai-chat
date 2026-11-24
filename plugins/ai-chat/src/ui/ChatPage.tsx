@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Route,
   Routes,
@@ -24,11 +24,21 @@ import {
 } from 'react-router-dom';
 import { Content, Header, Page } from '@backstage/core-components';
 import { useApi } from '@backstage/core-plugin-api';
-import { RiAddLine, RiDeleteBinLine } from '@remixicon/react';
+import {
+  RiAddLine,
+  RiArchiveLine,
+  RiDeleteBinLine,
+  RiInboxUnarchiveLine,
+  RiPencilLine,
+  RiPushpinFill,
+  RiPushpinLine,
+} from '@remixicon/react';
 import { Button, Container } from '@backstage/ui';
 import type {
+  ChatSession,
   ChatSessionDetail,
   ChatToolset,
+  UpdateChatSessionRequest,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import { aiChatApiRef } from '../api';
 import type { AiChatApi } from '../api';
@@ -174,6 +184,133 @@ function NewSession({ api, basePath, toolsets, onChanged }: Basics) {
   );
 }
 
+/** One row of the session list: open, pin, rename, archive or delete (SE-03). */
+function SessionRow({
+  session,
+  selected,
+  onOpen,
+  onChange,
+  onDelete,
+}: {
+  session: ChatSession;
+  selected: boolean;
+  onOpen(): void;
+  onChange(id: string, patch: UpdateChatSessionRequest): Promise<boolean>;
+  onDelete(): void;
+}) {
+  const title = session.title ?? 'New conversation';
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState(title);
+  const committed = useRef(false);
+  const renameInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (renaming) renameInput.current?.focus();
+  }, [renaming]);
+
+  const save = () => {
+    if (committed.current) return;
+    committed.current = true;
+    setRenaming(false);
+    const next = draft.trim();
+    if (next.length === 0 || next === title) return;
+    void onChange(session.id, { title: next });
+  };
+
+  return (
+    <div
+      className={cx(
+        'chat-conversation',
+        selected && 'chat-conversation-selected',
+      )}
+    >
+      {renaming ? (
+        <input
+          className={cx('chat-rename-input')}
+          aria-label={`Title for ${title}`}
+          value={draft}
+          ref={renameInput}
+          onChange={event => setDraft(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              save();
+            } else if (event.key === 'Escape') {
+              committed.current = true;
+              setRenaming(false);
+            }
+          }}
+          onBlur={save}
+        />
+      ) : (
+        <button
+          type="button"
+          className={cx('chat-conversation-open')}
+          aria-current={selected}
+          onClick={onOpen}
+        >
+          {title}
+        </button>
+      )}
+      <button
+        type="button"
+        className={cx(
+          'chat-icon-button',
+          session.pinned && 'chat-icon-button-on',
+        )}
+        aria-label={`${session.pinned ? 'Unpin' : 'Pin'} conversation ${title}`}
+        aria-pressed={session.pinned}
+        onClick={() => void onChange(session.id, { pinned: !session.pinned })}
+      >
+        {session.pinned ? (
+          <RiPushpinFill size="1em" />
+        ) : (
+          <RiPushpinLine size="1em" />
+        )}
+      </button>
+      <button
+        type="button"
+        className={cx('chat-icon-button')}
+        aria-label={`Rename conversation ${title}`}
+        onClick={() => {
+          committed.current = false;
+          setDraft(title);
+          setRenaming(true);
+        }}
+      >
+        <RiPencilLine size="1em" />
+      </button>
+      <button
+        type="button"
+        className={cx('chat-icon-button')}
+        aria-label={`${
+          session.archivedAt ? 'Restore' : 'Archive'
+        } conversation ${title}`}
+        onClick={() =>
+          void onChange(session.id, { archived: !session.archivedAt })
+        }
+      >
+        {session.archivedAt ? (
+          <RiInboxUnarchiveLine size="1em" />
+        ) : (
+          <RiArchiveLine size="1em" />
+        )}
+      </button>
+      <button
+        type="button"
+        className={cx('chat-icon-button')}
+        aria-label={`Delete conversation ${title}`}
+        onClick={onDelete}
+      >
+        <RiDeleteBinLine size="1em" />
+      </button>
+      {session.archivedAt && (
+        <span className={cx('chat-conversation-archived')}>Archived</span>
+      )}
+    </div>
+  );
+}
+
 /** The list of sessions, the open session and the input box. */
 export function ChatPageContent() {
   const api = useApi(aiChatApiRef);
@@ -208,49 +345,45 @@ export function ChatPageContent() {
         >
           New chat
         </Button>
+        <input
+          className={cx('chat-search')}
+          aria-label="Search conversations"
+          placeholder="Search"
+          value={list.query}
+          onChange={event => list.setQuery(event.target.value)}
+        />
+        <label className={cx('chat-show-archived')}>
+          <input
+            type="checkbox"
+            checked={list.includeArchived}
+            onChange={event => list.setIncludeArchived(event.target.checked)}
+          />
+          Show archived
+        </label>
         {list.error && (
           <div className={cx('chat-error')} role="alert">
             {list.error}
           </div>
         )}
-        {list.sessions.map(session => {
-          const title = session.title ?? 'New conversation';
-          return (
-            <div
-              key={session.id}
-              className={cx(
-                'chat-conversation',
-                session.id === openId && 'chat-conversation-selected',
-              )}
-            >
-              <button
-                type="button"
-                className={cx('chat-conversation-open')}
-                aria-current={session.id === openId}
-                onClick={() =>
-                  navigate(`${basePath}/${encodeURIComponent(session.id)}`)
-                }
-              >
-                {title}
-              </button>
-              <button
-                type="button"
-                className={cx('chat-icon-button')}
-                aria-label={`Delete conversation ${title}`}
-                onClick={async () => {
-                  if (
-                    (await list.remove(session.id)) &&
-                    session.id === openId
-                  ) {
-                    navigate(basePath || '/');
-                  }
-                }}
-              >
-                <RiDeleteBinLine size="1em" />
-              </button>
-            </div>
-          );
-        })}
+        {list.sessions.map(session => (
+          <SessionRow
+            key={session.id}
+            session={session}
+            selected={session.id === openId}
+            onOpen={() =>
+              navigate(`${basePath}/${encodeURIComponent(session.id)}`)
+            }
+            onChange={list.change}
+            onDelete={async () => {
+              if ((await list.remove(session.id)) && session.id === openId) {
+                navigate(basePath || '/');
+              }
+            }}
+          />
+        ))}
+        {list.sessions.length === 0 && list.query.trim() !== '' && (
+          <div className={cx('chat-empty-list')}>No conversations match.</div>
+        )}
       </nav>
       <Routes>
         <Route index element={<NewSession {...basics} />} />

@@ -26,6 +26,7 @@ import {
 import {
   ShuttingDown,
   UnreadMessages,
+  isNormalEnd,
   type LeasedRun,
   type Principal,
   type Run,
@@ -59,6 +60,12 @@ export type RunSupervisorDeps = {
    * (IN-14). A run that waits for an approval is reported too.
    */
   afterRun?: AfterRun;
+  /**
+   * Writes a title after a normal end, once the queue has been reported and
+   * before `run.ended` is published (SE-04). A failure is logged and does not
+   * change the run.
+   */
+  nameSession?: (info: { run: Run; outcome: RunOutcome }) => Promise<void>;
   /** How often the lease is renewed while a model call takes long. 10 seconds by default. */
   heartbeatMs?: number;
 };
@@ -107,6 +114,9 @@ const MAX_REREADS = 20;
  * - After the status of a run is written, `afterRun` tells the state of the
  *   queue (it may start the next run). The subscribers get it as
  *   `queue.state`, before `run.ended`.
+ * - On a normal end, after the queue, `nameSession` may write a title (SE-04).
+ *   That also happens before `run.ended`. A failure is logged; the run stays
+ *   as it was written.
  * - `fences` has the fence of every run this process is running. A run that is
  *   carried on after an approval has a new fence, and replaces the old one;
  *   the entry goes when the loop ends, also on an error.
@@ -270,6 +280,7 @@ export class RunSupervisor {
             event = { ...event, outcome: settled.outcome };
           }
           await this.reportQueue(loop, settled);
+          await this.nameSession(loop, settled);
         }
         if (event.type === 'summary.failed') {
           // The cause is the original error: it goes to the log only.
@@ -324,6 +335,29 @@ export class RunSupervisor {
       this.publish(loop, { type: 'queue.state', ...state });
     } catch (error) {
       this.deps.logger.error('Could not tell the state of the queue', {
+        runId: loop.run.id,
+        error: describe(error),
+      });
+    }
+  }
+
+  /**
+   * Asks for a title after a normal end. The status is already written, so a
+   * failure here is only a log line: the subscribers still get `run.ended`.
+   */
+  private async nameSession(
+    loop: Loop,
+    settled: { run?: Run; outcome: RunOutcome },
+  ): Promise<void> {
+    if (!this.deps.nameSession || !settled.run) return;
+    if (!isNormalEnd(settled.outcome)) return;
+    try {
+      await this.deps.nameSession({
+        run: settled.run,
+        outcome: settled.outcome,
+      });
+    } catch (error) {
+      this.deps.logger.error('Could not name the session', {
         runId: loop.run.id,
         error: describe(error),
       });

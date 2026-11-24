@@ -25,16 +25,25 @@ export interface SessionRepository {
   get(sessionId: string): Promise<Session>;
 
   /**
-   * The sessions of an owner, most recently updated first. Archived ones are
-   * left out unless `includeArchived` is set.
+   * The sessions of an owner. Pinned ones come first, then the most recently
+   * updated. Archived ones are left out unless `includeArchived` is set.
+   * `query` keeps the sessions whose title contains it (see
+   * `sessionMatchesSearch`).
    */
   listByOwner(
     ownerRef: string,
-    opts?: { includeArchived?: boolean; limit?: number },
+    opts?: { includeArchived?: boolean; limit?: number; query?: string },
   ): Promise<Session[]>;
 
   /** Throws `SessionNotFound` when there is none. */
   update(sessionId: string, patch: SessionPatch): Promise<Session>;
+
+  /**
+   * Sets the title only while it is still empty, so a title the user set in
+   * the meantime is kept. Returns whether this call wrote it. A session that
+   * does not exist returns false.
+   */
+  setTitleIfAbsent(sessionId: string, title: string): Promise<boolean>;
 
   /** Deletes the session with its runs and items. Throws `SessionNotFound` when there is none. */
   delete(sessionId: string): Promise<void>;
