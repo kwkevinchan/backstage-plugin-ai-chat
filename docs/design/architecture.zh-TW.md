@@ -889,6 +889,8 @@ SQLite 和 PostgreSQL 對唯一索引裡的空值的行為相同：空值之間�
 3. 檢查批次裡的 `dedupe_key` 有沒有在紀錄裡，或在批次裡重複，有就丟 `DuplicateItem`。
 4. 插入 Item，更新 `sessions.updated_at`。
 
+讀取（`KnexItemLog.read`）：`afterSeq` 是 `seq > afterSeq` 的條件。`fromLatestSummary` 在同一個 transaction 裡先查這段 Session 最新的 `summary`（`kind = 'summary'`，依 `seq` 由大到小取第一筆），從 `payload` 的 JSON 解析出 `coversUpToSeq`，再讀 `seq` 大於它的 Item；兩個選項都有時取較大的界線，沒有摘要就讀全部。沒有另加欄位或 migration：主鍵 `(session_id, seq)` 讓「最新的摘要」從尾端往回找，摘要的 `coversUpToSeq` 只在這裡用到，不需要索引。
+
 `dedupe_key` 的唯一索引才是保證：第 3 步擋不到的情況下（例如有人繞過紀錄直接寫表），資料庫仍會拒絕，adapter 把這個錯誤也轉成 `DuplicateItem`。`DecideApproval` 收到這個錯誤時，回傳已經存在的那個決定。
 
 ## 8. HTTP 介面

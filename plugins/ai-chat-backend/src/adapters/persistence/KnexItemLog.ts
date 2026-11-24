@@ -69,12 +69,31 @@ export class KnexItemLog implements ItemLog {
 
   async read(
     sessionId: string,
-    opts: { afterSeq?: number } = {},
+    opts: { afterSeq?: number; fromLatestSummary?: boolean } = {},
   ): Promise<Item[]> {
-    const rows = await this.knex<ItemRow>('items')
-      .where({ session_id: sessionId })
-      .andWhere('seq', '>', opts.afterSeq ?? 0)
-      .orderBy('seq', 'asc');
+    // One transaction, so the summary and the items after it are read from
+    // the same state of the log.
+    const rows = await this.knex.transaction(async trx => {
+      let afterSeq = opts.afterSeq ?? 0;
+      if (opts.fromLatestSummary) {
+        // The newest summary has the highest `seq` of its kind; the index of
+        // the key `(session_id, seq)` walks back from the end to find it.
+        const summary = await trx<ItemRow>('items')
+          .where({ session_id: sessionId, kind: 'summary' })
+          .orderBy('seq', 'desc')
+          .first('payload');
+        if (summary) {
+          const { coversUpToSeq } = JSON.parse(summary.payload) as {
+            coversUpToSeq: number;
+          };
+          afterSeq = Math.max(afterSeq, coversUpToSeq);
+        }
+      }
+      return trx<ItemRow>('items')
+        .where({ session_id: sessionId })
+        .andWhere('seq', '>', afterSeq)
+        .orderBy('seq', 'asc');
+    });
     return rows.map(toItem);
   }
 
