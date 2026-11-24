@@ -17,7 +17,7 @@
 export * from './agent';
 export * from './errors';
 export * from './item';
-export { insertStatesOf, unreadInserted, type InsertState } from './inputs';
+export { insertStatesOf, unreadInserted, type ReadState } from './inputs';
 export * from './modelInput';
 export * from './nextAction';
 export * from './plan';

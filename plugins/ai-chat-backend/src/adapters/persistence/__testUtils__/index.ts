@@ -20,6 +20,7 @@ import {
 } from '@kwkevinchan/ai-chat-harness/testing';
 import { createMigratedDb } from '../../../__testUtils__';
 import { KnexItemLog } from '../KnexItemLog';
+import { KnexQueuedMessageRepository } from '../KnexQueuedMessageRepository';
 import { KnexRunRepository } from '../KnexRunRepository';
 import { KnexSessionRepository } from '../KnexSessionRepository';
 
@@ -43,6 +44,7 @@ export async function createPersistence() {
     runs: newRuns(),
     newRuns,
     items: new KnexItemLog(knex, clock),
+    queue: new KnexQueuedMessageRepository(knex, clock, ids),
     cleanup: () => knex.destroy(),
   };
 }

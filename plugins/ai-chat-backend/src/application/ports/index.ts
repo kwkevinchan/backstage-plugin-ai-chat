@@ -15,7 +15,14 @@
  */
 
 export type { AgentCatalog } from './AgentCatalog';
-export type { AuditEvent, AuditLog, AuditSpan } from './AuditLog';
+export type {
+  AuditEvent,
+  AuditLog,
+  AuditSpan,
+  QueueAuditEvent,
+  ToolAuditEvent,
+} from './AuditLog';
 export type { Logger } from './Logger';
+export type { QueuedMessageRepository } from './QueuedMessageRepository';
 export type { RunRepository, RunTransitionTarget } from './RunRepository';
 export type { SessionRepository } from './SessionRepository';

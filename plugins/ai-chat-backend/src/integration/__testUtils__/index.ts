@@ -26,17 +26,18 @@ import {
   SequentialIdGenerator,
   type ScriptedStep,
 } from '@kwkevinchan/ai-chat-harness/testing';
-import type {
-  HarnessEvent,
-  ItemLog,
-  Limits,
-} from '@kwkevinchan/ai-chat-harness';
+import type { ItemLog, Limits } from '@kwkevinchan/ai-chat-harness';
 import { ActionsToolGateway } from '../../adapters/backstage/ActionsToolGateway';
 import { ConfigAgentCatalog } from '../../adapters/backstage/ConfigAgentCatalog';
 import { KnexItemLog } from '../../adapters/persistence/KnexItemLog';
+import { KnexQueuedMessageRepository } from '../../adapters/persistence/KnexQueuedMessageRepository';
 import { KnexRunRepository } from '../../adapters/persistence/KnexRunRepository';
 import { KnexSessionRepository } from '../../adapters/persistence/KnexSessionRepository';
-import { CreateSession, type RunHandle } from '../../application';
+import {
+  CreateSession,
+  type HostEvent,
+  type RunHandle,
+} from '../../application';
 import type { AuditEvent, AuditLog } from '../../application/ports';
 import type { Principal, Run } from '../../domain';
 import { createHost } from '../../host';
@@ -134,6 +135,14 @@ export const jane: Principal = {
   ownershipRefs: ['user:default/jane'],
   credentials: mockCredentials.user('user:default/jane'),
 };
+/**
+ * Jane with credentials that stay valid for a day after the start of the fake
+ * clock: the queue starts the next run only for credentials that last (IN-16).
+ */
+export const janeFresh: Principal = {
+  ...jane,
+  credentialsExpireAt: '2026-01-02T00:00:00.000Z',
+};
 export const mallory: Principal = {
   userRef: 'user:default/mallory',
   ownershipRefs: ['user:default/mallory'],
@@ -150,6 +159,9 @@ export async function createWorld(
   const sessions = new KnexSessionRepository(knex, clock, ids);
   const actions = new FakeActions();
   const audit = new RecordingAuditLog();
+  const queue = new KnexQueuedMessageRepository(knex, clock, ids, {
+    leaseSeconds: options.leaseSeconds,
+  });
   const catalog = new ConfigAgentCatalog(
     mockServices.rootConfig({
       data: {
@@ -206,6 +218,7 @@ export async function createWorld(
       items: extra.items ? extra.items(items) : items,
       sessions,
       runs: hooked,
+      queue,
       agents: catalog,
       tools: new ActionsToolGateway({
         actions,
@@ -233,6 +246,7 @@ export async function createWorld(
     knex,
     clock,
     items,
+    queue,
     sessions,
     actions,
     audit,
@@ -258,8 +272,8 @@ export async function createWorld(
 }
 
 /** Reads the events to the end and waits for the run to be up to date. */
-export async function drain(handle: RunHandle): Promise<HarnessEvent[]> {
-  const events: HarnessEvent[] = [];
+export async function drain(handle: RunHandle): Promise<HostEvent[]> {
+  const events: HostEvent[] = [];
   for await (const event of handle.events) events.push(event);
   await handle.done;
   return events;

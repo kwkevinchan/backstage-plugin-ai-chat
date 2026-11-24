@@ -15,8 +15,10 @@
  */
 
 export { AuditedToolGateway } from './AuditedToolGateway';
+export { createAfterRun } from './afterRun';
 export { buildRunRequest } from './buildRunRequest';
 export type { RunSettings } from './buildRunRequest';
+export type { AfterRun, HostEvent, QueueState } from './hostEvents';
 export { RunSupervisor } from './RunSupervisor';
 export type {
   LaunchRequest,
@@ -27,16 +29,25 @@ export { CancelRun } from './usecases/CancelRun';
 export { CreateSession } from './usecases/CreateSession';
 export { DecideApproval } from './usecases/DecideApproval';
 export type { DecisionResult } from './usecases/DecideApproval';
+export { DeleteQueuedMessage } from './usecases/DeleteQueuedMessage';
 export { DeleteSession } from './usecases/DeleteSession';
 export { ExpireStaleRuns } from './usecases/ExpireStaleRuns';
 export { FollowSession } from './usecases/FollowSession';
 export type { FollowHandle } from './usecases/FollowSession';
 export { GetSession } from './usecases/GetSession';
 export type { SessionView } from './usecases/GetSession';
+export { InsertMessage } from './usecases/InsertMessage';
+export { ListQueue, queueViewOf } from './usecases/ListQueue';
+export type { QueueView } from './usecases/ListQueue';
 export { ListSessions } from './usecases/ListSessions';
 export { ListSessionTools } from './usecases/ListSessionTools';
 export type { SessionTool } from './usecases/ListSessionTools';
 export { ListToolsets } from './usecases/ListToolsets';
+export { QueueMessage } from './usecases/QueueMessage';
+export { ReorderQueue } from './usecases/ReorderQueue';
+export { ResumeQueue } from './usecases/ResumeQueue';
 export { ResumeRun } from './usecases/ResumeRun';
 export { SendMessage } from './usecases/SendMessage';
+export { StartNextQueued } from './usecases/StartNextQueued';
+export { UpdateQueuedMessage } from './usecases/UpdateQueuedMessage';
 export { UpdateSession } from './usecases/UpdateSession';

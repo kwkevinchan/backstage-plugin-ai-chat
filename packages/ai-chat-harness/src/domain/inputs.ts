@@ -17,7 +17,7 @@
 import type { Item } from './item';
 
 /** Whether the model has read an inserted message (IN-12). @public */
-export type InsertState = 'read' | 'unread';
+export type ReadState = 'read' | 'unread';
 
 type Range = {
   /** The inserted messages of the run, in the order of `seq`. */
@@ -73,8 +73,8 @@ export function unreadInserted(items: readonly Item[]): Item[] {
  */
 export function insertStatesOf(
   items: readonly Item[],
-): ReadonlyMap<number, InsertState> {
-  const states = new Map<number, InsertState>();
+): ReadonlyMap<number, ReadState> {
+  const states = new Map<number, ReadState>();
   for (const range of rangesOf(items)) {
     for (const item of range.inserted) {
       states.set(item.seq, item.seq > range.readUpTo ? 'unread' : 'read');

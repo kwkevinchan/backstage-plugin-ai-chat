@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-import type { HarnessEvent } from '@kwkevinchan/ai-chat-harness';
 import type { Response } from 'express';
+import type { HostEvent } from '../../application';
 import type { Logger } from '../../application/ports';
 import type { UiMessageChunk } from './presenters/uiMessageChunk';
 import type { UiMessageStreamPresenter } from './presenters/uiMessageStream';
@@ -57,7 +57,7 @@ function write(res: Response, chunk: UiMessageChunk | '[DONE]'): void {
 export async function sendUiMessageStream(
   res: Response,
   stream: {
-    events: AsyncIterable<HarnessEvent>;
+    events: AsyncIterable<HostEvent>;
     presenter: UiMessageStreamPresenter;
     head?: UiMessageChunk[];
   },

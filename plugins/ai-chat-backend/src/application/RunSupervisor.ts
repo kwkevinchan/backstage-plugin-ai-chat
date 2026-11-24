@@ -23,8 +23,15 @@ import {
   type RunFence,
   type RunOutcome,
 } from '@kwkevinchan/ai-chat-harness';
-import { ShuttingDown, type LeasedRun, type Run } from '../domain';
+import {
+  ShuttingDown,
+  UnreadMessages,
+  type LeasedRun,
+  type Principal,
+  type Run,
+} from '../domain';
 import { EventChannel } from './EventChannel';
+import type { AfterRun, HostEvent } from './hostEvents';
 import type { Logger, RunRepository, RunTransitionTarget } from './ports';
 
 /** What `launch` needs besides the run: the request of the loop without what the supervisor adds. */
@@ -39,7 +46,7 @@ export type LaunchRequest = Omit<AdvanceRunRequest, 'fence' | 'signal'>;
  */
 export type RunHandle = {
   runId: string;
-  events: AsyncIterable<HarnessEvent>;
+  events: AsyncIterable<HostEvent>;
   done: Promise<void>;
 };
 
@@ -47,6 +54,11 @@ export type RunSupervisorDeps = {
   advance: Pick<AdvanceRun, 'execute'>;
   runs: RunRepository;
   logger: Logger;
+  /**
+   * Runs once the status of a run is written and tells the state of the queue
+   * (IN-14). A run that waits for an approval is reported too.
+   */
+  afterRun?: AfterRun;
   /** How often the lease is renewed while a model call takes long. 10 seconds by default. */
   heartbeatMs?: number;
 };
@@ -55,7 +67,7 @@ type Loop = {
   run: LeasedRun;
   request: LaunchRequest;
   controller: AbortController;
-  subscribers: Set<EventChannel<HarnessEvent>>;
+  subscribers: Set<EventChannel<HostEvent>>;
   /** Set when `run.ended` went to the subscribers: a new subscriber would not get it. */
   ended: boolean;
   /** Set when the shutdown takes the run over; the loop then leaves its status alone. */
@@ -66,6 +78,12 @@ type Loop = {
 const DEFAULT_HEARTBEAT_MS = 10_000;
 const DEFAULT_GRACE_MS = 20_000;
 const ABORT_WAIT_MS = 2_000;
+/**
+ * How often one loop starts again because a message came in after the model
+ * read the log. Every round reads at least one more step, so the step limit
+ * ends it; this stops a loop that would not make progress.
+ */
+const MAX_REREADS = 20;
 
 /**
  * The runs of this backend (D-16, H-04, H-07, H-11).
@@ -81,6 +99,13 @@ const ABORT_WAIT_MS = 2_000;
  *   the new status. A port that throws (such as `LeaseLost`) ends the loop
  *   without `run.ended`; the supervisor then ends the run itself, or leaves it
  *   to whoever holds the lease now.
+ * - A run does not end while a message that was inserted into it is unread
+ *   (IN-11): when the status change is refused (`UnreadMessages`), the
+ *   supervisor drops that `run.ended` and the next `run.started`, and runs
+ *   the loop again on the same lease, so the subscribers see one run.
+ * - After the status of a run is written, `afterRun` tells the state of the
+ *   queue (it may start the next run). The subscribers get it as
+ *   `queue.state`, before `run.ended`.
  * - `fences` has the fence of every run this process is running. A run that is
  *   carried on after an approval has a new fence, and replaces the old one;
  *   the entry goes when the loop ends, also on an error.
@@ -132,7 +157,7 @@ export class RunSupervisor {
    * now on. `undefined` when the run is not running here, and when its
    * `run.ended` went out already: the new subscriber would never get it.
    */
-  subscribe(runId: string): AsyncIterable<HarnessEvent> | undefined {
+  subscribe(runId: string): AsyncIterable<HostEvent> | undefined {
     const fence = this.fences.get(runId);
     const loop = fence && this.loops.get(fence.leaseOwner);
     return loop && !loop.ended ? this.addSubscriber(loop) : undefined;
@@ -196,15 +221,15 @@ export class RunSupervisor {
     }
   }
 
-  private addSubscriber(loop: Loop): EventChannel<HarnessEvent> {
-    const channel: EventChannel<HarnessEvent> = new EventChannel(() =>
+  private addSubscriber(loop: Loop): EventChannel<HostEvent> {
+    const channel: EventChannel<HostEvent> = new EventChannel(() =>
       loop.subscribers.delete(channel),
     );
     loop.subscribers.add(channel);
     return channel;
   }
 
-  private publish(loop: Loop, event: HarnessEvent): void {
+  private publish(loop: Loop, event: HostEvent): void {
     if (event.type === 'run.ended') loop.ended = true;
     for (const subscriber of loop.subscribers) subscriber.push(event);
   }
@@ -215,21 +240,35 @@ export class RunSupervisor {
       () => void this.renew(loop),
       this.deps.heartbeatMs ?? DEFAULT_HEARTBEAT_MS,
     );
-    const generator = this.deps.advance.execute({
+    let generator = this.deps.advance.execute({
       ...loop.request,
       fence: run.fence,
       signal: loop.controller.signal,
     });
     let ended = false;
+    let rereads = 0;
     try {
       for (;;) {
         const next = await generator.next();
         if (next.done) break;
         let event: HarnessEvent = next.value;
+        // The run began already: the second round of the loop is no new run.
+        if (event.type === 'run.started' && rereads > 0) continue;
         if (event.type === 'run.ended') {
-          const outcome = await this.settle(loop, event.outcome);
+          const settled = await this.settle(loop, event.outcome);
+          if (settled === 'unread') {
+            if (++rereads > MAX_REREADS) {
+              throw new Error('The run kept finding messages it had not read');
+            }
+            await generator.return(undefined as never).catch(() => undefined);
+            generator = await this.again(loop);
+            continue;
+          }
           ended = true;
-          if (outcome !== event.outcome) event = { ...event, outcome };
+          if (settled.outcome !== event.outcome) {
+            event = { ...event, outcome: settled.outcome };
+          }
+          await this.reportQueue(loop, settled);
         }
         if (event.type === 'summary.failed') {
           // The cause is the original error: it goes to the log only.
@@ -249,6 +288,44 @@ export class RunSupervisor {
       this.loops.delete(run.fence.leaseOwner);
       for (const subscriber of loop.subscribers) subscriber.end();
       loop.subscribers.clear();
+    }
+  }
+
+  /** The loop again, on the same lease, with the usage the run has now. */
+  private async again(loop: Loop) {
+    const { usage } = await this.deps.runs.get(loop.run.id);
+    return this.deps.advance.execute({
+      ...loop.request,
+      usage,
+      fence: loop.run.fence,
+      signal: loop.controller.signal,
+    });
+  }
+
+  /**
+   * Asks `afterRun` for the state of the queue and sends it to the
+   * subscribers. A run this backend does not own any more (`run` is
+   * undefined) has nothing to report. A failure is logged: the run has ended
+   * and is not affected.
+   */
+  private async reportQueue(
+    loop: Loop,
+    settled: { run?: Run; outcome: RunOutcome },
+  ): Promise<void> {
+    if (!settled.run || !this.deps.afterRun) return;
+    try {
+      const state = await this.deps.afterRun({
+        run: settled.run,
+        outcome: settled.outcome,
+        // `buildRunRequest` puts the principal of the request into the context.
+        principal: loop.request.ctx.principal as Principal,
+      });
+      this.publish(loop, { type: 'queue.state', ...state });
+    } catch (error) {
+      this.deps.logger.error('Could not tell the state of the queue', {
+        runId: loop.run.id,
+        error: describe(error),
+      });
     }
   }
 
@@ -275,11 +352,16 @@ export class RunSupervisor {
 
   /**
    * Writes the status the outcome gives the run. Returns the outcome the
-   * subscribers get: the same one, except when a stop request turns a wait for
-   * an approval into `cancelled`.
+   * subscribers get (the same one, except when a stop request turns a wait for
+   * an approval into `cancelled`) and the run as it is stored, or `undefined`
+   * for the run when it is not ours any more. Returns `'unread'` when the run
+   * cannot end: a message was inserted that the model did not read.
    */
-  private async settle(loop: Loop, outcome: RunOutcome): Promise<RunOutcome> {
-    if (loop.shuttingDown) return outcome;
+  private async settle(
+    loop: Loop,
+    outcome: RunOutcome,
+  ): Promise<{ run?: Run; outcome: RunOutcome } | 'unread'> {
+    if (loop.shuttingDown) return { outcome };
     if (outcome.status === 'failed') {
       this.deps.logger.error('A run failed', {
         runId: loop.run.id,
@@ -287,16 +369,28 @@ export class RunSupervisor {
       });
     }
     const [to, endReason] = statusOf(outcome);
-    const run = await this.end(loop, to, endReason);
+    let run: Run | undefined;
+    try {
+      run = await this.end(loop, to, endReason, {
+        // Only an answer of the model ends a run by itself; a limit or a stop
+        // leaves the messages unread, and the screen says so (IN-12).
+        requireAllRead: to === 'completed' && endReason === undefined,
+      });
+    } catch (error) {
+      if (error instanceof UnreadMessages) return 'unread';
+      throw error;
+    }
     // A stop request that was stored after the last heartbeat of the loop:
     // the loop did not see it, and the run must not wait for an approval that
     // the user no longer wants.
     if (to === 'waiting_approval' && run?.cancelRequested) {
-      await this.end(loop, 'cancelled', 'user', false);
+      const cancelled = await this.end(loop, 'cancelled', 'user', {
+        withLease: false,
+      });
       // The subscribers must not show approval buttons of a cancelled run.
-      return { status: 'cancelled' };
+      return { run: cancelled, outcome: { status: 'cancelled' } };
     }
-    return outcome;
+    return { run, outcome };
   }
 
   /** The loop ended with an error of a port, so there is no `run.ended` yet. */
@@ -310,7 +404,11 @@ export class RunSupervisor {
     }
     if (!loop.shuttingDown && !lost) {
       try {
-        await this.end(loop, 'failed', 'error');
+        const run = await this.end(loop, 'failed', 'error');
+        await this.reportQueue(loop, {
+          run,
+          outcome: { status: 'failed', message: 'The run stopped.' },
+        });
       } catch (inner) {
         this.deps.logger.error('Could not mark a run failed', {
           runId: loop.run.id,
@@ -327,18 +425,22 @@ export class RunSupervisor {
   /**
    * Changes the status of the run. `withLease` is false once the loop gave up
    * the lease (a run that waits for an approval has none). Returns the run, or
-   * `undefined` when it is not ours any more.
+   * `undefined` when it is not ours any more. With `requireAllRead` it throws
+   * `UnreadMessages` when the run has a message that was not read.
    */
   private async end(
     loop: Loop,
     to: RunTransitionTarget,
     endReason?: string,
-    withLease = true,
+    opts: { withLease?: boolean; requireAllRead?: boolean } = {},
   ): Promise<Run | undefined> {
     try {
       return await this.deps.runs.transition(loop.run.id, to, {
-        ...(withLease && { leaseOwner: loop.run.fence.leaseOwner }),
+        ...(opts.withLease !== false && {
+          leaseOwner: loop.run.fence.leaseOwner,
+        }),
         ...(endReason !== undefined && { endReason }),
+        ...(opts.requireAllRead && { requireAllRead: true }),
       });
     } catch (error) {
       // Someone else holds or has ended the run: its status is not ours.

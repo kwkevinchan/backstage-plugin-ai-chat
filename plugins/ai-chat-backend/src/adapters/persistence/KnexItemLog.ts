@@ -27,17 +27,9 @@ import {
   type RunStatus,
 } from '@kwkevinchan/ai-chat-harness';
 import type { Knex } from 'knex';
+import { DEFAULT_INSERT_MAX_PER_RUN, InsertLimitReached } from '../../domain';
+import { reserveSeq, toItem, writeItems, type ItemRow } from './transactions';
 import { isUniqueViolation } from './uniqueViolation';
-
-type ItemRow = {
-  session_id: string;
-  seq: number;
-  run_id: string | null;
-  kind: string;
-  payload: string;
-  dedupe_key: string | null;
-  created_at: string;
-};
 
 /**
  * The kinds the host writes for the user, outside the loop. They need a run
@@ -47,25 +39,93 @@ type ItemRow = {
 const HOST_KINDS: ReadonlySet<string> = new Set(['user_message', 'approval']);
 
 /**
+ * What an append writes, which decides the lock it takes on the run and the
+ * check of the run:
+ *
+ * - `model`: the output of a model call (an `agent_message` or a `tool_call`
+ *   in the batch). Written by the loop, so the lease must be held. It marks
+ *   how far the model read.
+ * - `insert`: one `user_message` the user inserted into a running run.
+ * - `host`: the message that starts a run, or an approval.
+ * - `loop`: anything else the loop writes (starts, results, summaries, plans).
+ */
+type WriteKind = 'model' | 'insert' | 'host' | 'loop';
+
+function writeKindOf(drafts: ItemDraft[]): WriteKind {
+  if (
+    drafts.length === 1 &&
+    drafts[0].kind === 'user_message' &&
+    drafts[0].delivery === 'inserted'
+  ) {
+    return 'insert';
+  }
+  if (drafts.length > 0 && drafts.every(draft => HOST_KINDS.has(draft.kind))) {
+    return 'host';
+  }
+  if (
+    drafts.some(
+      draft => draft.kind === 'agent_message' || draft.kind === 'tool_call',
+    )
+  ) {
+    return 'model';
+  }
+  return 'loop';
+}
+
+/** The largest `readUpToSeq` of the model output of a batch, if it has one. */
+function readUpToSeqOf(drafts: ItemDraft[]): number | undefined {
+  let max: number | undefined;
+  for (const draft of drafts) {
+    if (draft.kind === 'agent_message' || draft.kind === 'tool_call') {
+      if (draft.readUpToSeq !== undefined) {
+        max = Math.max(max ?? 0, draft.readUpToSeq);
+      }
+    }
+  }
+  return max;
+}
+
+/**
  * The `ItemLog` of the `items` table.
  *
- * One transaction writes an append:
+ * One transaction writes an append, and it touches the tables in the order
+ * `runs`, `sessions`, `items`:
  *
- * 1. It reads the run with a shared lock and checks the fence: the run
- *    belongs to the session and, for what the loop writes, is running and
- *    held by the owner of the fence (else `LeaseLost`). Only a batch made
- *    of `user_message` and `approval` items skips the owner check and needs
- *    an active run instead.
- * 2. It adds the number of drafts to `sessions.next_seq` in one UPDATE. The
+ * 1. It reads the run and checks the fence: the run belongs to the session
+ *    and, for what the loop writes, is running and held by the owner of the
+ *    fence (else `LeaseLost`). A batch made of `user_message` and `approval`
+ *    items skips the owner check and needs an active run instead. An inserted
+ *    message (IN-11) needs a run that is `running` with a lease that has not
+ *    expired, and no owner. The lock is `FOR SHARE`, except for the output of
+ *    a model call: that takes `FOR NO KEY UPDATE` at once, because a shared
+ *    lock that is raised later waits for the shared locks of the inserts and
+ *    queue writes, which wait for it (a deadlock in PostgreSQL).
+ * 2. The output of a model call sets `runs.read_up_to_seq` to the number its
+ *    items say they read up to. The run cannot end before an inserted message
+ *    with a larger `seq` is read (`KnexRunRepository.transition`).
+ * 3. It adds the number of drafts to `sessions.next_seq` in one UPDATE. The
  *    UPDATE locks the row, so appends to one session go one after the other
  *    and take consecutive numbers; a rolled back append gives its numbers
  *    back.
- * 3. It refuses a draft whose key is in the log already (`DuplicateItem`).
+ * 4. An inserted message must not be one more than `maxInsertsPerRun`
+ *    (`InsertLimitReached`). The check comes after step 3, so two inserts at
+ *    the same time do not both pass it.
+ * 5. It refuses a draft whose key is in the log already (`DuplicateItem`).
  *    The unique index on `(session_id, dedupe_key)` is what guarantees it.
- * 4. It inserts the items.
+ * 6. It inserts the items.
  */
 export class KnexItemLog implements ItemLog {
-  constructor(private readonly knex: Knex, private readonly clock: Clock) {}
+  private readonly maxInsertsPerRun: number;
+
+  /** @param options.maxInsertsPerRun - `aiChat.input.insert.maxPerRun`. 5 by default. */
+  constructor(
+    private readonly knex: Knex,
+    private readonly clock: Clock,
+    options: { maxInsertsPerRun?: number } = {},
+  ) {
+    this.maxInsertsPerRun =
+      options.maxInsertsPerRun ?? DEFAULT_INSERT_MAX_PER_RUN;
+  }
 
   async read(
     sessionId: string,
@@ -107,37 +167,26 @@ export class KnexItemLog implements ItemLog {
     fence: RunFence,
   ): Promise<Item[]> {
     const keys = drafts.map(draft => dedupeKeyOf(draft));
+    const kind = writeKindOf(drafts);
     try {
       return await this.knex.transaction(async trx => {
-        await this.checkFence(trx, sessionId, drafts, fence);
+        await this.checkFence(trx, sessionId, kind, fence);
         if (drafts.length === 0) return [];
 
-        const [{ next_seq: nextSeq }] = await trx('sessions')
-          .where({ id: sessionId })
-          .update({ next_seq: trx.raw('next_seq + ?', [drafts.length]) })
-          .returning('next_seq');
-        const firstSeq = nextSeq - drafts.length;
-
-        await this.refuseDuplicates(trx, sessionId, keys);
-
-        const createdAt = this.clock.now().toISOString();
-        const rows: ItemRow[] = drafts.map((draft, index) => {
-          const { kind, ...rest } = draft;
-          return {
-            session_id: sessionId,
-            seq: firstSeq + index,
-            run_id: fence.runId,
-            kind,
-            payload: JSON.stringify(rest),
-            dedupe_key: keys[index] ?? null,
-            created_at: createdAt,
-          };
+        if (kind === 'model') {
+          await this.markRead(trx, fence.runId, readUpToSeqOf(drafts));
+        }
+        const firstSeq = await reserveSeq(trx, sessionId, drafts.length);
+        if (kind === 'insert') {
+          await this.checkInsertLimit(trx, sessionId, fence.runId);
+        }
+        return writeItems(trx, this.clock, {
+          sessionId,
+          runId: fence.runId,
+          firstSeq,
+          drafts,
+          keys,
         });
-        await trx('items').insert(rows);
-        await trx('sessions')
-          .where({ id: sessionId })
-          .update({ updated_at: createdAt });
-        return rows.map(toItem);
       });
     } catch (error) {
       if (isUniqueViolation(error, 'dedupe_key')) {
@@ -150,42 +199,70 @@ export class KnexItemLog implements ItemLog {
   private async checkFence(
     trx: Knex.Transaction,
     sessionId: string,
-    drafts: ItemDraft[],
+    kind: WriteKind,
     fence: RunFence,
   ): Promise<void> {
-    const run = await trx('runs').where({ id: fence.runId }).forShare().first<{
+    const query = trx('runs').where({ id: fence.runId });
+    const run = await (kind === 'model'
+      ? query.forNoKeyUpdate()
+      : query.forShare()
+    ).first<{
       session_id: string;
       status: RunStatus;
       lease_owner: string | null;
-    }>('session_id', 'status', 'lease_owner');
+      lease_expires_at: string | null;
+    }>('session_id', 'status', 'lease_owner', 'lease_expires_at');
     if (!run || run.session_id !== sessionId) {
       throw new LeaseLost(fence.runId);
     }
-    const hostOnly =
-      drafts.length > 0 && drafts.every(draft => HOST_KINDS.has(draft.kind));
-    const allowed = hostOnly
-      ? isActiveStatus(run.status)
-      : run.status === 'running' && run.lease_owner === fence.leaseOwner;
+    let allowed: boolean;
+    switch (kind) {
+      case 'insert':
+        allowed =
+          run.status === 'running' &&
+          run.lease_expires_at !== null &&
+          run.lease_expires_at >= this.clock.now().toISOString();
+        break;
+      case 'host':
+        allowed = isActiveStatus(run.status);
+        break;
+      default:
+        allowed =
+          run.status === 'running' && run.lease_owner === fence.leaseOwner;
+    }
     if (!allowed) throw new LeaseLost(fence.runId);
   }
 
-  private async refuseDuplicates(
+  /**
+   * Raises `runs.read_up_to_seq` to what the model output read up to. It is
+   * the first write of the transaction and the run row is locked already, so
+   * no other transaction holds `sessions` while it waits for this one.
+   */
+  private async markRead(
+    trx: Knex.Transaction,
+    runId: string,
+    readUpToSeq: number | undefined,
+  ): Promise<void> {
+    if (readUpToSeq === undefined) return;
+    await trx('runs')
+      .where({ id: runId })
+      .andWhere('read_up_to_seq', '<', readUpToSeq)
+      .update({ read_up_to_seq: readUpToSeq });
+  }
+
+  /** The first message of the run does not count: the run may take `maxInsertsPerRun` more. */
+  private async checkInsertLimit(
     trx: Knex.Transaction,
     sessionId: string,
-    keys: (string | undefined)[],
+    runId: string,
   ): Promise<void> {
-    const wanted = keys.filter((key): key is string => key !== undefined);
-    const seen = new Set<string>();
-    for (const key of wanted) {
-      if (seen.has(key)) throw new DuplicateItem(key);
-      seen.add(key);
+    const [{ n }] = await trx('items')
+      .where({ session_id: sessionId, run_id: runId, kind: 'user_message' })
+      .count({ n: '*' });
+    // PostgreSQL gives a count as text, SQLite as a number.
+    if (Number(n) - 1 >= this.maxInsertsPerRun) {
+      throw new InsertLimitReached(runId, this.maxInsertsPerRun);
     }
-    if (wanted.length === 0) return;
-    const existing = await trx('items')
-      .where({ session_id: sessionId })
-      .whereIn('dedupe_key', wanted)
-      .first<{ dedupe_key: string }>('dedupe_key');
-    if (existing) throw new DuplicateItem(existing.dedupe_key);
   }
 
   private async firstExistingKey(
@@ -199,15 +276,4 @@ export class KnexItemLog implements ItemLog {
       .first<{ dedupe_key: string }>('dedupe_key');
     return existing?.dedupe_key ?? wanted[0];
   }
-}
-
-function toItem(row: ItemRow): Item {
-  return {
-    ...JSON.parse(row.payload),
-    kind: row.kind,
-    sessionId: row.session_id,
-    seq: row.seq,
-    ...(row.run_id !== null && { runId: row.run_id }),
-    createdAt: row.created_at,
-  } as Item;
 }

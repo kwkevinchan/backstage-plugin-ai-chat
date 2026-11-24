@@ -66,6 +66,21 @@ export interface Config {
       keepRecentSteps?: number;
     };
     /**
+     * What the user may add while a run goes on. A message can be inserted
+     * into the run, which the model reads in its next call, or queued, which
+     * is sent as a new run when the run before it ends.
+     */
+    input?: {
+      insert?: {
+        /** Most messages inserted into one run. Defaults to 5. */
+        maxPerRun?: number;
+      };
+      queue?: {
+        /** Most queued messages in one session. Defaults to 5. */
+        maxMessages?: number;
+      };
+    };
+    /**
      * Instructions added to the built-in system prompt. They cannot remove
      * the built-in rules.
      */

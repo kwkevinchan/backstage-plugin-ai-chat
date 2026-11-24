@@ -21,8 +21,13 @@ import {
   type RunFence,
   type RunOutcome,
 } from '@kwkevinchan/ai-chat-harness';
-import type { LeasedRun } from '../domain';
-import { RunSupervisor, type LaunchRequest } from './RunSupervisor';
+import { UnreadMessages, type LeasedRun } from '../domain';
+import type { HostEvent } from './hostEvents';
+import {
+  RunSupervisor,
+  type LaunchRequest,
+  type RunSupervisorDeps,
+} from './RunSupervisor';
 import type { Logger, RunRepository } from './ports';
 
 // The supervisor against a scripted loop and a recording run repository: the
@@ -49,6 +54,7 @@ function setup(
     signal: AbortSignal,
   ) => AsyncGenerator<HarnessEvent, RunOutcome>,
   overrides: Partial<Record<keyof RunRepository, jest.Mock>> = {},
+  extra: Partial<RunSupervisorDeps> = {},
 ) {
   const calls: string[] = [];
   const runs = {
@@ -63,16 +69,16 @@ function setup(
     warn: jest.fn(),
     error: jest.fn(),
   };
-  const advance = {
-    execute: (req: any) => loop(req.fence, req.signal),
-  } as unknown as Pick<AdvanceRun, 'execute'>;
+  const execute = jest.fn((req: any) => loop(req.fence, req.signal));
+  const advance = { execute } as unknown as Pick<AdvanceRun, 'execute'>;
   const supervisor = new RunSupervisor({
     advance,
     runs,
     logger,
     heartbeatMs: 10,
+    ...extra,
   });
-  return { supervisor, runs: runs as any, logger, calls };
+  return { supervisor, runs: runs as any, logger, calls, execute };
 }
 
 async function* ending(
@@ -145,7 +151,7 @@ describe('RunSupervisor', () => {
       return outcome;
     });
     const handle = supervisor.launch(leased('r1', 'lease-1'), request);
-    const seen: HarnessEvent[] = [];
+    const seen: HostEvent[] = [];
     for await (const event of handle.events) seen.push(event);
     expect(logger.warn).toHaveBeenCalledWith(
       'A summary could not be made',
@@ -171,7 +177,7 @@ describe('RunSupervisor', () => {
       throw new Error('secret text of the database');
     });
     const handle = supervisor.launch(leased('r1', 'lease-1'), request);
-    const seen: HarnessEvent[] = [];
+    const seen: HostEvent[] = [];
     for await (const event of handle.events) seen.push(event);
     expect(JSON.stringify(seen)).not.toContain('secret');
     expect(seen[seen.length - 1]).toEqual({
@@ -405,5 +411,225 @@ describe('RunSupervisor', () => {
     expect(supervisor.subscribe('r1')).toBeUndefined();
     release();
     await handle.done;
+  });
+});
+
+describe('RunSupervisor with inserted messages and the queue (PI-03)', () => {
+  const principal = { userRef: 'user:default/jane' } as any;
+  const withPrincipal = { ctx: { principal } } as unknown as LaunchRequest;
+  const stored = (status: string) =>
+    ({ id: 'r1', sessionId: 's1', status, cancelRequested: false } as any);
+
+  /** A loop that ends as completed every time it is run; counts the runs of it. */
+  function completing(times: { n: number }) {
+    return async function* (): AsyncGenerator<HarnessEvent, RunOutcome> {
+      times.n += 1;
+      yield { type: 'run.started', runId: 'r1' };
+      const outcome: RunOutcome = { status: 'completed' };
+      yield { type: 'run.ended', outcome };
+      return outcome;
+    };
+  }
+
+  it('asks for the check of unread messages only when the model gave its answer', async () => {
+    for (const [outcome, requireAllRead] of [
+      [{ status: 'completed' }, true],
+      [{ status: 'completed', endReason: 'max_steps' }, false],
+      [{ status: 'waiting_approval', pending: [] }, false],
+      [{ status: 'failed', message: 'm' }, false],
+      [{ status: 'cancelled' }, false],
+    ] as [RunOutcome, boolean][]) {
+      const { supervisor, runs } = setup(() => ending(outcome));
+      await supervisor.launch(leased('r1', 'lease-1'), request).done;
+      expect(runs.transition.mock.calls[0][2].requireAllRead === true).toBe(
+        requireAllRead,
+      );
+    }
+  });
+
+  it('keeps the run when a message is unread: it runs the loop again on the same lease, and the subscribers see one run.started and one run.ended', async () => {
+    const times = { n: 0 };
+    let refused = 1;
+    const { supervisor, runs, execute } = setup(() => completing(times)(), {
+      transition: jest.fn(async () => {
+        if (refused-- > 0) throw new UnreadMessages('r1');
+        return stored('completed');
+      }),
+      get: jest.fn(async () => ({
+        ...stored('running'),
+        usage: { stepsUsed: 3, toolCallsUsed: 0, elapsedSeconds: 7 },
+      })),
+    });
+    const handle = supervisor.launch(leased('r1', 'lease-1'), request);
+    const seen: HostEvent[] = [];
+    for await (const event of handle.events) seen.push(event);
+
+    expect(times.n).toBe(2);
+    expect(seen.map(e => e.type)).toEqual(['run.started', 'run.ended']);
+    expect(runs.transition).toHaveBeenCalledTimes(2);
+    // The second round has the lease of the first and the usage of the run now.
+    expect(execute.mock.calls[1][0]).toMatchObject({
+      fence: { runId: 'r1', leaseOwner: 'lease-1' },
+      usage: { stepsUsed: 3, elapsedSeconds: 7 },
+    });
+  });
+
+  it('stops asking again after a limit, and ends the run as failed', async () => {
+    const { supervisor, runs, logger } = setup(() => completing({ n: 0 })(), {
+      transition: jest.fn(async (_id: string, to: string, opts: any) => {
+        if (opts.requireAllRead) throw new UnreadMessages('r1');
+        return stored(to);
+      }),
+      get: jest.fn(async () => ({
+        ...stored('running'),
+        usage: { stepsUsed: 0, toolCallsUsed: 0, elapsedSeconds: 0 },
+      })),
+    });
+    const handle = supervisor.launch(leased('r1', 'lease-1'), request);
+    const seen: HostEvent[] = [];
+    for await (const event of handle.events) seen.push(event);
+    // 1 try and 20 more, then the run fails with a fixed text.
+    expect(
+      runs.transition.mock.calls.filter((c: any) => c[2].requireAllRead),
+    ).toHaveLength(21);
+    expect(runs.transition).toHaveBeenLastCalledWith(
+      'r1',
+      'failed',
+      expect.objectContaining({ endReason: 'error' }),
+    );
+    expect(seen[seen.length - 1]).toEqual({
+      type: 'run.ended',
+      outcome: { status: 'failed', message: 'The run stopped.' },
+    });
+    expect(logger.error).toHaveBeenCalled();
+  });
+
+  it('calls afterRun after the status is written, with the principal of the request, and sends queue.state before run.ended', async () => {
+    const order: string[] = [];
+    const afterRun = jest.fn(async (info: any) => {
+      order.push(`afterRun ${info.run.status} ${info.outcome.status}`);
+      return { items: [], paused: false, nextRunId: 'r2' };
+    });
+    const { supervisor } = setup(
+      () => ending({ status: 'completed' }),
+      {
+        transition: jest.fn(async (_i: string, to: string) => {
+          order.push(`transition ${to}`);
+          return stored(to);
+        }),
+      },
+      { afterRun },
+    );
+    const handle = supervisor.launch(leased('r1', 'lease-1'), withPrincipal);
+    const seen: HostEvent[] = [];
+    for await (const event of handle.events) {
+      order.push(`subscriber ${event.type}`);
+      seen.push(event);
+    }
+    expect(order).toEqual([
+      'subscriber run.started',
+      'transition completed',
+      'afterRun completed completed',
+      'subscriber queue.state',
+      'subscriber run.ended',
+    ]);
+    expect(afterRun).toHaveBeenCalledWith({
+      run: stored('completed'),
+      outcome: { status: 'completed' },
+      principal,
+    });
+    expect(seen[1]).toEqual({
+      type: 'queue.state',
+      items: [],
+      paused: false,
+      nextRunId: 'r2',
+    });
+  });
+
+  it('calls afterRun for a run that waits for an approval, with that outcome', async () => {
+    const afterRun = jest.fn(async () => ({ items: [], paused: false }));
+    const { supervisor } = setup(
+      () => ending({ status: 'waiting_approval', pending: [] }),
+      { transition: jest.fn(async (_i: string, to: string) => stored(to)) },
+      { afterRun },
+    );
+    await supervisor.launch(leased('r1', 'lease-1'), withPrincipal).done;
+    expect(afterRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: { status: 'waiting_approval', pending: [] },
+      }),
+    );
+  });
+
+  it('calls afterRun with the outcome the subscribers get: a stop request turns the wait into cancelled', async () => {
+    const afterRun = jest.fn(async () => ({ items: [], paused: true }));
+    const { supervisor } = setup(
+      () => ending({ status: 'waiting_approval', pending: [] }),
+      {
+        transition: jest.fn(async (_i: string, to: string) => ({
+          ...stored(to),
+          cancelRequested: to === 'waiting_approval',
+        })),
+      },
+      { afterRun },
+    );
+    await supervisor.launch(leased('r1', 'lease-1'), withPrincipal).done;
+    expect(afterRun).toHaveBeenCalledTimes(1);
+    expect(afterRun).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: { status: 'cancelled' } }),
+    );
+  });
+
+  it('tells the failure of a loop that threw to afterRun as a failed run', async () => {
+    const afterRun = jest.fn(async () => ({ items: [], paused: true }));
+    const { supervisor } = setup(
+      async function* () {
+        yield { type: 'run.started', runId: 'r1' };
+        throw new Error('database down');
+      },
+      { transition: jest.fn(async (_i: string, to: string) => stored(to)) },
+      { afterRun },
+    );
+    await supervisor.launch(leased('r1', 'lease-1'), withPrincipal).done;
+    expect(afterRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        run: stored('failed'),
+        outcome: expect.objectContaining({ status: 'failed' }),
+      }),
+    );
+  });
+
+  it('does not call afterRun for a run it does not own any more, or when the backend shuts down', async () => {
+    const afterRun = jest.fn(async () => ({ items: [], paused: false }));
+    const lost = setup(
+      () => ending({ status: 'completed' }),
+      {
+        transition: jest.fn(async () => {
+          throw new LeaseLost('r1');
+        }),
+      },
+      { afterRun },
+    );
+    await lost.supervisor.launch(leased('r1', 'lease-1'), withPrincipal).done;
+    expect(afterRun).not.toHaveBeenCalled();
+  });
+
+  it('ends the run and goes on when afterRun fails: no queue.state, run.ended still comes', async () => {
+    const afterRun = jest.fn(async () => {
+      throw new Error('queue table gone');
+    });
+    const { supervisor, logger } = setup(
+      () => ending({ status: 'completed' }),
+      { transition: jest.fn(async (_i: string, to: string) => stored(to)) },
+      { afterRun },
+    );
+    const handle = supervisor.launch(leased('r1', 'lease-1'), withPrincipal);
+    const types: string[] = [];
+    for await (const event of handle.events) types.push(event.type);
+    expect(types).toEqual(['run.started', 'run.ended']);
+    expect(logger.error).toHaveBeenCalledWith(
+      'Could not tell the state of the queue',
+      expect.objectContaining({ error: 'queue table gone' }),
+    );
   });
 });

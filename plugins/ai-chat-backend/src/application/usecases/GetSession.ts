@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 
-import type { Item, ItemLog } from '@kwkevinchan/ai-chat-harness';
+import {
+  insertStatesOf,
+  unreadInserted,
+  type Item,
+  type ItemLog,
+} from '@kwkevinchan/ai-chat-harness';
 import {
   assertOwner,
   callsAwaitingDecision,
@@ -22,7 +27,12 @@ import {
   type Run,
   type Session,
 } from '../../domain';
-import type { RunRepository, SessionRepository } from '../ports';
+import type {
+  QueuedMessageRepository,
+  RunRepository,
+  SessionRepository,
+} from '../ports';
+import { queueViewOf, type QueueView } from './ListQueue';
 
 /** What a screen needs to show a session. */
 export type SessionView = {
@@ -40,6 +50,14 @@ export type SessionView = {
    * not start after the last decision. `ResumeRun` carries it on.
    */
   resumable: boolean;
+  /** The queued messages and whether the queue waits for the user (IN-15). */
+  queue: QueueView;
+  /**
+   * For each inserted message in `items`, by `seq`: `read`, `pending` (not
+   * read yet, its run goes on) or `unread` (its run ended without reading it,
+   * IN-12).
+   */
+  insertStates: ReadonlyMap<number, 'read' | 'pending' | 'unread'>;
 };
 
 /** The session with its items and its active run, for the owner (SE-01). */
@@ -49,6 +67,7 @@ export class GetSession {
       sessions: SessionRepository;
       runs: RunRepository;
       items: ItemLog;
+      queue: QueuedMessageRepository;
     },
   ) {}
 
@@ -78,6 +97,38 @@ export class GetSession {
       awaitingDecision,
       resumable:
         run?.status === 'waiting_approval' && awaitingDecision.length === 0,
+      queue: await queueViewOf(this.deps, session.id),
+      insertStates: await this.insertStates(
+        session.id,
+        list,
+        run,
+        input.afterSeq,
+      ),
     };
+  }
+
+  private async insertStates(
+    sessionId: string,
+    list: Item[],
+    run: Run | undefined,
+    afterSeq?: number,
+  ): Promise<ReadonlyMap<number, 'read' | 'pending' | 'unread'>> {
+    const inserted = list.filter(
+      item => item.kind === 'user_message' && item.delivery === 'inserted',
+    );
+    if (inserted.length === 0) return new Map();
+    // A run is cut by its first message, which may be before `afterSeq`.
+    const all = afterSeq ? await this.deps.items.read(sessionId) : list;
+    const states = insertStatesOf(all);
+    // While the run goes on, a message it did not read is not lost yet.
+    const pending = new Set(
+      run ? unreadInserted(all).map(item => item.seq) : [],
+    );
+    return new Map(
+      inserted.map(item => [
+        item.seq,
+        pending.has(item.seq) ? 'pending' : states.get(item.seq) ?? 'unread',
+      ]),
+    );
   }
 }

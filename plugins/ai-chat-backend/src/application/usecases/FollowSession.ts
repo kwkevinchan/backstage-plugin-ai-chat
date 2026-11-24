@@ -14,8 +14,9 @@
  * limitations under the License.
  */
 
-import type { HarnessEvent, Item, ItemLog } from '@kwkevinchan/ai-chat-harness';
+import type { Item, ItemLog } from '@kwkevinchan/ai-chat-harness';
 import { assertOwner, type Principal, type Run } from '../../domain';
+import type { HostEvent } from '../hostEvents';
 import type { RunSupervisor } from '../RunSupervisor';
 import type { RunRepository, SessionRepository } from '../ports';
 
@@ -33,7 +34,7 @@ export type FollowHandle = {
    * the items out. Events of items up to it are replays.
    */
   upToSeq: number;
-  events: AsyncIterable<HarnessEvent>;
+  events: AsyncIterable<HostEvent>;
 };
 
 /**

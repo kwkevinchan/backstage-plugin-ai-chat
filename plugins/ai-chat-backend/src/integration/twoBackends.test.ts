@@ -28,13 +28,14 @@ import request from 'supertest';
 import { createRouter } from '../adapters/http';
 import { parseSse } from '../adapters/http/__testUtils__/uiMessageStream';
 import { principalFromRequest } from '../adapters/backstage/principalFromRequest';
-import { createWorld, jane, until } from './__testUtils__';
+import { createWorld, jane, janeFresh, until } from './__testUtils__';
 
 type World = Awaited<ReturnType<typeof createWorld>>;
 type Backend = ReturnType<World['backend']>;
 
 const JANE = mockCredentials.user.header('user:default/jane');
 const writeCall = callTool('m1', 'demo:write', { name: 'x' });
+const readCall = callTool('m1', 'demo:read', { name: 'x' });
 
 /**
  * Two backends on one database: the deployment of P1 with more than one
@@ -321,6 +322,115 @@ describe('two backends on one database', () => {
       expect(onA.status).toBe(200);
       await onA.body!.cancel();
       expect((await world.runRow(handle.runId)).status).toBe('running');
+    });
+  });
+
+  describe('inserted messages and the queue across backends (PI-03)', () => {
+    it('lets B read a message that was inserted before A put the run to wait: B takes the run over after the approval and its model call has the message', async () => {
+      let sessionId = '';
+      const a: Backend = backend([[writeCall]], {
+        aroundTransition: async (info, call) => {
+          if (info.to === 'waiting_approval') {
+            // The insert goes to whichever backend gets it; here it is A.
+            await a.useCases.insertMessage.execute({
+              principal: jane,
+              sessionId,
+              runId: info.runId,
+              text: 'to staging only',
+            });
+          }
+          return call();
+        },
+      });
+      const b = backend([[say('written')]]);
+      const session = await world.newSession();
+      sessionId = session.id;
+      const handle = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId,
+        text: 'deploy',
+      });
+      for await (const _event of handle.events) {
+        // Reads the run to its end: it waits for the approval.
+      }
+      await handle.done;
+      const call = (await world.items.read(session.id)).find(
+        item => item.kind === 'tool_call',
+      ) as { callId: string };
+
+      const decided = await b.useCases.decideApproval.execute({
+        principal: jane,
+        sessionId,
+        callId: call.callId,
+        decision: 'allow',
+      });
+      for await (const _event of decided.run!.events) {
+        // The loop of B runs to its end.
+      }
+      await decided.run!.done;
+
+      expect((await world.runRow(handle.runId)).status).toBe('completed');
+      expect(b.model.inputs).toHaveLength(1);
+      expect(
+        b.model.inputs[0].messages
+          .filter(m => m.role === 'user')
+          .map(m => m.content),
+      ).toEqual(['deploy', 'to staging only']);
+      expect(a.model.inputs).toHaveLength(1);
+    });
+
+    it('starts the next run of the queue with the identity of B, which made the last approval, and A sends nothing', async () => {
+      const a = backend([[writeCall]]);
+      const b = backend([[say('written')], [readCall], [say('read it')]]);
+      const identityOfB = {
+        ...janeFresh,
+        credentials: { marker: 'request that reached B' },
+      };
+      const session = await world.newSession();
+      const handle = await a.useCases.sendMessage.execute({
+        principal: janeFresh,
+        sessionId: session.id,
+        text: 'deploy',
+      });
+      for await (const _event of handle.events) {
+        // Reads the run to its end: it waits for the approval.
+      }
+      await handle.done;
+      await a.useCases.queueMessage.execute({
+        principal: janeFresh,
+        sessionId: session.id,
+        text: 'then read it',
+      });
+      const call = (await world.items.read(session.id)).find(
+        item => item.kind === 'tool_call',
+      ) as { callId: string };
+
+      const decided = await b.useCases.decideApproval.execute({
+        principal: identityOfB,
+        sessionId: session.id,
+        callId: call.callId,
+        decision: 'allow',
+      });
+      const events = [];
+      for await (const event of decided.run!.events) events.push(event);
+      await decided.run!.done;
+
+      const state = events.find(e => e.type === 'queue.state') as any;
+      expect(state.nextRunId).toEqual(expect.any(String));
+      await until(
+        async () =>
+          (await world.runRow(state.nextRunId)).status === 'completed',
+      );
+      // A ran the first loop and has nothing to do with the end.
+      expect(a.model.inputs).toHaveLength(1);
+      expect(b.model.inputs).toHaveLength(3);
+      const read = world.actions.invocations.find(i => i.id === 'demo:read');
+      expect(read?.credentials).toBe(identityOfB.credentials);
+      expect(
+        (await world.items.read(session.id)).filter(
+          item => item.kind === 'user_message' && item.delivery === 'queued',
+        ),
+      ).toHaveLength(1);
     });
   });
 });

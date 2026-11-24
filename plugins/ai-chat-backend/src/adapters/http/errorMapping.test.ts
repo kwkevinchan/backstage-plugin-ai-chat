@@ -23,9 +23,15 @@ import {
 import { InvalidRunTransition, LeaseLost } from '@kwkevinchan/ai-chat-harness';
 import {
   AgentNotFound,
+  InsertLimitReached,
+  NoActiveRun,
   NotSessionOwner,
+  QueueChanged,
+  QueuedMessageNotFound,
+  QueueFull,
   RunAlreadyActive,
   RunNotFound,
+  RunNotRunning,
   RunNotWaiting,
   SessionNotFound,
   ShuttingDown,
@@ -54,6 +60,24 @@ describe('toHttpError', () => {
   ])('maps %p to %p', (error, expected) => {
     expect(toHttpError(error, noop)).toBeInstanceOf(expected);
   });
+
+  it.each([
+    [new RunNotRunning('r1'), 'RunNotRunning', 409],
+    [new InsertLimitReached('r1', 5), 'InsertLimitReached', 409],
+    [new NoActiveRun('s1'), 'NoActiveRun', 409],
+    [new QueueFull('s1', 5), 'QueueFull', 409],
+    [new QueueChanged('s1'), 'QueueChanged', 409],
+    [new QueuedMessageNotFound('q1'), 'QueuedMessageNotFound', 404],
+  ])(
+    'keeps the name of %p in the answer, with the status %p',
+    (error, name, status) => {
+      const answer = toHttpError(error, noop) as Error & { statusCode: number };
+      // The error handler of Backstage answers with `statusCode` and `name`.
+      expect(answer.name).toBe(name);
+      expect(answer.statusCode).toBe(status);
+      expect(answer.message).toBe(error.message);
+    },
+  );
 
   it('answers a session of another user like a session that does not exist', () => {
     const notOwner = toHttpError(new NotSessionOwner('s1'), noop) as Error;

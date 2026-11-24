@@ -23,11 +23,11 @@ import type {
   ChatNoticeData,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type {
-  HarnessEvent,
   Item,
   RunOutcome,
   ToolCallItem,
 } from '@kwkevinchan/ai-chat-harness';
+import type { HostEvent } from '../../../application';
 import type { UiMessageChunk } from './uiMessageChunk';
 
 const NOTICES: Record<ChatNoticeData['code'], ChatNoticeData> = {
@@ -61,11 +61,21 @@ const STOPPED_TEXT = 'The run stopped.';
  * - Every item gets a transient `data-item` with its `seq`. An item whose
  *   `seq` the presenter has sent already (a replayed item that comes again
  *   as an event) is skipped.
+ * - An inserted message the model read goes out as `data-inserted`, before the
+ *   step that read it. It is no item of the stream: the message was written
+ *   when the user inserted it, so its `seq` is lower than that of the output
+ *   before it and the `seq` check above would drop it. The presenter keeps the
+ *   `seq` of the inserted messages it sent instead, and sends each once; a
+ *   replay marks the ones it sent, so the live event does not send them again.
+ * - The state of the queue goes out as a transient `data-queue`, before the
+ *   `data-run` of the end.
  */
 export class UiMessageStreamPresenter {
   private stepOpen = false;
   private readonly openText = new Map<string, string>();
   private lastSeq = 0;
+  /** The `seq` of the inserted messages already sent as `data-inserted`. */
+  private readonly insertedSent = new Set<number>();
   private trimmedSent = false;
   private ended = false;
   private replaying = false;
@@ -91,7 +101,7 @@ export class UiMessageStreamPresenter {
   ) {}
 
   /** The chunks of one event. */
-  present(event: HarnessEvent): UiMessageChunk[] {
+  present(event: HostEvent): UiMessageChunk[] {
     switch (event.type) {
       case 'run.started':
         return [
@@ -100,7 +110,13 @@ export class UiMessageStreamPresenter {
           this.run('running'),
         ];
       case 'message.read':
-        return [];
+        return event.item.kind === 'user_message'
+          ? this.inserted(event.item)
+          : [];
+      case 'queue.state': {
+        const { type: _type, ...data } = event;
+        return [{ type: 'data-queue', data, transient: true }];
+      }
       case 'step.started':
         if (event.step <= this.replayedStep) return [];
         return [...this.closeStep(), ...this.openStep()];
@@ -148,7 +164,23 @@ export class UiMessageStreamPresenter {
   ): UiMessageChunk[] {
     this.replaying = true;
     const chunks: UiMessageChunk[] = [this.start(), this.run(status)];
-    for (const item of items) chunks.push(...this.item(item));
+    const unsent = items.filter(
+      item => item.kind === 'user_message' && item.delivery === 'inserted',
+    );
+    for (const item of items) {
+      if (item.kind === 'agent_message' || item.kind === 'tool_call') {
+        // Where the live stream would have sent them: before the output that
+        // read them. A message no output read yet goes out when it is read.
+        const read = unsent.filter(
+          message =>
+            !this.insertedSent.has(message.seq) &&
+            message.seq <= (item.readUpToSeq ?? item.seq),
+        );
+        if (read.length > 0) chunks.push(...this.closeStep());
+        for (const message of read) chunks.push(...this.inserted(message));
+      }
+      chunks.push(...this.item(item));
+    }
     this.replaying = false;
     this.lastSeq = Math.max(this.lastSeq, upToSeq);
     // A step that wrote a call has its number in the call. A step that wrote
@@ -205,6 +237,23 @@ export class UiMessageStreamPresenter {
     this.trimmedSent = true;
     return [
       { type: 'data-notice', data: NOTICES.context_trimmed, transient: true },
+    ];
+  }
+
+  private inserted(message: Item): UiMessageChunk[] {
+    if (message.kind !== 'user_message') return [];
+    if (this.insertedSent.has(message.seq)) return [];
+    this.insertedSent.add(message.seq);
+    return [
+      {
+        type: 'data-inserted',
+        id: `inserted-${message.seq}`,
+        data: {
+          seq: message.seq,
+          text: message.text,
+          ...(message.page && { page: message.page }),
+        },
+      },
     ];
   }
 

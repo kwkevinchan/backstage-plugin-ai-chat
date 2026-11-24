@@ -29,14 +29,22 @@ export class AuditorAuditLog implements AuditLog {
     const started = await this.auditor.createEvent({
       eventId: event.eventId,
       severityLevel: 'medium',
-      meta: {
-        actor: event.actorRef,
-        sessionId: event.sessionId,
-        runId: event.runId,
-        toolCallId: event.callId,
-        actionId: event.toolId,
-        readOnly: event.readOnly,
-      },
+      meta:
+        event.eventId === 'queued-message-send'
+          ? {
+              actor: event.actorRef,
+              sessionId: event.sessionId,
+              runId: event.runId,
+              queuedMessageId: event.queuedMessageId,
+            }
+          : {
+              actor: event.actorRef,
+              sessionId: event.sessionId,
+              runId: event.runId,
+              toolCallId: event.callId,
+              actionId: event.toolId,
+              readOnly: event.readOnly,
+            },
     });
     return {
       success: () => started.success(),

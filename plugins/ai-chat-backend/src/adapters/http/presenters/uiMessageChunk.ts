@@ -15,9 +15,11 @@
  */
 
 import type {
+  ChatInsertedData,
   ChatItemData,
   ChatNoticeData,
   ChatPlan,
+  ChatQueueData,
   ChatRunData,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { JsonValue } from '@backstage/types';
@@ -58,6 +60,8 @@ export type UiMessageChunk =
   | { type: 'data-item'; data: ChatItemData; transient: true }
   | { type: 'data-notice'; data: ChatNoticeData; transient: true }
   | { type: 'data-plan'; id: 'plan'; data: ChatPlan }
+  | { type: 'data-inserted'; id: string; data: ChatInsertedData }
+  | { type: 'data-queue'; data: ChatQueueData; transient: true }
   | {
       type: 'finish';
       finishReason: 'stop' | 'tool-calls';
