@@ -21,7 +21,7 @@ import type { PolicyName, PolicySettings } from '@kwkevinchan/ai-chat-harness';
 import type { AgentCatalog } from '../../application/ports/AgentCatalog';
 import type { Toolset } from '../../domain/toolset';
 
-const TOOLSET_ID = /^[A-Za-z0-9_-]+$/;
+const TOOLSET_ID = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/i;
 const POLICY_NAMES: readonly string[] = ['allow', 'ask', 'deny'];
 
 /**
@@ -47,8 +47,8 @@ export class ConfigAgentCatalog implements AgentCatalog {
     if (include.length > 0 || exclude.length > 0) {
       logger.warn(
         toolsetsConfig
-          ? 'aiChat.actions.include and aiChat.actions.exclude are deprecated and ignored because aiChat.toolsets is set; remove them'
-          : 'aiChat.actions.include and aiChat.actions.exclude are deprecated; define aiChat.toolsets instead',
+          ? 'aiChat.actions.include and aiChat.actions.exclude are deprecated. The chat still filters actions with them for now; aiChat.toolsets replaces them once the new agent loop is connected.'
+          : 'aiChat.actions.include and aiChat.actions.exclude are deprecated. The chat still uses them for now; define aiChat.toolsets, which replaces them once the new agent loop is connected.',
       );
     }
 
@@ -79,7 +79,7 @@ function readToolsets(config: Config): Toolset[] {
   return config.keys().map(id => {
     if (!TOOLSET_ID.test(id)) {
       throw new InputError(
-        `aiChat.toolsets.${id}: the id may only have letters, digits, - and _`,
+        `aiChat.toolsets.${id}: the id must start with a letter and may only have letters, digits, - and _ between them`,
       );
     }
     const toolset = config.getConfig(id);
@@ -91,7 +91,7 @@ function readToolsets(config: Config): Toolset[] {
       id,
       title: toolset.getOptionalString('title'),
       actions,
-      exclude: [],
+      exclude: toolset.getOptionalStringArray('exclude') ?? [],
       default: toolset.getOptionalBoolean('default') ?? false,
       egress: toolset.getOptionalBoolean('egress') ?? false,
     };
@@ -111,6 +111,11 @@ function readPolicy(value: unknown): PolicySettings {
     if (typeof name !== 'string' || !POLICY_NAMES.includes(name)) {
       throw new InputError(
         `aiChat.policy.${toolId} must be allow, ask or deny`,
+      );
+    }
+    if (toolId.includes('*')) {
+      throw new InputError(
+        `aiChat.policy.${toolId}: policy takes only a complete action id, not a pattern`,
       );
     }
     byTool[toolId] = name as PolicyName;

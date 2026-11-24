@@ -100,13 +100,17 @@ function setup(options: {
   chosen?: string[];
   maxOutputChars?: number;
 }) {
-  const state = { chosen: options.chosen };
+  const state = {
+    chosen: options.chosen,
+    toolsets: options.toolsets,
+    policy: options.policy,
+  };
   const actions = new FakeActionsService();
   const logger = mockServices.logger.mock();
   const catalog: AgentCatalog = {
     toolsets: async () =>
-      options.toolsets ?? [toolset('catalog', { default: true })],
-    policy: async () => options.policy ?? {},
+      state.toolsets ?? [toolset('catalog', { default: true })],
+    policy: async () => state.policy ?? {},
   };
   const gateway = new ActionsToolGateway({
     actions,
@@ -391,7 +395,7 @@ describe('ActionsToolGateway.execute', () => {
   });
 
   it('cuts a long output and says so', async () => {
-    const { actions, gateway, hash } = await prepared({ maxOutputChars: 10 });
+    const { actions, gateway, hash } = await prepared({ maxOutputChars: 60 });
     actions.invoke.mockResolvedValueOnce({ output: { text: 'a'.repeat(100) } });
     const result = await gateway.execute(callOf('catalog:get', hash), ctx, {
       signal: signal(),
@@ -401,7 +405,7 @@ describe('ActionsToolGateway.execute', () => {
       truncated: true,
       output: { text: expect.any(String), originalLength: 111 },
     });
-    expect((result.output as any).text).toHaveLength(10);
+    expect(JSON.stringify(result.output).length).toBeLessThanOrEqual(60);
   });
 
   it('turns a failure of the action into an error result', async () => {
@@ -498,5 +502,115 @@ describe('ActionsToolGateway.execute', () => {
     });
     expect(result.status).toBe('error');
     expect(actions.invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe('ActionsToolGateway.execute, more checks', () => {
+  const signal = () => new AbortController().signal;
+  async function prepared() {
+    const s = setup({});
+    s.actions.actions = [action('catalog:get')];
+    const [tool] = await s.gateway.list(ctx);
+    return { ...s, hash: tool.schemaHash };
+  }
+
+  it('does not invoke when the signal aborts while the tools are listed', async () => {
+    const { actions, gateway, hash } = await prepared();
+    const controller = new AbortController();
+    actions.list.mockImplementationOnce(async () => {
+      await new Promise(resolve => setTimeout(resolve, 20));
+      return { actions: actions.actions };
+    });
+    const pending = gateway.execute(callOf('catalog:get', hash), ctx, {
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+    expect(actions.invoke).not.toHaveBeenCalled();
+  });
+
+  it('does not run a call that the policy denies now', async () => {
+    const { actions, gateway, hash, state } = await prepared();
+    state.policy = { byTool: { 'catalog:get': 'deny' } };
+    const result = await gateway.execute(callOf('catalog:get', hash), ctx, {
+      signal: signal(),
+    });
+    expect(result.status).toBe('error');
+    expect(result.message).toContain('policy');
+    expect(actions.invoke).not.toHaveBeenCalled();
+  });
+
+  it('does not run a call stored as ask when the policy denies it after the approval', async () => {
+    const { actions, gateway, hash, state } = await prepared();
+    state.policy = { byTool: { 'catalog:get': 'deny' } };
+    const result = await gateway.execute(
+      callOf('catalog:get', hash, { policy: 'ask' }),
+      ctx,
+      { signal: signal() },
+    );
+    expect(result.status).toBe('error');
+    expect(actions.invoke).not.toHaveBeenCalled();
+  });
+
+  it('runs an approved call that the policy still asks for', async () => {
+    const { actions, gateway, hash, state } = await prepared();
+    state.policy = { byTool: { 'catalog:get': 'ask' } };
+    const result = await gateway.execute(
+      callOf('catalog:get', hash, { policy: 'ask' }),
+      ctx,
+      { signal: signal() },
+    );
+    expect(result.status).toBe('ok');
+    expect(actions.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not run a call stored without approval when the tool now sends data out', async () => {
+    const { actions, gateway, hash, state } = await prepared();
+    state.toolsets = [toolset('catalog', { default: true, egress: true })];
+    const result = await gateway.execute(
+      callOf('catalog:get', hash, { policy: 'allow' }),
+      ctx,
+      { signal: signal() },
+    );
+    expect(result.status).toBe('error');
+    expect(result.message).toContain('approval');
+    expect(actions.invoke).not.toHaveBeenCalled();
+  });
+
+  it('keeps the serialized output of a cut result within the limit', async () => {
+    const s = setup({ maxOutputChars: 50 });
+    s.actions.actions = [action('catalog:get')];
+    const [tool] = await s.gateway.list(ctx);
+    s.actions.invoke.mockResolvedValueOnce({ output: { t: '"'.repeat(200) } });
+    const result = await s.gateway.execute(
+      callOf('catalog:get', tool.schemaHash),
+      ctx,
+      { signal: signal() },
+    );
+    expect(result.truncated).toBe(true);
+    expect(JSON.stringify(result.output).length).toBeLessThanOrEqual(50);
+  });
+
+  it('validates two tools whose schemas have the same $id', async () => {
+    const { actions, gateway } = setup({});
+    const withId = (extra: object) => ({
+      $id: 'https://example.com/same',
+      type: 'object',
+      ...extra,
+    });
+    actions.actions = [
+      action('catalog:a', {
+        input: withId({ properties: { a: { type: 'string' } } }),
+      }),
+      action('catalog:b', {
+        input: withId({ properties: { b: { type: 'number' } } }),
+      }),
+    ];
+    expect(await gateway.validate('catalog:a', { a: 'x' }, ctx)).toEqual({
+      valid: true,
+    });
+    expect(await gateway.validate('catalog:b', { b: 1 }, ctx)).toEqual({
+      valid: true,
+    });
   });
 });

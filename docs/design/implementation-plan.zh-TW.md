@@ -122,7 +122,7 @@ flowchart LR
 - **範圍**：`ActionsToolGateway`、`ConfigAgentCatalog`（只有 Toolset 和 policy，Agent 留到 P3）。設定檔的 `toolsets` 和 `policy`。PR #1 的 include、exclude 設定保留一版並標成淘汰。設定檔的 `policy` 是平的 `{toolId: deny}`，要轉成 domain 的 `PolicySettings {byTool}`。
 - **驗收**：
   - 沒有標 `readOnly` 的 action 被當成不是唯讀。
-  - 設定把不是唯讀的 action 寫成 `allow` 時，啟動時記一筆警告，執行時仍然是 `ask`。
+  - 設定把不是唯讀的 action 寫成 `allow` 時，第一次列出工具時記一筆警告（啟動時沒有使用者憑證，列不出 action），執行時仍然是 `ask`。
   - Session 沒開的 Toolset，工具不會出現在給模型的清單裡。
   - 參數不符合 schema 時，`validate` 回傳錯誤訊息。
   - action 的 schema 在呼叫存下之後改變：核准時重新驗證（T-06）。

@@ -91,9 +91,9 @@ export function enabledTools(
 }
 
 /**
- * The tools the policy sets to `allow` although they are not read-only. The
- * policy never lets them run without approval (D-06, T-03); the list is for
- * a warning to the administrator.
+ * The tools the policy sets to `allow` although they are not read-only or
+ * send data out (`egress`). The policy never lets them run without approval
+ * (D-06, T-03, T-04); the list is for a warning to the administrator.
  */
 export function unsafeAllows(
   tools: readonly ToolDescriptor[],
@@ -103,7 +103,7 @@ export function unsafeAllows(
   return tools
     .filter(
       tool =>
-        tool.readOnly !== true &&
+        (tool.readOnly !== true || tool.egress === true) &&
         Object.prototype.hasOwnProperty.call(byTool, tool.id) &&
         byTool[tool.id] === 'allow',
     )

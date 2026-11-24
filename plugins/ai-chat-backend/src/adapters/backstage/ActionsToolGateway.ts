@@ -19,21 +19,25 @@ import type {
   BackstageCredentials,
   LoggerService,
 } from '@backstage/backend-plugin-api';
-// The only file that uses the actions service, which is still alpha. Check it
-// again with every Backstage upgrade.
+// The only adapter that uses the actions service, which is still alpha (the
+// assembly in plugin.ts and the old ChatService and ToolCatalog also use it,
+// until P1-08 and P1-09 remove them). Check it again with every Backstage
+// upgrade.
 import type {
   ActionsService,
   ActionsServiceAction,
 } from '@backstage/backend-plugin-api/alpha';
-import type {
-  CallContext,
-  JsonObject,
-  JsonValue,
-  ToolCallItem,
-  ToolDescriptor,
-  ToolGateway,
-  ToolOutput,
-  ValidationResult,
+import {
+  decidePolicy,
+  needsApproval,
+  type CallContext,
+  type JsonObject,
+  type JsonValue,
+  type ToolCallItem,
+  type ToolDescriptor,
+  type ToolGateway,
+  type ToolOutput,
+  type ValidationResult,
 } from '@kwkevinchan/ai-chat-harness';
 import Ajv, { type ValidateFunction } from 'ajv';
 import type { AgentCatalog } from '../../application/ports/AgentCatalog';
@@ -68,8 +72,9 @@ const MAX_MESSAGE_CHARS = 2000;
  * - A tool is offered when it is in a toolset the session has switched on
  *   (T-02, T-11); a toolset marked `egress` makes its tools ask (T-04).
  * - `validate` checks the input against the input schema of the action (T-05).
- * - `execute` checks the call against the action as it is now: a tool that is
- *   no longer offered, no longer read-only when the call was stored as
+ * - `execute` checks the call against the action and the policy as they are
+ *   now: a tool that is no longer offered, that the policy denies, that asks
+ *   for approval now although the call was stored without one, no longer read-only when the call was stored as
  *   read-only, or whose schema changed and no longer fits the stored input,
  *   does not run (T-06).
  *
@@ -80,6 +85,8 @@ export class ActionsToolGateway implements ToolGateway {
     strict: false,
     validateFormats: false,
     allErrors: false,
+    // The same `$id` in a second schema must not make `compile` throw.
+    addUsedSchema: false,
   });
   private readonly validators = new Map<string, ValidateFunction>();
   private readonly warned = new Set<string>();
@@ -116,6 +123,8 @@ export class ActionsToolGateway implements ToolGateway {
     const credentials = credentialsOf(ctx.principal);
     throwIfAborted(signal);
     const tool = (await this.list(ctx)).find(t => t.id === call.toolId);
+    // `list` takes time; do not start the action after an abort.
+    throwIfAborted(signal);
     if (!tool) {
       return error(`The tool ${call.toolId} is not available.`);
     }
@@ -132,6 +141,18 @@ export class ActionsToolGateway implements ToolGateway {
         );
       }
     }
+
+    // The policy decides at the time of the call and again before the run.
+    const policy = decidePolicy(tool, await this.deps.catalog.policy());
+    if (policy === 'deny') {
+      return error(`The policy no longer allows ${call.toolId}.`);
+    }
+    if (policy !== 'allow' && !needsApproval(call)) {
+      return error(
+        `The policy now asks for approval of ${call.toolId}, and this call was stored without it, so it does not run.`,
+      );
+    }
+    throwIfAborted(signal);
 
     let output: JsonValue | undefined;
     try {
@@ -266,16 +287,26 @@ function cut(text: string): string {
     : `${text.slice(0, MAX_MESSAGE_CHARS)}...`;
 }
 
-/** Always an object (the loop treats anything else as no result). */
+/**
+ * Always an object (the loop treats anything else as no result). A long output
+ * becomes `{ text, originalLength }` whose serialized form is at most
+ * `maxChars` characters.
+ */
 function limit(output: JsonValue | undefined, maxChars: number): ToolOutput {
   if (output === undefined) return { status: 'ok' };
   const json = JSON.stringify(output) ?? 'null';
   if (json.length <= maxChars) return { status: 'ok', output };
+  let text = json.slice(0, maxChars);
+  const wrap = () => ({ text, originalLength: json.length });
+  while (text.length > 0 && JSON.stringify(wrap()).length > maxChars) {
+    const excess = JSON.stringify(wrap()).length - maxChars;
+    text = text.slice(0, Math.max(0, text.length - excess));
+  }
   return {
     status: 'ok',
-    output: { text: json.slice(0, maxChars), originalLength: json.length },
+    output: wrap(),
     truncated: true,
-    message: `The output was cut: ${maxChars} of ${json.length} characters are kept.`,
+    message: `The output was cut: the stored output is at most ${maxChars} characters of ${json.length}.`,
   };
 }
 

@@ -47,9 +47,9 @@ export interface Config {
     systemPrompt?: string;
     /**
      * Which actions of the actions registry the chat can use.
-     * @deprecated Define `toolsets` instead. These two lists are read only
-     * when `toolsets` is not set, and the backend logs a warning when they are
-     * set.
+     * @deprecated `toolsets` replaces these two lists once the new agent loop
+     * is connected. Until then the chat still filters actions with them, with
+     * or without `toolsets`, and the backend logs a warning when they are set.
      */
     actions?: {
       /**
@@ -73,6 +73,8 @@ export interface Config {
         title?: string;
         /** Action ID patterns (`*` matches any characters), for example `catalog:*`. */
         actions: string[];
+        /** Action ID patterns that are not part of the toolset. */
+        exclude?: string[];
         /** Whether a new session has the toolset switched on. Defaults to false. */
         default?: boolean;
         /**
@@ -88,7 +90,8 @@ export interface Config {
      * it at once, `ask` asks the user first, `deny` never runs it and never
      * offers it. `allow` takes effect only for an action that marks itself
      * read-only and is not in an `egress` toolset; any other action asks, and
-     * the backend logs a warning. An action that is not listed is `allow` when
+     * the backend logs a warning. Keys are complete action IDs; a key with `*`
+     * is refused. An action that is not listed is `allow` when
      * it is read-only and `ask` otherwise.
      */
     policy?: {

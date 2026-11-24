@@ -140,6 +140,13 @@ describe('unsafeAllows', () => {
     ).toEqual(['a:write']);
   });
 
+  it('lists a read-only tool of an egress toolset that is set to allow', () => {
+    const web = { ...tool('web:fetch'), egress: true };
+    expect(unsafeAllows([web], { byTool: { 'web:fetch': 'allow' } })).toEqual([
+      'web:fetch',
+    ]);
+  });
+
   it('is empty without settings', () => {
     expect(unsafeAllows([tool('a:write', false)], {})).toEqual([]);
   });

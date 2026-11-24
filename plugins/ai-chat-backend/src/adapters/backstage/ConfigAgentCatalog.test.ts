@@ -91,7 +91,7 @@ describe('ConfigAgentCatalog', () => {
     );
     expect(() =>
       catalogFor({ toolsets: { 'a b': { actions: ['x'] } } }),
-    ).toThrow('the id may only have');
+    ).toThrow('the id must start with a letter');
   });
 
   it('offers every action in one default toolset when nothing is configured', async () => {
@@ -127,14 +127,33 @@ describe('ConfigAgentCatalog', () => {
     );
   });
 
-  it('ignores the deprecated lists when toolsets are set, and warns', async () => {
+  it('warns that the chat still uses the deprecated lists when toolsets are set', async () => {
     const { catalog, logger } = catalogFor({
       actions: { include: ['x:*'] },
       toolsets: { a: { actions: ['a:*'] } },
     });
     expect((await catalog.toolsets()).map(t => t.id)).toEqual(['a']);
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('ignored'),
+      expect.stringContaining('still filters actions'),
     );
+  });
+
+  it('rejects a policy key that is a pattern', () => {
+    expect(() => catalogFor({ policy: { 'catalog:*': 'deny' } })).toThrow(
+      'complete action id',
+    );
+  });
+
+  it('reads the exclude patterns of a toolset', async () => {
+    const { catalog } = catalogFor({
+      toolsets: { a: { actions: ['a:*'], exclude: ['a:delete-*'] } },
+    });
+    expect((await catalog.toolsets())[0].exclude).toEqual(['a:delete-*']);
+  });
+
+  it.each(['1a', '-a', 'a-', 'a--b', 'a_'])('rejects the toolset id %s', id => {
+    expect(() =>
+      catalogFor({ toolsets: { [id]: { actions: ['x'] } } }),
+    ).toThrow('the id must start with a letter');
   });
 });

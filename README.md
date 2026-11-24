@@ -109,7 +109,7 @@ aiChat:
   maxTurns: 10 # model calls for one user message; default 10
   systemPrompt: | # optional, added to the built-in rules
     You help the platform team of Example Corp.
-  actions: # deprecated, use toolsets (below); the backend logs a warning
+  actions: # deprecated, toolsets (below) replaces it later; logs a warning
     include: ['catalog:*', 'temporal:*'] # optional; * matches any characters
     exclude: ['*:unregister-*'] # optional; wins over include
   maxToolOutputChars: 20000 # output stored and sent to the model; default 20000
@@ -132,8 +132,8 @@ cannot supply them.
 ### Toolsets and policy
 
 `aiChat.toolsets` and `aiChat.policy` replace `actions.include` and
-`actions.exclude`, which stay for one more release and are ignored once
-`toolsets` is set. The backend reads and checks both at startup, and a wrong
+`actions.exclude`, which stay for one more release; the backend logs a warning
+when either is set. The backend reads and checks both at startup, and a wrong
 value stops it. The chat of this release still uses `include` and `exclude`;
 the new settings take effect when the agent loop replaces the current chat
 service.
@@ -143,15 +143,17 @@ aiChat:
   toolsets:
     catalog:
       actions: ['catalog:*'] # * matches any characters
+      exclude: ['catalog:unregister-*'] # optional; not part of the toolset
       default: true # on in a new session; default false
     web:
       actions: ['web:*']
       egress: true # sends data out of the organization: always asks
   policy:
-    'catalog:get-entity': allow # allow, ask or deny, by action ID
+    'catalog:get-entity': allow # allow, ask or deny, by complete action ID
     'temporal:terminate-workflow': deny
 ```
 
+- `policy` takes complete action IDs only; a key with `*` is refused.
 - A session offers the actions of the toolsets that are switched on for it. An
   action in no toolset is never offered.
 - `deny` never runs an action and never offers it. `allow` takes effect only
