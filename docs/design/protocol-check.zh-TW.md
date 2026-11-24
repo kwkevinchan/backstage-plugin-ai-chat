@@ -291,7 +291,12 @@ it('imports ai and useChat', () => {
 
 - **助理訊息的 id。** `start.messageId` 要每個 Run 一個，而且核准後的接續串流用同一個。測試時如果新的 Run 用了舊訊息的 id，會蓋掉舊訊息。
 - **使用者訊息的 id 在用戶端產生**，和紀錄裡的 Item id 不同。重新整理後以紀錄為準。
-- **一次有多個核准時。** `lastAssistantMessageIsCompleteWithApprovalResponses` 要同一步裡所有核准都有回應，才會自動送出。決定請求是一個呼叫一個請求，所以 transport 要把已決定的呼叫依序送出，前面的收 JSON，最後一個收 SSE。代價：只決定一部分時重新整理，這些決定會丟掉。實作 P1-10 時要確認這可以接受。
+- **一次有多個核准時，每按一次就存一次。** 規格 P-04 是每個呼叫各自決定，`DecideApproval` 每次寫一筆 `approval` Item。所以不能等 `useChat` 全部回應完才送。做法：
+  - 不是最後一個要決定的呼叫：畫面的處理函式先呼叫 `AiChatClient` 的 decision 端點（回應是 JSON），成功後再呼叫 `addToolApprovalResponse`，讓畫面更新。這時還有呼叫在等，`useChat` 不會自動送出。
+  - 最後一個要決定的呼叫：只呼叫 `addToolApprovalResponse`。`useChat` 自動送出，transport 的 `sendMessages` 打這個呼叫的 decision 端點，收 SSE 接續執行。
+  - transport 記下已經送過的 `callId`，不重送。
+  - 載入已存的訊息時，已決定的呼叫轉成 `approval-responded`，還沒決定的是 `approval-requested`。所以只決定一個就重新整理，那個決定還在，另一個仍在等。
+  - 這個流程在 P1-10 的端對端測試驗收（見實作規劃）。這份驗證沒有實測它。
 - **停止。** `useChat.stop()` 只會中斷 fetch。文件把這種中斷視為斷線，不是取消（見 Chatbot Resume Streams 的警告）。要取消 Run，transport 的 `abortSignal` 不能直接取消伺服器的工作，要由使用者按「停止」時另外呼叫 `POST .../cancel`。
 - **A-07 要改文字。** 規格的 A-07 寫「先送缺的 Item，再接著送新的」。對 `useChat` 要改成「從目前 Run 的第一個 Item 重送，再接著送新的」。`afterSeq` 留作其他用戶端的下限。這份驗證沒有改規格，要不要改由維護者決定。
 - **zod 版本。** `ai` 的 peer 是 `zod@^3.25.76 || ^4.1.8`。
@@ -301,5 +306,5 @@ it('imports ai and useChat', () => {
 - Backstage CLI 的 jest 裡 import `ai` 和 `@ai-sdk/react`（5.3）。
 - TypeScript 5.8 編譯 `ai` 的型別定義。
 - 真正的瀏覽器：`useChat` 的 `resume` 只測了掛載時重連，沒測分頁回到前景時的重連。
-- 多個核准同時進行（5.5）。
+- 多個核准同時進行（5.5 的做法只靠讀 `useChat` 的程式判斷，沒有實測）。
 - 在 Backstage 的 HTTP 堆疊（Express）上送 SSE：驗證用的是 Node 內建 `http`。
