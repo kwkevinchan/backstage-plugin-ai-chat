@@ -23,6 +23,7 @@ import {
 import { InvalidRunTransition, LeaseLost } from '@kwkevinchan/ai-chat-harness';
 import {
   AgentNotFound,
+  EmptyMessage,
   InsertLimitReached,
   NoActiveRun,
   NotSessionOwner,
@@ -68,6 +69,7 @@ describe('toHttpError', () => {
     [new QueueFull('s1', 5), 'QueueFull', 409],
     [new QueueChanged('s1'), 'QueueChanged', 409],
     [new QueuedMessageNotFound('q1'), 'QueuedMessageNotFound', 404],
+    [new EmptyMessage(), 'EmptyMessage', 400],
   ])(
     'keeps the name of %p in the answer, with the status %p',
     (error, name, status) => {

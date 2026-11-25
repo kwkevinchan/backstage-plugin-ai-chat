@@ -176,18 +176,17 @@ export class OpenAiCompatibleModelClient implements ModelClient {
         missing.push(`[image: ${image.name}, not available]`);
       }
     }
+    // No text part when the message is only images. A note that an image is
+    // missing stays, and so does the line about the page (it is in `content`).
+    const text = [message.content, ...missing]
+      .filter(part => part.length > 0)
+      .join('\n');
     if (parts.length === 0) {
-      return {
-        role: 'user',
-        content: [message.content, ...missing].join('\n'),
-      };
+      return { role: 'user', content: text };
     }
     return {
       role: 'user',
-      content: [
-        { type: 'text', text: [message.content, ...missing].join('\n') },
-        ...parts,
-      ],
+      content: [...(text ? [{ type: 'text' as const, text }] : []), ...parts],
     };
   }
 }
