@@ -369,11 +369,13 @@ The loop still uses the limits of the installation and its one model client.
 It does not filter tools by the agent's toolsets, load a skill, require a
 plan on the first step, or call a model client other than that one.
 
-A backend module can register more agents through
+A backend module can register agents and lifecycle hooks through
 `@kwkevinchan/backstage-plugin-ai-chat-node`. It depends only on that package.
 An agent a module registers receives the same built-in prompt rules as a
 configured agent. An id that both the configuration and a module define stops
-the backend.
+the backend. `addHook` registers `beforeModelCall`, `beforeToolCall`,
+`afterToolCall`, and `onRunEnd` hooks on the loop; `beforeToolCall` can tighten
+policy to `ask` or `deny` and never relaxes `ask` to `continue`.
 
 `plugins/ai-chat-backend-module-example` in this repository is a private
 example of such a module, to copy from. It registers the agent `guide`. It is
@@ -602,7 +604,7 @@ this plugin until it is updated.
 
 Retrieval over TechDocs, an entity tab or sidebar widget, file uploads,
 several model providers at once, MCP servers outside Backstage, sharing a
-conversation, applying an agent's skills, hooks, planning or model (those
+conversation, applying an agent's skills, planning or model (those
 fields can be set, and a module can register them; the loop does not use them
 yet), and a session list that can search, pin or archive (the page still lists
 recent sessions; a title is stored after the first round ends normally).

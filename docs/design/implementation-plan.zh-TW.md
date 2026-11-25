@@ -703,13 +703,13 @@ flowchart LR
 
 完成後的狀態：別的團隊可以用設定檔加一個 backend module 做自己的 Agent。
 
-| 編號  | 工作項目                                                | 大小 | 完成的需求                         | PR  | 狀態 |
-| ----- | ------------------------------------------------------- | ---- | ---------------------------------- | --- | ---- |
-| P3-01 | `ai-chat-node`、擴充點、設定檔裡的 Agent                | M    | X-01、X-02                         | #39 | 完成 |
+| 編號  | 工作項目                                                | 大小 | 完成的需求                         | PR    | 狀態 |
+| ----- | ------------------------------------------------------- | ---- | ---------------------------------- | ----- | ---- |
+| P3-01 | `ai-chat-node`、擴充點、設定檔裡的 Agent                | M    | X-01、X-02                         | #39   | 完成 |
 | P3-02 | Context provider 和 entity 綁定                         | M    | X-03、SE-02、SE-06                 |
 | P3-03 | 計畫：`update_plan`、`planning: required`、畫面上的清單 | M    | X-06、X-07、D-07                   |
 | P3-04 | Skills：讀 `SKILL.md`、`load_skill`                     | M    | X-04、D-22                         |
-| P3-05 | Hooks                                                   | M    | X-05                               |
+| P3-05 | Hooks                                                   | M    | X-05                               | 本 PR | 完成 |
 | P3-06 | TechDocs 搜尋的 action                                  | M    | X-08                               |
 | P3-07 | 平行唯讀呼叫、每步上限、模型能力、限流                  | M    | P-01、P-02、P-03、P-05、P-06、X-09 |
 | P3-08 | Toolset 的權限、輸出上限和遮蔽、寫入配額                | M    | T-08、T-09、T-10                   |
@@ -752,6 +752,28 @@ flowchart LR
   - `model` 只檢查 id 的寫法，不讀 `aiChat.models`（模型轉接是 P3-07）。`skills` 只檢查 id 的寫法，不讀 `aiChat.skills.directories`，也不要求擴充點已經註冊同名 Skill（載入全文是 P3-04）。
   - 設定檔裡的 Agent，系統提示一律是內建規則再加上該 Agent 的 `systemPrompt`；該欄沒寫就用全站的 `aiChat.systemPrompt`。兩段額外說明不疊加。擴充點註冊的 Agent 也套 `buildSystemPrompt(systemPrompt)`，和設定檔同一條規則。
   - 沒有人定義 `default` 時才放內建的那一個。設定檔的 `agents.default` 取代它。擴充點再註冊 `default` 算重複，啟動失敗。
+
+### P3-05 Hooks
+
+- **範圍**：
+  - 核心（`packages/ai-chat-harness`）：`application/ports/extensions.ts` 新增 `StepContext`、`ToolCall`、`ToolResult`、`BeforeToolCallDecision`、`RunSummary`、`Hooks`、`HookName`、`HookRegistry`，於 `AiChatHarnessExtensionPoint` 加入 `addHook`，`Extensions` 改為保存四個時機的 Hook 陣列。`AdvanceRun`、`callModel`、`executeTools` 與 `application/steps/hooks.ts` 執行 `beforeModelCall`、`beforeToolCall`、`afterToolCall`、`onRunEnd`。
+  - 擴充點（`plugins/ai-chat-node`）：重新匯出上述型別。
+  - 宿主（`plugins/ai-chat-backend`）：`AiChatHarnessRegistry` 實作 `addHook`（檢查 hook 名稱與函式型別，保留註冊順序），`plugin.ts` 將註冊結果傳給 `createHost` 並在 log 記錄 hook 數量。
+- **依賴**：P3-01（`ai-chat-node` 與 `AiChatHarnessRegistry`）。
+- **驗收**：
+  - 擴充點與登錄：`AiChatHarnessRegistry.addHook` 保留每個時機的多個 Hook 註冊順序；未知 Hook 名稱或非函式回呼拋出 `InputError` 並阻止後端啟動；`aiChatPlugin` log 顯示註冊的 Agent 與 Hook 數量，並透過僅依賴 `@kwkevinchan/backstage-plugin-ai-chat-node` 的 backend module 跑通四個時機。
+  - `beforeModelCall(ctx)`：每一步呼叫模型前（`summarize` 不呼叫）依註冊順序執行，收到含 `sessionId`、`runId`、`principal`、`page`、`agentId`、`step`、`signal` 的 `StepContext`；拋出例外時 fail closed：不呼叫模型、Run 以 `failed` 結束（訊息固定，原始錯誤僅記 log／`cause`），且終態觸發 `onRunEnd`；signal 中止時結束為 `cancelled`。
+  - `beforeToolCall(call, ctx)`：在 schema 驗證、上限與管理員 `policy` 之後執行，收到複本 `ToolCall`（修改 `call.input` 不影響儲存與實際執行）與 `StepContext`：
+    - 管理員政策為 `allow` 時，回傳 `continue` 照常執行；為 `ask`（非唯讀、`egress` 或管理員設 `ask`）時，回傳 `continue` 仍須核准，絕不放寬。
+    - `allow` 回傳 `ask` 時調嚴為等待核准，核准後才執行；已設為 `ask` 後再經過 `continue` 仍維持 `ask`。
+    - 任一 Hook 回傳 `{ action: 'deny', reason }`（含原本要 `ask` 的工具）立即寫入帶該理由的 `denied` 結果、跳過後續 Hook、不執行也不等核准，Run 繼續。
+    - 拋出例外或回傳不合法決策時 fail closed：該呼叫立即記為 `denied`（固定訊息 `'Denied by hook.'`，不洩漏例外訊息）、不執行，同一步其餘呼叫照常分類、Run 繼續。
+  - `afterToolCall(call, result)`：僅對實際執行過的工具（`ok`、`error`、`timeout`）依順序串接執行（不對 `denied`、`invalid`、`unknown` 呼叫）；修改後的 `ToolResult` 同時寫入紀錄與透過 `item.completed` 串流（H-08）；修改 `call` 不影響紀錄；拋出例外或回傳不合法結果時 fail closed，覆寫為 `{ status: 'error', message: 'A hook failed after the tool call.' }`（不洩漏未遮蔽輸出或例外細節），Run 繼續。
+  - `onRunEnd(run)`：僅於終態（`completed`、`completed` 含 `endReason`、`cancelled`、`failed`）且 `run.ended` 之後依序執行，`waiting_approval` 不執行、`RunSupervisor` 因 `UnreadMessages` 重跑迴圈時也不提前執行；收到 `{ sessionId, runId, agentId, principal, outcome, usage }`；某個 Hook 拋出例外時記錄並隔離，後續 Hook 仍執行且不改變 Run 狀態。
+- **規格沒寫、實作選定的地方**：
+  - `StepContext` 擴充 `CallContext` 加上 `agentId`、`step`（1-based 當前模型步驟編號）與 `signal`；`RunSummary` 為 `{ sessionId, runId, agentId, principal, outcome, usage }`；`ToolResult` 為 `ToolOutput`。
+  - Fail-closed 預設值：`beforeToolCall` 失敗寫固定訊息 `'Denied by hook.'`；`afterToolCall` 失敗回傳 `{ status: 'error', message: 'A hook failed after the tool call.' }`；兩者皆使用 JSON 深複製避免 Hook 意外突變紀錄中的輸入／輸出物件。
+  - `beforeModelCall`、`beforeToolCall`、`afterToolCall` 支援同步或非同步回傳（型別依規格第 7 節允許回傳值或 `Promise`）。
 
 ### P4：擴大
 
@@ -886,3 +908,4 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-25 | 1.2  | 新增 PU（第 6 節）：前端對齊 assistant-ui。PU-01 到 PU-07，每項有範圍、依賴和驗收清單；P3 以後的節號順延一號。P1-10、PI-04、PI-06 的說明補一句：畫面在 PU 重做。P2-01、P2-06、P2-07 的範圍改成後端，以及不含畫面的前端部分。第 9 節風險加兩條：assistant-ui 在 0.x、佇列介面是 2026-10 才加的。                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 2026-11-25 | 1.2  | PU-07 完成（IN-20，#47）：`POST /sessions/:id/queue/:queuedId/insert` 在同一個 transaction 把排隊的訊息改成插入，圖片從保留轉成已使用。失敗時佇列不變。和 `startNext`、Run 結束並行時只有一邊成功                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 2026-11-25 | 1.2  | PI-07 文件與設定收尾（#49）：新增 [pi-coverage.zh-TW.md](pi-coverage.zh-TW.md)，PI-01 到 PI-05 標為完成（PR #18、#25、#26、#29、#28、#30、#32）、PI-06 為後端完成（PR #41，畫面在 PU-04）、PI-07 文件與設定完成並將綜合端對端與 `usage.zh-TW.html` 畫面說明延至 PU-03/PU-04 之後；P4-01（`delegate`，P-07 到 P-09）標記不做                                                                                                                                                                                                                                                                                                                                                                          |
+| 2026-11-25 | 1.2  | P3-05 完成（X-05）：在核心 `extensions.ts`、`AdvanceRun`、`callModel`、`executeTools`、與 `ai-chat-node`／`AiChatHarnessRegistry` 加入四個時機的 Hook（`beforeModelCall`、`beforeToolCall`、`afterToolCall`、`onRunEnd`）；實作單調調嚴政策、fail-closed 與終態隔離規則                                                                                                                                                                                                                                                                                                                                                                                                                              |

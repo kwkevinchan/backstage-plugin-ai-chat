@@ -152,8 +152,9 @@ backend:
   `aiChat.systemPrompt`，兩段額外說明不疊加。`toolsets` 必須是已經定義的工具組。
   `skills`、`model`、`limits`、`planning: required` 會記在 Agent 上。迴圈仍用全站的上限和
   唯一的模型；這些欄位這一版還不執行。值不對會讓後端無法啟動。
-- 別的 backend module 透過 `@kwkevinchan/backstage-plugin-ai-chat-node` 註冊 Agent，不必
+- 別的 backend module 透過 `@kwkevinchan/backstage-plugin-ai-chat-node` 註冊 Agent 與 Hook，不必
   import 宿主。模組註冊的 Agent 也套同一套內建規則。設定檔和 module 用了同一個 id 時，後端無法啟動。
+  `addHook` 支援 `beforeModelCall`、`beforeToolCall`、`afterToolCall` 與 `onRunEnd`；`beforeToolCall` 只能調嚴（`ask`／`deny`）而不能放寬，Hook 丟例外時安全拒絶或失敗處理。
   這個庫的 `plugins/ai-chat-backend-module-example` 是可以照抄的範例（Agent id 是 `guide`），
   不是要安裝的套件。
 

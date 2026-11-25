@@ -27,6 +27,7 @@ import {
   type ScriptedStep,
 } from '@kwkevinchan/ai-chat-harness/testing';
 import type {
+  Extensions,
   ItemLog,
   Limits,
   ModelClient,
@@ -243,6 +244,7 @@ export async function createWorld(
       items?: (inner: ItemLog) => ItemLog;
       model?: ModelClient;
       notifier?: Notifier;
+      extensions?: Extensions;
       heartbeatMs?: number;
       /**
        * Runs around every `transition` of this backend: `call()` makes the
@@ -301,6 +303,7 @@ export async function createWorld(
       ids,
       logger,
       ...(extra.notifier && { notifier: extra.notifier }),
+      ...(extra.extensions && { extensions: extra.extensions }),
       settings: {
         limits,
         budget: { tokenBudget: 100000, keepRecentSteps: 6 },

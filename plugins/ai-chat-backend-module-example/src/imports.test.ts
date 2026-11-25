@@ -81,6 +81,7 @@ describe('the example module', () => {
           addAgent(agent) {
             agents.push(agent);
           },
+          addHook() {},
         });
         // A plugin has to register an init, even when the module does the work.
         env.registerInit({
