@@ -36,8 +36,9 @@ export class InsertQueuedMessage {
   /**
    * Returns the item that was written. Throws `NotSessionOwner`,
    * `RunNotRunning` (the run waits for an approval, has ended, is another
-   * run or has no live lease), `QueuedMessageNotFound` (already changed,
-   * removed or sent), `InsertLimitReached`, or `TooManyImageBytes`.
+   * run or has no live lease), `QueuedMessageNotFound` (already removed
+   * or sent), `InsertLimitReached`, or `TooManyImageBytes`. A queued message
+   * that was changed is inserted with its current content.
    */
   async execute(input: {
     principal: Principal;
