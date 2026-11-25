@@ -878,7 +878,7 @@ export const aiChatPlugin = createBackendPlugin({
 
 ### 6.1 Backend：`ai-chat-node`
 
-擴充點的介面在規格第 7 節。型別定義在核心的 `application/ports/extensions.ts`，`ai-chat-node` 重新匯出它們，並定義 `aiChatHarnessExtensionPoint`。目前公開的只有 `addAgent`。Context provider、Skill、Hook、模型轉接的方法在 P3-02、P3-04、P3-05、P3-07 才加，連同迴圈的呼叫一起進來。
+擴充點的介面在規格第 7 節。型別定義在核心的 `application/ports/extensions.ts`，`ai-chat-node` 重新匯出它們，並定義 `aiChatHarnessExtensionPoint`。目前公開的是 `addAgent` 和 `addHook`。Context provider、Skill、模型轉接的方法在 P3-02、P3-04、P3-07 才加，連同迴圈的呼叫一起進來。
 
 別的團隊的 module 長這樣：
 

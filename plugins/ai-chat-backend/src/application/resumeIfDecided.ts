@@ -24,6 +24,7 @@ import {
 } from '../domain';
 import { buildRunRequest, type RunSettings } from './buildRunRequest';
 import { notifyActivity, type ActivityNotifier } from './notifyActivity';
+import type { RunEnded } from './runEnded';
 import type { RunHandle, RunSupervisor } from './RunSupervisor';
 import type { AgentCatalog, Logger, RunRepository } from './ports';
 
@@ -47,6 +48,7 @@ export async function resumeIfDecided(
     settings: RunSettings;
     notify?: ActivityNotifier;
     logger?: Logger;
+    runEnded?: RunEnded;
   },
   input: {
     session: Session;
@@ -81,11 +83,17 @@ export async function resumeIfDecided(
           leaseOwner: leased.fence.leaseOwner,
         });
       } else {
-        await runs.transition(leased.id, 'failed', {
+        const failed = await runs.transition(leased.id, 'failed', {
           leaseOwner: leased.fence.leaseOwner,
           endReason: 'not_started',
         });
         notifyActivity(deps.notify, deps.logger, session.id, 'idle');
+        // The run had steps before it waited for the approval: it ends here.
+        deps.runEnded?.({
+          run: failed,
+          agentId: session.agentId,
+          userRef: session.ownerRef,
+        });
       }
     } catch {
       // The lease expiry (ExpireStaleRuns) ends it.

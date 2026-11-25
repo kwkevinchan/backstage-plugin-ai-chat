@@ -31,8 +31,15 @@ import {
 } from '../../domain';
 import type { HarnessEvent, RunOutcome } from '../events';
 import type { ItemDraft } from '../ports/ItemLog';
+import type { StepContext } from '../ports/extensions';
 import type { ValidationResult } from '../ports/ToolGateway';
 import type { AdvanceRunDeps, AdvanceRunRequest } from '../types';
+import {
+  runBeforeModelCall,
+  runBeforeToolCall,
+  toolCallFromParts,
+} from './hooks';
+import { stepContextOf } from './stepContext';
 import { summarize } from './summarize';
 
 /** What one model call left: how many calls the model asked for, or an end. */
@@ -97,6 +104,21 @@ export async function* callModel(
 ): AsyncGenerator<HarnessEvent, CallModelResult> {
   // `usage.stepsUsed` already counts the steps the log shows for this run.
   const step = usage.stepsUsed + 1;
+  const stepCtx = stepContextOf(req, step);
+  const before = await runBeforeModelCall(deps.extensions, stepCtx);
+  if (!before.ok) {
+    return {
+      toolCallsRequested: 0,
+      outcome: before.aborted
+        ? { status: 'cancelled' }
+        : {
+            status: 'failed',
+            message: 'The model call failed.',
+            cause: before.error,
+          },
+      noStep: true,
+    };
+  }
   const available = await deps.tools.list(req.ctx);
   const byId = new Map(available.map(tool => [tool.id, tool]));
   // A tool the policy denies is not offered to the model.
@@ -233,17 +255,21 @@ export async function* callModel(
   for (let position = 0; position < requested.length; position++) {
     const call = requested[position];
     const descriptor = byId.get(call.toolId);
-    const { body, result } = await classify(deps, req, {
+    const classified = await classify(deps, req, {
       call,
       callId: call.callId,
       descriptor,
       step,
       position,
       overLimit: position >= remaining,
+      stepCtx,
     });
-    drafts.push({ ...body, readUpToSeq });
+    if (classified.aborted) {
+      return { toolCallsRequested: 0, outcome: { status: 'cancelled' } };
+    }
+    drafts.push({ ...classified.body, readUpToSeq });
     draftIds.push(call.callId);
-    if (result) results.push(result);
+    if (classified.result) results.push(classified.result);
   }
   for (const result of results) {
     drafts.push(result);
@@ -289,9 +315,13 @@ async function classify(
     step: number;
     position: number;
     overLimit: boolean;
+    stepCtx: StepContext;
   },
-): Promise<{ body: ToolCallBody; result?: ToolResultBody }> {
-  const { call, callId, descriptor, step, position, overLimit } = args;
+): Promise<
+  | { aborted: true }
+  | { aborted?: false; body: ToolCallBody; result?: ToolResultBody }
+> {
+  const { call, callId, descriptor, step, position, overLimit, stepCtx } = args;
   const base = { kind: 'tool_call' as const, callId, toolId: call.toolId };
   const refuse = (
     status: 'denied' | 'invalid',
@@ -355,5 +385,30 @@ async function classify(
   if (!validation.valid) {
     return refuse('invalid', validation.message, { ...fields, policy });
   }
-  return { body: { ...base, ...fields, policy } };
+  const hookDecision = await runBeforeToolCall(
+    deps.extensions,
+    toolCallFromParts({
+      callId,
+      toolId: call.toolId,
+      input: fields.input,
+      readOnly: fields.readOnly,
+      step,
+      position,
+    }),
+    policy,
+    stepCtx,
+  );
+  if (hookDecision.aborted) {
+    return { aborted: true };
+  }
+  if (hookDecision.action === 'deny') {
+    return refuse('denied', hookDecision.reason, { ...fields, policy: 'ask' });
+  }
+  return {
+    body: {
+      ...base,
+      ...fields,
+      policy: fields.readOnly ? hookDecision.action : 'ask',
+    },
+  };
 }

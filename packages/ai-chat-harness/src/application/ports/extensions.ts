@@ -14,29 +14,198 @@
  * limitations under the License.
  */
 
-import type { AgentDefinition } from '../../domain/agent';
+import type { AgentDefinition, JsonObject, RunUsage } from '../../domain';
+import type { CallContext, ToolOutput } from './ToolGateway';
 
 /**
- * What a backend module can add (X-02). This version only has `addAgent`.
- * Context providers (P3-02), skills (P3-04), hooks (P3-05) and a model
- * client (P3-07) are added on those later items, together with the loop
- * calling them.
+ * What `beforeModelCall` and `beforeToolCall` hooks get about the step (X-05).
+ * Every call of a hook gets its own copy.
+ *
+ * @public
+ */
+export interface StepContext extends CallContext {
+  /**
+   * The user the run acts for, as the host gives it. The backend plugin gives
+   * `{ userRef, ownershipRefs, credentials }`: the entity ref of the user, the
+   * refs the user owns through, and the `BackstageCredentials` of the request
+   * that started or carried on the run, so a hook can check a permission or
+   * call another plugin as the user. It is a copy for this call of the hook
+   * only: do not keep it or use it after the hook returned.
+   */
+  principal: unknown;
+  /** The id of the agent of the run. */
+  agentId: string;
+  /** 1-based step number about to run inside the current run. */
+  step: number;
+  /** Aborts when the run stops. The loop stops waiting for the hook then. */
+  signal: AbortSignal;
+}
+
+/**
+ * A copy of a validated tool call, as hooks get it (X-05). Changing it does
+ * not change the call that is stored or the call the tool gateway runs.
+ *
+ * @public
+ */
+export interface ToolCall {
+  /** The id of the call, the same as in the stored `tool_call` item. */
+  readonly callId: string;
+  /** The id of the tool, for example an action id. */
+  readonly toolId: string;
+  /** The input the model gave, after the schema check. */
+  readonly input: JsonObject;
+  /** Whether the tool is read-only. */
+  readonly readOnly: boolean;
+  /** The step of the run the call was made in. */
+  readonly step: number;
+  /** The place of the call among the calls of its step. */
+  readonly position: number;
+}
+
+/**
+ * What a tool gave back, as `afterToolCall` hooks get and return it (X-05).
+ *
+ * @public
+ */
+export type ToolResult = ToolOutput;
+
+/**
+ * What a `beforeToolCall` hook decides (X-05). `continue` keeps the policy,
+ * `ask` makes the call wait for an approval, and `deny` refuses the call with
+ * the reason. A hook can only keep or tighten the policy: `continue` never
+ * runs a call that the policy asks an approval for.
+ *
+ * @public
+ */
+export type BeforeToolCallDecision =
+  | { action: 'continue' }
+  | { action: 'ask' }
+  | { action: 'deny'; reason: string };
+
+/**
+ * What `onRunEnd` hooks get when a run ended (X-05): the status and usage the
+ * host stored. It has the entity ref of the user and no credentials.
+ *
+ * @public
+ */
+export interface RunSummary {
+  /** The session of the run. */
+  readonly sessionId: string;
+  /** The id of the run. */
+  readonly runId: string;
+  /** The id of the agent of the run. */
+  readonly agentId: string;
+  /** The entity ref of the user the run acted for. */
+  readonly userRef: string;
+  /** The status the run ended with. */
+  readonly status: 'completed' | 'failed' | 'cancelled' | 'expired';
+  /**
+   * Why the run ended, as stored: for example a limit (`max_steps`), `user`
+   * for a stop, `error`, or `shutdown`.
+   */
+  readonly endReason?: string;
+  /** What the run used. */
+  readonly usage: RunUsage;
+}
+
+/**
+ * The hooks a backend module can register with `addHook` (X-05). Each hook
+ * may return its value or a promise of it. Hooks of one kind run in the order
+ * they were registered.
+ *
+ * The hooks fail closed: a hook that throws, or returns a value of the wrong
+ * shape, never lets more happen than without it.
+ *
+ * @public
+ */
+export interface Hooks {
+  /**
+   * Runs before each call of the model of a step; a summary is not a step.
+   * When it throws, the model is not called and the run ends `failed`.
+   */
+  beforeModelCall(ctx: StepContext): void | Promise<void>;
+  /**
+   * Runs for each tool call after the schema check, the limits and the policy
+   * of the administrator. When it throws or returns a decision of the wrong
+   * shape, the call is denied and the run goes on.
+   */
+  beforeToolCall(
+    call: ToolCall,
+    ctx: StepContext,
+  ): BeforeToolCallDecision | Promise<BeforeToolCallDecision>;
+  /**
+   * Runs after a tool ran, and may change the result that is stored and
+   * streamed. Each hook gets the result of the hook before it. It gets no
+   * signal: when the run stops while it runs, the loop stops waiting and
+   * stores an error result. When it throws or returns a result of the wrong
+   * shape, the result is an error, without the output of the tool.
+   */
+  afterToolCall(
+    call: ToolCall,
+    result: ToolResult,
+  ): ToolResult | Promise<ToolResult>;
+  /**
+   * Runs once after the host stored the end of a run, also when it was
+   * stopped, failed or expired; not when it waits for an approval, and not
+   * for a run that ended before its loop started. The run does not wait for
+   * it, and a failure does not change the run. The backend plugin waits at
+   * most 10 seconds for each hook, and at its shutdown at most 10 seconds
+   * for the hooks that still run.
+   */
+  onRunEnd(run: RunSummary): void | Promise<void>;
+}
+
+/**
+ * Names of lifecycle hooks supported by the harness extension point (X-05).
+ *
+ * @public
+ */
+export type HookName = keyof Hooks;
+
+/**
+ * Ordered hooks grouped by lifecycle phase.
+ *
+ * @public
+ */
+export type HookRegistry = {
+  readonly [K in HookName]: readonly Hooks[K][];
+};
+
+/**
+ * What a backend module can add (X-02). Context providers (P3-02), skills
+ * (P3-04) and a model client (P3-07) are added on those later items, together
+ * with the loop calling them.
  *
  * @public
  */
 export interface AiChatHarnessExtensionPoint {
   addAgent(agent: AgentDefinition): void;
+  /**
+   * Adds a hook of the kind `name`. An unknown name, or a hook that is not a
+   * function, stops the backend.
+   */
+  addHook<K extends HookName>(name: K, hook: Hooks[K]): void;
 }
 
 /**
- * The registrations the loop will read. Later items fill this in. The loop
- * does not read it yet.
+ * The registrations the loop reads from backend modules. The loop calls
+ * `beforeModelCall`, `beforeToolCall` and `afterToolCall`; the host calls
+ * `onRunEnd`, once it stored the end of the run.
  *
  * @public
  */
-export type Extensions = Readonly<Record<string, never>>;
+export type Extensions = {
+  readonly hooks?: Partial<HookRegistry>;
+};
 
 /** No registrations. @public */
 export function emptyExtensions(): Extensions {
-  return {};
+  return {
+    hooks: {
+      beforeModelCall: [],
+      beforeToolCall: [],
+      afterToolCall: [],
+      onRunEnd: [],
+    },
+  };
 }

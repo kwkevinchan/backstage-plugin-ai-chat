@@ -565,4 +565,154 @@ describe('aiChatPlugin', () => {
       await db.destroy();
     }
   });
+
+  it('does not start when a module registers an unknown hook', async () => {
+    const badHook = createBackendModule({
+      pluginId: 'ai-chat',
+      moduleId: 'bad-hook',
+      register(env) {
+        env.registerInit({
+          deps: { harness: aiChatHarnessExtensionPoint },
+          async init({ harness }) {
+            harness.addHook('nope' as never, (() => undefined) as never);
+          },
+        });
+      },
+    });
+    await expect(startConfigured({ features: [badHook] })).rejects.toThrow(
+      /unknown hook/,
+    );
+  });
+
+  it('runs lifecycle hooks registered through aiChatHarnessExtensionPoint during HTTP runs', async () => {
+    const events: string[] = [];
+    let resolveOnRunEnd!: () => void;
+    const onRunEndDone = new Promise<void>(resolve => {
+      resolveOnRunEnd = resolve;
+    });
+    const hookModule = createBackendModule({
+      pluginId: 'ai-chat',
+      moduleId: 'hooks',
+      register(env) {
+        env.registerInit({
+          deps: { harness: aiChatHarnessExtensionPoint },
+          async init({ harness }) {
+            harness.addHook('beforeModelCall', ctx => {
+              events.push(`beforeModelCall:step=${ctx.step}`);
+            });
+            harness.addHook('beforeToolCall', toolCall => {
+              events.push(`beforeToolCall:${toolCall.toolId}`);
+              return { action: 'continue' };
+            });
+            harness.addHook('afterToolCall', (toolCall, result) => {
+              events.push(`afterToolCall:${toolCall.toolId}`);
+              return {
+                ...result,
+                output: { masked: true },
+              };
+            });
+            harness.addHook('onRunEnd', summary => {
+              events.push(`onRunEnd:${summary.status}`);
+              resolveOnRunEnd();
+            });
+          },
+        });
+      },
+    });
+
+    answers = [
+      call('demo_list-things', {}),
+      text('Final reply after masked tool'),
+    ];
+    actions = new FakeActions([
+      {
+        id: 'demo:list-things',
+        readOnly: true,
+        run: () => ({ things: ['sensitive'] }),
+      },
+    ]);
+    llm = await startLlmServer(body => {
+      const system = body.messages?.find(
+        (m: { role?: string }) => m.role === 'system',
+      )?.content;
+      if (typeof system === 'string' && system.startsWith(TITLE_PROMPT_MARK)) {
+        return { body: text('Hooked title') };
+      }
+      const next = answers.shift() ?? text('done');
+      return { body: next };
+    });
+
+    const logger = mockServices.logger.mock();
+    const db = await createDb();
+    try {
+      const { server } = await startTestBackend({
+        features: [
+          aiChatPlugin,
+          hookModule,
+          mockServices.rootConfig.factory({
+            data: {
+              aiChat: { llm: { baseUrl: llm.url, model: 'test-model' } },
+            },
+          }),
+          mockServices.database.factory({ knex: db }),
+          mockServices.auditor.mock().factory,
+          mockServices.httpAuth.factory({
+            defaultCredentials: mockCredentials.none(),
+          }),
+          logger.factory,
+          createServiceFactory({
+            service: actionsServiceRef,
+            deps: {},
+            factory: () => actions,
+          }),
+        ],
+      });
+
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('4 hook(s)'),
+      );
+      const created = await request(server)
+        .post('/api/ai-chat/sessions')
+        .set('Authorization', alice)
+        .send({})
+        .expect(201);
+
+      const runRes = await request(server)
+        .post(`/api/ai-chat/sessions/${created.body.id}/runs`)
+        .set('Authorization', alice)
+        .send({ text: 'Run read tool', page: { path: '/ai-chat' } })
+        .expect(200);
+
+      await onRunEndDone;
+
+      const uiMessage = await readMessage(await parseSse(runRes.text));
+      expect(uiMessage.parts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'tool-demo:list-things',
+            state: 'output-available',
+            output: { masked: true },
+          }),
+        ]),
+      );
+      expect(JSON.stringify(uiMessage)).not.toContain('sensitive');
+      expect(events).toEqual([
+        'beforeModelCall:step=1',
+        'beforeToolCall:demo:list-things',
+        'afterToolCall:demo:list-things',
+        'beforeModelCall:step=2',
+        'onRunEnd:completed',
+      ]);
+      // The title is written after the run ended; the database must outlive it.
+      const deadline = Date.now() + 5000;
+      for (;;) {
+        const row = await db('sessions').where({ id: created.body.id }).first();
+        if (row?.title === 'Hooked title') break;
+        if (Date.now() > deadline) throw new Error('No title was written');
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+    } finally {
+      await db.destroy();
+    }
+  });
 });

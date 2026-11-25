@@ -13,8 +13,14 @@ An id that the configuration also defines, or that another module already
 registered, stops the backend. The system prompt is wrapped with the same
 built-in rules as a configured agent.
 
-Further methods (context providers, skills, hooks, a model client) are added
-on later items, together with the loop calling them.
+`addHook` registers a lifecycle hook: `beforeModelCall`, `beforeToolCall`,
+`afterToolCall` or `onRunEnd`. `beforeToolCall` can deny a call or make it
+wait for an approval, and never lets a call run that the policy asks an
+approval for. A hook that throws fails closed. `onRunEnd` gets the stored
+status of a run once it ended, and the user ref without credentials.
+
+Further methods (context providers, skills, a model client) are added on
+later items, together with the loop calling them.
 
 ```ts
 import { createBackendModule } from '@backstage/backend-plugin-api';

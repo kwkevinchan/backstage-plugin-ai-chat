@@ -21,7 +21,15 @@ export type { Clock } from './ports/Clock';
 export {
   emptyExtensions,
   type AiChatHarnessExtensionPoint,
+  type BeforeToolCallDecision,
   type Extensions,
+  type HookName,
+  type HookRegistry,
+  type Hooks,
+  type RunSummary,
+  type StepContext,
+  type ToolCall,
+  type ToolResult,
 } from './ports/extensions';
 export type { IdGenerator } from './ports/IdGenerator';
 export type { ItemDraft, ItemLog, RunFence } from './ports/ItemLog';

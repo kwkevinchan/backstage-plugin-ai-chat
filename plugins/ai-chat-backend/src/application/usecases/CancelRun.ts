@@ -17,6 +17,7 @@
 import { InvalidRunTransition } from '@kwkevinchan/ai-chat-harness';
 import { assertOwner, RunNotFound, type Principal } from '../../domain';
 import { notifyActivity, type ActivityNotifier } from '../notifyActivity';
+import type { RunEnded } from '../runEnded';
 import type { RunSupervisor } from '../RunSupervisor';
 import type { Logger, RunRepository, SessionRepository } from '../ports';
 
@@ -29,6 +30,7 @@ export class CancelRun {
       supervisor: RunSupervisor;
       notify?: ActivityNotifier;
       logger?: Logger;
+      runEnded?: RunEnded;
     },
   ) {}
 
@@ -59,8 +61,15 @@ export class CancelRun {
     // the status after the request, whoever runs the loop.
     if ((await runs.get(run.id)).status === 'waiting_approval') {
       try {
-        await runs.transition(run.id, 'cancelled', { endReason: 'user' });
+        const cancelled = await runs.transition(run.id, 'cancelled', {
+          endReason: 'user',
+        });
         notifyActivity(this.deps.notify, this.deps.logger, session.id, 'idle');
+        this.deps.runEnded?.({
+          run: cancelled,
+          agentId: session.agentId,
+          userRef: session.ownerRef,
+        });
       } catch (error) {
         // Ended in the meantime.
         if (!(error instanceof InvalidRunTransition)) throw error;

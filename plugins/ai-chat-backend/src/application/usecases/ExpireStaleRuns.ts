@@ -14,12 +14,20 @@
  * limitations under the License.
  */
 
+import type { Run } from '../../domain';
 import { notifyActivity, type ActivityNotifier } from '../notifyActivity';
-import type { Logger, RunRepository } from '../ports';
+import type { RunEnded } from '../runEnded';
+import type { Logger, RunRepository, SessionRepository } from '../ports';
 
 /**
  * Marks the runs whose lease expired as `expired` (H-04): the backend that
  * ran them stopped. The session can start a new run then.
+ *
+ * Afterwards, in the background, it tells the owner of each session, and the
+ * `onRunEnd` hooks of each run. `expireStale` returns a run only to the call
+ * that changed it (on PostgreSQL the `UPDATE` of a second backend waits for
+ * the row and then finds it no longer `running`), so the hooks run once, on
+ * one backend.
  */
 export class ExpireStaleRuns {
   constructor(
@@ -27,6 +35,8 @@ export class ExpireStaleRuns {
       runs: RunRepository;
       logger: Logger;
       notify?: ActivityNotifier;
+      sessions?: Pick<SessionRepository, 'get'>;
+      runEnded?: RunEnded;
     },
   ) {}
 
@@ -38,37 +48,48 @@ export class ExpireStaleRuns {
         `Marked ${ids.length} run(s) expired: the lease was not renewed`,
         { runIds: ids },
       );
-      if (this.deps.notify) {
-        const notify = this.deps.notify;
-        void Promise.allSettled(ids.map(id => this.deps.runs.get(id))).then(
-          results => {
-            const seen = new Set<string>();
-            for (const result of results) {
-              if (result.status === 'fulfilled') {
-                if (seen.has(result.value.sessionId)) continue;
-                seen.add(result.value.sessionId);
-                notifyActivity(
-                  notify,
-                  this.deps.logger,
-                  result.value.sessionId,
-                  'idle',
-                );
-              } else {
-                this.deps.logger.warn(
-                  'Could not notify the activity of a session',
-                  {
-                    error:
-                      result.reason instanceof Error
-                        ? result.reason.message
-                        : String(result.reason),
-                  },
-                );
-              }
-            }
-          },
-        );
-      }
+      if (this.deps.notify || this.deps.runEnded) void this.afterExpiry(ids);
     }
     return ids;
   }
+
+  private async afterExpiry(ids: string[]): Promise<void> {
+    const { notify, logger } = this.deps;
+    const results = await Promise.allSettled(
+      ids.map(id => this.deps.runs.get(id)),
+    );
+    const seen = new Set<string>();
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        logger.warn('Could not notify the activity of a session', {
+          error: describe(result.reason),
+        });
+        continue;
+      }
+      const run = result.value;
+      if (notify && !seen.has(run.sessionId)) {
+        seen.add(run.sessionId);
+        notifyActivity(notify, logger, run.sessionId, 'idle');
+      }
+      await this.tellHooks(run);
+    }
+  }
+
+  private async tellHooks(run: Run): Promise<void> {
+    const { sessions, runEnded, logger } = this.deps;
+    if (!sessions || !runEnded) return;
+    try {
+      const session = await sessions.get(run.sessionId);
+      runEnded({ run, agentId: session.agentId, userRef: session.ownerRef });
+    } catch (error) {
+      logger.warn('Could not tell the onRunEnd hooks about an expired run', {
+        runId: run.id,
+        error: describe(error),
+      });
+    }
+  }
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

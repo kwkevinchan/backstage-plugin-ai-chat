@@ -288,6 +288,25 @@ function cut(text: string): string {
 }
 
 /**
+ * `result` with its output cut to `maxChars` characters, as `execute` cuts the
+ * output of a tool. A result whose output fits is returned as it is.
+ */
+export function limitToolResult(
+  result: ToolOutput,
+  maxChars: number,
+): ToolOutput {
+  if (result.output === undefined) return result;
+  const limited = limit(result.output, maxChars);
+  if (!limited.truncated) return result;
+  return {
+    ...result,
+    output: limited.output,
+    truncated: true,
+    message: limited.message,
+  };
+}
+
+/**
  * Always an object (the loop treats anything else as no result). A long output
  * becomes `{ text, originalLength }` whose serialized form is at most
  * `maxChars` characters.

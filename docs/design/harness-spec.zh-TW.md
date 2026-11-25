@@ -137,17 +137,17 @@
 
 ### 4.3 擴充點（X）
 
-| 編號 | 需求                                                                                                                                    | 分期 |
-| ---- | --------------------------------------------------------------------------------------------------------------------------------------- | ---- |
-| X-01 | Agent 定義：系統提示、Toolsets、Skills、模型、上限、規劃模式。放在設定檔                                                                | P3   |
-| X-02 | `aiChatHarnessExtensionPoint`：backend module 可以加 Context provider、Skill、Hook、Agent                                               | P3   |
-| X-03 | Context provider：每一步回傳一段要加進上下文的文字，有長度上限。內建：使用者身分、綁定的 entity、目前的計畫                             | P3   |
-| X-04 | Skill：格式是 `SKILL.md`。上下文只放名稱和一句說明。`load_skill` 載入全文，唯讀，`allow`                                                | P3   |
-| X-05 | Hook 的時機：`beforeModelCall`、`beforeToolCall`、`afterToolCall`、`onRunEnd`。`beforeToolCall` 可以拒絕或把政策調嚴，不能調鬆          | P3   |
-| X-06 | `update_plan`：模型寫入或更新計畫。計畫是一筆 Item，每一步放進上下文，畫面顯示成清單                                                    | P3   |
-| X-07 | Agent 的 `planning: required`：第一步只提供 `update_plan`                                                                               | P3   |
-| X-08 | TechDocs 搜尋和讀取做成 action，透過 Backstage Search，用使用者的身分。回答要附來源連結                                                 | P3   |
-| X-09 | 模型轉接可以替換。每個模型可以宣告能力，例如是否支援平行工具呼叫、是否能讀圖片（圖片這一項在 PI，見 IN-05；目前的單一模型設定是 `llm`） | P3   |
+| 編號 | 需求                                                                                                                                    | 分期       |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| X-01 | Agent 定義：系統提示、Toolsets、Skills、模型、上限、規劃模式。放在設定檔                                                                | P3         |
+| X-02 | `aiChatHarnessExtensionPoint`：backend module 可以加 Context provider、Skill、Hook、Agent                                               | P3         |
+| X-03 | Context provider：每一步回傳一段要加進上下文的文字，有長度上限。內建：使用者身分、綁定的 entity、目前的計畫                             | P3         |
+| X-04 | Skill：格式是 `SKILL.md`。上下文只放名稱和一句說明。`load_skill` 載入全文，唯讀，`allow`                                                | P3         |
+| X-05 | Hook 的時機：`beforeModelCall`、`beforeToolCall`、`afterToolCall`、`onRunEnd`。`beforeToolCall` 可以拒絕或把政策調嚴，不能調鬆          | P3（完成） |
+| X-06 | `update_plan`：模型寫入或更新計畫。計畫是一筆 Item，每一步放進上下文，畫面顯示成清單                                                    | P3         |
+| X-07 | Agent 的 `planning: required`：第一步只提供 `update_plan`                                                                               | P3         |
+| X-08 | TechDocs 搜尋和讀取做成 action，透過 Backstage Search，用使用者的身分。回答要附來源連結                                                 | P3         |
+| X-09 | 模型轉接可以替換。每個模型可以宣告能力，例如是否支援平行工具呼叫、是否能讀圖片（圖片這一項在 PI，見 IN-05；目前的單一模型設定是 `llm`） | P3         |
 
 ### 4.4 平行（P）
 
@@ -380,7 +380,7 @@ aiChat:
 
 ## 7. 擴充點介面
 
-backend 的擴充點放在 `ai-chat-node` 套件，型別來自核心。前端的擴充點放在 `ai-chat-react` 套件。介面的完整版本在程式架構文件的第 6 節。目前公開的只有 `addAgent`。其餘方法在 P3-02（Context provider）、P3-04（Skill）、P3-05（Hook）、P3-07（模型轉接）才加，連同迴圈的呼叫一起進來。下面是最終形狀。
+backend 的擴充點放在 `ai-chat-node` 套件，型別來自核心。前端的擴充點放在 `ai-chat-react` 套件。介面的完整版本在程式架構文件的第 6 節。目前公開的是 `addAgent` 和 `addHook`。其餘方法在 P3-02（Context provider）、P3-04（Skill）、P3-07（模型轉接）才加，連同迴圈的呼叫一起進來。下面是最終形狀。
 
 ```ts
 interface AiChatHarnessExtensionPoint {
@@ -492,6 +492,7 @@ interface Hooks {
 | 2026-11-24 | 1.1  | PI 審查後：複製帶走圖片（IN-19、SH-04、Q-17 改正）；暫停時直接送出的順序寫進 IN-15、IN-18；IN-12 說明只有一個重送按鈕，沒讀到的訊息不再送給模型；IN-06 加圖片位元組上限和 `maxBytesPerInput`；`images` 設定改放 `llm`；`readUpToSeq` 的定義                                                                                                                              |
 | 2026-11-25 | 1.2  | 新增 D-31：前端畫面用 assistant-ui 的無樣式 primitives，接法是 `useExternalStoreRuntime`，狀態留在 `useSessionChat`。D-19 理由補一句：這個決定讓前端可以換，這次換成 D-31。S-02 補 Markdown 元件禁用圖片、不渲染原始 HTML、連結協定由測試鎖住。第 8 節加 PU。第 12 節加 assistant-ui。                                                                                   |
 | 2026-11-25 | 1.2  | PI-07 文件與設定收尾（[pi-coverage.zh-TW.md](pi-coverage.zh-TW.md)）：標記 PI-01 到 PI-05 完成、PI-06 後端與 client 完成（畫面在 PU-04）、PI-07 端對端與用途說明頁在 PU-03/PU-04 之後。D-08、D-10 與 P-07 到 P-09 標記為不做（P4-01 不做）                                                                                                                               |
+| 2026-11-25 | 1.2  | X-05 完成（P3-05）：`aiChatHarnessExtensionPoint` 公開 `addHook`。迴圈依序呼叫 `beforeModelCall`、`beforeToolCall`、`afterToolCall`；宿主寫入 Run 的終態之後呼叫 `onRunEnd`，每個 Run 一次。政策只能調嚴，Hook 失敗時 fail closed                                                                                                                                        |
 
 ## 12. 對照的開源專案
 

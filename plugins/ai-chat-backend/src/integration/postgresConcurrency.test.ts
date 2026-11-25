@@ -788,6 +788,28 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
     });
   });
 
+  describe('expireStale (H-04)', () => {
+    it('two backends at the same time get each stale run once, so the hooks of a run run once', async () => {
+      const ids: string[] = [];
+      for (let i = 0; i < 20; i++) {
+        const session = await db.sessions.create({
+          ownerRef: owner.userRef,
+          agentId: 'default',
+        });
+        ids.push((await db.runs.start(session.id)).id);
+      }
+      db.clock.advance(31);
+
+      const [a, b] = await Promise.all([
+        db.runs.expireStale(),
+        db.runs.expireStale(),
+      ]);
+
+      const returned = [...a, ...b].filter(id => ids.includes(id));
+      expect(returned.sort()).toEqual([...ids].sort());
+    });
+  });
+
   describe('purgeExpired (SE-05)', () => {
     const age = (id: string) =>
       db

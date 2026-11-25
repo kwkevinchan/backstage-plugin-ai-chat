@@ -709,7 +709,7 @@ flowchart LR
 | P3-02 | Context provider 和 entity 綁定                         | M    | X-03、SE-02、SE-06                 |
 | P3-03 | 計畫：`update_plan`、`planning: required`、畫面上的清單 | M    | X-06、X-07、D-07                   |
 | P3-04 | Skills：讀 `SKILL.md`、`load_skill`                     | M    | X-04、D-22                         |
-| P3-05 | Hooks                                                   | M    | X-05                               |
+| P3-05 | Hooks                                                   | M    | X-05                               | #52 | 完成 |
 | P3-06 | TechDocs 搜尋的 action                                  | M    | X-08                               |
 | P3-07 | 平行唯讀呼叫、每步上限、模型能力、限流                  | M    | P-01、P-02、P-03、P-05、P-06、X-09 |
 | P3-08 | Toolset 的權限、輸出上限和遮蔽、寫入配額                | M    | T-08、T-09、T-10                   |
@@ -752,6 +752,58 @@ flowchart LR
   - `model` 只檢查 id 的寫法，不讀 `aiChat.models`（模型轉接是 P3-07）。`skills` 只檢查 id 的寫法，不讀 `aiChat.skills.directories`，也不要求擴充點已經註冊同名 Skill（載入全文是 P3-04）。
   - 設定檔裡的 Agent，系統提示一律是內建規則再加上該 Agent 的 `systemPrompt`；該欄沒寫就用全站的 `aiChat.systemPrompt`。兩段額外說明不疊加。擴充點註冊的 Agent 也套 `buildSystemPrompt(systemPrompt)`，和設定檔同一條規則。
   - 沒有人定義 `default` 時才放內建的那一個。設定檔的 `agents.default` 取代它。擴充點再註冊 `default` 算重複，啟動失敗。
+
+### P3-05 Hooks
+
+- **範圍**：
+  - 核心（`packages/ai-chat-harness`）：`application/ports/extensions.ts` 新增 `StepContext`、`ToolCall`、`ToolResult`、`BeforeToolCallDecision`、`RunSummary`、`Hooks`、`HookName`、`HookRegistry`，`AiChatHarnessExtensionPoint` 加入 `addHook`，`Extensions` 保存四個時機的 Hook 陣列。`callModel`、`executeTools` 與 `application/steps/hooks.ts` 執行 `beforeModelCall`、`beforeToolCall`、`afterToolCall`。`application/steps/stepContext.ts` 是組 `StepContext` 的唯一來源（`stepContextOf`、`copyStepContext`）。
+  - 擴充點（`plugins/ai-chat-node`）：重新匯出上述型別。
+  - 宿主（`plugins/ai-chat-backend`）：
+    - `AiChatHarnessRegistry` 實作 `addHook`（檢查 Hook 名稱與函式型別，保留註冊順序）。`extensions()` 把每個 Hook 包起來：丟例外時帶 Hook 名稱記 log，再丟出。有 `afterToolCall` 時，清單最後再照 `maxToolOutputChars` 裁一次輸出。
+    - `onRunEnd` 由宿主呼叫（`application/runEnded.ts`）：`RunSupervisor`、`CancelRun`、`ExpireStaleRuns` 和恢復等核准的 Run（`resumeIfDecided`）自己寫入 Run 的終態之後觸發。
+    - `plugin.ts` 把註冊結果傳給 `createHost`，並在 log 記錄 Hook 數量。
+- **依賴**：P3-01（`ai-chat-node` 與 `AiChatHarnessRegistry`）。
+- **驗收**：
+  - 擴充點與登錄：
+    - `AiChatHarnessRegistry.addHook` 保留每個時機多個 Hook 的註冊順序。
+    - 未知的 Hook 名稱或不是函式的 Hook 丟 `InputError`，後端無法啟動。
+    - `aiChatPlugin` 的 log 顯示註冊的 Agent 與 Hook 數量。只依賴 `@kwkevinchan/backstage-plugin-ai-chat-node` 的 backend module 能跑通四個時機。
+    - Hook 丟例外時，log 有一筆帶 Hook 名稱的警告，例外照樣交給迴圈處理。
+  - `beforeModelCall(ctx)`：
+    - 每一步呼叫模型前依註冊順序執行；摘要（`summarize`）不是一步，不呼叫。
+    - 收到含 `sessionId`、`runId`、`principal`、`page`、`agentId`、`step`、`signal` 的 `StepContext`。
+    - 丟例外時不呼叫模型，Run 以 `failed` 結束（訊息固定，原始錯誤只進 log）。
+    - Hook 還沒回應時 Run 被停止或逾時：不再等它，Run 以 `cancelled` 結束。
+  - `beforeToolCall(call, ctx)`：在 schema 驗證、上限與管理員的 `policy` 之後執行，收到 `ToolCall` 的複本（改 `call.input` 不影響儲存與實際執行）和 `StepContext`。
+    - 政策是 `allow` 時，回傳 `continue` 照常執行。
+    - 政策是 `ask` 時（不是唯讀、`egress`，或管理員把唯讀工具設成 `ask`），回傳 `continue` 仍要核准。
+    - `allow` 遇到 `ask` 時調嚴成等核准；之後的 Hook 回傳 `continue` 仍維持 `ask`。
+    - 回傳 `{ action: 'deny', reason }`（包括原本要 `ask` 的工具）：寫入帶這個理由的 `denied` 結果，跳過後面的 Hook，不執行、不等核准，Run 繼續。
+    - 丟例外，或回傳不合法的決策（`undefined`、`null`、未知的 `action`、不是物件）：這個呼叫記為 `denied`（固定訊息 `'Denied by hook.'`，不帶例外內容），不執行；同一步其他呼叫照常，Run 繼續。
+    - Hook 還沒回應時 Run 被停止：不再等它，不執行，Run 以 `cancelled` 結束，續約計時器停止。
+  - `afterToolCall(call, result)`：
+    - 只對實際執行過的工具（`ok`、`error`、`timeout`）依序串接執行；`denied`、`invalid`、`unknown` 不執行。
+    - 改過的 `ToolResult` 同時寫入紀錄和 `item.completed` 串流（H-08）。改 `call` 不影響存下的 `tool_call`。
+    - 改過的輸出再照 `maxToolOutputChars` 裁一次，超過時設 `truncated`。
+    - 丟例外或回傳不合法的結果：存成 `{ status: 'error', message: 'A hook failed after the tool call.' }`，不帶原始輸出和例外內容，Run 繼續。
+    - 工具已經跑完、Hook 還在跑時 Run 被停止：不再等它，存成同一個 `error` 結果，這個呼叫不會變成 `unknown`。
+  - `onRunEnd(run)`：
+    - 宿主自己把 Run 寫成終態之後觸發，每個 Run 一次：`RunSupervisor` 用 fence 寫入終態之後、埠丟例外而標成 `failed` 之後、停止請求在寫入等核准之後才到而改成 `cancelled` 之後、關機標成 `expired` 之後；`CancelRun` 取消等核准的 Run 之後；`ExpireStaleRuns` 把後端沒有正常關機留下的 Run 標成 `expired`（`lease_expired`）之後；等核准的 Run 恢復時迴圈起不來、標成 `failed`（`not_started`）之後。
+    - 結果是宿主寫進去的狀態（`completed`、`failed`、`cancelled`、`expired`）和 `endReason`，例如上限停止是 `completed` 加 `max_steps`。
+    - 等核准不觸發；`RunSupervisor` 因 `UnreadMessages` 重跑迴圈時也不提前觸發。
+    - 轉換被拒絕的一方（租約被別的後端拿走、Run 已經被別人結束）不觸發，所以兩台後端只會觸發一次。兩台同時跑 `ExpireStaleRuns` 時，`expireStale` 的 `UPDATE … RETURNING` 每個 Run 只回給一台。
+    - 讀不到 Session 的過期 Run 記 log，不觸發。
+    - Run 的結束不等 Hook。Hook 依序執行；一個丟例外或超過 10 秒，下一個照樣執行，逾時記 log。
+    - 關機時，`RunSupervisor.shutdown` 最後再等還在跑的 `onRunEnd`，最多 10 秒，超過就不等。
+- **規格沒寫、實作選定的地方**：
+  - `StepContext` 擴充 `CallContext`，加上 `agentId`、`step`（目前這一步，從 1 起算）與 `signal`。
+  - `StepContext.principal` 在這個後端是 `{ userRef, ownershipRefs, credentials }`：使用者的 entity ref、使用者透過哪些 ref 擁有東西、啟動或接續這個 Run 的請求的 `BackstageCredentials`。每次呼叫 Hook 都給一份複本（物件和陣列複製，credentials 本身不複製），只在這次呼叫期間有效，不能保存。
+  - `RunSummary` 是 `{ sessionId, runId, agentId, userRef, status, endReason, usage }`，只給 `userRef`，不給 credentials：Run 結束之後不能再用使用者的身分呼叫別的 plugin。
+  - `ToolResult` 就是 `ToolOutput`。
+  - `beforeModelCall` 丟例外時 Run 是 `failed`，不是跳過這一步或拒絕之後繼續。
+  - Fail-closed 的固定值：`beforeToolCall` 失敗寫 `'Denied by hook.'`；`afterToolCall` 失敗寫 `{ status: 'error', message: 'A hook failed after the tool call.' }`。輸入和輸出用 JSON 深複製，Hook 改不到紀錄裡的物件。
+  - 四個時機都可以同步回傳，或回傳 `Promise`。`afterToolCall` 沒有 `signal`：停止時迴圈不再等它。
+  - 從沒啟動迴圈就結束的 Run（`SendMessage`、`StartNextQueued` 的 `not_started`）不觸發 `onRunEnd`：它沒有跑過任何一步。
 
 ### P4：擴大
 
@@ -886,3 +938,4 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-25 | 1.2  | 新增 PU（第 6 節）：前端對齊 assistant-ui。PU-01 到 PU-07，每項有範圍、依賴和驗收清單；P3 以後的節號順延一號。P1-10、PI-04、PI-06 的說明補一句：畫面在 PU 重做。P2-01、P2-06、P2-07 的範圍改成後端，以及不含畫面的前端部分。第 9 節風險加兩條：assistant-ui 在 0.x、佇列介面是 2026-10 才加的。                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 2026-11-25 | 1.2  | PU-07 完成（IN-20，#47）：`POST /sessions/:id/queue/:queuedId/insert` 在同一個 transaction 把排隊的訊息改成插入，圖片從保留轉成已使用。失敗時佇列不變。和 `startNext`、Run 結束並行時只有一邊成功                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 2026-11-25 | 1.2  | PI-07 文件與設定收尾（#49）：新增 [pi-coverage.zh-TW.md](pi-coverage.zh-TW.md)，PI-01 到 PI-05 標為完成（PR #18、#25、#26、#29、#28、#30、#32）、PI-06 為後端完成（PR #41，畫面在 PU-04）、PI-07 文件與設定完成並將綜合端對端與 `usage.zh-TW.html` 畫面說明延至 PU-03/PU-04 之後；P4-01（`delegate`，P-07 到 P-09）標記不做                                                                                                                                                                                                                                                                                                                                                                          |
+| 2026-11-25 | 1.2  | P3-05 完成（X-05，#52）：擴充點加入 `addHook`。迴圈依序呼叫 `beforeModelCall`、`beforeToolCall`、`afterToolCall`，宿主在寫入 Run 的終態之後呼叫 `onRunEnd`。政策只能調嚴；Hook 失敗時 fail closed；停止時不再等 Hook                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |

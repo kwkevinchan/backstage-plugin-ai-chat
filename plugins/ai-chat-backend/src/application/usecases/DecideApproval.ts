@@ -33,6 +33,7 @@ import {
 import type { RunSettings } from '../buildRunRequest';
 import type { ActivityNotifier } from '../notifyActivity';
 import { resumeIfDecided } from '../resumeIfDecided';
+import type { RunEnded } from '../runEnded';
 import type { RunHandle, RunSupervisor } from '../RunSupervisor';
 import type {
   AgentCatalog,
@@ -75,6 +76,7 @@ export class DecideApproval {
       settings: RunSettings;
       notify?: ActivityNotifier;
       logger?: Logger;
+      runEnded?: RunEnded;
     },
   ) {}
 

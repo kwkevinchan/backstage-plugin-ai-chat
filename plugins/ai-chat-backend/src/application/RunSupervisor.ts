@@ -34,6 +34,7 @@ import {
 import { EventChannel } from './EventChannel';
 import { notifyActivity, type ActivityNotifier } from './notifyActivity';
 import type { AfterRun, HostEvent } from './hostEvents';
+import { RUN_END_HOOK_TIMEOUT_MS, type RunEnded } from './runEnded';
 import type {
   Logger,
   RunRepository,
@@ -77,6 +78,12 @@ export type RunSupervisorDeps = {
     outcome: RunOutcome;
     signal: AbortSignal;
   }) => Promise<void>;
+  /**
+   * Tells the `onRunEnd` hooks, each time this supervisor wrote the end of a
+   * run: after a status change with the fence, a failure of a port, a stop
+   * that came after the wait for an approval was written, or the shutdown.
+   */
+  runEnded?: RunEnded;
   /** How often the lease is renewed while a model call takes long. 10 seconds by default. */
   heartbeatMs?: number;
   /**
@@ -235,7 +242,9 @@ export class RunSupervisor {
 
   /**
    * H-11. Takes no new runs, waits up to `graceMs` for the running ones, then
-   * aborts what is left and marks each of those runs `expired`.
+   * aborts what is left and marks each of those runs `expired`. Last, it waits
+   * up to `RUN_END_HOOK_TIMEOUT_MS` (10 seconds) for the `onRunEnd` hooks
+   * that still run.
    */
   async shutdown(graceMs: number = DEFAULT_GRACE_MS): Promise<void> {
     this.closed = true;
@@ -247,11 +256,14 @@ export class RunSupervisor {
         loop.controller.abort();
       }
       try {
-        await this.deps.runs.transition(runId, 'expired', {
+        const run = await this.deps.runs.transition(runId, 'expired', {
           leaseOwner: fence.leaseOwner,
           endReason: 'shutdown',
         });
-        if (loop) this.tell(loop, 'idle');
+        if (loop) {
+          this.tell(loop, 'idle');
+          this.runEnded(loop, run);
+        }
       } catch (error) {
         if (!(error instanceof LeaseLost || isInvalidTransition(error))) {
           this.deps.logger.error('Could not mark a run expired at shutdown', {
@@ -262,6 +274,7 @@ export class RunSupervisor {
       }
     }
     await this.settled(ABORT_WAIT_MS);
+    await this.deps.runEnded?.drain(RUN_END_HOOK_TIMEOUT_MS);
   }
 
   private async settled(ms: number): Promise<void> {
@@ -333,6 +346,19 @@ export class RunSupervisor {
       loop.run.sessionId,
       activity,
     );
+  }
+
+  /**
+   * Tells the hooks about a run this supervisor ended; `run` is what the
+   * status change returned. A run that waits for an approval is ignored.
+   */
+  private runEnded(loop: Loop, run: Run): void {
+    this.deps.runEnded?.({
+      run,
+      agentId: loop.request.agent.id,
+      // `buildRunRequest` puts the principal of the request into the context.
+      userRef: (loop.request.ctx.principal as Principal).userRef,
+    });
   }
 
   private endSubscribers(loop: Loop): void {
@@ -522,10 +548,16 @@ export class RunSupervisor {
         withLease: false,
       });
       // The subscribers must not show approval buttons of a cancelled run.
-      if (cancelled) this.tell(loop, 'idle');
+      if (cancelled) {
+        this.tell(loop, 'idle');
+        this.runEnded(loop, cancelled);
+      }
       return { run: cancelled, outcome: { status: 'cancelled' } };
     }
-    if (run) this.tell(loop, activityOf(outcome));
+    if (run) {
+      this.tell(loop, activityOf(outcome));
+      this.runEnded(loop, run);
+    }
     return { run, outcome };
   }
 
@@ -541,6 +573,7 @@ export class RunSupervisor {
     if (!loop.shuttingDown && !lost) {
       try {
         const run = await this.end(loop, 'failed', 'error');
+        if (run) this.runEnded(loop, run);
         await this.reportQueue(loop, {
           run,
           outcome: { status: 'failed', message: 'The run stopped.' },
