@@ -44,6 +44,11 @@ export interface ChatSession {
   archivedAt?: string;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Set when a run of the session has not ended: the loop is working, or it
+   * waits for an approval. Absent when there is no such run.
+   */
+  activity?: 'running' | 'waiting_approval';
 }
 
 /** A run: one pass of the agent loop over a message of the user. @public */

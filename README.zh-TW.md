@@ -29,6 +29,19 @@ yarn --cwd packages/app add @kwkevinchan/backstage-plugin-ai-chat
 backend.add(import('@kwkevinchan/backstage-plugin-ai-chat-backend'));
 ```
 
+`GET /sessions` 在 Run 尚未結束時會帶 `activity`（`running` 或
+`waiting_approval`）。要將活動變化（`running`、`waiting_approval`、
+`replied`、`idle`）推送到擁有者的 `ai-chat` Signals 頻道，依這個 Backstage
+版本的方式安裝 `@backstage/plugin-signals-backend` 並加上這個 module：
+
+```ts
+import { aiChatSignalsModule } from '@kwkevinchan/backstage-plugin-ai-chat-backend';
+
+backend.add(import('@kwkevinchan/backstage-plugin-ai-chat-backend'));
+backend.add(aiChatSignalsModule);
+backend.add(import('@backstage/plugin-signals-backend'));
+```
+
 前端（新前端系統）：`import aiChatPlugin from '@kwkevinchan/backstage-plugin-ai-chat/alpha'`，
 頁面在 `/ai-chat`，每一段對話有自己的網址 `/ai-chat/<session id>`。
 `/ai-chat?entityRef=component:default/my-service` 會以那個 entity 開啟對話。
@@ -163,8 +176,11 @@ Run 的狀態在資料庫，不在行程裡，所以可以部署多台，也可�
 
 ## 已知限制
 
-- 打開正在跑 Run 的對話時，只有跑那個 Run 的那一台能接回串流；別台的
-  `GET /sessions/:id/stream` 回 `204`，畫面顯示目前存下的內容。
+- 正在跑的 Run 在任何一台都能接回。跑那個迴圈的一台先送已經寫下的文字，再送同一則的後續內容；
+  同一個 Run 之後若還有下一則回覆，在接回串流上會等它完成後整段送出。別台大約每秒送一個已完成的
+  Item（整段，沒有逐字片段，輪詢項目之間沒有 step 邊界），Run 離開 `running` 時結束串流
+  （`failed` 和 `expired` 一律回 `"The run stopped."`）。等核准、已結束、或沒有 Run 時，
+  `GET /sessions/:id/stream` 仍回 `204`。
 - 摘要涵蓋最新使用者訊息之前的步驟；同一個 Run 裡的舊步驟只縮短和省略，不做摘要。
 - 對話可以依標題搜尋，也可以釘選、改名、封存。第一輪正常結束後會自動產生短標題；你自己改過的標題會留下。產生不出標題時，對話照常結束。
 

@@ -43,6 +43,7 @@ export { InsertMessage } from './usecases/InsertMessage';
 export { ListQueue, queueViewOf } from './usecases/ListQueue';
 export type { QueueView } from './usecases/ListQueue';
 export { ListSessions } from './usecases/ListSessions';
+export type { ListedSession } from './usecases/ListSessions';
 export {
   NameSession,
   TITLE_PROMPT_MARK,

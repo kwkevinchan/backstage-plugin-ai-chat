@@ -39,6 +39,12 @@ export interface RunRepository extends RunControl {
   findActive(sessionId: string): Promise<Run | undefined>;
 
   /**
+   * The runs that have not ended for these sessions, one at most per session.
+   * An empty list reads nothing.
+   */
+  findActiveForSessions(sessionIds: readonly string[]): Promise<Run[]>;
+
+  /**
    * Whether a run of the session other than `runId` has ended the normal way
    * (`completed`, no end reason). Used to name a session once (SE-04).
    */

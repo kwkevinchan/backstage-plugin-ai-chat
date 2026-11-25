@@ -36,6 +36,9 @@ export const aiChatSessionConditions: Conditions<{
 }>;
 
 // @public
+export const aiChatSignalsModule: BackendFeature;
+
+// @public
 export const createAiChatConditionalDecision: (
   permission: ResourcePermission<'ai-chat-session'>,
   conditions: PermissionCriteria<PermissionCondition<'ai-chat-session'>>,

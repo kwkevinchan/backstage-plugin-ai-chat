@@ -1111,6 +1111,117 @@ describe('the host on a real database', () => {
     });
   });
 
+  describe('idle activity notifications outside the supervisor loop', () => {
+    it('notifies idle when cancelling a waiting_approval run, expiring a stale run, or failing to start a run', async () => {
+      const events: Array<{ sessionId: string; activity: string }> = [];
+      const notifier = {
+        notify: jest.fn(
+          async (event: { sessionId: string; activity: string }) => {
+            events.push({
+              sessionId: event.sessionId,
+              activity: event.activity,
+            });
+          },
+        ),
+      };
+
+      // 1. CancelRun while waiting_approval
+      const a = backend([[callTool('m1', 'demo:write', { name: 'a' })]], {
+        notifier,
+      });
+      const s1 = await world.newSession();
+      const h1 = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: s1.id,
+        text: 'go',
+      });
+      await drain(h1);
+      await until(() =>
+        events.some(
+          e => e.sessionId === s1.id && e.activity === 'waiting_approval',
+        ),
+      );
+      events.length = 0;
+      expect(
+        await a.useCases.cancelRun.execute({
+          principal: jane,
+          sessionId: s1.id,
+          runId: h1.runId,
+        }),
+      ).toBe(true);
+      await until(() =>
+        events.some(e => e.sessionId === s1.id && e.activity === 'idle'),
+      );
+
+      // 2. ExpireStaleRuns
+      const b = backend([waitForAbort], { notifier, heartbeatMs: 60_000 });
+      const s2 = await world.newSession();
+      const h2 = await b.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: s2.id,
+        text: 'hang',
+      });
+      await until(
+        async () => (await world.runRow(h2.runId)).status === 'running',
+      );
+      events.length = 0;
+      world.clock.advance(600_000);
+      const expired = await a.useCases.expireStaleRuns.execute();
+      expect(expired).toEqual([h2.runId]);
+      await until(() =>
+        events.some(e => e.sessionId === s2.id && e.activity === 'idle'),
+      );
+      await b.supervisor.shutdown(0);
+
+      // 3. abandonRun when SendMessage fails before launch (e.g. shut down right after start)
+      const c = backend([], { notifier });
+      const s3 = await world.newSession();
+      jest.spyOn(c.supervisor, 'launch').mockImplementationOnce(() => {
+        throw new Error('launch failed');
+      });
+      events.length = 0;
+      await expect(
+        c.useCases.sendMessage.execute({
+          principal: jane,
+          sessionId: s3.id,
+          text: 'boom',
+        }),
+      ).rejects.toThrow('launch failed');
+      await until(() =>
+        events.some(e => e.sessionId === s3.id && e.activity === 'idle'),
+      );
+
+      // 4. resumeIfDecided fails to start after acquiring the lease
+      const d = backend([[callTool('m1', 'demo:write', { name: 'a' })]], {
+        notifier,
+      });
+      const s4 = await world.newSession();
+      const h4 = await d.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: s4.id,
+        text: 'go',
+      });
+      await drain(h4);
+      const log4 = await world.items.read(s4.id);
+      const call4 = log4.find(i => i.kind === 'tool_call') as any;
+      jest.spyOn(d.supervisor, 'launch').mockImplementationOnce(() => {
+        throw new Error('resume launch failed');
+      });
+      events.length = 0;
+      await expect(
+        d.useCases.decideApproval.execute({
+          principal: jane,
+          sessionId: s4.id,
+          callId: call4.callId,
+          decision: 'allow',
+        }),
+      ).rejects.toThrow('resume launch failed');
+      await until(() =>
+        events.some(e => e.sessionId === s4.id && e.activity === 'idle'),
+      );
+    });
+  });
+
   describe('a title after the first normal end (SE-04)', () => {
     it('writes a title after the first normal end, including when an earlier run failed', async () => {
       const failed = backend([new Error('down')]);

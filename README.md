@@ -73,6 +73,20 @@ yarn --cwd packages/backend add @kwkevinchan/backstage-plugin-ai-chat-backend
 backend.add(import('@kwkevinchan/backstage-plugin-ai-chat-backend'));
 ```
 
+`GET /sessions` includes `activity` (`running` or `waiting_approval`) while a
+run has not ended. To push activity changes (`running`, `waiting_approval`,
+`replied`, `idle`) to the session owner on the `ai-chat` Signals channel,
+install `@backstage/plugin-signals-backend` the way this Backstage version
+documents and add the module:
+
+```ts
+import { aiChatSignalsModule } from '@kwkevinchan/backstage-plugin-ai-chat-backend';
+
+backend.add(import('@kwkevinchan/backstage-plugin-ai-chat-backend'));
+backend.add(aiChatSignalsModule);
+backend.add(import('@backstage/plugin-signals-backend'));
+```
+
 The plugin keeps its state in its own database (`ai-chat`; tables
 `sessions`, `runs`, `items`), with migrations that it runs when
 it starts. On SQLite it allows one connection: the pool maximum must be 1,
@@ -559,9 +573,14 @@ recent sessions; a title is stored after the first round ends normally).
 
 Limits of this version:
 
-- A client that opens a session while a run is under way can follow it only on
-  the backend that runs it. On another backend `GET /sessions/:id/stream`
-  answers `204`, and the page shows what is stored so far.
+- A client can follow a run that is still going on any backend. The backend
+  that runs the loop sends the text already written, then the rest of that
+  message as it arrives; any subsequent reply in the same run on that stream is
+  sent whole when complete. Another backend polls about once a second and sends
+  each finished item as one piece without step boundaries between polled items,
+  and ends the stream when the run leaves `running` (always reporting
+  `"The run stopped."` for `failed` or `expired`). A run that waits for an
+  approval, a run that ended, or no run answers `204`.
 - A summary covers the steps before the newest message of the user. Inside one
   run the old steps are shortened and then left out, never summarized.
 - The model server may not report token use, so the size of the input is
