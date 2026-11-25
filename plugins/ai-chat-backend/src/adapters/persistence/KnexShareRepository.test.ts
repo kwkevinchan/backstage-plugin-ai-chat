@@ -55,6 +55,19 @@ describe('KnexShareRepository', () => {
     expect(raw.revoked_at).toBeNull();
   });
 
+  it('stores expiresAt as a UTC ISO instant so later string comparison is valid', async () => {
+    const session = await p.sessions.create(NEW_SESSION);
+    const share = await p.shares.add({
+      sessionId: session.id,
+      subjectRef: 'user:default/bob',
+      expiresAt: '2026-02-01T08:00:00.000+08:00',
+      createdBy: 'user:default/jane',
+    });
+    expect(share.expiresAt).toBe('2026-02-01T00:00:00.000Z');
+    const raw = await p.knex('shares').where({ id: share.id }).first();
+    expect(raw.expires_at).toBe('2026-02-01T00:00:00.000Z');
+  });
+
   it('lists the active shares of the given subjects and leaves out revoked and other subjects', async () => {
     const session = await p.sessions.create(NEW_SESSION);
     const other = await p.sessions.create({

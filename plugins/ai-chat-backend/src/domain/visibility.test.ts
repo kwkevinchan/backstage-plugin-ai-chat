@@ -330,8 +330,7 @@ describe('visibleItems', () => {
       revokedAt: '2026-03-01T00:00:00.000Z',
     });
     const combined = effectiveShare([narrow, revoked, wider], items, NOW);
-    expect(combined).toMatchObject({ upToSeq: 3 });
-    expect(combined).not.toHaveProperty('outputsUpToSeq');
+    expect(combined).toMatchObject({ upToSeq: 3, outputsUpToSeq: 3 });
     expect(combined).not.toHaveProperty('expiresAt');
     expect(combined).not.toHaveProperty('revokedAt');
     const seen = visibleItems(items, { isOwner: false, share: combined! }, NOW);
@@ -351,20 +350,74 @@ describe('visibleItems', () => {
     expect(effectiveShare([revoked], items, NOW)).toBeUndefined();
   });
 
+  it('a snapshot with no output bound and a live share do not open later outputs', () => {
+    const items = [
+      result(1, 'one'),
+      result(2, 'two'),
+      result(3, 'three'),
+      result(4, 'four'),
+      result(6, 'six'),
+    ];
+    const snapshot = share({ id: 'snap', upToSeq: 3 });
+    const live = share({ id: 'live', outputsUpToSeq: 4 });
+    expect(see([result(6, 'six')], snapshot)[0]).toBeUndefined();
+    expect(see(items, live)[4]).toMatchObject({
+      seq: 6,
+      output: NOT_SHARED_OUTPUT,
+    });
+    const combined = effectiveShare([snapshot, live], items, NOW);
+    expect(combined).not.toHaveProperty('upToSeq');
+    expect(combined).toMatchObject({ outputsUpToSeq: 4 });
+    const seen = visibleItems(items, { isOwner: false, share: combined! }, NOW);
+    expect(seen.map(row => row.seq)).toEqual([1, 2, 3, 4, 6]);
+    expect(seen[4]).toMatchObject({ seq: 6, output: NOT_SHARED_OUTPUT });
+    const later = item(7, {
+      kind: 'summary',
+      coversUpToSeq: 6,
+      text: 'later tool output',
+    });
+    expect(
+      visibleItems(
+        [...items, later],
+        { isOwner: false, share: combined! },
+        NOW,
+      ).map(row => row.seq),
+    ).toEqual([1, 2, 3, 4, 6]);
+  });
+
+  it('two snapshots with different output bounds do not open outputs past either share alone', () => {
+    const items = [result(3, 'three'), result(4, 'four'), result(6, 'six')];
+    const openToThree = share({ id: 'a', upToSeq: 3 });
+    const closedToSix = share({ id: 'b', upToSeq: 6, outputsUpToSeq: 0 });
+    const combined = effectiveShare([openToThree, closedToSix], items, NOW);
+    expect(combined).toMatchObject({ upToSeq: 6, outputsUpToSeq: 3 });
+    const seen = visibleItems(items, { isOwner: false, share: combined! }, NOW);
+    expect(seen.map(row => row.seq)).toEqual([3, 4, 6]);
+    expect(seen[0]).toMatchObject({ output: 'three' });
+    expect(seen[1]).toMatchObject({ output: NOT_SHARED_OUTPUT });
+    expect(seen[2]).toMatchObject({ output: NOT_SHARED_OUTPUT });
+  });
+
   it('an expiry freezes the union and does not drop the read by itself', () => {
     const expiry = '2026-01-01T00:00:02.000Z';
-    const items = [note(1), note(2), note(3)];
+    const items = [note(1), note(2), note(3), note(4)];
     const expiredLive = share({
       id: 'a',
       expiresAt: expiry,
       outputsUpToSeq: 1,
     });
+    const laterSnapshot = share({ id: 'b', upToSeq: 4 });
     const combined = effectiveShare(
-      [expiredLive],
+      [expiredLive, laterSnapshot],
       items,
       '2026-02-01T00:00:00.000Z',
     );
-    expect(combined).toMatchObject({ upToSeq: 2, outputsUpToSeq: 1 });
+    expect(combined).toMatchObject({ upToSeq: 4, outputsUpToSeq: 4 });
     expect(combined).not.toHaveProperty('expiresAt');
+    expect(
+      visibleItems(items, { isOwner: false, share: combined! }, NOW).map(
+        row => row.seq,
+      ),
+    ).toEqual([1, 2, 3, 4]);
   });
 });

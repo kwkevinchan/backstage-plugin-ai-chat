@@ -284,21 +284,47 @@ describe('GetSession', () => {
     expect(view.items).toHaveLength(1);
   });
 
-  it('access without a granting share shows nothing', async () => {
+  it('access without a granting share is NotSessionOwner', async () => {
     const access: AccessControl = {
       canReadSession: async () => true,
     };
-    const view = await readSession({
+    const { result } = readSession({
       principal: cara,
       items: log,
       shares: [],
       access,
       run: running,
+    });
+    await expect(result).rejects.toBeInstanceOf(NotSessionOwner);
+  });
+
+  it('a snapshot does not return a run that started after its seq cap', async () => {
+    const earlier = item(1, { kind: 'note', text: 'old' }, at(1));
+    earlier.runId = 'r0';
+    const later = item(2, { kind: 'note', text: 'new' }, at(2));
+    const view = await readSession({
+      principal: bobAlone,
+      items: [earlier, later],
+      shares: [share({ subjectRef: 'user:default/bob', upToSeq: 1 })],
+      run: running,
     }).result;
-    expect(view.items).toEqual([]);
-    expect(view.run).toBe(running);
-    expect(view.queue).toEqual({ items: [], paused: false });
-    expect(view.awaitingDecision).toEqual([]);
-    expect(view.resumable).toBe(false);
+    expect(view.items.map(row => row.seq)).toEqual([1]);
+    expect(view.run).toBeUndefined();
+  });
+
+  it('a sharee with afterSeq only receives visible items after that seq', async () => {
+    const items = [
+      item(1, { kind: 'note', text: 'a' }),
+      item(2, { kind: 'note', text: 'b' }),
+      item(3, { kind: 'note', text: 'c' }),
+      item(4, { kind: 'note', text: 'hidden' }),
+    ];
+    const view = await readSession({
+      principal: bobAlone,
+      items,
+      shares: [share({ subjectRef: 'user:default/bob', upToSeq: 3 })],
+      afterSeq: 1,
+    }).result;
+    expect(view.items.map(row => row.seq)).toEqual([2, 3]);
   });
 });

@@ -41,12 +41,17 @@ export type Share = {
   revokedAt?: string;
 };
 
-/** What is stored for a new share. `revokedAt` is never set on create. */
+/**
+ * What is stored for a new share. `revokedAt` is never set on create.
+ * `expiresAt` is an ISO 8601 instant; `KnexShareRepository.add` stores
+ * `new Date(expiresAt).toISOString()` so string comparison stays valid.
+ */
 export type NewShare = {
   sessionId: string;
   subjectRef: string;
   upToSeq?: number;
   outputsUpToSeq?: number;
+  /** ISO 8601 instant. Stored as UTC `toISOString()`. */
   expiresAt?: string;
   createdBy: string;
 };

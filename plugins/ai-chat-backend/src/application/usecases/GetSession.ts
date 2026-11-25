@@ -157,8 +157,9 @@ export class GetSession {
   }
 
   /**
-   * A sharee sees the run, and only the items the shares allow. The queue, the
-   * decisions and resume are the owner's. Insert states come from the visible
+   * A sharee sees only the items the shares allow. The queue, the decisions
+   * and resume are the owner's. A snapshot or a frozen share does not include
+   * a run that started after its seq cap. Insert states come from the visible
    * items, so a hidden item cannot change them or leak through them.
    */
   private async forSharee(
@@ -169,18 +170,25 @@ export class GetSession {
   ): Promise<SessionView> {
     const now = this.deps.clock.now().toISOString();
     const all = await this.deps.items.read(session.id);
-    const share =
-      effectiveShare(
-        shares.filter(one => shareGrantsRead(one, principal)),
-        all,
-        now,
-      ) ?? nothingShared(session.id, principal.userRef, now);
+    const share = effectiveShare(
+      shares.filter(one => shareGrantsRead(one, principal)),
+      all,
+      now,
+    );
+    if (share === undefined) throw new NotSessionOwner(session.id);
     const visible = visibleItems(all, { isOwner: false, share }, now);
     const list =
       afterSeq === undefined
         ? visible
         : visible.filter(item => item.seq > afterSeq);
-    const run = await this.deps.runs.findActive(session.id);
+    const active = await this.deps.runs.findActive(session.id);
+    // A snapshot or a frozen share must not show a run that started after it.
+    const run =
+      active !== undefined &&
+      (share.upToSeq === undefined ||
+        visible.some(item => item.runId === active.id))
+        ? active
+        : undefined;
     return {
       session,
       ...(run && { run }),
@@ -191,26 +199,6 @@ export class GetSession {
       insertStates: statesOf(list, visible, run),
     };
   }
-}
-
-/**
- * No granting share. Seq 0 shows no item (sequence numbers start at 1) and an
- * output bound of 0 would hide every tool output if one were in range.
- */
-function nothingShared(
-  sessionId: string,
-  subjectRef: string,
-  now: string,
-): Share {
-  return {
-    id: 'none',
-    sessionId,
-    subjectRef,
-    createdBy: subjectRef,
-    createdAt: now,
-    upToSeq: 0,
-    outputsUpToSeq: 0,
-  };
 }
 
 function statesOf(

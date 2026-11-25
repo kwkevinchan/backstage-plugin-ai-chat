@@ -57,7 +57,21 @@ function share(partial: Partial<Share> & Pick<Share, 'subjectRef'>): Share {
 function permissionsReturning(decision: PolicyDecision): PermissionsService {
   return {
     authorize: async () => [{ result: AuthorizeResult.DENY }],
-    authorizeConditional: async () => [decision],
+    authorizeConditional: async (
+      ...args: Parameters<PermissionsService['authorizeConditional']>
+    ) => {
+      const [requests, options] = args;
+      if (
+        requests.length !== 1 ||
+        requests[0]?.permission !== aiChatSessionReadPermission
+      ) {
+        throw new Error('authorizeConditional received the wrong permission');
+      }
+      if (options?.credentials === undefined) {
+        throw new Error('authorizeConditional received no credentials');
+      }
+      return [decision];
+    },
   } as unknown as PermissionsService;
 }
 
@@ -74,6 +88,27 @@ function control(decision: PolicyDecision) {
 }
 
 describe('PermissionAccessControl', () => {
+  it('authorizeConditional is called with the read permission and the principal credentials', async () => {
+    const seen: unknown[] = [];
+    const permissions = {
+      authorize: async () => [{ result: AuthorizeResult.DENY }],
+      authorizeConditional: async (requests: unknown, options: unknown) => {
+        seen.push({ requests, options });
+        return [{ result: AuthorizeResult.ALLOW }];
+      },
+    } as unknown as PermissionsService;
+    await new PermissionAccessControl({
+      permissions,
+      authorizer,
+    }).canReadSession({ session, principal: jane, shares: [] });
+    expect(seen).toEqual([
+      {
+        requests: [{ permission: aiChatSessionReadPermission }],
+        options: { credentials: jane.credentials },
+      },
+    ]);
+  });
+
   it('DENY refuses the owner', async () => {
     const allowed = await control({
       result: AuthorizeResult.DENY,

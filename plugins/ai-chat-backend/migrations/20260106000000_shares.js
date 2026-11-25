@@ -34,7 +34,8 @@ exports.up = async function up(knex) {
       .notNullable()
       .references('id')
       .inTable('sessions')
-      .onDelete('CASCADE');
+      .onDelete('CASCADE')
+      .index();
     table.string('subject_ref', 255).notNullable().index();
     table
       .integer('up_to_seq')

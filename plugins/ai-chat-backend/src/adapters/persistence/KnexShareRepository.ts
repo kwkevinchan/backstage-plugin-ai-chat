@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { InputError } from '@backstage/errors';
 import type { Clock, IdGenerator } from '@kwkevinchan/ai-chat-harness';
 import type { Knex } from 'knex';
 import type { ShareRepository } from '../../application/ports';
@@ -46,7 +47,7 @@ export class KnexShareRepository implements ShareRepository {
       subject_ref: input.subjectRef,
       up_to_seq: input.upToSeq ?? null,
       outputs_up_to_seq: input.outputsUpToSeq ?? null,
-      expires_at: input.expiresAt ?? null,
+      expires_at: toIso8601(input.expiresAt),
       created_by: input.createdBy,
       created_at: this.clock.now().toISOString(),
       revoked_at: null,
@@ -80,6 +81,15 @@ export class KnexShareRepository implements ShareRepository {
       ]);
     return rows.map(toShare);
   }
+}
+
+function toIso8601(value: string | undefined): string | null {
+  if (value === undefined) return null;
+  const instant = new Date(value);
+  if (Number.isNaN(instant.getTime())) {
+    throw new InputError(`expiresAt is not an ISO 8601 instant: ${value}`);
+  }
+  return instant.toISOString();
 }
 
 function toShare(row: ShareRow): Share {

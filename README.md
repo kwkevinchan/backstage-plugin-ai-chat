@@ -353,10 +353,44 @@ than one backend and restart them.
 ## Security notes
 
 - Every route needs the credentials of a signed-in **user**; a service token is
-  refused. A user reads and changes only their own sessions.
+  refused. A user changes only their own sessions. Reading a session uses the
+  permission `ai-chat.session.read`: the owner, or someone a share names, can
+  read, unless a policy tightens that (see below).
 - The actions run with the credentials of the user, so the permissions and
   policies of the plugins that own the actions apply as they do on their own
-  pages. The chat adds no permissions.
+  pages.
+
+### `ai-chat.session.read`
+
+The plugin registers this permission and two conditions, `isSessionOwner` and
+`isSharedWith`. What the policy returns changes who can open a session:
+
+1. **DENY** refuses even the owner. A default-deny policy (every permission
+   that is not granted is DENY) will make every session open as not found
+   after you upgrade, until the policy allows this permission.
+2. **ALLOW** does not widen the range. Granting a role ALLOW does not let it
+   read every session: the plugin still checks the owner and the shares.
+3. **CONDITIONAL** applies only the conditions the policy returned. If the
+   policy grants only `isSharedWith`, the owner cannot read their own session.
+
+A policy that keeps the default behaviour is an `anyOf` of the two
+conditions, with the caller's identity:
+
+```ts
+if (isPermission(request.permission, aiChatSessionReadPermission)) {
+  return createAiChatConditionalDecision(request.permission, {
+    anyOf: [
+      aiChatSessionConditions.isSessionOwner({
+        userRefs: [userEntityRef],
+      }),
+      aiChatSessionConditions.isSharedWith({
+        subjectRefs: [userEntityRef, ...ownershipRefs],
+      }),
+    ],
+  });
+}
+```
+
 - The core of the loop can run no code, reach no file and open no network: its
   only way to act is a tool, which is an action of the actions service. The
   lint rules of the repository keep out the imports of `fs`, `child_process`,

@@ -58,9 +58,12 @@ export function visibleSeqLimit(
 /**
  * One share that shows the union of several. A revoked share is left out. Any
  * share that is not frozen and has no `upToSeq` shows every item; otherwise
- * the seq cap is the greatest of the caps. Any absent `outputsUpToSeq` shows
- * every tool output and summary in range; otherwise the bound is the greatest.
- * The result has no `expiresAt`: the freeze is already in `upToSeq`, so
+ * the seq cap is the greatest of the caps. Each share's output bound is first
+ * capped by that share's own seq limit (an absent `outputsUpToSeq` means
+ * every tool output and summary up to that limit, not every output in the
+ * log). The union then takes the greatest of those bounds. The result omits
+ * `outputsUpToSeq` only when that greatest bound is unbounded. The result
+ * has no `expiresAt`: the freeze is already in `upToSeq`, so
  * {@link visibleItems} does not freeze it a second time.
  */
 export function effectiveShare(
@@ -76,10 +79,17 @@ export function effectiveShare(
   );
   const upToSeq =
     numbers.length === limits.length ? Math.max(...numbers) : undefined;
-  const outputsOpen = active.some(share => share.outputsUpToSeq === undefined);
-  const outputsUpToSeq = outputsOpen
-    ? undefined
-    : Math.max(...active.map(share => share.outputsUpToSeq as number));
+  const bounds = active.map((share, index) => {
+    const output =
+      share.outputsUpToSeq === undefined
+        ? Number.POSITIVE_INFINITY
+        : share.outputsUpToSeq;
+    const limit =
+      limits[index] === undefined ? Number.POSITIVE_INFINITY : limits[index];
+    return Math.min(output, limit);
+  });
+  const widest = Math.max(...bounds);
+  const outputsUpToSeq = Number.isFinite(widest) ? widest : undefined;
   const first = active[0];
   return {
     id: first.id,

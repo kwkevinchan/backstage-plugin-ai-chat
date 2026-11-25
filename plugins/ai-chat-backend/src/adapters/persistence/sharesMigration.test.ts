@@ -69,7 +69,7 @@ describe('the migration of the shares', () => {
     created_at: NOW,
   });
 
-  it('creates exactly the columns of a share, with no write permission, and indexes subject_ref', async () => {
+  it('creates exactly the columns of a share, with no write permission, and indexes session_id and subject_ref', async () => {
     await knex.migrate.latest(config);
     const info = await knex('shares').columnInfo();
     expect(Object.keys(info).sort()).toEqual(COLUMNS);
@@ -91,7 +91,9 @@ describe('the migration of the shares', () => {
       expect(info[name].nullable).toBe(false);
     }
     expect(info).not.toHaveProperty('role');
-    expect(await indexSql(knex)).toMatch(/subject_ref/);
+    const indexes = await indexSql(knex);
+    expect(indexes).toMatch(/session_id/);
+    expect(indexes).toMatch(/subject_ref/);
   });
 
   it('stores a null seq, a null output bound, a null expiry and a null revocation, and a user or group ref', async () => {
