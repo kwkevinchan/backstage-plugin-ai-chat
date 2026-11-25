@@ -69,7 +69,7 @@ describe('MarkdownText', () => {
 
   it('makes links of http, https and mailto only', () => {
     const text =
-      '[ok](https://example.test/a) [mail](mailto:a@example.test) [bad](javascript:alert(1)) [data](data:text/html,x) and https://example.test/b.';
+      '[ok](https://example.test/a) [mail](mailto:a@example.test) [bad](javascript:alert(1)) [data](data:text/html,x) [rel](/catalog) [pr](//evil.test) and https://example.test/b.';
     renderMarkdown({ text: text });
     const links = screen.getAllByRole('link');
     expect(links.map(l => l.getAttribute('href'))).toEqual([
@@ -84,6 +84,39 @@ describe('MarkdownText', () => {
     // A refused target leaves its label.
     expect(screen.queryByRole('link', { name: 'bad' })).toBeNull();
     expect(document.body).toHaveTextContent('bad');
+    expect(screen.queryByRole('link', { name: 'rel' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'pr' })).toBeNull();
+    expect(document.body).toHaveTextContent('rel');
+    expect(document.body).toHaveTextContent('pr');
+  });
+
+  // GFM finds bare addresses by its own rules, and this component keeps them:
+  // in JSON written as text an address can take the next characters into the
+  // link. Code has no links. A link that must open is written as a Markdown
+  // link.
+  it('follows GFM for bare addresses in JSON text and makes no link in code', () => {
+    const { container } = renderMarkdown({
+      text: '[{"u":"https://x.test/a"}] and {"u":"https://x.test/b"}\n\n```json\n{"u": "https://x.test/c"}\n```\n\n`https://x.test/d`',
+    });
+    expect(
+      [...container.querySelectorAll('a')].map(a => a.getAttribute('href')),
+    ).toEqual(['https://x.test/a', 'https://x.test/b%22%7D']);
+    expect(container.querySelector('pre code')).toHaveTextContent(
+      'https://x.test/c',
+    );
+    expect(container).toHaveTextContent('https://x.test/d');
+  });
+
+  it('shows footnotes as a plain list, with no ids and no hidden heading', () => {
+    const { container } = renderThread([
+      assistantText('first[^1]\n\n[^1]: note one', 'run_1'),
+      assistantText('second[^1]\n\n[^1]: note two', 'run_2'),
+    ]);
+    expect(container.querySelectorAll('[id]')).toHaveLength(0);
+    expect(container).not.toHaveTextContent('Footnotes');
+    expect(container.querySelectorAll('a')).toHaveLength(0);
+    expect(container).toHaveTextContent('note one');
+    expect(container).toHaveTextContent('note two');
   });
 
   it('keeps a half-written code block while the answer streams', () => {

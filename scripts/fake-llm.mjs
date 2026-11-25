@@ -52,6 +52,27 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const STORY = Array.from({ length: 60 }, (_, i) => `word${i + 1}`).join(' ');
 
+/** Tool output as a fenced JSON block, laid out when it parses. */
+function jsonBlock(content) {
+  let body = content;
+  try {
+    body = JSON.stringify(JSON.parse(content), null, 2);
+  } catch {
+    // Output cut to the limit is no JSON; show it as it is.
+  }
+  return ['```json', body, '```'].join('\n');
+}
+
+const WIDE_TABLE = [
+  'Every service with its owner, links and notes:',
+  '',
+  '| Service | Owner | Tier | Region | Status | Restarts | Dashboard | Notes |',
+  '| --- | --- | --- | --- | --- | ---: | --- | --- |',
+  '| payments | team-payments | 1 | eu-west-1 | running | 0 | https://dashboards.example.test/d/payments-overview/payments-service-latency-and-errors?orgId=1&refresh=30s&from=now-24h&to=now | Handlesallcardandbanktransfersettlementsforeverymarketandmustneverbeoutoflonger_than_five_minutes_during_business_hours |',
+  '| search | team-search | 2 | us-east-1 | running | 0 | https://dashboards.example.test/d/search-overview/search-service-query-latency?orgId=1 | Rebuilds its index every night at two o clock, which takes about forty minutes on a normal day. |',
+  '| billing | team-billing | 2 | ap-southeast-2 | running | 0 | https://dashboards.example.test/d/billing-overview/billing?orgId=1 | Short note. |',
+].join('\n');
+
 const TABLE = [
   'The services and their restarts:',
   '',
@@ -161,7 +182,7 @@ export function scriptedReply(body) {
       return call('list-services', {});
     }
     return {
-      text: `Here is the result of the action: ${content.slice(0, 400)}`,
+      text: `Here is the result of the action:\n\n${jsonBlock(content)}`,
     };
   }
 
@@ -187,6 +208,7 @@ export function scriptedReply(body) {
   const restart = /^restart\s+([\w-]+)/i.exec(text);
   if (restart) return call('restart-service', { name: restart[1] });
   if (/^story/i.test(text)) return { text: STORY };
+  if (/^wide table/i.test(text)) return { text: WIDE_TABLE };
   if (/^table/i.test(text)) return { text: TABLE };
   const hold = /^hold(?:\s+(\d+))?/i.exec(text);
   if (hold) {

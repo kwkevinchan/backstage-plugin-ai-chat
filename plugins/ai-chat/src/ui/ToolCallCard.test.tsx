@@ -129,6 +129,22 @@ describe('ApprovalCard', () => {
     ]);
   });
 
+  it('keeps working when the runtime refuses a decision, also with a throw', async () => {
+    const throws = jest.fn(() => {
+      throw new Error('decided already');
+    });
+    const rejects = jest.fn().mockRejectedValue(new Error('decided already'));
+    const { rerender } = render(
+      <ApprovalCard call={callOf(waiting, throws)} />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    expect(throws).toHaveBeenCalledTimes(1);
+    rerender(<ApprovalCard call={callOf(waiting, rejects)} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Deny' }));
+    expect(rejects).toHaveBeenCalledWith({ approved: false });
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeEnabled();
+  });
+
   it('disables the buttons while a decision is being sent', () => {
     render(<ApprovalCard call={callOf(waiting)} disabled />);
     expect(screen.getByRole('button', { name: 'Allow' })).toBeDisabled();

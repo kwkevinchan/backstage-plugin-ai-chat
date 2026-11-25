@@ -100,10 +100,14 @@ test('read-only call, approval, rejection', async ({ page }) => {
   await page.getByRole('button', { name: 'New chat' }).click();
   await say(page, 'list services');
   await expect(
-    page.getByText(/"name":"payments","status":"running","restarts":1/),
+    page
+      .getByText(/"name": "payments",\s*"status": "running",\s*"restarts": 1/)
+      .last(),
   ).toBeVisible();
   await expect(
-    page.getByText(/"name":"search","status":"running","restarts":0/),
+    page
+      .getByText(/"name": "search",\s*"status": "running",\s*"restarts": 0/)
+      .last(),
   ).toBeVisible();
   await shot('06-only-the-allowed-restart');
 
@@ -207,10 +211,14 @@ test('two approvals: one decision survives a reload and is not sent again', asyn
   await page.getByRole('button', { name: 'New chat' }).click();
   await say(page, 'list services');
   await expect(
-    page.getByText(/"name":"search","status":"running","restarts":1/),
+    page
+      .getByText(/"name": "search",\s*"status": "running",\s*"restarts": 1/)
+      .last(),
   ).toBeVisible();
   await expect(
-    page.getByText(/"name":"billing","status":"running","restarts":1/),
+    page
+      .getByText(/"name": "billing",\s*"status": "running",\s*"restarts": 1/)
+      .last(),
   ).toBeVisible();
 });
 
@@ -241,7 +249,9 @@ test('reload while an allowed call runs: the page follows the run to the result'
   await page.getByRole('button', { name: 'New chat' }).click();
   await say(page, 'list services');
   await expect(
-    page.getByText(/"name":"payments","status":"running","restarts":2/),
+    page
+      .getByText(/"name": "payments",\s*"status": "running",\s*"restarts": 2/)
+      .last(),
   ).toBeVisible();
 });
 
@@ -417,5 +427,20 @@ test('the conversation follows the answer to its end, and shows a table', async 
     table.getByRole('columnheader', { name: 'Restarts' }),
   ).toBeVisible();
   await expect.poll(atEnd).toBe(true);
+
+  // A table wider than the answer scrolls inside it; the page does not.
+  await say(page, 'wide table');
+  const wide = page.getByRole('table').last();
+  await expect(wide.getByRole('cell', { name: 'team-billing' })).toBeVisible();
+  expect(
+    await wide.evaluate(element => element.scrollWidth > element.clientWidth),
+  ).toBe(true);
+  expect(
+    await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth <=
+        document.documentElement.clientWidth,
+    ),
+  ).toBe(true);
   await shot('14-long-conversation-and-table');
 });

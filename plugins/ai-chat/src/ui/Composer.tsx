@@ -106,6 +106,8 @@ export function Composer(props: ComposerProps) {
           minRows={2}
           maxRows={6}
           maxLength={MAX_MESSAGE_LENGTH}
+          // Escape does not stop a run; only the Stop button does.
+          cancelOnEscape={false}
           onKeyDown={onKeyDown}
         />
         {props.canStop && (

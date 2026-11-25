@@ -474,6 +474,15 @@ describe('the thread', () => {
     ]);
   });
 
+  it('does not stop the run on Escape in the box', async () => {
+    const api = mockApi();
+    const box = await open(api, waiting());
+    await userEvent.type(box, 'draft{Escape}');
+    expect(api.cancelRun).not.toHaveBeenCalled();
+    expect(box).toHaveValue('draft');
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled();
+  });
+
   it('stops a run that waits for a decision', async () => {
     const api = mockApi();
     await open(api, waiting());

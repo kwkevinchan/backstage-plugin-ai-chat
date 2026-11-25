@@ -31,13 +31,41 @@ export function safeUrl(url: string): string {
   return SAFE_URL.test(url) ? url : '';
 }
 
-function Link({ href, children }: ComponentProps<'a'>) {
+type Props<T extends 'a' | 'h2' | 'li' | 'section'> = ComponentProps<T> & {
+  'data-footnote-backref'?: unknown;
+  'data-footnotes'?: unknown;
+};
+
+function Link(props: Props<'a'>) {
+  // The way back from a footnote to its reference: a link inside the page,
+  // which this component does not make.
+  if (props['data-footnote-backref'] !== undefined) return null;
+  const { href, children } = props;
   return href ? <Anchor href={href}>{children}</Anchor> : <>{children}</>;
+}
+
+// GFM footnotes get ids (`user-content-fn-1`, `footnote-label`) that repeat in
+// every answer with a footnote, and a heading for screen readers only. The
+// notes show as a plain list at the end of the answer: no ids, no heading,
+// no links inside the page.
+function Section({ children, ...props }: Props<'section'>) {
+  if (props['data-footnotes'] === undefined)
+    return <section>{children}</section>;
+  return <div className={cx('chat-footnotes')}>{children}</div>;
+}
+
+function Heading2({ children, className }: Props<'h2'>) {
+  if (className === 'sr-only') return null;
+  return <h2>{children}</h2>;
+}
+
+function ListItem({ children }: Props<'li'>) {
+  return <li>{children}</li>;
 }
 
 const plugins = [remarkGfm];
 const disallowed = ['img'];
-const components = { a: Link };
+const components = { a: Link, section: Section, h2: Heading2, li: ListItem };
 
 /**
  * The text of an assistant message as Markdown with GFM (tables, lists,

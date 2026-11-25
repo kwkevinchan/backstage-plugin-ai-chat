@@ -256,7 +256,9 @@ export function ApprovalCard(props: ApprovalCardProps) {
   // A decision that the runtime refuses (the call is decided already) leaves
   // the card as the next state of the messages shows it.
   const decide = (approved: boolean) =>
-    call.respondToApproval({ approved }).catch(() => undefined);
+    Promise.resolve()
+      .then(() => call.respondToApproval({ approved }))
+      .catch(() => undefined);
   return (
     <section
       className={cx('chat-approval', !waiting && 'chat-approval-decided')}
