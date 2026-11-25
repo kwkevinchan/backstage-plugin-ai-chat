@@ -32,7 +32,7 @@ import { usePageContext } from '../application/usePageContext';
 import { useToolsets } from '../application/useToolsets';
 import { panelMessagePage } from '../domain/launch';
 import type { PanelState } from '../domain/panel';
-import { Composer } from './Composer';
+import { DraftComposer } from './Composer';
 import { SessionView } from './SessionView';
 import { cx } from './styles';
 
@@ -241,7 +241,7 @@ function PanelConversation(props: {
           {error}
         </div>
       )}
-      <Composer onSend={send} disabled={opening} />
+      <DraftComposer onSend={send} disabled={opening} />
     </div>
   );
 }

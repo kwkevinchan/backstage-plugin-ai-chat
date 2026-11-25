@@ -14,97 +14,157 @@
  * limitations under the License.
  */
 
-import { KeyboardEvent, useState } from 'react';
+import type { KeyboardEvent } from 'react';
+import {
+  AssistantRuntimeProvider,
+  ComposerPrimitive,
+  useAui,
+  useAuiState,
+} from '@assistant-ui/react';
 import { Button } from '@backstage/ui';
 import { MAX_MESSAGE_LENGTH } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import { useSessionRuntime } from '../adapters/assistantUi/sessionRuntime';
 import { cx } from './styles';
 
-export interface ComposerProps {
-  /**
-   * Enter, and the Send button. Resolves with `false` when the message was not
-   * sent at all.
-   */
-  onSend(text: string): Promise<boolean | void> | void;
+type Handler = (text: string) => Promise<boolean | void> | void;
+
+/** What the box does while a run goes on, outside the runtime of assistant-ui. */
+export interface ComposerDuringRun {
+  /** Enter, and the main button. Resolves with `false` when the message was not sent. */
+  onSend: Handler;
   /**
    * Ctrl or Cmd with Enter, and the Queue button, which shows only with this.
    * Without it Ctrl or Cmd with Enter does what Enter does.
    */
-  onQueue?(text: string): Promise<boolean | void> | void;
-  /** A response is on its way that the new message cannot join. */
+  onQueue?: Handler;
+  /** Nothing can be sent now. */
   disabled: boolean;
+}
+
+export interface ComposerProps {
   /** Shown above the box. */
   hint?: string;
   /** The text of the empty box. */
   placeholder?: string;
-  /** The name of the main button; default Send. */
+  /** The name of the main button while a run goes on; default Send. */
   sendLabel?: string;
-  /** Set while a run is active: shows Stop. */
-  onStop?(): void;
+  /**
+   * Set while a run goes on. The send of assistant-ui is off then, so the
+   * box takes messages through these handlers (the run adds or queues them).
+   */
+  duringRun?: ComposerDuringRun;
+  /** Shows Stop, which stops the run through the runtime. */
+  canStop?: boolean;
 }
 
 const DEFAULT_PLACEHOLDER =
   'Write a message (Enter sends, Shift+Enter starts a new line)';
 
-/** The input box with Send, Queue while a run is active, and Stop. */
+/**
+ * The input box of the runtime around it: Send when no run goes on, Send and
+ * Queue for a run that goes on, and Stop.
+ */
 export function Composer(props: ComposerProps) {
-  const [draft, setDraft] = useState('');
+  const aui = useAui();
+  const empty = useAuiState(s => !s.composer.text.trim());
+  // The primitive buttons pass `disabled` to their child, which the Button of
+  // @backstage/ui (React Aria) does not read: it takes `isDisabled`.
+  const canSend = useAuiState(s => s.composer.canSend);
+  const canCancel = useAuiState(s => s.composer.canCancel);
+  const { duringRun } = props;
 
-  const submit = async (queue: boolean) => {
-    const text = draft.trim();
-    if (!text || props.disabled) return;
-    setDraft('');
-    const handler = queue && props.onQueue ? props.onQueue : props.onSend;
+  const submitDuringRun = async (run: ComposerDuringRun, queue: boolean) => {
+    const text = aui.composer.getState().text.trim();
+    if (!text || run.disabled) return;
+    aui.composer.setText('');
+    const handler = queue && run.onQueue ? run.onQueue : run.onSend;
     const sent = await handler(text);
     // A message that was not sent goes back into the box, unless the user typed again.
-    if (sent === false) setDraft(current => current || text);
+    if (sent === false && !aui.composer.getState().text) {
+      aui.composer.setText(text);
+    }
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter') return;
+    if (!duringRun || event.key !== 'Enter') return;
+    if (event.nativeEvent.isComposing) return;
     const modified = event.ctrlKey || event.metaKey;
     if (event.shiftKey && !modified) return;
     event.preventDefault();
-    submit(modified);
+    submitDuringRun(duringRun, modified);
   };
-  const empty = !draft.trim();
 
   return (
     <>
       {props.hint && (
         <div className={cx('chat-composer-hint')}>{props.hint}</div>
       )}
-      <div className={cx('chat-composer')}>
-        <textarea
+      <ComposerPrimitive.Root className={cx('chat-composer')}>
+        <ComposerPrimitive.Input
           className={cx('chat-composer-input')}
           aria-label="Message"
           placeholder={props.placeholder ?? DEFAULT_PLACEHOLDER}
-          rows={2}
+          minRows={2}
+          maxRows={6}
           maxLength={MAX_MESSAGE_LENGTH}
-          value={draft}
-          onChange={event => setDraft(event.target.value)}
+          // Escape does not stop a run; only the Stop button does.
+          cancelOnEscape={false}
           onKeyDown={onKeyDown}
         />
-        {props.onStop && (
-          <Button variant="secondary" onPress={props.onStop}>
-            Stop
-          </Button>
+        {props.canStop && (
+          <ComposerPrimitive.Cancel asChild>
+            <Button variant="secondary" isDisabled={!canCancel}>
+              Stop
+            </Button>
+          </ComposerPrimitive.Cancel>
         )}
-        {props.onQueue && (
+        {duringRun?.onQueue && (
           <Button
             variant="secondary"
-            isDisabled={props.disabled || empty}
-            onPress={() => submit(true)}
+            isDisabled={duringRun.disabled || empty}
+            onPress={() => submitDuringRun(duringRun, true)}
           >
             Queue
           </Button>
         )}
-        <Button
-          variant="primary"
-          isDisabled={props.disabled || empty}
-          onPress={() => submit(false)}
-        >
-          {props.sendLabel ?? 'Send'}
-        </Button>
-      </div>
+        {duringRun ? (
+          <Button
+            variant="primary"
+            isDisabled={duringRun.disabled || empty}
+            onPress={() => submitDuringRun(duringRun, false)}
+          >
+            {props.sendLabel ?? 'Send'}
+          </Button>
+        ) : (
+          <ComposerPrimitive.Send asChild>
+            <Button variant="primary" isDisabled={!canSend}>
+              Send
+            </Button>
+          </ComposerPrimitive.Send>
+        )}
+      </ComposerPrimitive.Root>
     </>
+  );
+}
+
+export interface DraftComposerProps {
+  /** Resolves with `false` when the message was not sent: the text stays in the box. */
+  onSend: Handler;
+  disabled: boolean;
+}
+
+const NO_MESSAGES: never[] = [];
+
+/** The input box of a session that does not exist yet: the first message creates it. */
+export function DraftComposer(props: DraftComposerProps) {
+  const runtime = useSessionRuntime({
+    messages: NO_MESSAGES,
+    isRunning: false,
+    isSendDisabled: props.disabled,
+    onSend: props.onSend,
+  });
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <Composer />
+    </AssistantRuntimeProvider>
   );
 }

@@ -231,6 +231,44 @@
 .chat-markdown pre code {
   padding: 0;
   background: transparent;
+  font-size: inherit;
+}
+.chat-footnotes {
+  margin-top: var(--bui-space-2);
+  padding-top: var(--bui-space-1);
+  border-top: 1px solid var(--bui-border-1);
+  color: var(--bui-fg-secondary);
+  font-size: var(--bui-font-size-2);
+}
+/* A wide table scrolls sideways inside the answer. */
+.chat-markdown table {
+  display: block;
+  max-width: 100%;
+  margin: var(--bui-space-2) 0;
+  overflow-x: auto;
+  border-collapse: collapse;
+  overflow-wrap: normal;
+}
+.chat-markdown th,
+.chat-markdown td {
+  padding: var(--bui-space-1) var(--bui-space-2);
+  border: 1px solid var(--bui-border-2);
+  text-align: left;
+  vertical-align: top;
+}
+/*
+ * Words stay whole. A cell wraps at spaces up to 24em wide; a longer token
+ * (an address, an id) keeps the cell wider and the table scrolls.
+ */
+.chat-markdown td {
+  min-width: 2em;
+  max-width: 24em;
+  overflow-wrap: break-word;
+}
+.chat-markdown th {
+  background: var(--bui-bg-app);
+  font-weight: var(--bui-font-weight-bold);
+  white-space: nowrap;
 }
 .chat-markdown a,
 .chat-code a {
@@ -238,16 +276,33 @@
   text-decoration: underline;
 }
 
-.chat-code {
+/*
+ * Code blocks: the input, output and error of a tool call, and fenced code in
+ * an answer. `--bui-bg-app` differs from the card (`--bui-bg-neutral-1`) and
+ * the answer (`--bui-bg-neutral-2`) in both themes. Lines are kept as they
+ * are; a long line scrolls sideways inside the block.
+ */
+.chat-code,
+.chat-markdown pre {
+  box-sizing: border-box;
+  max-width: 100%;
+  max-height: 320px;
   margin: 0;
   padding: var(--bui-space-2) var(--bui-space-3);
+  border: 1px solid var(--bui-border-2);
   border-radius: var(--bui-radius-2);
-  background: var(--bui-bg-neutral-3);
+  background: var(--bui-bg-app);
   color: var(--bui-fg-primary);
+  font-family: var(--bui-font-monospace);
+  font-size: 0.9em;
+  line-height: 1.5;
   overflow: auto;
-  max-height: 320px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  white-space: pre;
+  overflow-wrap: normal;
+  tab-size: 2;
+}
+.chat-markdown pre {
+  margin: var(--bui-space-2) 0;
 }
 
 /* Tool calls */

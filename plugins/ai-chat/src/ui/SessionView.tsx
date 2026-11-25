@@ -15,12 +15,14 @@
  */
 
 import { useCallback, useState } from 'react';
+import { AssistantRuntimeProvider, ThreadPrimitive } from '@assistant-ui/react';
 import type {
   ChatPageContext,
   ChatSessionDetail,
   ChatToolset,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { AiChatApi } from '../api';
+import { useSessionRuntime } from '../adapters/assistantUi/sessionRuntime';
 import { describeError } from '../adapters/describeError';
 import { useSessionChat } from '../application/useSessionChat';
 import { useSessionTools } from '../application/useSessionTools';
@@ -82,6 +84,16 @@ export function SessionView(props: SessionViewProps) {
 
   const running = Boolean(chat.activeRun);
   const waiting = chat.activeRun?.status === 'waiting_approval';
+  // A run that goes on, or a response on its way before the run is known.
+  const inRun = running || chat.busy;
+  const runtime = useSessionRuntime({
+    messages: chat.messages,
+    isRunning: inRun,
+    isSendDisabled: chat.followingNext,
+    onSend: chat.send,
+    onStop: chat.stop,
+    onDecide: chat.decide,
+  });
   // While a run goes on the box takes messages: Enter inserts, Ctrl or Cmd
   // with Enter queues, and a run that waits for a decision only queues.
   let hint: string | undefined;
@@ -98,52 +110,60 @@ export function SessionView(props: SessionViewProps) {
   }
 
   return (
-    <div className={cx('chat-main')}>
-      <ToolsetPanel
-        toolsets={toolsets}
-        enabled={enabled}
-        disabled={running}
-        onChange={changeToolsets}
-      />
-      {toolsetError && (
-        <div className={cx('chat-error')} role="alert">
-          {toolsetError}
-        </div>
-      )}
-      <MessageList
-        messages={chat.messages}
-        busy={chat.busy}
-        disabled={chat.deciding}
-        notice={chat.notice}
-        tools={tools}
-        decisions={chat.decisions}
-        error={chat.error}
-        interrupted={chat.interrupted && chat.canResend}
-        onDecide={chat.decide}
-        onSendAgain={chat.sendAgain}
-        onSendTextAgain={running || chat.busy ? undefined : chat.sendTextAgain}
-      />
-      <QueuePanel
-        items={chat.queue}
-        paused={chat.queuePaused}
-        pausedReason={chat.queuePausedReason}
-        notice={chat.queueNotice}
-        onContinue={chat.continueQueue}
-        onEdit={chat.editQueued}
-        onRemove={chat.removeQueued}
-        moving={chat.queueMoving}
-        onMove={chat.moveQueued}
-      />
-      <PendingInserts items={chat.pending} />
-      <Composer
-        onSend={chat.send}
-        onQueue={running && !waiting ? chat.queueMessage : undefined}
-        sendLabel={waiting ? 'Queue' : undefined}
-        disabled={(chat.busy && !running) || chat.followingNext}
-        hint={hint}
-        placeholder={placeholder}
-        onStop={running ? chat.stop : undefined}
-      />
-    </div>
+    <AssistantRuntimeProvider runtime={runtime}>
+      <ThreadPrimitive.Root className={cx('chat-main')}>
+        <ToolsetPanel
+          toolsets={toolsets}
+          enabled={enabled}
+          disabled={running}
+          onChange={changeToolsets}
+        />
+        {toolsetError && (
+          <div className={cx('chat-error')} role="alert">
+            {toolsetError}
+          </div>
+        )}
+        <MessageList
+          busy={chat.busy}
+          disabled={chat.deciding}
+          notice={chat.notice}
+          tools={tools}
+          decisions={chat.decisions}
+          error={chat.error}
+          interrupted={chat.interrupted && chat.canResend}
+          onSendAgain={chat.sendAgain}
+          onSendTextAgain={
+            running || chat.busy ? undefined : chat.sendTextAgain
+          }
+        />
+        <QueuePanel
+          items={chat.queue}
+          paused={chat.queuePaused}
+          pausedReason={chat.queuePausedReason}
+          notice={chat.queueNotice}
+          onContinue={chat.continueQueue}
+          onEdit={chat.editQueued}
+          onRemove={chat.removeQueued}
+          moving={chat.queueMoving}
+          onMove={chat.moveQueued}
+        />
+        <PendingInserts items={chat.pending} />
+        <Composer
+          hint={hint}
+          placeholder={placeholder}
+          sendLabel={waiting ? 'Queue' : undefined}
+          canStop={running}
+          duringRun={
+            inRun
+              ? {
+                  onSend: chat.send,
+                  onQueue: running && !waiting ? chat.queueMessage : undefined,
+                  disabled: (chat.busy && !running) || chat.followingNext,
+                }
+              : undefined
+          }
+        />
+      </ThreadPrimitive.Root>
+    </AssistantRuntimeProvider>
   );
 }

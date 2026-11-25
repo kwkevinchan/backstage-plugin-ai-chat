@@ -14,18 +14,25 @@
  * limitations under the License.
  */
 
-import { useEffect, useRef } from 'react';
-import { isToolUIPart } from 'ai';
+import { createContext, useContext } from 'react';
+import {
+  MessagePrimitive,
+  ThreadPrimitive,
+  useAuiState,
+  type DataMessagePartProps,
+  type TextMessagePartProps,
+} from '@assistant-ui/react';
+import { Button } from '@backstage/ui';
 import type {
+  ChatInsertedData,
   ChatNoticeData,
   ChatTool,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { DecisionInfo } from '../domain/itemsToMessages';
-import { toolIdOf } from '../domain/toolView';
-import type { ChatUiMessage, ToolPart } from '../domain/types';
-import { Markdown } from './Markdown';
+import type { ChatUnreadData } from '../domain/types';
+import { MarkdownText } from './MarkdownText';
 import { cx } from './styles';
-import { ApprovalCard, needsCard, ToolCallRow } from './ToolCallCard';
+import { ToolCall, ToolCallViewContext } from './ToolCallCard';
 
 /** The text of each notice code, for the screen. */
 export const NOTICE_TEXT: Record<ChatNoticeData['code'], string> = {
@@ -33,8 +40,15 @@ export const NOTICE_TEXT: Record<ChatNoticeData['code'], string> = {
   context_trimmed: 'Earlier content was left out of what the assistant reads.',
 };
 
+/** The label of an inserted message that the run ended without reading. */
+export const UNREAD_TEXT = 'The agent did not read this message.';
+
+export const EMPTY_TEXT =
+  'Ask a question. The assistant can use the actions of Backstage as you. ' +
+  'Actions that only read run at once; every action that changes something ' +
+  'waits for your approval here.';
+
 export interface MessageListProps {
-  messages: ChatUiMessage[];
   /** A response is on its way. */
   busy: boolean;
   /** Set while a decision is being sent: the cards cannot be used. */
@@ -46,162 +60,148 @@ export interface MessageListProps {
   error?: string;
   /** The last run stopped before it gave an answer. */
   interrupted?: boolean;
-  onDecide(callId: string, approved: boolean): void;
   /** Sends the first message of the run again (the run gave no answer). */
   onSendAgain?(): void;
   /** Sends a message that the run did not read again. */
   onSendTextAgain?(text: string): void;
 }
 
-/** The label of an inserted message that the run ended without reading. */
-export const UNREAD_TEXT = 'The agent did not read this message.';
+const SendTextAgainContext = createContext<
+  ((text: string) => void) | undefined
+>(undefined);
 
-function MessageParts({
-  message,
-  tools,
-  decisions,
-  disabled,
-  onDecide,
-  onSendTextAgain,
-}: {
-  message: ChatUiMessage;
-  tools?: Record<string, ChatTool>;
-  decisions?: Record<string, DecisionInfo>;
-  disabled: boolean;
-  onDecide(callId: string, approved: boolean): void;
-  onSendTextAgain?(text: string): void;
-}) {
-  const text = message.parts.find(part => part.type === 'text');
+function UserText({ text }: TextMessagePartProps) {
+  if (!text) return null;
+  return <div className={cx('chat-message', 'chat-message-user')}>{text}</div>;
+}
+
+function AssistantText({ text }: TextMessagePartProps) {
+  if (!text) return null;
   return (
-    <>
-      {message.parts.map((part, index) => {
-        const key = `${message.id}:${index}`;
-        if (part.type === 'text') {
-          if (!part.text) return null;
-          return message.role === 'user' ? (
-            <div key={key} className={cx('chat-message', 'chat-message-user')}>
-              {part.text}
-            </div>
-          ) : (
-            <div
-              key={key}
-              className={cx('chat-message', 'chat-message-assistant')}
-            >
-              <Markdown text={part.text} />
-            </div>
-          );
-        }
-        if (part.type === 'data-inserted') {
-          // A message that the user added to the run, shown where the model
-          // read it.
-          return (
-            <div key={key} className={cx('chat-message', 'chat-message-user')}>
-              {part.data.text}
-            </div>
-          );
-        }
-        if (part.type === 'data-unread') {
-          return (
-            <div key={key} className={cx('chat-unread')} role="status">
-              {UNREAD_TEXT}
-              {part.data.sendAgain &&
-                onSendTextAgain &&
-                text?.type === 'text' && (
-                  <>
-                    {' '}
-                    <button
-                      type="button"
-                      onClick={() => onSendTextAgain(text.text)}
-                    >
-                      Send this message again
-                    </button>
-                  </>
-                )}
-            </div>
-          );
-        }
-        if (isToolUIPart(part)) {
-          const tool = part as ToolPart;
-          return needsCard(tool) ? (
-            <ApprovalCard
-              key={tool.toolCallId}
-              part={tool}
-              tool={tools?.[toolIdOf(tool)]}
-              decision={decisions?.[tool.toolCallId]}
-              disabled={disabled}
-              onDecide={onDecide}
-            />
-          ) : (
-            <ToolCallRow
-              key={tool.toolCallId}
-              part={tool}
-              tool={tools?.[toolIdOf(tool)]}
-            />
-          );
-        }
-        return null;
-      })}
-    </>
+    <div className={cx('chat-message', 'chat-message-assistant')}>
+      <MarkdownText />
+    </div>
   );
 }
 
-/** The messages of a session with their tool calls, and what the run says. */
-export function MessageList(props: MessageListProps) {
-  const { messages } = props;
-  const timeline = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const element = timeline.current;
-    if (element) element.scrollTop = element.scrollHeight;
-  }, [messages]);
-
+/** A message that the user added to the run, shown where the model read it. */
+function Inserted({ data }: DataMessagePartProps<ChatInsertedData>) {
   return (
-    <div
-      className={cx('chat-timeline')}
-      ref={timeline}
-      aria-live="polite"
-      aria-busy={props.busy}
-    >
-      {messages.length === 0 && !props.error && (
-        <div className={cx('chat-empty')}>
-          Ask a question. The assistant can use the actions of Backstage as you.
-          Actions that only read run at once; every action that changes
-          something waits for your approval here.
-        </div>
-      )}
-      {messages.map(message => (
-        <div key={message.id} style={{ display: 'contents' }}>
-          <MessageParts
-            message={message}
-            tools={props.tools}
-            decisions={props.decisions}
-            disabled={props.disabled || props.busy}
-            onDecide={props.onDecide}
-            onSendTextAgain={props.onSendTextAgain}
-          />
-        </div>
-      ))}
-      {props.notice && (
-        <div className={cx('chat-notice')}>{NOTICE_TEXT[props.notice]}</div>
-      )}
-      {props.interrupted && !props.busy && (
-        <div className={cx('chat-notice')} role="status">
-          The last run stopped before it gave an answer.
-          {props.onSendAgain && (
-            <>
-              {' '}
-              <button type="button" onClick={props.onSendAgain}>
-                Send the message again
-              </button>
-            </>
-          )}
-        </div>
-      )}
-      {props.error && (
-        <div className={cx('chat-error')} role="alert">
-          {props.error}
-        </div>
+    <div className={cx('chat-message', 'chat-message-user')}>{data.text}</div>
+  );
+}
+
+/** An inserted message that the run ended without reading, and its button. */
+function Unread({ data }: DataMessagePartProps<ChatUnreadData>) {
+  const onSendTextAgain = useContext(SendTextAgainContext);
+  const text = useAuiState(s => {
+    const part = s.message.parts.find(p => p.type === 'text');
+    return part?.type === 'text' ? part.text : undefined;
+  });
+  return (
+    <div className={cx('chat-unread')} role="status">
+      {UNREAD_TEXT}
+      {data.sendAgain && onSendTextAgain && text !== undefined && (
+        <>
+          {' '}
+          <Button
+            size="small"
+            variant="tertiary"
+            onPress={() => onSendTextAgain(text)}
+          >
+            Send this message again
+          </Button>
+        </>
       )}
     </div>
+  );
+}
+
+// The run, the notices and the other data parts are shown outside the
+// messages or not at all.
+const Hidden = () => null;
+
+const data = {
+  by_name: { inserted: Inserted, unread: Unread },
+  Fallback: Hidden,
+};
+
+function UserMessage() {
+  return (
+    <MessagePrimitive.Root style={{ display: 'contents' }}>
+      <MessagePrimitive.Parts components={{ Text: UserText, data }} />
+    </MessagePrimitive.Root>
+  );
+}
+
+function AssistantMessage() {
+  return (
+    <MessagePrimitive.Root style={{ display: 'contents' }}>
+      <MessagePrimitive.Parts
+        components={{
+          Text: AssistantText,
+          data,
+          tools: { Fallback: ToolCall },
+        }}
+      />
+    </MessagePrimitive.Root>
+  );
+}
+
+const messageComponents = { UserMessage, AssistantMessage };
+
+/**
+ * The messages of the session with their tool calls, and what the run says,
+ * in the viewport of assistant-ui, which follows new content while the view
+ * is at the end.
+ */
+export function MessageList(props: MessageListProps) {
+  const empty = useAuiState(s => s.thread.messages.length === 0);
+  return (
+    <ToolCallViewContext.Provider
+      value={{
+        tools: props.tools,
+        decisions: props.decisions,
+        disabled: props.disabled || props.busy,
+      }}
+    >
+      <SendTextAgainContext.Provider value={props.onSendTextAgain}>
+        <ThreadPrimitive.Viewport
+          className={cx('chat-timeline')}
+          aria-live="polite"
+          aria-busy={props.busy}
+        >
+          {empty && !props.error && (
+            <div className={cx('chat-empty')}>{EMPTY_TEXT}</div>
+          )}
+          <ThreadPrimitive.Messages components={messageComponents} />
+          {props.notice && (
+            <div className={cx('chat-notice')}>{NOTICE_TEXT[props.notice]}</div>
+          )}
+          {props.interrupted && !props.busy && (
+            <div className={cx('chat-notice')} role="status">
+              The last run stopped before it gave an answer.
+              {props.onSendAgain && (
+                <>
+                  {' '}
+                  <Button
+                    size="small"
+                    variant="tertiary"
+                    onPress={props.onSendAgain}
+                  >
+                    Send the message again
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
+          {props.error && (
+            <div className={cx('chat-error')} role="alert">
+              {props.error}
+            </div>
+          )}
+        </ThreadPrimitive.Viewport>
+      </SendTextAgainContext.Provider>
+    </ToolCallViewContext.Provider>
   );
 }
