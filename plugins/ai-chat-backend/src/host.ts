@@ -149,6 +149,7 @@ export function createHost(ports: HostPorts) {
     ...DEFAULT_IMAGE_LIMITS,
     enabled: false,
   };
+  const extensions = ports.extensions ?? emptyExtensions();
   const advance = new AdvanceRun({
     items,
     model: ports.model,
@@ -156,7 +157,7 @@ export function createHost(ports: HostPorts) {
     run: runs,
     clock,
     ids: ports.ids,
-    extensions: ports.extensions ?? emptyExtensions(),
+    extensions,
   });
   // The supervisor calls `afterRun` for the queue, and the queue starts runs
   // on the supervisor: the function is set once both exist.
@@ -299,7 +300,12 @@ export function createHost(ports: HostPorts) {
         logger,
       }),
       listToolsets: new ListToolsets({ agents }),
-      listSessionTools: new ListSessionTools({ sessions, tools: ports.tools }),
+      listSessionTools: new ListSessionTools({
+        sessions,
+        tools: ports.tools,
+        agents,
+        skills: extensions.skills,
+      }),
       uploadAttachment: new UploadAttachment({ sessions, attachments, images }),
       readAttachment: new ReadAttachment({ sessions, attachments }),
       purgeUnusedAttachments: new PurgeUnusedAttachments({

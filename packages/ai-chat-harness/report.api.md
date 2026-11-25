@@ -63,6 +63,8 @@ export type AgentMessageBody = {
 export interface AiChatHarnessExtensionPoint {
   // (undocumented)
   addAgent(agent: AgentDefinition): void;
+  // (undocumented)
+  addSkill(skill: Skill): void;
 }
 
 // @public
@@ -177,7 +179,9 @@ export function emptyExtensions(): Extensions;
 export function estimateTokens(text: string): number;
 
 // @public
-export type Extensions = Readonly<Record<string, never>>;
+export type Extensions = {
+  readonly skills?: readonly Skill[];
+};
 
 // @public
 export class HarnessError extends Error {
@@ -325,6 +329,12 @@ export type Limits = {
   maxToolCallsPerRun: number;
   runTimeoutSeconds: number;
 };
+
+// @public
+export const LOAD_SKILL_TOOL_ID = 'load_skill';
+
+// @public
+export function loadSkillDescriptor(skills: readonly Skill[]): ToolDescriptor;
 
 // @public
 export type ModelChunk =
@@ -482,6 +492,12 @@ export type PolicySettings = {
 export type ReadState = 'read' | 'unread';
 
 // @public
+export function resolveAgentSkills(
+  agent: AgentDefinition,
+  registered?: readonly Skill[],
+): Skill[];
+
+// @public
 export interface RunControl {
   heartbeat(fence: RunFence): Promise<{
     cancelRequested: boolean;
@@ -529,6 +545,23 @@ export type RunUsage = {
   toolCallsUsed: number;
   elapsedSeconds: number;
 };
+
+// @public
+export interface Skill {
+  description: string;
+  // (undocumented)
+  id: string;
+  load(ctx: StepContext): string | Promise<string>;
+}
+
+// @public
+export interface StepContext extends CallContext {
+  // (undocumented)
+  agentId: string;
+  // (undocumented)
+  signal: AbortSignal;
+  step: number;
+}
 
 // @public (undocumented)
 export type StopReason = 'max_steps' | 'max_tool_calls' | 'timeout';

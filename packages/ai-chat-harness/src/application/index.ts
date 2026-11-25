@@ -22,7 +22,14 @@ export {
   emptyExtensions,
   type AiChatHarnessExtensionPoint,
   type Extensions,
+  type Skill,
+  type StepContext,
 } from './ports/extensions';
+export {
+  LOAD_SKILL_TOOL_ID,
+  loadSkillDescriptor,
+  resolveAgentSkills,
+} from './steps/skills';
 export type { IdGenerator } from './ports/IdGenerator';
 export type { ItemDraft, ItemLog, RunFence } from './ports/ItemLog';
 export type { ModelChunk, ModelClient } from './ports/ModelClient';

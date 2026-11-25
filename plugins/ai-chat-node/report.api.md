@@ -8,6 +8,8 @@ import { AgentLimits } from '@kwkevinchan/ai-chat-harness';
 import { AiChatHarnessExtensionPoint } from '@kwkevinchan/ai-chat-harness';
 import { ExtensionPoint } from '@backstage/backend-plugin-api';
 import { PlanningMode } from '@kwkevinchan/ai-chat-harness';
+import { Skill } from '@kwkevinchan/ai-chat-harness';
+import { StepContext } from '@kwkevinchan/ai-chat-harness';
 
 export { AgentDefinition };
 
@@ -19,4 +21,8 @@ export { AiChatHarnessExtensionPoint };
 export const aiChatHarnessExtensionPoint: ExtensionPoint<AiChatHarnessExtensionPoint>;
 
 export { PlanningMode };
+
+export { Skill };
+
+export { StepContext };
 ```

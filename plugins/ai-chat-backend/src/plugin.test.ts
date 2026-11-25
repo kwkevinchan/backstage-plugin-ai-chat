@@ -26,6 +26,9 @@ import {
   mockServices,
   startTestBackend,
 } from '@backstage/backend-test-utils';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import knex from 'knex';
 import request from 'supertest';
 import { TITLE_PROMPT_MARK } from './application';
@@ -563,6 +566,263 @@ describe('aiChatPlugin', () => {
       expect(created.body.agentId).toBe('guide');
     } finally {
       await db.destroy();
+    }
+  });
+
+  it('does not start when duplicate, malformed, or unknown agent skills are configured', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ai-chat-plugin-skills-bad-'));
+    try {
+      await mkdir(join(dir, 'dup-skill'));
+      await writeFile(
+        join(dir, 'dup-skill', 'SKILL.md'),
+        '---\nname: dup-skill\ndescription: From dir\n---\nDir body',
+      );
+      const clashSkill = createBackendModule({
+        pluginId: 'ai-chat',
+        moduleId: 'clash-skill',
+        register(env) {
+          env.registerInit({
+            deps: { harness: aiChatHarnessExtensionPoint },
+            async init({ harness }) {
+              harness.addSkill({
+                id: 'dup-skill',
+                description: 'From module',
+                load: () => 'Module body',
+              });
+            },
+          });
+        },
+      });
+      await expect(
+        startConfigured({
+          features: [clashSkill],
+          aiChat: { skills: { directories: [dir] } },
+        }),
+      ).rejects.toThrow(/already defined/);
+
+      const twiceSkill = createBackendModule({
+        pluginId: 'ai-chat',
+        moduleId: 'twice-skill',
+        register(env) {
+          env.registerInit({
+            deps: { harness: aiChatHarnessExtensionPoint },
+            async init({ harness }) {
+              harness.addSkill({
+                id: 'dup',
+                description: 'Once',
+                load: () => 'One',
+              });
+              harness.addSkill({
+                id: 'dup',
+                description: 'Twice',
+                load: () => 'Two',
+              });
+            },
+          });
+        },
+      });
+      await expect(startConfigured({ features: [twiceSkill] })).rejects.toThrow(
+        /already registered/,
+      );
+
+      await expect(
+        startConfigured({
+          aiChat: {
+            agents: { sre: { skills: ['missing-skill'] } },
+          },
+        }),
+      ).rejects.toThrow(/unknown skill missing-skill/);
+
+      const malformedDir = await mkdtemp(
+        join(tmpdir(), 'ai-chat-plugin-skills-malformed-'),
+      );
+      try {
+        await mkdir(join(malformedDir, 'broken'));
+        await writeFile(join(malformedDir, 'broken', 'SKILL.md'), 'No FM');
+        await expect(
+          startConfigured({
+            aiChat: { skills: { directories: [malformedDir] } },
+          }),
+        ).rejects.toThrow(/frontmatter/);
+      } finally {
+        await rm(malformedDir, { recursive: true, force: true });
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('loads SKILL.md directories and module skills, lists load_skill, and executes lazy loading over HTTP', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ai-chat-plugin-skills-e2e-'));
+    try {
+      await mkdir(join(dir, 'deploy-failure'));
+      await writeFile(
+        join(dir, 'deploy-failure', 'SKILL.md'),
+        [
+          '---',
+          'name: deploy-failure',
+          'description: Diagnose failed deployments cleanly.',
+          '---',
+          '# Secret Deploy Checklist',
+          '1. Inspect rollout status on example.com.',
+        ].join('\n'),
+      );
+
+      const moduleSkillLoader = jest.fn(async () => 'Module skill details');
+      const skillModule = createBackendModule({
+        pluginId: 'ai-chat',
+        moduleId: 'custom-skill',
+        register(env) {
+          env.registerInit({
+            deps: { harness: aiChatHarnessExtensionPoint },
+            async init({ harness }) {
+              harness.addSkill({
+                id: 'module-skill',
+                description: 'Provided by backend module.',
+                load: moduleSkillLoader,
+              });
+            },
+          });
+        },
+      });
+
+      answers = [
+        call('load_skill', { id: 'deploy-failure' }),
+        text('Used the deploy-failure checklist.'),
+      ];
+      let scripted = 0;
+      llm = await startLlmServer(body => {
+        const system = body.messages?.find(
+          (m: { role?: string }) => m.role === 'system',
+        )?.content;
+        if (
+          typeof system === 'string' &&
+          system.startsWith(TITLE_PROMPT_MARK)
+        ) {
+          return { body: text('Skills E2E title') };
+        }
+        const index = scripted;
+        scripted += 1;
+        return { body: answers[Math.min(index, answers.length - 1)] };
+      });
+
+      const logger = mockServices.logger.mock();
+      const { server } = await startTestBackend({
+        features: [
+          aiChatPlugin,
+          skillModule,
+          mockServices.rootConfig.factory({
+            data: {
+              aiChat: {
+                llm: { baseUrl: llm.url, model: 'test-model' },
+                skills: { directories: [dir] },
+                agents: {
+                  sre: {
+                    title: 'SRE Agent',
+                    skills: ['deploy-failure', 'module-skill'],
+                  },
+                },
+              },
+            },
+          }),
+          mockServices.database.factory({ knex: await createDb() }),
+          mockServices.auditor.mock().factory,
+          mockServices.httpAuth.factory({
+            defaultCredentials: mockCredentials.none(),
+          }),
+          logger.factory,
+          createServiceFactory({
+            service: actionsServiceRef,
+            deps: {},
+            factory: () => new FakeActions([]),
+          }),
+        ],
+      });
+
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('2 skill(s)'),
+      );
+
+      const created = await request(server)
+        .post('/api/ai-chat/sessions')
+        .set('Authorization', alice)
+        .send({ agentId: 'sre' })
+        .expect(201);
+      const sessionId = created.body.id;
+
+      const toolsRes = await request(server)
+        .get(`/api/ai-chat/sessions/${sessionId}/tools`)
+        .set('Authorization', alice)
+        .expect(200);
+      expect(toolsRes.body.items.map((t: { id: string }) => t.id)).toContain(
+        'load_skill',
+      );
+
+      const runRes = await request(server)
+        .post(`/api/ai-chat/sessions/${sessionId}/runs`)
+        .set('Authorization', alice)
+        .send({ text: 'How do I debug deploy failure?' })
+        .expect(200);
+
+      const uiMessage = await readMessage(await parseSse(runRes.text));
+      // Wait for post-run auto-title generation to finish before teardown.
+      for (let i = 0; i < 40; i++) {
+        const detail = await request(server)
+          .get(`/api/ai-chat/sessions/${sessionId}`)
+          .set('Authorization', alice)
+          .expect(200);
+        if (detail.body.session.title === 'Skills E2E title') break;
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      expect(uiMessage.parts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'tool-load_skill',
+            state: 'output-available',
+            output: {
+              id: 'deploy-failure',
+              description: 'Diagnose failed deployments cleanly.',
+              content:
+                '# Secret Deploy Checklist\n1. Inspect rollout status on example.com.',
+            },
+          }),
+        ]),
+      );
+
+      const chatRequests = llm.requests.filter(r => {
+        const sys = (
+          r.body as { messages?: { role?: string; content?: string }[] }
+        ).messages?.[0]?.content;
+        return typeof sys === 'string' && !sys.startsWith(TITLE_PROMPT_MARK);
+      });
+      expect(chatRequests).toHaveLength(2);
+      const req1System = (
+        chatRequests[0].body as { messages: { content: string }[] }
+      ).messages[0].content;
+      expect(req1System).toContain(
+        '- deploy-failure: Diagnose failed deployments cleanly.',
+      );
+      expect(req1System).toContain(
+        '- module-skill: Provided by backend module.',
+      );
+      expect(req1System).not.toContain('Secret Deploy Checklist');
+      expect(moduleSkillLoader).not.toHaveBeenCalled();
+
+      const req2Messages = (
+        chatRequests[1].body as {
+          messages: { role: string; content: string }[];
+        }
+      ).messages;
+      expect(req2Messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            role: 'tool',
+            content: expect.stringContaining('Secret Deploy Checklist'),
+          }),
+        ]),
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });

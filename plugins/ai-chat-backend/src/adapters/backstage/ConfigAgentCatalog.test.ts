@@ -375,5 +375,51 @@ describe('ConfigAgentCatalog', () => {
         ]),
       ).toThrow(/agent guide\.toolsets: unknown toolset missing/);
     });
+
+    it('rejects agents naming unknown skills when knownSkills is provided and accepts valid skills', async () => {
+      const knownSkills = new Set(['getting-started', 'deploy-failure']);
+      expect(
+        () =>
+          new ConfigAgentCatalog(
+            mockServices.rootConfig({
+              data: {
+                aiChat: {
+                  agents: { sre: { skills: ['deploy-failure', 'missing'] } },
+                },
+              },
+            }),
+            mockServices.logger.mock(),
+            [],
+            knownSkills,
+          ),
+      ).toThrow(/aiChat\.agents\.sre\.skills: unknown skill missing/);
+
+      expect(
+        () =>
+          new ConfigAgentCatalog(
+            mockServices.rootConfig({ data: { aiChat: {} } }),
+            mockServices.logger.mock(),
+            [{ id: 'guide', systemPrompt: 'x', skills: ['unknown-skill'] }],
+            knownSkills,
+          ),
+      ).toThrow(/agent guide\.skills: unknown skill unknown-skill/);
+
+      const catalog = new ConfigAgentCatalog(
+        mockServices.rootConfig({
+          data: {
+            aiChat: {
+              agents: { sre: { skills: ['deploy-failure'] } },
+            },
+          },
+        }),
+        mockServices.logger.mock(),
+        [{ id: 'guide', systemPrompt: 'x', skills: ['getting-started'] }],
+        knownSkills,
+      );
+      expect((await catalog.agent('sre')).skills).toEqual(['deploy-failure']);
+      expect((await catalog.agent('guide')).skills).toEqual([
+        'getting-started',
+      ]);
+    });
   });
 });

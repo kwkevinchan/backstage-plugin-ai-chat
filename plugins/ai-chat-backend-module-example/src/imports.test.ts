@@ -19,6 +19,7 @@ import { startTestBackend } from '@backstage/backend-test-utils';
 import {
   aiChatHarnessExtensionPoint,
   type AgentDefinition,
+  type Skill,
 } from '@kwkevinchan/backstage-plugin-ai-chat-node';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
@@ -72,14 +73,18 @@ describe('the example module', () => {
     expect(outside).toEqual([]);
   });
 
-  it('registers an agent for example.com', async () => {
+  it('registers an agent and a skill for example.com', async () => {
     const agents: AgentDefinition[] = [];
+    const skills: Skill[] = [];
     const stub = createBackendPlugin({
       pluginId: 'ai-chat',
       register(env) {
         env.registerExtensionPoint(aiChatHarnessExtensionPoint, {
           addAgent(agent) {
             agents.push(agent);
+          },
+          addSkill(skill) {
+            skills.push(skill);
           },
         });
         // A plugin has to register an init, even when the module does the work.
@@ -96,6 +101,10 @@ describe('the example module', () => {
     expect(agents.map(agent => agent.id)).toContain('guide');
     expect(
       agents.some(agent => agent.systemPrompt.includes('example.com')),
+    ).toBe(true);
+    expect(skills.map(skill => skill.id)).toContain('getting-started');
+    expect(
+      skills.some(skill => skill.description.includes('example.com')),
     ).toBe(true);
   });
 });

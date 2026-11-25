@@ -19,7 +19,7 @@
  * in the harness and re-exported here, so a module does not import the
  * harness or the backend plugin.
  *
- * This version only exposes `addAgent`. Context providers, skills, hooks and
+ * This version exposes `addAgent` and `addSkill`. Context providers, hooks and
  * a model client are added on later items, together with the loop calling
  * them.
  *
@@ -32,5 +32,7 @@ export type {
   AgentDefinition,
   AgentLimits,
   PlanningMode,
+  Skill,
+  StepContext,
   AiChatHarnessExtensionPoint,
 } from '@kwkevinchan/ai-chat-harness';

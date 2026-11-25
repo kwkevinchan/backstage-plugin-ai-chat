@@ -18,17 +18,20 @@ import { InputError } from '@backstage/errors';
 import type {
   AgentDefinition,
   AiChatHarnessExtensionPoint,
+  Skill,
 } from '@kwkevinchan/ai-chat-harness';
 import { readExtensionAgent } from './agentShape';
+import { readExtensionSkill } from './skillShape';
 
 /**
  * What backend modules add through `aiChatHarnessExtensionPoint` (X-02).
  * The plugin registers this object before the modules run, then reads the
- * agents when it builds the catalog. A repeated id is refused and the first
- * registration stays.
+ * registered agents and skills during initialization. A repeated id is
+ * refused and the first registration stays.
  */
 export class AiChatHarnessRegistry implements AiChatHarnessExtensionPoint {
   private readonly agentList: AgentDefinition[] = [];
+  private readonly skillList: Skill[] = [];
 
   addAgent(agent: AgentDefinition): void {
     const checked = readExtensionAgent(agent);
@@ -38,7 +41,19 @@ export class AiChatHarnessRegistry implements AiChatHarnessExtensionPoint {
     this.agentList.push(checked);
   }
 
+  addSkill(skill: Skill): void {
+    const checked = readExtensionSkill(skill);
+    if (this.skillList.some(existing => existing.id === checked.id)) {
+      throw new InputError(`skill ${checked.id} is already registered`);
+    }
+    this.skillList.push(checked);
+  }
+
   agents(): readonly AgentDefinition[] {
     return [...this.agentList];
+  }
+
+  skills(): readonly Skill[] {
+    return [...this.skillList];
   }
 }

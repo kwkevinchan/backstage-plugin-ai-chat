@@ -14,9 +14,16 @@
  * limitations under the License.
  */
 
-import type { ToolGateway } from '@kwkevinchan/ai-chat-harness';
+import {
+  LOAD_SKILL_TOOL_ID,
+  decidePolicy,
+  loadSkillDescriptor,
+  resolveAgentSkills,
+  type Skill,
+  type ToolGateway,
+} from '@kwkevinchan/ai-chat-harness';
 import { assertOwner, type Principal } from '../../domain';
-import type { SessionRepository } from '../ports';
+import type { AgentCatalog, SessionRepository } from '../ports';
 
 /** A tool of a session, as the screen shows it. */
 export type SessionTool = {
@@ -33,26 +40,53 @@ export type SessionTool = {
  */
 export class ListSessionTools {
   constructor(
-    private readonly deps: { sessions: SessionRepository; tools: ToolGateway },
+    private readonly deps: {
+      sessions: SessionRepository;
+      tools: ToolGateway;
+      agents?: Pick<AgentCatalog, 'agent' | 'policy'>;
+      skills?: readonly Skill[];
+    },
   ) {}
 
   async execute(input: {
     principal: Principal;
     sessionId: string;
   }): Promise<SessionTool[]> {
-    const { sessions, tools } = this.deps;
-    assertOwner(await sessions.get(input.sessionId), input.principal);
-    const listed = await tools.list({
-      sessionId: input.sessionId,
-      runId: '',
-      principal: input.principal,
-    });
-    return listed.map(tool => ({
+    const { sessions, tools, agents, skills } = this.deps;
+    const session = await sessions.get(input.sessionId);
+    assertOwner(session, input.principal);
+    const listed = (
+      await tools.list({
+        sessionId: input.sessionId,
+        runId: '',
+        principal: input.principal,
+      })
+    ).filter(tool => tool.id !== LOAD_SKILL_TOOL_ID);
+    const result: SessionTool[] = listed.map(tool => ({
       id: tool.id,
       ...(tool.title !== undefined && { title: tool.title }),
       description: withoutTitle(tool.description, tool.title),
       readOnly: tool.readOnly === true,
     }));
+
+    if (agents && skills && skills.length > 0) {
+      const agent = await agents.agent(session.agentId);
+      const activeSkills = resolveAgentSkills(agent, skills);
+      if (activeSkills.length > 0) {
+        const descriptor = loadSkillDescriptor(activeSkills);
+        const policy = await agents.policy();
+        if (decidePolicy(descriptor, policy) !== 'deny') {
+          result.push({
+            id: descriptor.id,
+            ...(descriptor.title !== undefined && { title: descriptor.title }),
+            description: withoutTitle(descriptor.description, descriptor.title),
+            readOnly: descriptor.readOnly === true,
+          });
+        }
+      }
+    }
+
+    return result;
   }
 }
 

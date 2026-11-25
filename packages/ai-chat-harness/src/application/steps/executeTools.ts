@@ -25,6 +25,11 @@ import type { HarnessEvent } from '../events';
 import type { ItemDraft } from '../ports/ItemLog';
 import type { ToolOutput } from '../ports/ToolGateway';
 import type { AdvanceRunDeps, AdvanceRunRequest } from '../types';
+import {
+  LOAD_SKILL_TOOL_ID,
+  executeLoadSkill,
+  resolveAgentSkills,
+} from './skills';
 
 /**
  * Calls that may run together: a stretch of read-only calls, or one call that
@@ -144,6 +149,13 @@ async function run(
   req: AdvanceRunRequest,
   call: ToolCallItem,
 ): Promise<ToolOutput | undefined> {
+  if (call.toolId === LOAD_SKILL_TOOL_ID) {
+    return executeLoadSkill(
+      call,
+      req,
+      resolveAgentSkills(req.agent, deps.extensions.skills),
+    );
+  }
   try {
     const output = await deps.tools.execute(call, req.ctx, {
       signal: req.signal,

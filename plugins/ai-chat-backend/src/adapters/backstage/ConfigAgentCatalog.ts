@@ -28,6 +28,7 @@ import { buildSystemPrompt } from '../../domain/systemPrompt';
 import type { Toolset } from '../../domain/toolset';
 import {
   assertExtensionId,
+  assertKnownSkills,
   assertKnownToolsets,
   definitionFrom,
   readAgentBody,
@@ -70,6 +71,7 @@ export class ConfigAgentCatalog implements AgentCatalog {
     root: Config,
     logger: LoggerService,
     registeredAgents: readonly AgentDefinition[] = [],
+    knownSkills?: ReadonlySet<string>,
   ) {
     const config = root.getOptionalConfig('aiChat');
     const include = config?.getOptionalStringArray('actions.include') ?? [];
@@ -102,6 +104,7 @@ export class ConfigAgentCatalog implements AgentCatalog {
     for (const agent of readConfiguredAgents(
       config,
       knownToolsets,
+      knownSkills,
       globalPrompt,
     )) {
       this.agents.set(agent.id, agent);
@@ -115,6 +118,9 @@ export class ConfigAgentCatalog implements AgentCatalog {
     for (const registered of registeredAgents) {
       const agent = readExtensionAgent(registered);
       assertKnownToolsets(agent.toolsets, knownToolsets, `agent ${agent.id}`);
+      if (knownSkills) {
+        assertKnownSkills(agent.skills, knownSkills, `agent ${agent.id}`);
+      }
       if (this.agents.has(agent.id)) {
         throw new InputError(`agent ${agent.id} is already defined`);
       }
@@ -152,6 +158,7 @@ export class ConfigAgentCatalog implements AgentCatalog {
 function readConfiguredAgents(
   config: Config | undefined,
   knownToolsets: ReadonlySet<string>,
+  knownSkills: ReadonlySet<string> | undefined,
   globalPrompt: string | undefined,
 ): AgentDefinition[] {
   if (!config) return [];
@@ -168,6 +175,9 @@ function readConfiguredAgents(
     assertExtensionId(id, `aiChat.agents.${id}`);
     const body = readAgentBody(agents.get(id), `aiChat.agents.${id}`);
     assertKnownToolsets(body.toolsets, knownToolsets, `aiChat.agents.${id}`);
+    if (knownSkills) {
+      assertKnownSkills(body.skills, knownSkills, `aiChat.agents.${id}`);
+    }
     return definitionFrom(
       id,
       body,

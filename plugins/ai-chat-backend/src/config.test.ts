@@ -57,6 +57,7 @@ describe('readAiChatConfig', () => {
       maxToolOutputChars: 20000,
       sharing: { live: { enabled: true, defaultHours: 24, maxHours: 72 } },
       retentionDays: 90,
+      skills: { directories: [] },
     });
   });
 
@@ -289,6 +290,22 @@ describe('readAiChatConfig', () => {
         ),
       ).toThrow(/retention\.days/);
     }
+
+    expect(
+      readAiChatConfig(
+        mockServices.rootConfig({
+          data: { aiChat: { llm, skills: { directories: ['./skills'] } } },
+        }),
+      ).skills,
+    ).toEqual({ directories: ['./skills'] });
+
+    expect(() =>
+      readAiChatConfig(
+        mockServices.rootConfig({
+          data: { aiChat: { llm, skills: { directories: ['   '] } } },
+        }),
+      ),
+    ).toThrow(/aiChat\.skills\.directories/);
   });
 });
 

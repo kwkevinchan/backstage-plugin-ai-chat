@@ -30,9 +30,17 @@ import {
   type ToolResultBody,
 } from '../../domain';
 import type { HarnessEvent, RunOutcome } from '../events';
+import type { Skill } from '../ports/extensions';
 import type { ItemDraft } from '../ports/ItemLog';
 import type { ValidationResult } from '../ports/ToolGateway';
 import type { AdvanceRunDeps, AdvanceRunRequest } from '../types';
+import {
+  LOAD_SKILL_TOOL_ID,
+  loadSkillDescriptor,
+  resolveAgentSkills,
+  skillsContextBlock,
+  validateLoadSkillInput,
+} from './skills';
 import { summarize } from './summarize';
 
 /** What one model call left: how many calls the model asked for, or an end. */
@@ -97,15 +105,27 @@ export async function* callModel(
 ): AsyncGenerator<HarnessEvent, CallModelResult> {
   // `usage.stepsUsed` already counts the steps the log shows for this run.
   const step = usage.stepsUsed + 1;
-  const available = await deps.tools.list(req.ctx);
+  const activeSkills = resolveAgentSkills(req.agent, deps.extensions.skills);
+  const externalTools = (await deps.tools.list(req.ctx)).filter(
+    tool => tool.id !== LOAD_SKILL_TOOL_ID,
+  );
+  const loadSkillTool =
+    activeSkills.length > 0 ? loadSkillDescriptor(activeSkills) : undefined;
+  const loadSkillOffered =
+    loadSkillTool !== undefined &&
+    decidePolicy(loadSkillTool, req.policy) !== 'deny';
+  const available = [
+    ...externalTools,
+    ...(loadSkillTool ? [loadSkillTool] : []),
+  ];
   const byId = new Map(available.map(tool => [tool.id, tool]));
   // A tool the policy denies is not offered to the model.
   const offered = available.filter(
     tool => decidePolicy(tool, req.policy) !== 'deny',
   );
-  // Context providers come with the extension points (P3).
+  // Context providers come with the extension points (P3-02).
   const extra = {
-    context: [],
+    context: loadSkillOffered ? [skillsContextBlock(activeSkills)] : [],
     tools: offered,
     images: deps.model.capabilities.images,
   };
@@ -237,6 +257,7 @@ export async function* callModel(
       call,
       callId: call.callId,
       descriptor,
+      activeSkills,
       step,
       position,
       overLimit: position >= remaining,
@@ -286,12 +307,14 @@ async function classify(
     call: RequestedCall;
     callId: string;
     descriptor: ToolDescriptor | undefined;
+    activeSkills: readonly Skill[];
     step: number;
     position: number;
     overLimit: boolean;
   },
 ): Promise<{ body: ToolCallBody; result?: ToolResultBody }> {
-  const { call, callId, descriptor, step, position, overLimit } = args;
+  const { call, callId, descriptor, activeSkills, step, position, overLimit } =
+    args;
   const base = { kind: 'tool_call' as const, callId, toolId: call.toolId };
   const refuse = (
     status: 'denied' | 'invalid',
@@ -345,7 +368,10 @@ async function classify(
   }
   let validation: ValidationResult;
   try {
-    validation = await deps.tools.validate(call.toolId, fields.input, req.ctx);
+    validation =
+      call.toolId === LOAD_SKILL_TOOL_ID
+        ? validateLoadSkillInput(fields.input, activeSkills)
+        : await deps.tools.validate(call.toolId, fields.input, req.ctx);
   } catch {
     return refuse('invalid', 'The input could not be checked.', {
       ...fields,

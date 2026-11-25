@@ -52,4 +52,66 @@ describe('AiChatHarnessRegistry', () => {
     ).toThrow('agent guide is already registered');
     expect(registry.agents()[0].systemPrompt).toBe('Keep this one.');
   });
+
+  it('registers skills in order with normalized single-line descriptions and rejects invalid or duplicate skills', async () => {
+    const registry = new AiChatHarnessRegistry();
+    registry.addSkill({
+      id: 'deploy-failure',
+      description: '  Debug\n  deployments on example.com. ',
+      load: async ctx => `loaded:${ctx.agentId}:${ctx.step}`,
+    });
+    registry.addSkill({
+      id: 'rollback',
+      description: 'Roll back a service.',
+      load: () => 'rollback body',
+    });
+
+    const skills = registry.skills();
+    expect(skills.map(s => [s.id, s.description])).toEqual([
+      ['deploy-failure', 'Debug deployments on example.com.'],
+      ['rollback', 'Roll back a service.'],
+    ]);
+    await expect(
+      skills[0].load({
+        sessionId: 's1',
+        runId: 'r1',
+        agentId: 'sre',
+        step: 2,
+        principal: { user: 'u' },
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toBe('loaded:sre:2');
+
+    expect(() =>
+      registry.addSkill({
+        id: 'deploy-failure',
+        description: 'Duplicate',
+        load: () => 'x',
+      }),
+    ).toThrow('skill deploy-failure is already registered');
+
+    expect(() =>
+      registry.addSkill({
+        id: 'bad id',
+        description: 'Bad',
+        load: () => 'x',
+      }),
+    ).toThrow(/skill bad id/);
+
+    expect(() =>
+      registry.addSkill({
+        id: 'empty-desc',
+        description: '   ',
+        load: () => 'x',
+      }),
+    ).toThrow(/description must not be empty/);
+
+    expect(() =>
+      registry.addSkill({
+        id: 'no-fn',
+        description: 'Missing loader',
+        load: 'not-a-fn' as never,
+      }),
+    ).toThrow(/load must be a function/);
+  });
 });

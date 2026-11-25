@@ -5,15 +5,16 @@ Extension point for backend modules of the unofficial
 
 A module depends on this package, and not on the backend plugin or the
 harness. It receives `aiChatHarnessExtensionPoint` and can call `addAgent`
-to register an agent: a system prompt, toolsets, skills, a model, limits and
-`planning: required`. `skills`, `model`, `limits` and `planning` are recorded
-on the agent and are not applied yet.
+to register an agent (a system prompt, toolsets, skills, a model, limits and
+`planning: required`; `model`, `limits` and `planning` are recorded on the
+agent and are not applied yet) and `addSkill` to register a skill whose full
+instructions are loaded lazily when the model calls `load_skill`.
 
 An id that the configuration also defines, or that another module already
-registered, stops the backend. The system prompt is wrapped with the same
-built-in rules as a configured agent.
+registered, stops the backend. The system prompt of an extension agent is
+wrapped with the same built-in rules as a configured agent.
 
-Further methods (context providers, skills, hooks, a model client) are added
+Further methods (context providers, hooks, a model client) are added
 on later items, together with the loop calling them.
 
 ```ts
@@ -30,6 +31,12 @@ export default createBackendModule({
         harness.addAgent({
           id: 'guide',
           systemPrompt: 'You help people find documentation on example.com.',
+          skills: ['getting-started'],
+        });
+        harness.addSkill({
+          id: 'getting-started',
+          description: 'Walks new readers through docs on example.com.',
+          load: async () => 'Start with the docs index on example.com.',
         });
       },
     });
