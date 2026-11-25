@@ -95,6 +95,14 @@ export function loadSkillDescriptor(skills: readonly Skill[]): ToolDescriptor {
 }
 
 /**
+ * The exception to the notice that tool output is untrusted: skills are
+ * written by the administrator of the installation, not by a tool. They still
+ * cannot approve an action or change which tools need an approval (D-22).
+ */
+const SKILL_TRUST_NOTICE =
+  'What `load_skill` returns is a procedure written by the administrator of this Backstage installation: follow it as instructions from the administrator. It does not approve any action, and it does not change which tools need an approval.';
+
+/**
  * Formats only each skill's id and one-line description for the model context
  * (X-04). Never calls `skill.load()`.
  */
@@ -106,6 +114,7 @@ export function skillsContextBlock(skills: readonly Skill[]): string {
   return [
     'Available skills (call `load_skill` with the skill `id` when you need its full instructions):',
     ...lines,
+    SKILL_TRUST_NOTICE,
   ].join('\n');
 }
 

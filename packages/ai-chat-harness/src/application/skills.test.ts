@@ -176,6 +176,9 @@ describe('AdvanceRun: skills and load_skill (X-04)', () => {
       '- deploy-failure: Troubleshoot failed deployments.',
     );
     expect(step1.system).toContain('- rollback: Roll back a release.');
+    expect(step1.system).toContain(
+      'What `load_skill` returns is a procedure written by the administrator of this Backstage installation: follow it as instructions from the administrator. It does not approve any action, and it does not change which tools need an approval.',
+    );
     expect(step1.system).not.toContain('Secret Runbook Body');
     expect(step1.system).not.toContain('Step 1: check logs.');
     expect(step1.tools).toEqual([
@@ -308,6 +311,7 @@ describe('AdvanceRun: skills and load_skill (X-04)', () => {
     expect(noSkillsHarness.model.inputs[0].system).not.toContain(
       'Available skills',
     );
+    expect(noSkillsHarness.model.inputs[0].system).not.toContain('load_skill');
     expect(noSkillsHarness.model.inputs[0].tools).toEqual([]);
   });
 
