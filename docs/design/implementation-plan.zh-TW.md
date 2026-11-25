@@ -852,7 +852,7 @@ flowchart LR
   - 用使用者的身分：搜尋引擎收到的是送出訊息的那個使用者的 credentials，不是服務身分。同一個問題，兩個使用者拿到的結果不同：每個人只拿到自己有 `catalog.entity.read` 權限的 entity 的文件。沒有權限的文件不在工具輸出裡，也不在下一步送給模型的內容裡。
   - 回答要附來源連結：每一筆結果的 `document.location` 和 `document.title` 在工具輸出裡，下一步送給模型。
   - 搜尋失敗：搜尋引擎丟出帶內部網址的錯誤時，工具結果是 `error`，訊息是 `Request failed with 500 Internal Server Error`。內部網址不在工具結果、送給模型的內容和使用者收到的串流裡。Run 繼續，模型照常回答。
-  - 搜尋不回應：Run 在 `runTimeoutSeconds` 到時結束。使用者收到的串流不含內部網址。
+  - 搜尋不回應：Run 在 `runTimeoutSeconds` 到時結束，狀態是 `completed`、`endReason` 是 `timeout`。這個呼叫沒有結果，模型不再被呼叫。每個工具呼叫自己的逾時是 P-02（P3-07）。
   - 輸出上限：輸出超過 `aiChat.maxToolOutputChars` 時，存下並送給模型的輸出是裁過的 `{ text, originalLength }`，序列化後不超過上限，結果標 `truncated`。
   - 輸入驗證：少了 `term`、`term` 不是字串、`types` 有不存在的文件類型時，呼叫是 `invalid`，action 不執行。
   - 空的 `term`：官方的 schema 接受。結果一樣只有使用者有權限的文件。
