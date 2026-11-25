@@ -22,7 +22,7 @@ import {
   type Skill,
   type ToolGateway,
 } from '@kwkevinchan/ai-chat-harness';
-import { assertOwner, type Principal } from '../../domain';
+import { AgentNotFound, assertOwner, type Principal } from '../../domain';
 import type { AgentCatalog, SessionRepository } from '../ports';
 
 /** A tool of a session, as the screen shows it. */
@@ -70,8 +70,10 @@ export class ListSessionTools {
     }));
 
     if (agents && skills && skills.length > 0) {
-      const agent = await agents.agent(session.agentId);
-      const activeSkills = resolveAgentSkills(agent, skills);
+      const agent = await agentOrUndefined(agents, session.agentId);
+      // An agent removed from the configuration offers no skill; the session
+      // still lists its other tools.
+      const activeSkills = agent ? resolveAgentSkills(agent, skills) : [];
       if (activeSkills.length > 0) {
         const descriptor = loadSkillDescriptor(activeSkills);
         const policy = await agents.policy();
@@ -87,6 +89,18 @@ export class ListSessionTools {
     }
 
     return result;
+  }
+}
+
+async function agentOrUndefined(
+  agents: Pick<AgentCatalog, 'agent'>,
+  agentId: string,
+) {
+  try {
+    return await agents.agent(agentId);
+  } catch (error) {
+    if (error instanceof AgentNotFound) return undefined;
+    throw error;
   }
 }
 
