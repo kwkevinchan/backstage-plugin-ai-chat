@@ -16,7 +16,9 @@
 
 import {
   AdvanceRun,
+  emptyExtensions,
   type Clock,
+  type Extensions,
   type IdGenerator,
   type ItemLog,
   type ModelClient,
@@ -107,6 +109,11 @@ export type HostPorts = {
    */
   notifier?: Notifier;
   /**
+   * Registrations from backend modules. The loop receives them and does not
+   * call them yet. Omitted means nothing was registered.
+   */
+  extensions?: Extensions;
+  /**
    * `aiChat.retention.days`. Sessions last changed longer ago than this are
    * deleted. 0 keeps every session. Defaults to 90.
    */
@@ -144,7 +151,7 @@ export function createHost(ports: HostPorts) {
     run: runs,
     clock,
     ids: ports.ids,
-    extensions: {},
+    extensions: ports.extensions ?? emptyExtensions(),
   });
   // The supervisor calls `afterRun` for the queue, and the queue starts runs
   // on the supervisor: the function is set once both exist.

@@ -47,21 +47,25 @@ BACKSTAGE_TEST_DATABASE_POSTGRES16_CONNECTION_STRING=postgresql://postgres:postg
 
 ## Layout
 
-| Package                         | Role                                                                             |
-| ------------------------------- | -------------------------------------------------------------------------------- |
-| `ai-chat-backend`               | Backend plugin `ai-chat`; depends only on `ai-chat-harness` and `ai-chat-common` |
-| `ai-chat`                       | Frontend plugin; depends on no other package of this repository                  |
-| `app`, `app-next`               | Development apps (legacy and new frontend system); private                       |
-| `backend`                       | Development backend; private                                                     |
-| `ai-chat-harness` (`packages/`) | Core of the agent loop; published, depends on no `@backstage/*` package          |
-| `ai-chat-common`                | Types shared by the frontend and the backend; published                          |
+| Package                          | Role                                                                                                |
+| -------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `ai-chat-backend`                | Backend plugin `ai-chat`; depends on `ai-chat-harness`, `ai-chat-common` and `ai-chat-node`         |
+| `ai-chat-node`                   | Extension point for backend modules; depends only on `ai-chat-harness`                              |
+| `ai-chat-backend-module-example` | Private example module, not published; depends only on `ai-chat-node` and the Backstage backend API |
+| `ai-chat`                        | Frontend plugin; depends on no other package of this repository                                     |
+| `app`, `app-next`                | Development apps (legacy and new frontend system); private                                          |
+| `backend`                        | Development backend; private                                                                        |
+| `ai-chat-harness` (`packages/`)  | Core of the agent loop; published, depends on no `@backstage/*` package                             |
+| `ai-chat-common`                 | Types shared by the frontend and the backend; published                                             |
 
 `yarn constraints` (`yarn.config.cjs`) checks the directions: frontend
 packages never depend on backend packages or Node-only packages, and the other
 way round, and a published package never on a private one. The backend
-depends on the core (its adapters implement the ports of the core); the core
-depends on no other package of this repository. The core
-(`packages/ai-chat-harness`) lists no `@backstage/*` package as a runtime
+depends on the harness, the common types and `ai-chat-node`. `ai-chat-node`
+depends only on the harness. A backend module of this plugin depends only on
+`ai-chat-node`, not on the host or the harness. The core
+(`packages/ai-chat-harness`) depends on no other package of this repository
+and lists no `@backstage/*` package as a runtime
 dependency, and its lint rules (`packages/ai-chat-harness/.eslintrc.js`, tested in
 `src/lintRules.test.ts`) keep `domain/` from importing `application/`, and
 keep both circles from running code, reaching the file system or opening a
@@ -85,7 +89,7 @@ they import no `@backstage/*`, `express`, `knex` or Node.js module, and
 | `host.ts`               | `createHost()`: wires the loop, the supervisor and the use cases on the ports                                                                                     |
 | `adapters/http/`        | The router, the controllers, `presenters/uiMessageStream.ts` (the only place that knows the stream protocol), `sse.ts`, the request schemas and `errorMapping.ts` |
 | `adapters/persistence/` | `Knex*` implementations of the ports, on the tables of `migrations/`                                                                                              |
-| `adapters/backstage/`   | Tools (Actions Registry), agent catalog (configuration), auditor, `principalFromRequest`                                                                          |
+| `adapters/backstage/`   | Tools (Actions Registry), agent catalog (configuration and extension registrations), auditor, `principalFromRequest`                                              |
 | `adapters/model/`       | The `ModelClient` of the core on an OpenAI-compatible server                                                                                                      |
 | `adapters/system/`      | The clock and the UUID generator                                                                                                                                  |
 | `migrations/`           | Knex migrations (a folder of the package, not of `src`)                                                                                                           |

@@ -41,7 +41,8 @@
     "pluginPackages": [
       "@kwkevinchan/backstage-plugin-ai-chat",
       "@kwkevinchan/backstage-plugin-ai-chat-backend",
-      "@kwkevinchan/backstage-plugin-ai-chat-common"
+      "@kwkevinchan/backstage-plugin-ai-chat-common",
+      "@kwkevinchan/backstage-plugin-ai-chat-node"
     ]
   },
   "files": [
@@ -69,6 +70,7 @@
     "@backstage/types": "backstage:^",
     "@kwkevinchan/ai-chat-harness": "workspace:^",
     "@kwkevinchan/backstage-plugin-ai-chat-common": "workspace:^",
+    "@kwkevinchan/backstage-plugin-ai-chat-node": "workspace:^",
     "ajv": "^8.20.0",
     "express": "^4.22.0",
     "express-promise-router": "^4.1.0",
@@ -79,6 +81,7 @@
     "@backstage/backend-defaults": "backstage:^",
     "@backstage/backend-test-utils": "backstage:^",
     "@backstage/cli": "backstage:^",
+    "@kwkevinchan/backstage-plugin-ai-chat-backend-module-example": "workspace:^",
     "@types/compression": "^1.7.5",
     "@types/eslint": "^8.56.0",
     "@types/express": "^4.17.6",
