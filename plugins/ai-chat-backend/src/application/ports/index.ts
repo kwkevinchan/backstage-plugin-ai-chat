@@ -26,4 +26,6 @@ export type {
 export type { Logger } from './Logger';
 export type { QueuedMessageRepository } from './QueuedMessageRepository';
 export type { RunRepository, RunTransitionTarget } from './RunRepository';
+export type { AccessControl } from './AccessControl';
 export type { SessionRepository } from './SessionRepository';
+export type { ShareRepository } from './ShareRepository';

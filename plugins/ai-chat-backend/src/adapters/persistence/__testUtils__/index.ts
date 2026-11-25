@@ -24,6 +24,7 @@ import { KnexItemLog } from '../KnexItemLog';
 import { KnexQueuedMessageRepository } from '../KnexQueuedMessageRepository';
 import { KnexRunRepository } from '../KnexRunRepository';
 import { KnexSessionRepository } from '../KnexSessionRepository';
+import { KnexShareRepository } from '../KnexShareRepository';
 
 /**
  * A migrated database (SQLite, or PostgreSQL 16 when CI sets it; see
@@ -51,6 +52,7 @@ export async function createPersistence(
     }),
     attachments: new KnexAttachmentStore(knex, clock, ids),
     queue: new KnexQueuedMessageRepository(knex, clock, ids),
+    shares: new KnexShareRepository(knex, clock, ids),
     cleanup: () => knex.destroy(),
   };
 }

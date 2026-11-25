@@ -4,8 +4,59 @@
 
 ```ts
 import { BackendFeature } from '@backstage/backend-plugin-api';
+import { ConditionalPolicyDecision } from '@backstage/plugin-permission-common';
+import { Conditions } from '@backstage/plugin-permission-node';
+import { PermissionCondition } from '@backstage/plugin-permission-common';
+import type { PermissionCriteria } from '@backstage/plugin-permission-common';
+import { PermissionRule } from '@backstage/plugin-permission-node';
+import { ResourcePermission } from '@backstage/plugin-permission-common';
 
 // @public
 const aiChatPlugin: BackendFeature;
 export default aiChatPlugin;
+
+// @public
+export const aiChatSessionConditions: Conditions<{
+  isSessionOwner: PermissionRule<
+    SessionAccess,
+    SessionAccessQuery,
+    'ai-chat-session',
+    {
+      userRefs: string[];
+    }
+  >;
+  isSharedWith: PermissionRule<
+    SessionAccess,
+    SessionAccessQuery,
+    'ai-chat-session',
+    {
+      subjectRefs: string[];
+    }
+  >;
+}>;
+
+// @public
+export const createAiChatConditionalDecision: (
+  permission: ResourcePermission<'ai-chat-session'>,
+  conditions: PermissionCriteria<PermissionCondition<'ai-chat-session'>>,
+) => ConditionalPolicyDecision;
+
+// @public
+export type SessionAccess = {
+  ownerRef: string;
+  shares: ReadonlyArray<{
+    subjectRef: string;
+    revokedAt?: string;
+  }>;
+};
+
+// @public
+export type SessionAccessQuery =
+  | {
+      ownerRef: string;
+    }
+  | {
+      subjectRef: string;
+      revoked: false;
+    };
 ```

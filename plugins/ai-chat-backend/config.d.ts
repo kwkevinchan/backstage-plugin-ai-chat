@@ -174,6 +174,31 @@ export interface Config {
       [actionId: string]: 'allow' | 'ask' | 'deny';
     };
     /**
+     * Limits for a share that keeps updating. Read at startup. Creating or
+     * changing a share is not in this version, so these values are only
+     * checked and kept. When `sharing` or `live` is left out, the defaults
+     * are used.
+     */
+    sharing?: {
+      live?: {
+        /**
+         * Whether a share may keep updating. Defaults to true. `false` is
+         * stored as false.
+         */
+        enabled?: boolean;
+        /**
+         * Hours a live share lasts when nobody picks a life. A positive
+         * integer, at most `maxHours`. Defaults to 24.
+         */
+        defaultHours?: number;
+        /**
+         * Longest life of a live share, in hours. A positive integer, at
+         * least `defaultHours`. Defaults to 72.
+         */
+        maxHours?: number;
+      };
+    };
+    /**
      * Most characters of the output of an action that are stored and sent to
      * the model; the rest is cut. At least 100 (a smaller value stops the
      * backend at startup). Defaults to 20000.

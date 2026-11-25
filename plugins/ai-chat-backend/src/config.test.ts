@@ -55,8 +55,47 @@ describe('readAiChatConfig', () => {
       systemPrompt: undefined,
       actions: { include: [], exclude: [] },
       maxToolOutputChars: 20000,
+      sharing: { live: { enabled: true, defaultHours: 24, maxHours: 72 } },
       retentionDays: 90,
     });
+  });
+
+  it('reads sharing.live and refuses a life that is not a positive integer or longer than the maximum', () => {
+    const read = (sharing?: JsonObject) =>
+      readAiChatConfig(
+        mockServices.rootConfig({
+          data: {
+            aiChat: { llm, ...(sharing === undefined ? {} : { sharing }) },
+          },
+        }),
+      ).sharing;
+    expect(read()).toEqual({
+      live: { enabled: true, defaultHours: 24, maxHours: 72 },
+    });
+    expect(read({})).toEqual({
+      live: { enabled: true, defaultHours: 24, maxHours: 72 },
+    });
+    expect(read({ live: { enabled: false } })).toEqual({
+      live: { enabled: false, defaultHours: 24, maxHours: 72 },
+    });
+    expect(read({ live: { defaultHours: 12, maxHours: 48 } })).toEqual({
+      live: { enabled: true, defaultHours: 12, maxHours: 48 },
+    });
+    expect(() => read({ live: { defaultHours: 0 } })).toThrow(
+      /sharing\.live\.defaultHours must be a positive integer/,
+    );
+    expect(() => read({ live: { defaultHours: 1.5 } })).toThrow(
+      /sharing\.live\.defaultHours must be a positive integer/,
+    );
+    expect(() => read({ live: { maxHours: 1.5 } })).toThrow(
+      /sharing\.live\.maxHours must be a positive integer/,
+    );
+    expect(() => read({ live: { defaultHours: 80 } })).toThrow(
+      /sharing\.live\.defaultHours \(80\) must not be greater than sharing\.live\.maxHours \(72\)/,
+    );
+    expect(() => read({ live: { maxHours: 10 } })).toThrow(
+      /sharing\.live\.defaultHours \(24\) must not be greater than sharing\.live\.maxHours \(10\)/,
+    );
   });
 
   it('reads the limits of the inserted and the queued messages, and refuses a value that is not a positive integer', () => {
@@ -280,6 +319,7 @@ describe('the configuration in the READMEs', () => {
         runTimeoutSeconds: 300,
         context: { tokenBudget: 100000, keepRecentSteps: 6 },
         maxToolOutputChars: 20000,
+        sharing: { live: { enabled: true, defaultHours: 24, maxHours: 72 } },
         retentionDays: 90,
       });
       const catalog = new ConfigAgentCatalog(root, logger);

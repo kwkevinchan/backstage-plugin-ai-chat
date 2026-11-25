@@ -20,3 +20,4 @@ export { KnexItemLog } from './KnexItemLog';
 export { KnexQueuedMessageRepository } from './KnexQueuedMessageRepository';
 export { KnexRunRepository } from './KnexRunRepository';
 export { KnexSessionRepository } from './KnexSessionRepository';
+export { KnexShareRepository } from './KnexShareRepository';
