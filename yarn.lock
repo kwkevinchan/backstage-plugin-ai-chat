@@ -5109,6 +5109,8 @@ __metadata:
     "@backstage/cli": "backstage:^"
     "@backstage/config": "backstage:^"
     "@backstage/errors": "backstage:^"
+    "@backstage/plugin-permission-common": "backstage:^"
+    "@backstage/plugin-permission-node": "backstage:^"
     "@backstage/plugin-signals-node": "backstage:^"
     "@backstage/types": "backstage:^"
     "@kwkevinchan/ai-chat-harness": "workspace:^"
@@ -5138,6 +5140,7 @@ __metadata:
   resolution: "@kwkevinchan/backstage-plugin-ai-chat-common@workspace:plugins/ai-chat-common"
   dependencies:
     "@backstage/cli": "backstage:^"
+    "@backstage/plugin-permission-common": "backstage:^"
     "@backstage/types": "backstage:^"
   languageName: unknown
   linkType: soft

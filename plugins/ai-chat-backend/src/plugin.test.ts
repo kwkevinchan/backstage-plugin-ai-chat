@@ -197,6 +197,22 @@ describe('aiChatPlugin', () => {
     }
   });
 
+  it('registers the session read permission and its rules', async () => {
+    const server = await startBackend();
+    const metadata = await request(server)
+      .get('/api/ai-chat/.well-known/backstage/permissions/metadata')
+      .set('Authorization', alice);
+    expect(metadata.status).toBe(200);
+    expect(metadata.body.permissions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'ai-chat.session.read' }),
+      ]),
+    );
+    expect(
+      metadata.body.rules.map((rule: { name: string }) => rule.name).sort(),
+    ).toEqual(['IS_SESSION_OWNER', 'IS_SHARED_WITH']);
+  });
+
   it('refuses a request without credentials (401) and a service token (403)', async () => {
     const server = await startBackend();
     const none = await request(server).get('/api/ai-chat/sessions');

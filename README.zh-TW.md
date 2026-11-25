@@ -88,6 +88,11 @@ aiChat:
       maxBytesPerInput: 20971520 # 一次 Run 和一次模型呼叫的圖片位元組上限；預設 20 MB，不小於 maxPerMessage 乘 maxBytes
       maxPendingPerSession: 12 # 上傳了但還沒進訊息的圖片；預設 12
       tokensPerImage: 1600 # 一張圖片在預算裡的估計 token；預設 1600
+  sharing: # 啟動時讀取；這一版還不能建立或修改分享
+    live:
+      enabled: true # 分享能不能持續更新；預設 true
+      defaultHours: 24 # 沒指定時，持續更新的分享維持幾小時；預設 24
+      maxHours: 72 # 最長幾小時；預設 72
   retention:
     days: 90 # 最後一次變更超過這麼多天的對話會刪除；0 代表保留；預設 90
 backend:
@@ -96,6 +101,8 @@ backend:
 ```
 
 只有 `aiChat.llm` 是必填。啟動時會讀取並檢查整段設定，值不對會讓後端無法啟動。
+
+**分享的上限。** `aiChat.sharing.live` 在啟動時讀取。`enabled`（預設 true）是分享能不能持續更新。`defaultHours`（預設 24）是沒有指定時，持續更新的分享維持幾小時；`maxHours`（預設 72）是最長的時數。沒寫 `sharing` 或 `live` 就用這些預設。`enabled: false` 會存成 false。兩個小時數都必須是正整數，而且 `defaultHours` 不能大於 `maxHours`，否則後端無法啟動。這一版還不能建立或修改分享，所以這些值只會被檢查並留下。
 
 **圖片。** `aiChat.llm.images: true` 時，使用者可以在訊息附上 PNG、JPEG、WebP 或 GIF。**圖片會隨訊息送到模型伺服器**；伺服器在組織之外時，圖片就離開組織。不允許時保持預設（關閉）。圖片存在後端的資料庫、屬於一段對話，只有擁有者讀得到；沒有進任何訊息的圖片 24 小時後刪除。
 

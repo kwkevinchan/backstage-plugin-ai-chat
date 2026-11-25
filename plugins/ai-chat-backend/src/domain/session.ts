@@ -58,12 +58,23 @@ export type SessionPatch = {
   enabledToolsets?: string[];
 };
 
+/**
+ * The owner is the user entity ref stored on the session. A group ref is not
+ * the owner.
+ */
+export function isSessionOwner(
+  session: Pick<Session, 'ownerRef'>,
+  userRef: string,
+): boolean {
+  return session.ownerRef === userRef;
+}
+
 /** Throws `NotSessionOwner` unless the principal owns the session. */
 export function assertOwner(
   session: Pick<Session, 'id' | 'ownerRef'>,
   principal: Pick<Principal, 'userRef'>,
 ): void {
-  if (session.ownerRef !== principal.userRef) {
+  if (!isSessionOwner(session, principal.userRef)) {
     throw new NotSessionOwner(session.id);
   }
 }

@@ -5,6 +5,10 @@
 ```ts
 import type { JsonObject } from '@backstage/types';
 import type { JsonValue } from '@backstage/types';
+import { ResourcePermission } from '@backstage/plugin-permission-common';
+
+// @public
+export const aiChatSessionReadPermission: ResourcePermission<'ai-chat-session'>;
 
 // @public
 export interface ChatAttachment {
