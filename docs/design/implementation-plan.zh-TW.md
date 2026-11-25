@@ -838,6 +838,33 @@ flowchart LR
   - 四個時機都可以同步回傳，或回傳 `Promise`。`afterToolCall` 沒有 `signal`：停止時迴圈不再等它。
   - 從沒啟動迴圈就結束的 Run（`SendMessage`、`StartNextQueued` 的 `not_started`）不觸發 `onRunEnd`：它沒有跑過任何一步。
 
+### P3-06 TechDocs 搜尋的 action
+
+- **範圍**：
+  - 用 Backstage 官方的 `search:query`（`@backstage/plugin-search-backend` 2.1.8，Backstage 1.56.2；V-05），不另外寫 action。安裝 search backend 和 TechDocs 的 collator（`@backstage/plugin-search-backend-module-techdocs`），把 `search` 加進 `backend.actions.pluginSources`，再放進一個工具組，對話就能用它。這一項不改 ai-chat 的程式。
+  - 讀取：用搜尋結果的 `document.text`。TechDocs 的 collator 把每一頁的每一段各存成一筆文件，`text` 是那一段的全文，`location` 是那一段的網址。不另外讀 TechDocs 的頁面。
+  - 測試：`plugins/ai-chat-backend` 的整合測試在同一個測試 backend 裡跑 ai-chat 和真的 search backend。工具清單和呼叫走 Backstage 的 actions service 與 actions registry（HTTP）。search 的 permission 過濾是 search backend 自己的（`permission.enabled: true`）。搜尋引擎是測試用的，collator 只登記 `techdocs` 這個文件類型和它的權限，不抓真的 TechDocs。
+  - 文件：README（中英）寫設定範例、需要的設定、限制。
+  - 不做：畫面、引用的呈現、ai-chat 自己的 search action、每個工具呼叫的逾時（P-02，在 P3-07）、改 Markdown 的連結規則。
+- **依賴**：無。
+- **驗收**：
+  - ai-chat 看得到並呼叫官方的 action：`backend.actions.pluginSources` 有 `search`、工具組有 `search:query` 時，對話的工具清單有 `search:query`，標成唯讀。政策沒寫時直接執行，不等核准。
+  - 用使用者的身分：搜尋引擎收到的是送出訊息的那個使用者的 credentials，不是服務身分。同一個問題，兩個使用者拿到的結果不同：每個人只拿到自己有 `catalog.entity.read` 權限的 entity 的文件。沒有權限的文件不在工具輸出裡，也不在下一步送給模型的內容裡。
+  - 回答要附來源連結：每一筆結果的 `document.location` 和 `document.title` 在工具輸出裡，下一步送給模型。
+  - 搜尋失敗：搜尋引擎丟出帶內部網址的錯誤時，工具結果是 `error`，訊息是 `Request failed with 500 Internal Server Error`。內部網址不在工具結果、送給模型的內容和使用者收到的串流裡。Run 繼續，模型照常回答。
+  - 搜尋不回應：Run 在 `runTimeoutSeconds` 到時結束。使用者收到的串流不含內部網址。
+  - 輸出上限：輸出超過 `aiChat.maxToolOutputChars` 時，存下並送給模型的輸出是裁過的 `{ text, originalLength }`，序列化後不超過上限，結果標 `truncated`。
+  - 輸入驗證：少了 `term`、`term` 不是字串、`types` 有不存在的文件類型時，呼叫是 `invalid`，action 不執行。
+  - 空的 `term`：官方的 schema 接受。結果一樣只有使用者有權限的文件。
+- **規格沒寫、實作選定的地方**：
+  - 官方已經有 action，所以不重做（V-05）。X-08 的「搜尋」是 `search:query`，「讀取」是搜尋結果的 `document.text`。TechDocs backend 的 `techdocs:get-techdocs-metadata` 只回傳網站的目錄和中繼資料，不回傳內容；要用的話可以放進同一個工具組。
+  - 使用者的權限由 search backend 套用。它只在 `permission.enabled: true` 時才用 `AuthorizedSearchEngine` 過濾結果；沒有開 permission 時，每個人都看得到全部的結果。README 寫明這一條。TechDocs 文件的權限是 `catalog.entity.read`，對象是文件所屬的 entity。
+  - 連結：TechDocs 的 collator 預設的 `location` 是相對路徑（`/docs/:namespace/:kind/:name/:path`）。對話的 Markdown 只把 `http`、`https`、`mailto` 做成連結（S-02），所以相對路徑只顯示成文字。要讓連結可以點，設 `search.collators.techdocs.locationTemplate` 成完整的網址。README 寫這個設定和一段請模型附上 `location` 的 Agent 系統提示範例。
+  - 錯誤訊息：Backstage 的 actions service 把 action 的錯誤轉成 `Request failed with <狀態碼> <狀態文字>`，原本的訊息只留在 `cause`。`ActionsToolGateway` 只送出 `message`，所以不另外遮蔽。
+  - 輸出上限照現有的裁切：裁的是整段 JSON，後面幾筆結果的 `location` 可能被裁掉。官方的 `pageLimit` 預設 10；結果太長時，可以在 Agent 的系統提示請模型用較小的 `pageLimit`。
+  - `term` 的長度沒有上限，空字串也可以：這是官方 schema 的規則，ai-chat 不另外限制。
+  - 示範 backend（`packages/backend`）不裝 search 和 TechDocs：它沒有 TechDocs 的內容可以搜尋，煙霧測試也不用它。整合測試已經跑真的 search backend。
+
 ### P4：擴大
 
 | 編號  | 工作項目           | 大小 | 完成的需求       | PR  | 狀態 |
@@ -858,7 +885,7 @@ flowchart LR
 | V-02 | `actionsServiceRef` 還在 alpha。下一版 Backstage 的介面有沒有變                                                                                                                                                                                         | `ActionsToolGateway` 一個檔案 | P1-06 已確認（見下）。每次升級 Backstage 時檢查               |
 | V-03 | SQLite 和 PostgreSQL 對「唯一索引裡的空值」的行為是否一致                                                                                                                                                                                               | H-03、T-07 的做法             | P1-05 的測試。已驗證：一致，空值不算重複                      |
 | V-04 | 模型的 token 計算。OpenAI 相容的端點不一定回傳用量                                                                                                                                                                                                      | 上下文預算的準確度            | P1-07。沒有用量時用字數估計                                   |
-| V-05 | Backstage 有沒有官方的 search 或 TechDocs action                                                                                                                                                                                                        | P3-06 的範圍                  | P3-06 開始前                                                  |
+| V-05 | Backstage 有沒有官方的 search 或 TechDocs action                                                                                                                                                                                                        | P3-06 的範圍                  | P3-06 已確認（見下）：有官方的 `search:query`                 |
 | V-06 | 使用者 token 的有效期在各種登入方式下是多少                                                                                                                                                                                                             | `runTimeoutSeconds` 的上限    | P1-08 已確認（見下）                                          |
 | V-07 | `auditor` 在沒有 HTTP 請求時（自動送出排隊的訊息）能不能記事件，要帶什麼身分                                                                                                                                                                            | 自動送出的稽核寫法            | PI-03 已確認（見下）                                          |
 | V-08 | OpenAI 相容的端點是否接受 `image_url` 的 data URL；各家對圖片大小和型別的限制                                                                                                                                                                           | 模型 adapter 的圖片格式       | PI-05 已確認（見下）                                          |
@@ -897,6 +924,15 @@ V-10 的確認結果（PI-03）：
 - 把模型輸出的 `append` 改成 `FOR SHARE` 再升級（並且在 `sessions` 之後才更新 `runs`）時，這些測試失敗：見 PR 說明的破壞測試。
 - SQLite：knex 把 `forShare`、`forUpdate`、`forNoKeyUpdate` 編成空字串；測試用的 SQLite 資料庫只有一條連線（`min: 1, max: 1`，`databasePool.test.ts` 檢查），所有 transaction 排隊，結果仍是「插入先」或「結束先」。`inputFlows.test.ts` 用 `aroundTransition` 把兩種順序各做一次。
 - 連線池開到多條的 SQLite 檔案資料庫（`better-sqlite3`，pool `max` 2，`busy_timeout` 200 ms，journal mode `delete` 和 `wal` 各 40 輪）：兩條連線都先讀到 Run 是 `running`，再同時寫入。沒有「兩邊都 commit」。插入寫入成功，結束的 `UPDATE` 得到 `SQLITE_BUSY`（`database is locked`），Run 維持 `running`，訊息留在紀錄裡。這不是「插入先」（結束應得到 `UnreadMessages`，Run 繼續）也不是「結束先」。`RunSupervisor` 只把 `UnreadMessages` 當成重讀，別的錯誤會把 Run 標成失敗。所以只支援一條 SQLite 連線：啟動時 `assertSingleSqliteConnection` 要求 pool 的 `max` 是 1（knex 對 SQLite 的預設，`databasePool.test.ts` 檢查測試用的資料庫）。`max` 不是 1 時 backend 不起來（`sqliteConnection.test.ts`，plugin 的啟動測試也擋）。正式環境用 PostgreSQL。Backstage 的 `Sqlite3Connector` 自己不改 pool，沿用 knex 的預設；有人在 `knexConfig.pool` 把 `max` 調大才會被擋。
+
+V-05 的確認結果（P3-06，Backstage 1.56.2，讀 npm 上這一版的套件的 `dist`）：
+
+- `@backstage/plugin-search-backend` 2.1.8 用 `actionsRegistryServiceRef` 註冊 `query`（id 是 `search:query`，`dist/actions/createQueryAction.cjs.js`）。它標 `readOnly: true`。輸入是 `term`、`types`、`filters`、`pageLimit`（預設 10）、`pageCursor`；輸出是 `results`（每一筆有 `type`、`document.title`、`document.text`、`document.location`、`highlight`、`rank`）、`nextPageCursor`、`totalItems`、`hasMoreResults`。它用呼叫者的 `credentials` 呼叫搜尋引擎，結果去掉 `authorization`，只留 `http`、`https` 和相對路徑的 `location`。
+- 搜尋引擎在 `permission.enabled: true` 時是 `AuthorizedSearchEngine`（`dist/plugin.cjs.js`、`dist/service/AuthorizedSearchEngine.cjs.js`）：照每個文件類型的 `visibilityPermission` 和每筆文件的 `authorization.resourceRef` 過濾。HTTP 的 `/api/search/query` 和這個 action 用同一個引擎。
+- `@backstage/plugin-search-backend-module-techdocs` 0.4.19 的 collator：類型 `techdocs`，`visibilityPermission` 是 `catalog.entity.read`，`resourceRef` 是文件所屬的 entity，`location` 預設 `/docs/:namespace/:kind/:name/:path`，可以用 `search.collators.techdocs.locationTemplate` 改（`dist/collators/DefaultTechDocsCollatorFactory.cjs.js`）。
+- `@backstage/plugin-techdocs-backend` 2.4.0 註冊 `get-techdocs-metadata`（`techdocs:get-techdocs-metadata`，`dist/actions/createGetTechdocsMetadataAction.cjs.js`）：唯讀，權限 `techdocs.actions.read`，用 `onBehalfOf` 使用者的 token 讀 TechDocs 的中繼資料。它不回傳頁面的內容。
+- `@backstage/backend-defaults` 的 `DefaultActionsService.invoke` 在回應不是 2xx 時丟 `ResponseError.fromResponse`，訊息只有 `Request failed with <狀態碼> <狀態文字>`。
+- 所以 P3-06 用官方的 `search:query`，不另外寫 action。
 
 V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `ActionsService` 有 `list({ credentials })`，回傳 `{ actions }`；和 `invoke({ id, input?, secrets?, credentials })`，回傳 `{ output }`，沒有 signal 參數。`ActionsServiceAction` 有 `id`、`title`、`description`、`schema.input`、`schema.secrets?` 和 `attributes.readOnly`、`destructive`、`idempotent`。`ActionsToolGateway` 只用這些。
 
