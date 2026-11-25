@@ -1,11 +1,11 @@
 # AI Chat Harness 程式架構
 
-| 欄位     | 內容                                                                                                                                         |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| 狀態     | 已定案，P1 完成（P1-01 到 P1-11）。PI 進行中：核心（PI-02）已實作，其餘見第 13 節                                                            |
-| 版本     | 1.1（2026-11-24）                                                                                                                            |
-| 對應規格 | [harness-spec.zh-TW.md](harness-spec.zh-TW.md) 1.1，主要是 D-15 到 D-19、D-23、D-25，以及需求 4.9（A）。PI 是 D-27 到 D-30 和需求 4.11（IN） |
-| 下一份   | [implementation-plan.zh-TW.md](implementation-plan.zh-TW.md)                                                                                 |
+| 欄位     | 內容                                                                                                                                               |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 狀態     | 已定案，P1 完成（P1-01 到 P1-11）。PU（前端對齊 assistant-ui）規劃中，分層見第 9 節                                                                |
+| 版本     | 1.2（2026-11-25）                                                                                                                                  |
+| 對應規格 | [harness-spec.zh-TW.md](harness-spec.zh-TW.md) 1.2，主要是 D-15 到 D-19、D-23、D-25、D-31，以及需求 4.9（A）。PI 是 D-27 到 D-30 和需求 4.11（IN） |
+| 下一份   | [implementation-plan.zh-TW.md](implementation-plan.zh-TW.md)                                                                                       |
 
 這份文件說明程式怎麼分層、每一層放什麼、介面長什麼樣。它不重複規格裡的「為什麼」。
 
@@ -1119,7 +1119,7 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 
 ## 9. 前端：`ai-chat`
 
-前端的分層比較輕，但是方向一樣：畫面元件不直接呼叫 `fetch`，狀態的規則是純函式。
+前端的分層比較輕，但是方向一樣：畫面元件不直接呼叫 `fetch`，狀態的規則是純函式。畫面用 assistant-ui 的無樣式 primitives；狀態留在 `useSessionChat`（D-31）。
 
 ```
 plugins/ai-chat/src/
@@ -1133,27 +1133,81 @@ plugins/ai-chat/src/
     AiChatClient.ts         實作 AiChatApi；串流的路由直接回傳 Response
     AiChatTransport.ts      實作 ai 的 ChatTransport：送訊息、決定、接續、接回串流
     describeError.ts
-  application/              React hooks，包 useChat
+    assistantUi/            全專案只有這個目錄和 ui/ 可以 import @assistant-ui/*
+      sessionRuntime.ts     useExternalStoreRuntime，把下面幾個組起來
+      toThreadMessage.ts    我們的訊息 → ThreadMessageLike
+      queueAdapter.ts       後端的排隊和插入 → 它的兩條道
+      threadListAdapter.ts  Session API → RemoteThreadListAdapter
+      attachmentAdapter.ts  我們的上傳 → AttachmentAdapter
+  application/              不動：React hooks，包 useChat
     useSessionChat.ts       一個 Session 的 useChat：還原、決定、接續、停止、重新讀取
-    useSessionList.ts       Session 列表
+    useSessionList.ts       Session 列表（PU-05 之後刪掉，改由 threadListAdapter 負責）
     useToolsets.ts          GET /toolsets
     useSessionTools.ts      GET /sessions/:id/tools
     usePageContext.ts       B-01：路徑和 entityRef
-  ui/
+  ui/                       assistant-ui 的 primitives，套 @backstage/ui 的樣式
     ChatPage.tsx            路由（SE-01）、Session 列表、新對話
     SessionView.tsx         一個 Session：Toolset、訊息、輸入框
-    MessageList.tsx  Composer.tsx  ToolsetPanel.tsx
-    ToolCallCard.tsx        ApprovalCard、ToolCallRow
+    ToolsetPanel.tsx        自己畫（assistant-ui 的模型裡沒有工具組）
+    ToolCallCard.tsx        吃工具元件的 props：核准、拒絕、誰決定的、等待中、失敗
     ShareDialog.tsx（P2）  SharedBanner.tsx（P2）  PlanPanel.tsx（P3）
   alpha.tsx                 新 frontend system 的 extension
   plugin.ts                 舊 frontend system
 ```
 
-前端用 `@ai-sdk/react` 的 `useChat`，加我們的 `ChatTransport`。型別、路徑、`messageIdOfRun` 來自 `ai-chat-common`，前端沒有自己的一份。
+`application/`、`domain/`、其餘 `adapters/`（`AiChatClient`、`AiChatTransport`）不變。狀態仍用 `@ai-sdk/react` 的 `useChat`，加我們的 `ChatTransport`。畫面不直接用 `useChat`：`sessionRuntime` 以 `useExternalStoreRuntime` 把它接到 assistant-ui。型別、路徑、`messageIdOfRun` 來自 `ai-chat-common`，前端沒有自己的一份。
+
+整頁的樹是 `useRemoteThreadListRuntime({ adapter: threadListAdapter, threadId: 網址上的 id, onThreadIdChange: navigate, runtimeHook: () => sessionRuntime })`。側邊面板只有一段對話、沒有列表，所以不用 `useRemoteThreadListRuntime`。
+
+**版本。** `@assistant-ui/react` 鎖在 0.15.38，`@assistant-ui/react-markdown` 鎖在 0.14.26，不用 `^`。升級要另開單。不裝 `@assistant-ui/react-ai-sdk`、帶樣式的 `@assistant-ui/react-ui` / `@assistant-ui/styles`，也不用 Tailwind 或 shadcn。樣式用 `@backstage/ui` 的 token 和現有的 CSS module。Markdown 用 `MarkdownTextPrimitive` 加 `remark-gfm`：禁用圖片、不加 `rehype-raw`（不渲染原始 HTML）、連結只允許 `http`、`https`、`mailto`（S-02，由測試鎖住）。
+
+**各 adapter 對到的 API**
+
+排隊和插入（`queueAdapter`，實作 `ExternalThreadQueueAdapter`）。adapter 不存狀態，清單來自後端，操作完重新讀取。不用它內建的瀏覽器佇列。
+
+| 它的                      | 我們的來源或動作                                 | 我們的 API                                              |
+| ------------------------- | ------------------------------------------------ | ------------------------------------------------------- |
+| `items`（queue 道）       | 後端的排隊清單                                   | `GET /sessions/:id` 的 `queue`                          |
+| `steerItems`（steer 道）  | 已插入、模型還沒讀到的訊息                       | 現在 `PendingInserts` 顯示的那些（來自插入 API 和紀錄） |
+| `steer(msg)`              | Run 是 `running`：插入                           | `POST …/runs/:runId/messages`                           |
+|                           | Run 在等核准：改成排隊（IN-18 規定這時只能排隊） | `POST …/queue`                                          |
+| `enqueue(msg)`            | 有進行中的 Run：排隊                             | `POST …/queue`                                          |
+|                           | 沒有 Run：直接送出，開新的 Run                   | `POST …/runs`                                           |
+| `edit(id, msg)`           | 改排隊的訊息                                     | `PATCH …/queue/:id`                                     |
+| `remove(id)`              | 刪排隊的訊息                                     | `DELETE …/queue/:id`                                    |
+| `move(id, 佇列內的位置)`  | 調整順序                                         | `PUT …/queue/order`                                     |
+| `move(id, 移到 steer 道)` | 「現在就送」：把排隊的那一則改成插入             | `POST …/queue/:queuedId/insert`（PU-07）                |
+
+Session 列表（`threadListAdapter`，實作 `RemoteThreadListAdapter`）。
+
+| 它的方法                       | 我們的 API                     | 備註                                                           |
+| ------------------------------ | ------------------------------ | -------------------------------------------------------------- |
+| `list()`                       | `GET /sessions`                | 帶搜尋字串和「含封存」                                         |
+| `fetch(id)`                    | `GET /sessions/:id`            |                                                                |
+| `initialize()`                 | `POST /sessions`               | 送出第一則訊息時才建立，和現在一樣                             |
+| `rename`                       | `PATCH /sessions/:id`（title） |                                                                |
+| `archive`、`unarchive`         | `PATCH`（archived）            |                                                                |
+| `delete`                       | `DELETE /sessions/:id`         |                                                                |
+| `generateTitle`                | 後端自己產生標題               | 回傳一個等到列表讀到標題（或逾時）才結束的串流，不另外呼叫模型 |
+| `updateCustom`                 | 釘選                           |                                                                |
+| `custom`                       | `pinned`、`activity`           | 釘選和即時狀態放這裡                                           |
+| `threadId`、`onThreadIdChange` | 網址 `/ai-chat/:id`            | 受控的寫法，給 URL 路由用                                      |
+
+附件（`attachmentAdapter`，實作 `AttachmentAdapter`）。`add` 先檢查型別、大小、張數；`send` 換成我們的上傳，回傳帶附件 id 的附件；`remove` 處理還沒送出的草稿。訊息裡的圖片仍用帶身分的請求載入，轉成 object URL。
+
+**assistant-ui 的模型裡沒有、我們自己畫的**
+
+| 我們的功能                                | 做法                                                            |
+| ----------------------------------------- | --------------------------------------------------------------- |
+| 工具組面板                                | 留著自己的，放在訊息串上方                                      |
+| 佇列暫停和「繼續」（IN-15）               | 自己的橫幅加按鈕，呼叫 `POST …/queue/resume`                    |
+| 「Agent 沒有讀到」和「再送一次」（IN-12） | 沿用現在的資料片段 `unread`，在訊息串裡用自己的元件畫           |
+| 上限提示                                  | adapter 的方法丟錯時，自己顯示在佇列區塊                        |
+| 搜尋框                                    | 自己放一個輸入框，傳給 `list()`。釘選的排序由後端的 `list` 決定 |
 
 **網址（SE-01）**。頁面掛在 `<path>/*` 底下：`<path>` 是新對話，`<path>/<sessionId>` 是那一段 Session，直接打開網址會載入它。第一則訊息先 `POST /sessions`，再導向新 Session 的網址（訊息放在 location state），該頁載入之後送出它，並把 state 清掉。
 
-**列表（SE-03、SE-04）**。後端的 `GET /sessions?q=`、`PATCH`（改名、釘選、封存）和自動標題已可用；`AiChatClient` 也帶了對應的方法。目前的側邊列表仍只列出最近的 Session。搜尋、釘選、封存與「顯示已封存」的畫面在後續的前端工作。自動標題寫在 `run.ended` 送出、串流結束之後，仍在迴圈裡，所以稍後再讀列表才看得到標題。
+**列表（SE-03、SE-04）**。後端的 `GET /sessions?q=`、`PATCH`（改名、釘選、封存）和自動標題已可用；`AiChatClient` 也帶了對應的方法。列表畫面改用 `threadListAdapter` 和 `ThreadListPrimitive`（PU-05）。搜尋框由我們自己畫；釘選的排序由後端的 `list` 決定；`pinned` 和 `activity` 放在 `custom`。自動標題寫在 `run.ended` 送出、串流結束之後，仍在迴圈裡，所以稍後再讀列表才看得到標題。
 
 **一個 Session 一個 `useChat`**。`SessionView` 以 Session id 當 key，載入 `GET /sessions/:id` 之後才建立；`useChat` 的 `messages` 是 `itemsToMessages` 還原的結果。
 
@@ -1222,19 +1276,20 @@ plugins/ai-chat/src/
 
 3. **`no-restricted-imports`** 在 `src/domain` 和 `src/application` 禁止 `@backstage/*`、`express`、`knex` 和全域的 `fetch`。宿主的這兩圈還禁止所有 Node.js 內建模組（含 `node:*`）。核心的 `src/domain` 禁止所有 Node.js 內建模組，`src/application` 禁止能執行程式碼、碰檔案系統或開網路的那幾個（`fs`、`child_process`、`vm`、`worker_threads`、`cluster`、`module`、`net`、`http`、`https`、`dgram`）和 `eval`、`new Function`；兩圈（測試檔除外）還用 `no-restricted-globals` 和 `no-restricted-syntax` 擋 `require`、`process`、`globalThis`、`global`、`module`、動態 `import()`、`import x = require()`（S-01：核心唯一的作用管道是工具；這是原始碼的靜態檢查，不是沙箱）。`src/domain` 另外禁止 `async`、`await` 和 `Promise`。
 
-實際的設定在 `plugins/ai-chat-backend/.eslintrc.js`，和核心一樣，`import/no-restricted-paths` 是白名單：`domain` 只能 import `domain`，`application` 只能 import `domain` 和 `application`（`src/index.ts`、`plugin.ts`、`config.ts` 都不行）。測試在 `src/lintRules.test.ts`。`adapters/http` 和 `adapters/persistence` 互不 import 的那兩條，測試在同一個檔案：兩邊互相 import 會被擋，兩邊 import `domain`、`application` 或 `adapters/backstage` 不會。
+實際的設定在 `plugins/ai-chat-backend/.eslintrc.js`，和核心一樣，`import/no-restricted-paths` 是白名單：`domain` 只能 import `domain`，`application` 只能 import `domain` 和 `application`（`src/index.ts`、`plugin.ts`、`config.ts` 都不行）。測試在 `src/lintRules.test.ts`。`adapters/http` 和 `adapters/persistence` 互不 import 的那兩條，測試在同一個檔案：兩邊互相 import 會被擋，兩邊 import `domain`、`application` 或 `adapters/backstage` 不會。 前端加一條規則或測試：只有 `adapters/assistantUi/` 和 `ui/` 可以 import `@assistant-ui/*`（PU-02）。
 
 ## 12. 要改東西時動哪裡
 
-| 要做的事                       | 動哪裡                                                                                       | 不用動                               |
-| ------------------------------ | -------------------------------------------------------------------------------------------- | ------------------------------------ |
-| 換資料庫，或加快取             | `adapters/persistence`                                                                       | 其他全部                             |
-| 換串流協定                     | `presenters/uiMessageStream.ts`、前端的 `adapters/AiChatTransport.ts`                        | 核心、use case                       |
-| 換模型供應商                   | `adapters/model`，或用擴充點註冊                                                             | 核心                                 |
-| 加一種 Item                    | 核心的 `domain/item.ts`、`nextAction.ts`、`modelInput.ts`；宿主的 `visibility.ts`；presenter | 資料庫的 schema（`payload` 是 JSON） |
-| 加一條政策規則                 | 核心的 `domain/policy.ts` 和它的測試                                                         | adapters                             |
-| 把迴圈搬到獨立的 worker        | 寫新的宿主，重用核心和 `Knex*`                                                               | 核心                                 |
-| 接到別的畫面（例如別人的前端） | 多寫一個 presenter 和 router                                                                 | 核心、use case、資料庫               |
+| 要做的事                        | 動哪裡                                                                                       | 不用動                               |
+| ------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------ |
+| 換資料庫，或加快取              | `adapters/persistence`                                                                       | 其他全部                             |
+| 換串流協定                      | `presenters/uiMessageStream.ts`、前端的 `adapters/AiChatTransport.ts`                        | 核心、use case                       |
+| 換模型供應商                    | `adapters/model`，或用擴充點註冊                                                             | 核心                                 |
+| 加一種 Item                     | 核心的 `domain/item.ts`、`nextAction.ts`、`modelInput.ts`；宿主的 `visibility.ts`；presenter | 資料庫的 schema（`payload` 是 JSON） |
+| 加一條政策規則                  | 核心的 `domain/policy.ts` 和它的測試                                                         | adapters                             |
+| 把迴圈搬到獨立的 worker         | 寫新的宿主，重用核心和 `Knex*`                                                               | 核心                                 |
+| 接到別的畫面（例如別人的前端）  | 多寫一個 presenter 和 router                                                                 | 核心、use case、資料庫               |
+| 換畫面元件，或對齊 assistant-ui | `adapters/assistantUi/` 和 `ui/`                                                             | `application/`、`domain/`、後端      |
 
 ## 13. 輸入：圖片、插入、排隊（PI）
 
@@ -1693,6 +1748,8 @@ controller 依序做（`controllers/attachments.ts`；`route()` 先取出身分�
 - 沒有新的唯一索引：同一則排隊訊息只送一次靠 transaction 內「刪除影響 1 列」和 `runs.active_session_id` 的唯一索引。
 
 ### 13.9 前端
+
+以下是輸入（插入、排隊、圖片）在前端的狀態和行為規則。畫面元件在 PU 改用 assistant-ui 的 primitives（見第 9 節）；這些規則不變。
 
 **狀態**
 

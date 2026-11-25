@@ -2,11 +2,11 @@
 
 | 欄位     | 內容                                                                                                                   |
 | -------- | ---------------------------------------------------------------------------------------------------------------------- |
-| 狀態     | 已定案，P1 完成（P1-01 到 P1-11）。PI 規劃中                                                                           |
-| 版本     | 1.1（2026-11-24）                                                                                                      |
-| 對應文件 | 規格：[harness-spec.zh-TW.md](harness-spec.zh-TW.md) 1.1。程式架構：[architecture.zh-TW.md](architecture.zh-TW.md) 1.1 |
+| 狀態     | 已定案，P1 完成（P1-01 到 P1-11）。PU（前端對齊 assistant-ui）規劃中                                                   |
+| 版本     | 1.2（2026-11-25）                                                                                                      |
+| 對應文件 | 規格：[harness-spec.zh-TW.md](harness-spec.zh-TW.md) 1.2。程式架構：[architecture.zh-TW.md](architecture.zh-TW.md) 1.2 |
 
-這份文件把 PI 和四期拆成工作項目。一個工作項目是一個 PR。每一項寫明範圍、完成哪些需求、怎麼驗收。
+這份文件把 PI、PU 和四期拆成工作項目。一個工作項目是一個 PR。每一項寫明範圍、完成哪些需求、怎麼驗收。
 
 ## 1. 結論
 
@@ -15,6 +15,7 @@
 - **第 5 到第 9 個 PR 把宿主換成新架構。** 換完的那一個 PR（P1-09）是唯一會改變對外行為的地方。
 - **PI（輸入：圖片、插入、排隊）有 7 個 PR，排在 P2 之前。** PI-01 只改文件。
 - **P2 有 7 個 PR，P3 有 10 個，P4 有 3 個。**
+- **PU（前端對齊 assistant-ui）有 7 個 PR，排在 P2 之後。** PU-01 只改文件。畫面改用 assistant-ui 的無樣式 primitives；狀態仍留在 `useSessionChat`。
 - **PR #1 已經合併當基準**（2026-11-24）。它的 repo 基礎設施、畫面元件、模型呼叫留下來；backend 的迴圈、儲存、路由在 P1 重寫，舊的資料表直接刪除。
 
 大小的意思：S 是一個檔案群、幾百行以內；M 是一個完整的模組；L 是跨多個模組。這不是工時的估計。
@@ -189,7 +190,7 @@ flowchart LR
 
 ### P1-10 前端
 
-- **範圍**：前端照程式架構第 9 節分層。接新的 API 和協定。Session 有自己的網址（SE-01）。每則訊息帶上頁面上下文（B-01）。Session 裡可以開關 Toolset（T-11）。新的狀態：已過期可重送、結果不明。
+- **範圍**：前端照程式架構第 9 節分層。接新的 API 和協定。Session 有自己的網址（SE-01）。每則訊息帶上頁面上下文（B-01）。Session 裡可以開關 Toolset（T-11）。新的狀態：已過期可重送、結果不明。訊息串、輸入框、工具卡片和 Markdown 的畫面在 PU-02 重做。
 - **接續**：開啟 Session 時 `resumable` 為真（Run 在等核准，但所有呼叫都已決定），自動送接續請求。
   - 畫面在自己剛送出決定之後，不要因為看到 `resumable` 就自動接續。另一個分頁可能剛好在「決定已寫入、還沒 `acquireLease`」時看到 `resumable`；最後只會啟動一個迴圈，但做決定的那個用戶端可能拿不到串流，要等 P2 的 FollowSession 跨 backend 接回才補得上。
   - `reconnectToStream` 打 `GET /sessions/:id/stream`（204 回 `null`）；`decision` 回 JSON 時只更新那一張卡片，回 SSE 時接在同一則訊息上；停止按鈕呼叫 `POST /sessions/:id/runs/:runId/cancel`；Toolset 清單來自 `GET /toolsets`；`data-notice` 的 `code` 給畫面翻譯。從紀錄還原時助理訊息的 id 用 `messageIdOfRun`，並略過 `summary` Item。
@@ -311,6 +312,7 @@ flowchart LR
   - 「等待讀取」區、`data-inserted` 的顯示、`unread` 的標示和「再送一次」。
   - 排隊清單：顯示、修改、刪除、上下移；暫停的提示和「繼續」；Run 結束後接上自動送出的新 Run。
   - `itemsToMessages`：`data-inserted` 的位置、`unread`；`lastRunInterrupted` 和 `lastUserText` 以這個 Run 的第一則訊息為準（略過插入的訊息，架構 13.9 的「再送一次」）；`useSessionChat`：插入、排隊的狀態；`AiChatApi` 和 `AiChatClient` 加對應的呼叫。
+  - 佇列區塊、插入的顯示、輸入框的排隊和插入，畫面在 PU-03 重做。
 - **依賴**：PI-03。
 - **驗收**：
   - 元件測試：Run 進行中輸入框可用，各種狀態（含暫停）的 Enter 和 Ctrl 加 Enter 各送到正確的呼叫；失敗時文字還在輸入框。插入得到 409 的三種處理：`InsertLimitReached` 或 Run 是 `waiting_approval`，改排隊；Run 是 `running` 但 `runId` 不同，對新的 `runId` 再插入；沒有進行中的 Run，直接送出。
@@ -354,7 +356,7 @@ flowchart LR
 
 ### PI-06 前端：圖片
 
-- **範圍**：附加按鈕、貼上、拖放；草稿的縮圖、移除、上傳進度和失敗；訊息裡的縮圖（帶身分的 `fetch`，object URL）；`input-config` 說不能讀圖片時不顯示按鈕；新對話頁附加圖片時先建立 Session。
+- **範圍**：附加按鈕、貼上、拖放；草稿的縮圖、移除、上傳進度和失敗；訊息裡的縮圖（帶身分的 `fetch`，object URL）；`input-config` 說不能讀圖片時不顯示按鈕；新對話頁附加圖片時先建立 Session。附件按鈕、草稿和訊息裡的縮圖，畫面在 PU-04 重做。
 - **依賴**：PI-04、PI-05。
 - **驗收**：
   - 元件測試：三種附加方式各加一張；型別不對、太大、超過張數的檔案不上傳並顯示原因；移除後送出的內容沒有它；上傳失敗（413）時文字還在；模型不能讀圖片時沒有按鈕，貼上圖片不上傳。
@@ -465,7 +467,178 @@ flowchart LR
 - **第 5 節的安全測試，這一項測的**：超過 `up_to_seq` 的 Item 不在 `visibleItems`（也就是 `GetSession` 回給被分享的人的內容）。超過 `outputs_up_to_seq` 的工具輸出只有狀態。`summary` 同一條規則。不在群組、離開群組、`revoked_at` 已填，都讀不到。
 - **留給後面的安全測試**：被分享的人直接打 HTTP（含用序號把 Item 再讀一次）是 P2-04，這一項不加分享路由。附件位元組的 HTTP 讀取是 P2-04 的 IN-19，`ReadAttachment` 仍只允許擁有者。複製是 P2-05。接回端點是 P2-06，`FollowSession` 仍只允許擁有者。
 
-## 6. P3 和 P4
+### P2-06 斷線接回和即時狀態
+
+- **範圍**：後端，以及不含畫面的前端部分。斷線後接回串流（A-07）、`useSessionChat` 的接回，以及列表用的 `activity` 資料。列表上的即時狀態標籤在 PU-05。
+- **依賴**：P1 的 `FollowSession`。和分享無關，可以和 P2-03 以後的分享項目平行。
+
+### P2-07 側邊面板和入口元件
+
+- **範圍**：後端，以及不含畫面的前端部分。新增 `ai-chat-react`、面板外殼、Utility API、`<AiChatLauncher>`。面板裡的對話內容在 PU-06 換成新的訊息串。
+- **依賴**：P1 的 Session 和前端。和分享無關，可以和 P2-03 以後的分享項目平行。
+
+## 6. PU：前端對齊 assistant-ui
+
+完成後的狀態：訊息串、輸入框、附件、工具卡片、Session 列表、排隊和插入，都用 assistant-ui 的無樣式 primitives。樣式用 `@backstage/ui` 的 token。狀態留在 `useSessionChat`。工具組面板、佇列暫停和「繼續」、「Agent 沒有讀到」和「再送一次」、上限提示、搜尋框，由我們自己畫。
+
+```mermaid
+flowchart LR
+  PU01["PU-01 文件"] --> PU02["PU-02 地基"]
+  PU02 --> PU03["PU-03 排隊和插入"]
+  PU07["PU-07 現在就送"] --> PU03
+  PU02 --> PU04["PU-04 圖片附件"]
+  PU02 --> PU05["PU-05 Session 列表"]
+  PU02 --> PU06["PU-06 側邊面板的內容"]
+```
+
+| 編號  | 工作項目                              | 大小 | 依賴                         | 驗收重點                                                                  | PR  | 狀態 |
+| ----- | ------------------------------------- | ---- | ---------------------------- | ------------------------------------------------------------------------- | --- | ---- |
+| PU-01 | 文件                                  | S    | 無                           | 規格 D-31、架構第 9 節、這一節的驗收清單。三份文件一致                    | #43 | 完成 |
+| PU-02 | 地基：runtime、訊息串、工具、Markdown | L    | PU-01                        | runtime、訊息轉換、訊息串、工具卡片和核准、Markdown、契約測試、瀏覽器 e2e |     |      |
+| PU-03 | 排隊和插入                            | M    | PU-02、PU-07                 | `queueAdapter`、佇列區塊、暫停和未讀的小元件、契約測試                    |     |      |
+| PU-04 | 圖片附件                              | M    | PU-02、PI-06 的後端          | `attachmentAdapter`、草稿和訊息裡的縮圖                                   |     |      |
+| PU-05 | Session 列表                          | M    | PU-02、P2-01 和 P2-06 的後端 | `threadListAdapter`、搜尋、釘選、封存、即時狀態                           |     |      |
+| PU-06 | 側邊面板的內容                        | S    | PU-02、P2-07                 | 面板接上新的訊息串；和整頁同時開著同一段對話時兩邊都正確                  |     |      |
+| PU-07 | 後端：把排隊的訊息改成插入            | M    | 無                           | 「現在就送」的 API 一次做完；和 `startNext` 並行時只有一邊成功            |     |      |
+
+順序：PU-07 和 PU-01 沒有互相依賴，都可以先做。PU-02 做完之前，PU-03 到 PU-06 不能開始。PU-03、PU-04、PU-05 彼此獨立。PU-03 還要等 PU-07。PU-04 要等 PI-06 的後端；PU-05 要等 P2-01 和 P2-06 的後端；PU-06 要等 P2-07。
+
+### PU-01 文件
+
+- **範圍**：只改文件。規格（D-31、D-19 的理由、S-02、第 12 節）、程式架構第 9 節、這一節。不改程式、不改 `package.json`。
+- **依賴**：無。
+- **驗收**：
+  - 三份文件互相一致，沒有還寫著舊分層的段落。
+  - PU-02 到 PU-07 的驗收清單寫完，每一條能對到測試。
+  - `yarn prettier:check` 和邊界檢查通過。
+
+### PU-02 前端地基：runtime、訊息串、工具卡片、Markdown
+
+- **範圍**：
+  - `plugins/ai-chat` 加 `@assistant-ui/react` 0.15.38、`@assistant-ui/react-markdown` 0.14.26、`remark-gfm`。版本寫死，不用 `^`。不裝 `@assistant-ui/react-ai-sdk`、`@assistant-ui/react-ui`、`@assistant-ui/styles`、Tailwind。
+  - `adapters/assistantUi/toThreadMessage.ts`：把 `ChatUiMessage` 轉成 `ThreadMessageLike`。
+  - `adapters/assistantUi/sessionRuntime.ts`：`useExternalStoreRuntime`，接上 `useSessionChat` 的 `messages`、`isRunning`、送出、Stop（`onCancel`）、核准（`onRespondToToolApproval`）。
+  - 訊息串用 `ThreadPrimitive`、`MessagePrimitive.Parts`，自動捲動用它的 viewport。輸入框用 `ComposerPrimitive`（Input、Send、Cancel）：這一項先做「沒有 Run 時送出」和 Stop；Run 進行中的插入和排隊沿用現有的 `QueuePanel`、`PendingInserts`，PU-03 再換。
+  - `ToolCallCard` 的內容保留，改成吃工具元件的 props（`args`、`result`、`approval`、`respondToApproval`）。核准、拒絕、誰決定的、等待中、失敗的顯示都要在。
+  - 文字用 `MarkdownTextPrimitive` 加 `remark-gfm`。設定：`disallowedElements` 含 `img`；不加 `rehype-raw`；`urlTransform` 只放行 `http`、`https`、`mailto`。刪掉 `Markdown.tsx`。
+  - 樣式沿用 `chat.module.css` 和 `@backstage/ui` 的 token。按鈕統一用 `@backstage/ui` 的 `Button`；先試 primitive 的 `asChild` 能不能包它，不行就用 primitive 自己的按鈕套 BUI 的 class，在 PR 說明寫結果。
+  - 工具組面板、notice、錯誤、「再送一次」照舊，放在訊息串的對應位置。
+  - 不加排隊和插入的新畫面、附件、列表、側邊面板。不用它內建的瀏覽器佇列。不做程式碼高亮。
+- **依賴**：PU-01。
+- **驗收**：
+  - 契約測試：`toThreadMessage` 涵蓋文字、工具呼叫（輸入、結果、失敗、核准的每個狀態）、資料片段（`data-run`、`unread`、notice），以及串流到一半、等核准、核准後、拒絕、工具失敗、Run 失敗、未讀的插入訊息。
+  - lint 規則或測試：只有 `adapters/assistantUi/` 和 `ui/` 可以 import `@assistant-ui/*`。
+  - S-02：`Markdown.test.tsx` 改成對新的元件跑。餵進 `<script>`、`![](外部網址)`、`[x](javascript:…)`、`<img onerror>`、`<iframe>`，確認畫面上沒有 `img`、`script`、`iframe`，連結沒有 `javascript:`。再加一個表格的案例確認 GFM 有效。這組測試之後不能刪、不能放寬。
+  - `ui/` 的元件測試（`SessionView`、`ToolCallCard`）改寫。`application/` 的測試不應該要改；要改的話在 PR 說明寫原因。
+  - 端對端（Playwright，在瀏覽器跑）：送出、串流、核准後接續、Stop、重新整理後接回、自動捲動。
+  - 測試輸出沒有一堆 React `act()` 警告（assistant-ui 的 store 在測試外更新）。
+  - 畫面上原本有的功能都還在（PR 說明列一張對照表）。打包大小在 PR 說明寫出前後的數字。
+
+### PU-03 前端：排隊和插入
+
+- **範圍**：
+  - `adapters/assistantUi/queueAdapter.ts` 實作 `ExternalThreadQueueAdapter`，接到 `sessionRuntime` 的 `queue`。adapter 不存狀態：清單來自後端，操作完重新讀取。給了 `queue` 之後，沒有 Run 時的送出也走 `enqueue`，不走 `onNew`，所以「沒有 Run 就直接送出」寫在 adapter 裡。
+  - 畫面用 `ComposerPrimitive.Queue`、`QueueItemPrimitive`（Text、Steer、Remove）。插入的訊息（steer 道）不畫「刪除」和「現在就送」。排隊的訊息有改、刪、上下移、「現在就送」；「現在就送」只在 Run 是 `running` 時能按。`composer.queue` 是兩條道合起來的清單，steer 在前，用 id 分辨是哪一條。
+  - 自己畫的小元件：佇列暫停的橫幅和「繼續」（IN-15）、上限 5 則的提示、409 和 404 的錯誤、暫停時輸入框的提示文字（IN-18）。
+  - 刪掉 `QueuePanel.tsx`、`PendingInserts.tsx`。不用它內建的瀏覽器佇列。不改後端。
+- **依賴**：PU-02、PU-07。
+- **驗收**：
+
+  - 契約測試：下表每個方法呼叫到對的 API；三種 Run 狀態下 `steer` 和 `enqueue` 各走哪條路。
+
+    | 方法                    | 動作                                                                                                                              |
+    | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+    | `items`                 | 後端的排隊清單（`GET /sessions/:id` 的 `queue`）                                                                                  |
+    | `steerItems`            | 已插入、還沒被讀到的訊息                                                                                                          |
+    | `steer(msg)`            | `running`：插入（`POST …/runs/:runId/messages`）。`waiting_approval`：排隊（`POST …/queue`）。沒有 Run：直接送出（`POST …/runs`） |
+    | `enqueue(msg)`          | 有 Run：排隊。沒有 Run：直接送出                                                                                                  |
+    | `edit`、`remove`        | `PATCH …/queue/:id`、`DELETE …/queue/:id`                                                                                         |
+    | `move`（佇列內）        | `PUT …/queue/order`                                                                                                               |
+    | `move`（移到 steer 道） | PU-07 的 API：`POST …/queue/:queuedId/insert`                                                                                     |
+
+  - 元件測試：IN-12 到 IN-18 原有的情境都要有。
+  - 端對端：Run 進行中插入、排隊、改、刪、調順序、「現在就送」、暫停後繼續、重新整理後清單還在。
+  - 原本有的功能都還在（PR 說明列對照表）。
+
+### PU-04 前端：圖片附件
+
+- **範圍**：
+  - `adapters/assistantUi/attachmentAdapter.ts`：`accept` 是四種圖片型別；`add` 先檢查型別、大小、張數（上限來自 `input-config`），不符合就不上傳並說明原因；`send` 呼叫我們的上傳，回傳帶附件 id 的附件；`remove` 處理還沒送出的草稿。
+  - 畫面：`ComposerPrimitive.Attachments`、`AddAttachment`、`AttachmentPrimitive`。附加按鈕、貼上、拖放；草稿縮圖、移除、上傳中、失敗。
+  - 訊息裡的圖片：用帶身分的請求載入、轉成 object URL，換圖或卸載時釋放。不能把任何使用者內容當成 URL 直接載入。讀不到時顯示檔名和「圖片已不存在」。
+  - `toThreadMessage` 加上附件；排隊項目（PU-03 已合併的話）顯示縮圖。
+  - 模型不能讀圖片時（`input-config`）：不顯示按鈕，貼上和拖放不處理。
+  - 新對話頁第一次附加就先建立 Session，第一則訊息用同一個 Session；連續附加兩張只建立一個。
+  - 只有圖片的訊息：Send 可以按；直接送出、插入、排隊都能帶圖片。
+  - 拒絕訊息不能只增不減；新對話頁附加圖片後改工具組再馬上送出，第一個 Run 要用到新的工具組。
+  - 不改圖片上限、預算、`tokensPerImage`。不改後端。
+- **依賴**：PU-02、PI-06 的後端。
+- **驗收**：
+  - PI-06 驗收清單的每一項；object URL 的釋放。
+  - 模型不能讀圖片時 Attach 不出現（測 `SessionView` 和新對話頁，不是測一個永遠是 `undefined` 的 mock）。
+  - 端對端：附加、送出、重新整理後還在、Run 進行中插入帶圖片的訊息。
+  - PR 寫 `Closes #23`。
+
+### PU-05 前端：Session 列表
+
+- **範圍**：
+  - `adapters/assistantUi/threadListAdapter.ts` 實作 `RemoteThreadListAdapter`。
+  - `ChatPage` 用 `useRemoteThreadListRuntime({ adapter, threadId: 網址上的 id, onThreadIdChange: navigate, runtimeHook })`。路由 `/ai-chat/:id` 不變；`?entityRef=` 不變。
+  - 畫面：`ThreadListPrimitive`、`ThreadListItemPrimitive`（Title、Trigger、Archive、Unarchive、Delete）。自己加：搜尋框、「顯示已封存」、釘選、改名、即時狀態的標籤（Processing、Waiting for approval、New reply）。
+  - 即時狀態：有 Signals 就訂閱；不管有沒有 Signals 都保留低頻的後備輪詢。分頁在背景時暫停輪詢。
+  - 改名欄位的初始值用實際的標題，沒有標題時是空的，不是「New conversation」。刪除失敗的錯誤，下一次操作或成功時要清掉。封存正在看的對話時留在原網址。
+  - 刪掉 `useSessionList.ts` 和 `ChatPage` 裡舊的列表程式。不用 assistant-cloud。不改後端。
+- **依賴**：PU-02、P2-01 和 P2-06 的後端。
+- **驗收**：
+
+  - 契約測試：下表每個方法呼叫到對的 API。
+
+    | 方法                   | 我們的 API                                                                       |
+    | ---------------------- | -------------------------------------------------------------------------------- |
+    | `list`                 | `GET /sessions`（帶搜尋字串和「含封存」）                                        |
+    | `fetch`                | `GET /sessions/:id`                                                              |
+    | `initialize`           | `POST /sessions`                                                                 |
+    | `rename`               | `PATCH`（title）                                                                 |
+    | `archive`、`unarchive` | `PATCH`（archived）                                                              |
+    | `delete`               | `DELETE /sessions/:id`                                                           |
+    | `generateTitle`        | 後端自己產生標題：回傳一個等到列表讀到標題（或逾時）才結束的串流，不另外呼叫模型 |
+    | `updateCustom`         | 釘選                                                                             |
+    | `custom`               | `pinned`、`activity`                                                             |
+
+  - P2-01 和 P2-06 驗收清單裡屬於畫面的每一項。
+  - 網址和目前對話的同步（點一列、直接改網址、上一頁）；樂觀更新失敗時還原。
+  - 端對端覆蓋列表的主要操作。
+  - 原本有的功能都還在（PR 說明列對照表）。
+
+### PU-06 前端：側邊面板的內容
+
+- **範圍**：
+  - 面板裡的對話用 PU-02 的 `sessionRuntime` 和訊息串。面板只有一段對話、沒有列表，所以不用 `useRemoteThreadListRuntime`。
+  - `AiChatLauncher` 帶 prompt 打開時：建立 Session、送出 prompt，走 runtime 的送出（不是另外一條路）。
+  - PU-03、PU-04 已經合併的話，面板裡的排隊、插入、附件要能用；還沒合併就在 PR 說明寫明目前的狀態。
+  - 不改 `ai-chat-react` 對外的 API。不改後端。
+- **依賴**：PU-02、P2-07。
+- **驗收**：
+  - `AiChatPanel.test.tsx` 既有的情境全部保留。
+  - 面板和整頁 `/ai-chat/:id` 同時開著同一段對話時，兩邊都要正確（各自一個 runtime，以後端為準）。
+  - 鍵盤和焦點：打開時焦點移到輸入框、Esc 關閉、關上後焦點回到原本的按鈕、按鈕有 `aria-expanded`。
+
+### PU-07 後端：把排隊的訊息改成插入（「現在就送」）
+
+- **範圍**：
+  - 規格加一條需求（IN 的下一個編號）：Run 是 `running` 時，可以把一則排隊的訊息改成插入這個 Run。結果只有兩種：那一則從佇列消失並寫進紀錄（`delivery` 是 `inserted`），或什麼都沒變並回錯誤。
+  - 程式架構：路由、use case、第 13.8 節取鎖順序表加一列。
+  - API：`POST /sessions/:id/queue/:queuedId/insert`，請求帶目前的 `runId`。OpenAPI 一起改。`ai-chat-common` 加路徑和型別；前端的 `AiChatClient` 加一個方法（不含畫面）。
+  - 同一個 transaction：刪掉那一則排隊訊息、寫入插入的 `user_message`、帶著的圖片從「保留」轉成「已使用」。插入的所有限制照舊：Run 必須是 `running`、是這個 `runId`、租約沒過期、每個 Run 最多 5 則。不符合就回 409，佇列不變。排隊的訊息已經被改掉、刪掉或送出：404。`waiting_approval` 時不能插入：409。佇列剩下的訊息順序不變。佇列暫停的狀態不因為這個動作改變。
+  - 這個動作和 `startNext`（Run 結束時自動送出最前面那一則）搶同一則時，只有一邊成功。取鎖順序要和第 13.8 節一致。
+  - 不做畫面。不改插入和排隊既有 API 的行為。
+- **依賴**：無。
+- **驗收**：
+  - 每一條行為有測試：成功、Run 不是 `running`、`waiting_approval`、`runId` 不對、超過插入上限、那一則已不存在、帶圖片。
+  - PostgreSQL 的並行測試：和 `startNext` 同時搶同一則 100 輪，每一輪恰好一邊成功，沒有重複的 `user_message`，沒有死結。
+  - 兩台 backend 的整合測試涵蓋一次成功的情境。
+
+## 7. P3 和 P4
 
 ### P3：Harness
 
@@ -531,7 +704,7 @@ flowchart LR
 
 P4 開始之前要重新評估：先看 P3-07 的平行唯讀呼叫在實際使用上夠不夠。夠的話，P4-01 可以不做。
 
-## 7. 實作時要驗證的事
+## 8. 實作時要驗證的事
 
 這些是我設計時沒有親自驗證的地方。每一項都排在用到它的 PR 之前。
 
@@ -583,23 +756,25 @@ V-10 的確認結果（PI-03）：
 
 V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `ActionsService` 有 `list({ credentials })`，回傳 `{ actions }`；和 `invoke({ id, input?, secrets?, credentials })`，回傳 `{ output }`，沒有 signal 參數。`ActionsServiceAction` 有 `id`、`title`、`description`、`schema.input`、`schema.secrets?` 和 `attributes.readOnly`、`destructive`、`idempotent`。`ActionsToolGateway` 只用這些。
 
-## 8. 風險
+## 9. 風險
 
-| 風險                                                    | 可能性                                    | 處理                                                                                           |
-| ------------------------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| P1-09 和 P1-10 是破壞性變更，中間有一段時間前後端對不上 | 確定會發生                                | 兩個 PR 一起發版。套件還在 0.x，changeset 寫明                                                 |
-| 每一步讀整段紀錄，Session 很長時變慢                    | 中                                        | 有摘要之後只讀摘要涵蓋範圍之後的 Item。P1-07 一起做。用 500 筆 Item 的 Session 測量            |
-| Run 在行程裡跑，部署時會被中斷                          | 確定會發生                                | H-11 的關機流程，加上畫面的「已過期，可以重送」。不是唯讀的工具有 D-25 保護                    |
-| 分層之後檔案變多，小改動要動好幾個檔案                  | 中                                        | 接受。換來的是裡面兩圈不啟動 Backstage 就能測。程式架構第 12 節列了每種改動要動哪裡            |
-| 持續更新的分享讓別人看到不該看的內容                    | 低，但後果嚴重                            | D-21 的三條保護，加上第 5 節的安全測試                                                         |
-| Actions Registry 的介面改變                             | 中                                        | 只有一個 adapter 用到它                                                                        |
-| 插入和 Run 結束同時發生，訊息被吞掉                     | 低（空檔很小），但使用者會以為 Agent 讀了 | 資料庫的鎖和結束前的檢查（架構 13.4）；PI-03 用 PostgreSQL 的兩個連線反覆測試                  |
-| 圖片存在資料庫：資料庫變大，每個 Step 重讀              | 中                                        | 張數和大小上限、24 小時清理；`AttachmentStore` 是 port，之後可換物件儲存。只有帶圖片的輸入才讀 |
-| 自動送出時身分快過期                                    | 中                                        | IN-16：剩下的時間不夠一個 Run 就暫停，等使用者按「繼續」                                       |
-| 圖片（截圖）含敏感資料，而且會送到模型供應商            | 中                                        | 管理員可以把模型的 `images` 設成 `false`；README 說明；稽核不記圖片和文字                      |
-| 自動送出讓前一個 Run 的錯誤擴大                         | 中                                        | 只有正常結束才送；失敗、取消、過期、因上限結束都暫停（D-30）                                   |
+| 風險                                                                                                             | 可能性                                    | 處理                                                                                                                |
+| ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| P1-09 和 P1-10 是破壞性變更，中間有一段時間前後端對不上                                                          | 確定會發生                                | 兩個 PR 一起發版。套件還在 0.x，changeset 寫明                                                                      |
+| 每一步讀整段紀錄，Session 很長時變慢                                                                             | 中                                        | 有摘要之後只讀摘要涵蓋範圍之後的 Item。P1-07 一起做。用 500 筆 Item 的 Session 測量                                 |
+| Run 在行程裡跑，部署時會被中斷                                                                                   | 確定會發生                                | H-11 的關機流程，加上畫面的「已過期，可以重送」。不是唯讀的工具有 D-25 保護                                         |
+| 分層之後檔案變多，小改動要動好幾個檔案                                                                           | 中                                        | 接受。換來的是裡面兩圈不啟動 Backstage 就能測。程式架構第 12 節列了每種改動要動哪裡                                 |
+| 持續更新的分享讓別人看到不該看的內容                                                                             | 低，但後果嚴重                            | D-21 的三條保護，加上第 5 節的安全測試                                                                              |
+| Actions Registry 的介面改變                                                                                      | 中                                        | 只有一個 adapter 用到它                                                                                             |
+| 插入和 Run 結束同時發生，訊息被吞掉                                                                              | 低（空檔很小），但使用者會以為 Agent 讀了 | 資料庫的鎖和結束前的檢查（架構 13.4）；PI-03 用 PostgreSQL 的兩個連線反覆測試                                       |
+| 圖片存在資料庫：資料庫變大，每個 Step 重讀                                                                       | 中                                        | 張數和大小上限、24 小時清理；`AttachmentStore` 是 port，之後可換物件儲存。只有帶圖片的輸入才讀                      |
+| 自動送出時身分快過期                                                                                             | 中                                        | IN-16：剩下的時間不夠一個 Run 就暫停，等使用者按「繼續」                                                            |
+| 圖片（截圖）含敏感資料，而且會送到模型供應商                                                                     | 中                                        | 管理員可以把模型的 `images` 設成 `false`；README 說明；稽核不記圖片和文字                                           |
+| 自動送出讓前一個 Run 的錯誤擴大                                                                                  | 中                                        | 只有正常結束才送；失敗、取消、過期、因上限結束都暫停（D-30）                                                        |
+| assistant-ui 主套件還在 0.x，改版快                                                                              | 高                                        | 版本鎖死（`@assistant-ui/react` 0.15.38、`@assistant-ui/react-markdown` 0.14.26，不用 `^`）；升級當成一件工作另開單 |
+| 佇列介面是 2026-10 才加的。型別沒標實驗性，但有 `__internal_` 開頭的選用欄位，`QueueItemState.prompt` 已標要移除 | 中                                        | 所有 `@assistant-ui/*` 的 import 集中在 `adapters/assistantUi/` 和 `ui/`；接法做成契約測試，升級壞了 CI 會抓到      |
 
-## 9. 每個 PR 的共同要求
+## 10. 每個 PR 的共同要求
 
 - PR 的說明列出完成的需求編號。
 - 新增或修改的規則，測試放在它所在的那一圈。domain 的規則不靠整合測試來保證。
@@ -607,7 +782,7 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 - lint、型別檢查、單元測試、API report 都通過。
 - 不出現內部系統或公司的名稱。範例用 `example.com`。
 
-## 10. 變更紀錄
+## 11. 變更紀錄
 
 | 日期       | 版本 | 變更                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ---------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -641,9 +816,9 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-25 | 1.1  | P2-02 完成（SE-05）：`aiChat.retention.days` 預設 90，`0` 不刪。每小時刪除 `updated_at` 早於期限的 Session（runs、items、queued messages、attachments 連帶刪除）。進行中的 Run 不刪；釘選和封存不例外。稽核在 Auditor，刪除不碰它。PostgreSQL 用 `FOR UPDATE SKIP LOCKED`，兩台同時跑不重複刪、也不等已鎖的列。程式架構第 5.3 節和第 13.8 節照實作更新                                                                                                                                                                                                                                                                                                                                               |
 | 2026-11-25 | 1.1  | P2-01 驗收清單：搜尋是標題的子字串（ASCII 不分大小寫，沒有標題的對不上，`%` 和 `_` 是字面字）；釘選的排在前面，同組依 `updated_at`；封存可從畫面恢復；自動標題用同一個模型，在第一次正常結束（`isNormalEnd`）後產生，最多 80 字元，只在 `title` 仍空時寫入，失敗或逾時（8 秒）不改 Run。更早失敗的 Run 不算這一輪；產生失敗不為後來的 Run 再產生                                                                                                                                                                                                                                                                                                                                                     |
 | 2026-11-25 | 1.1  | P2-01：列表可依標題搜尋、釘選、改名、封存與恢復。第一輪正常結束後用同一個模型產生標題，寫在 `run.ended` 之前；已有標題不蓋掉，產生失敗不改 Run。程式架構第 5、9 節照實作更新                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| 2026-11-25 | 1.1  | P2-01 的 PR 欄為 #35，狀態為進行中                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | 2026-11-25 | 1.1  | P2-01 範圍改為後端與非畫面的 client；列表畫面改到 PU-05。自動標題改在 `run.ended` 送出並結束訂閱之後、仍在迴圈內寫入。搜尋改為 SQL 兩邊都 `lower()`，SQLite 與 PostgreSQL 一致。狀態為「後端完成，畫面在 PU-05」                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | 2026-11-25 | 1.1  | P2-03 完成（SH-01、SH-05、SH-08、SH-09、SH-11）：範圍、依賴和驗收清單（`shares`、`visibleItems` 每一列、兩條 permission 條件、`GetSession` 的讀取、`aiChat.sharing.live` 的預設）。第 5 節裡屬於附件 HTTP、複製、接回的安全測試留到 P2-04、P2-05、P2-06                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | 2026-11-25 | 1.1  | P2-03 聯集規則更正：每一筆的工具輸出界線先限制在自己的序號上界之內，再取最大。空的 `outputs_up_to_seq` 不再在聯集時變成「全部輸出都給看」。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 2026-11-25 | 1.1  | P3-01 完成（X-01、X-02）。新增 `ai-chat-node` 與私有範例 module，設定檔讀取 `aiChat.agents`，擴充點公開 `addAgent`。模組註冊的 Agent 也套內建規則。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 2026-11-25 | 1.1  | PI-06（#41）：後端和 client 完成「只有圖片的訊息」（送出、插入、排隊）；PATCH 排隊訊息時用更新後的文字和附件一起檢查，兩個都空就回 400。畫面改在 PU-04。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 2026-11-25 | 1.2  | 新增 PU（第 6 節）：前端對齊 assistant-ui。PU-01 到 PU-07，每項有範圍、依賴和驗收清單；P3 以後的節號順延一號。P1-10、PI-04、PI-06 的說明補一句：畫面在 PU 重做。P2-01、P2-06、P2-07 的範圍改成後端，以及不含畫面的前端部分。第 9 節風險加兩條：assistant-ui 在 0.x、佇列介面是 2026-10 才加的。                                                                                                                                                                                                                                                                                                                                                                                                      |
