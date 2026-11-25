@@ -39,8 +39,10 @@ import { KnexItemLog } from '../../adapters/persistence/KnexItemLog';
 import { KnexQueuedMessageRepository } from '../../adapters/persistence/KnexQueuedMessageRepository';
 import { KnexRunRepository } from '../../adapters/persistence/KnexRunRepository';
 import { KnexSessionRepository } from '../../adapters/persistence/KnexSessionRepository';
+import { KnexShareRepository } from '../../adapters/persistence/KnexShareRepository';
 import {
   CreateSession,
+  OwnerOrShareAccessControl,
   TITLE_PROMPT_MARK,
   type HostEvent,
   type ImageSettings,
@@ -275,6 +277,8 @@ export async function createWorld(
       runs: hooked,
       queue,
       attachments,
+      shares: new KnexShareRepository(knex, clock, ids),
+      access: new OwnerOrShareAccessControl(),
       images,
       agents: catalog,
       tools: new ActionsToolGateway({

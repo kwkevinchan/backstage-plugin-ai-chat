@@ -56,6 +56,20 @@ export interface AiChatConfig {
   };
   maxToolOutputChars: number;
   /**
+   * Limits for a share that keeps updating. Always filled in: a missing block
+   * uses the defaults.
+   */
+  sharing: {
+    live: {
+      /** Whether a share may keep updating. */
+      enabled: boolean;
+      /** Hours a live share lasts when nobody picks a life. */
+      defaultHours: number;
+      /** Longest life of a live share, in hours. */
+      maxHours: number;
+    };
+  };
+  /**
    * Days a session is kept after its last change (SE-05). 0 deletes nothing.
    */
   retentionDays: number;
@@ -80,6 +94,9 @@ const DEFAULT_RUN_TIMEOUT_SECONDS = 300;
  */
 const MAX_RUN_TIMEOUT_SECONDS = 600;
 const DEFAULT_MAX_TOOL_OUTPUT_CHARS = 20000;
+const DEFAULT_LIVE_ENABLED = true;
+const DEFAULT_LIVE_HOURS = 24;
+const DEFAULT_LIVE_MAX_HOURS = 72;
 /** A cut output keeps a wrapper of about 30 characters, so a smaller limit keeps no text. */
 const MIN_MAX_TOOL_OUTPUT_CHARS = 100;
 
@@ -144,6 +161,33 @@ function readImageLimits(config: Config): ImageLimits {
     );
   }
   return limits;
+}
+
+/**
+ * `sharing` and `live` may be left out. `enabled: false` is stored as false;
+ * creating a share, which would refuse a live share then, is not in this
+ * version. The hours are positive integers and the default is not longer than
+ * the maximum.
+ */
+function readSharing(config: Config): AiChatConfig['sharing'] {
+  const enabled =
+    config.getOptionalBoolean('sharing.live.enabled') ?? DEFAULT_LIVE_ENABLED;
+  const defaultHours = positiveInt(
+    config,
+    'sharing.live.defaultHours',
+    DEFAULT_LIVE_HOURS,
+  );
+  const maxHours = positiveInt(
+    config,
+    'sharing.live.maxHours',
+    DEFAULT_LIVE_MAX_HOURS,
+  );
+  if (defaultHours > maxHours) {
+    throw new InputError(
+      `sharing.live.defaultHours (${defaultHours}) must not be greater than sharing.live.maxHours (${maxHours})`,
+    );
+  }
+  return { live: { enabled, defaultHours, maxHours } };
 }
 
 /** Reads and checks the `aiChat` section of the configuration. */
@@ -217,6 +261,7 @@ export function readAiChatConfig(root: Config): AiChatConfig {
       DEFAULT_MAX_TOOL_OUTPUT_CHARS,
       MIN_MAX_TOOL_OUTPUT_CHARS,
     ),
+    sharing: readSharing(config),
     // 0 keeps every session. Any other integer is a number of days.
     retentionDays: positiveInt(
       config,

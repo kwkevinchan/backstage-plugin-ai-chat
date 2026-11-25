@@ -57,6 +57,7 @@ import {
   type RunSettings,
 } from './application';
 import type {
+  AccessControl,
   AgentCatalog,
   AttachmentStore,
   AuditLog,
@@ -64,6 +65,7 @@ import type {
   QueuedMessageRepository,
   RunRepository,
   SessionRepository,
+  ShareRepository,
 } from './application/ports';
 import {
   DEFAULT_IMAGE_LIMITS,
@@ -79,6 +81,8 @@ export type HostPorts = {
   queue: QueuedMessageRepository;
   agents: AgentCatalog;
   attachments: AttachmentStore;
+  shares: ShareRepository;
+  access: AccessControl;
   tools: ToolGateway;
   model: ModelClient;
   audit: AuditLog;
@@ -120,6 +124,8 @@ export function createHost(ports: HostPorts) {
     logger,
     settings,
     attachments,
+    shares,
+    access,
   } = ports;
   const images: ImageSettings = ports.images ?? {
     ...DEFAULT_IMAGE_LIMITS,
@@ -174,7 +180,15 @@ export function createHost(ports: HostPorts) {
     supervisor,
     useCases: {
       createSession: new CreateSession({ sessions, agents }),
-      getSession: new GetSession({ sessions, runs, items, queue }),
+      getSession: new GetSession({
+        sessions,
+        runs,
+        items,
+        queue,
+        shares,
+        access,
+        clock,
+      }),
       listSessions: new ListSessions({ sessions }),
       updateSession: new UpdateSession({ sessions, agents }),
       deleteSession: new DeleteSession({ sessions, runs }),

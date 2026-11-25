@@ -21,3 +21,11 @@
  */
 
 export { aiChatPlugin as default } from './plugin';
+export {
+  aiChatSessionConditions,
+  createAiChatConditionalDecision,
+} from './adapters/backstage/sessionAccess';
+export type {
+  SessionAccess,
+  SessionAccessQuery,
+} from './adapters/backstage/sessionAccess';

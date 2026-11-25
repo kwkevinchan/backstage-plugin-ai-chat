@@ -964,7 +964,7 @@ items
 
 shares                                           P2
   id                    string(64)   PK
-  session_id            string(64)   not null, FK sessions on delete cascade
+  session_id            string(64)   not null, FK sessions on delete cascade, index
   subject_ref           string(255)  not null, index    user:… 或 group:…
   up_to_seq             integer      null       空值是持續更新
   outputs_up_to_seq     integer      null       空值是範圍內都給看

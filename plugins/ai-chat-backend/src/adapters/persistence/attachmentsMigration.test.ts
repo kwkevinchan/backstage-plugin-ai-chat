@@ -92,6 +92,8 @@ describe('the migration of the attachments', () => {
 
   it('can be undone: the table goes and the rest stays', async () => {
     await knex.migrate.latest(config);
+    // The migration of the shares comes after this one.
+    await knex.migrate.down(config);
     await knex.migrate.down(config);
     expect(await knex.schema.hasTable('attachments')).toBe(false);
     expect(await knex.schema.hasTable('queued_messages')).toBe(true);
