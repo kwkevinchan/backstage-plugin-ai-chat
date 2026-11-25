@@ -36,6 +36,9 @@
  *   user with images          -> says how many images it got and their types and sizes
  *   tool result               -> a sentence that repeats part of the result
  *   tool result of a refusal  -> says that nothing was done
+ *   a title request           -> a short title taken from the "User:" line
+ *                                (the system prompt starts with
+ *                                "Write a title for the conversation")
  *   anything else             -> a short help text
  *
  * Usage:
@@ -105,6 +108,17 @@ function userTexts(messages) {
  */
 export function scriptedReply(body) {
   const messages = body.messages ?? [];
+  const system = messages.find(message => message.role === 'system');
+  if (
+    contentText(system?.content).startsWith(
+      'Write a title for the conversation',
+    )
+  ) {
+    const user = messages.find(message => message.role === 'user');
+    const source = /^User:\s*(.*)$/m.exec(contentText(user?.content));
+    const title = (source?.[1] ?? '').trim().slice(0, 80);
+    return { text: title.length > 0 ? title : 'Conversation' };
+  }
   const last = messages[messages.length - 1];
   const tools = body.tools ?? [];
   const call = (suffix, ...argsList) => {

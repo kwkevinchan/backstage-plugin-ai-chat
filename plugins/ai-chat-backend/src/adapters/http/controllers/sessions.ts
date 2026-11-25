@@ -62,13 +62,14 @@ export class SessionsController {
   constructor(private readonly useCases: SessionUseCases) {}
 
   async list(principal: Principal, query: unknown): Promise<ChatSessionList> {
-    const { includeArchived, limit } = parse(listQuery, query);
+    const { includeArchived, limit, q } = parse(listQuery, query);
     const sessions = await this.useCases.listSessions.execute({
       principal,
       ...(includeArchived !== undefined && {
         includeArchived: includeArchived === 'true',
       }),
       ...(limit !== undefined && { limit }),
+      ...(q && { query: q }),
     });
     return {
       items: sessions.map(session => toChatSession(session, session.activity)),

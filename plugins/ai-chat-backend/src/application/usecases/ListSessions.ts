@@ -25,7 +25,10 @@ export type ListedSession = Session & {
   activity?: 'running' | 'waiting_approval';
 };
 
-/** The sessions of the signed-in user, the most recently updated first. */
+/**
+ * The sessions of the signed-in user. Pinned ones come first, then the most
+ * recently updated. `query` matches the title (SE-03).
+ */
 export class ListSessions {
   constructor(
     private readonly deps: {
@@ -38,12 +41,14 @@ export class ListSessions {
     principal: Principal;
     includeArchived?: boolean;
     limit?: number;
+    query?: string;
   }): Promise<ListedSession[]> {
     const sessions = await this.deps.sessions.listByOwner(
       input.principal.userRef,
       {
         includeArchived: input.includeArchived,
         limit: input.limit,
+        query: input.query,
       },
     );
     const active = await this.deps.runs.findActiveForSessions(

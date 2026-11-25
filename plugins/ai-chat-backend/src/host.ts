@@ -39,6 +39,7 @@ import {
   ListSessions,
   ListSessionTools,
   ListToolsets,
+  NameSession,
   PurgeExpiredSessions,
   PurgeUnusedAttachments,
   QueueMessage,
@@ -168,6 +169,13 @@ export function createHost(ports: HostPorts) {
         activity,
       }),
     );
+  const nameSession = new NameSession({
+    sessions,
+    runs,
+    items,
+    model: ports.model,
+    logger,
+  });
   const supervisor = new RunSupervisor({
     advance,
     runs,
@@ -175,6 +183,7 @@ export function createHost(ports: HostPorts) {
     heartbeatMs: ports.heartbeatMs,
     afterRun: info => afterRun.current!(info),
     notify,
+    nameSession: info => nameSession.execute(info),
   });
   const startNext = new StartNextQueued({
     sessions,

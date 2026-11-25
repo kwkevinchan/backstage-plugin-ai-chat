@@ -45,6 +45,12 @@ export interface RunRepository extends RunControl {
   findActiveForSessions(sessionIds: readonly string[]): Promise<Run[]>;
 
   /**
+   * Whether a run of the session other than `runId` has ended the normal way
+   * (`completed`, no end reason). Used to name a session once (SE-04).
+   */
+  hasOtherNormalEnd(sessionId: string, runId: string): Promise<boolean>;
+
+  /**
    * Takes the lease of a run to carry it on: a run that waits for an approval
    * (it becomes `running`), or a running run whose lease is free or expired.
    * Each lease has its own fence: the one a run had before stops working, also

@@ -44,6 +44,11 @@ export { ListQueue, queueViewOf } from './usecases/ListQueue';
 export type { QueueView } from './usecases/ListQueue';
 export { ListSessions } from './usecases/ListSessions';
 export type { ListedSession } from './usecases/ListSessions';
+export {
+  NameSession,
+  TITLE_PROMPT_MARK,
+  TITLE_TIMEOUT_MS,
+} from './usecases/NameSession';
 export { ListSessionTools } from './usecases/ListSessionTools';
 export type { SessionTool } from './usecases/ListSessionTools';
 export { ListToolsets } from './usecases/ListToolsets';

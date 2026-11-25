@@ -525,8 +525,8 @@ paths:
     get:
       operationId: listSessions
       tags: [Sessions]
-      summary: List the sessions of the user, the most recently changed first.
-      description: Only the sessions that the signed-in user owns. Archived sessions are left out unless `includeArchived` is `true`.
+      summary: List the sessions of the user. Pinned ones come first, then the most recently changed.
+      description: Only the sessions that the signed-in user owns. Archived sessions are left out unless `includeArchived` is `true`. `q` keeps the sessions whose stored title contains that text.
       parameters:
         - name: includeArchived
           in: query
@@ -534,6 +534,13 @@ paths:
           schema:
             type: string
             enum: ['true', 'false']
+        - name: q
+          in: query
+          description: A title to search for. Matching ignores ASCII case. A session with no title is left out. `%` and `_` match themselves.
+          allowReserved: true
+          schema:
+            type: string
+            maxLength: 200
         - name: limit
           in: query
           allowReserved: true

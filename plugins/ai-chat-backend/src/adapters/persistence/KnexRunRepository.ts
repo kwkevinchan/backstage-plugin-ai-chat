@@ -112,6 +112,15 @@ export class KnexRunRepository implements RunRepository {
     return rows.map(row => toRun(row));
   }
 
+  async hasOtherNormalEnd(sessionId: string, runId: string): Promise<boolean> {
+    const row = await this.knex('runs')
+      .where({ session_id: sessionId, status: 'completed' })
+      .whereNull('end_reason')
+      .whereNot({ id: runId })
+      .first('id');
+    return row !== undefined;
+  }
+
   async acquireLease(runId: string): Promise<LeasedRun | undefined> {
     const now = this.clock.now();
     const [row] = await this.knex<RunRow>('runs')
