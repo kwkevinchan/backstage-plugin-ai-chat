@@ -14,11 +14,50 @@
  * limitations under the License.
  */
 
-/** @public */
+/**
+ * `required`: the first step of a run offers only `update_plan` (X-07). The
+ * loop does not enforce that yet (P3-03). Absent means the agent does not
+ * require a plan.
+ *
+ * @public
+ */
+export type PlanningMode = 'required';
+
+/**
+ * Limits recorded on an agent (X-01). A missing field uses the limit of the
+ * installation. 0 allows nothing. The loop still uses the limits of the run;
+ * applying these is later.
+ *
+ * @public
+ */
+export type AgentLimits = {
+  /** Model calls. */
+  maxSteps?: number;
+  /** Tool calls the model requested, over the whole run. */
+  maxToolCallsPerRun?: number;
+  /** Seconds of working time. At most 600, like the installation. */
+  runTimeoutSeconds?: number;
+};
+
+/**
+ * One agent (X-01). `toolsets`, `skills`, `model`, `limits` and `planning`
+ * are recorded here. The loop reads `systemPrompt` only; the rest is applied
+ * by later work (P3-02 to P3-07).
+ *
+ * @public
+ */
 export type AgentDefinition = {
   id: string;
   title?: string;
   systemPrompt: string;
+  /** Toolset ids this agent names. */
+  toolsets?: readonly string[];
+  /** Skill ids. The text of a skill is loaded later (P3-04). */
+  skills?: readonly string[];
+  /** Id of a model. The client for it is chosen later (P3-07). */
+  model?: string;
+  limits?: AgentLimits;
+  planning?: PlanningMode;
 };
 
 /**

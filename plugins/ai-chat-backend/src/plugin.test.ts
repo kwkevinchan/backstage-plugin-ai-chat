@@ -14,8 +14,13 @@
  * limitations under the License.
  */
 
-import { createServiceFactory } from '@backstage/backend-plugin-api';
+import {
+  createBackendModule,
+  createServiceFactory,
+} from '@backstage/backend-plugin-api';
 import { actionsServiceRef } from '@backstage/backend-plugin-api/alpha';
+import exampleModule from '@kwkevinchan/backstage-plugin-ai-chat-backend-module-example';
+import { aiChatHarnessExtensionPoint } from '@kwkevinchan/backstage-plugin-ai-chat-node';
 import {
   mockCredentials,
   mockServices,
@@ -435,5 +440,111 @@ describe('aiChatPlugin', () => {
     });
     expect(res.text).not.toContain('sk-live');
     expect(res.text).not.toContain('down');
+  });
+
+  async function startConfigured(options: {
+    aiChat?: Record<string, unknown>;
+    features?: Parameters<typeof startTestBackend>[0]['features'];
+    logger?: ReturnType<typeof mockServices.logger.mock>;
+  }) {
+    const db = await createDb();
+    const logger = options.logger ?? mockServices.logger.mock();
+    try {
+      const started = await startTestBackend({
+        features: [
+          aiChatPlugin,
+          ...(options.features ?? []),
+          mockServices.rootConfig.factory({
+            data: {
+              aiChat: {
+                llm: { baseUrl: 'http://127.0.0.1:9', model: 'test-model' },
+                ...options.aiChat,
+              },
+            },
+          }),
+          mockServices.database.factory({ knex: db }),
+          mockServices.auditor.mock().factory,
+          mockServices.httpAuth.factory({
+            defaultCredentials: mockCredentials.none(),
+          }),
+          logger.factory,
+          createServiceFactory({
+            service: actionsServiceRef,
+            deps: {},
+            factory: () => new FakeActions([]),
+          }),
+        ],
+      });
+      return { server: started.server, logger, db };
+    } catch (error) {
+      await db.destroy();
+      throw error;
+    }
+  }
+
+  it('does not start when an agent in the configuration is not valid', async () => {
+    await expect(
+      startConfigured({
+        aiChat: { agents: { 'bad id': { systemPrompt: 'x' } } },
+      }),
+    ).rejects.toThrow(/aiChat\.agents/);
+  });
+
+  it('does not start when a module registers the default agent', async () => {
+    const clash = createBackendModule({
+      pluginId: 'ai-chat',
+      moduleId: 'clash',
+      register(env) {
+        env.registerInit({
+          deps: { harness: aiChatHarnessExtensionPoint },
+          async init({ harness }) {
+            harness.addAgent({ id: 'default', systemPrompt: 'no' });
+          },
+        });
+      },
+    });
+    await expect(startConfigured({ features: [clash] })).rejects.toThrow(
+      /already defined/,
+    );
+  });
+
+  it('does not start when a module registers the same agent twice', async () => {
+    const twice = createBackendModule({
+      pluginId: 'ai-chat',
+      moduleId: 'twice',
+      register(env) {
+        env.registerInit({
+          deps: { harness: aiChatHarnessExtensionPoint },
+          async init({ harness }) {
+            harness.addAgent({ id: 'guide', systemPrompt: 'once' });
+            harness.addAgent({ id: 'guide', systemPrompt: 'twice' });
+          },
+        });
+      },
+    });
+    await expect(startConfigured({ features: [twice] })).rejects.toThrow(
+      /already registered/,
+    );
+  });
+
+  it('serves an agent registered by a backend module', async () => {
+    const logger = mockServices.logger.mock();
+    const { server, db } = await startConfigured({
+      features: [exampleModule],
+      logger,
+    });
+    try {
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('1 agent(s)'),
+      );
+      const created = await request(server)
+        .post('/api/ai-chat/sessions')
+        .set('Authorization', alice)
+        .send({ agentId: 'guide' })
+        .expect(201);
+      expect(created.body.agentId).toBe('guide');
+    } finally {
+      await db.destroy();
+    }
   });
 });
