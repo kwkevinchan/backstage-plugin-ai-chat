@@ -708,7 +708,7 @@ flowchart LR
 | P3-01 | `ai-chat-node`、擴充點、設定檔裡的 Agent                | M    | X-01、X-02                         | #39 | 完成 |
 | P3-02 | Context provider 和 entity 綁定                         | M    | X-03、SE-02、SE-06                 |
 | P3-03 | 計畫：`update_plan`、`planning: required`、畫面上的清單 | M    | X-06、X-07、D-07                   |
-| P3-04 | Skills：讀 `SKILL.md`、`load_skill`                     | M    | X-04、D-22                         |
+| P3-04 | Skills：讀 `SKILL.md`、`load_skill`                     | M    | X-04、D-22                         | #53 | 完成 |
 | P3-05 | Hooks                                                   | M    | X-05                               | #52 | 完成 |
 | P3-06 | TechDocs 搜尋的 action                                  | M    | X-08                               |
 | P3-07 | 平行唯讀呼叫、每步上限、模型能力、限流                  | M    | P-01、P-02、P-03、P-05、P-06、X-09 |
@@ -752,6 +752,37 @@ flowchart LR
   - `model` 只檢查 id 的寫法，不讀 `aiChat.models`（模型轉接是 P3-07）。`skills` 只檢查 id 的寫法，不讀 `aiChat.skills.directories`，也不要求擴充點已經註冊同名 Skill（載入全文是 P3-04）。
   - 設定檔裡的 Agent，系統提示一律是內建規則再加上該 Agent 的 `systemPrompt`；該欄沒寫就用全站的 `aiChat.systemPrompt`。兩段額外說明不疊加。擴充點註冊的 Agent 也套 `buildSystemPrompt(systemPrompt)`，和設定檔同一條規則。
   - 沒有人定義 `default` 時才放內建的那一個。設定檔的 `agents.default` 取代它。擴充點再註冊 `default` 算重複，啟動失敗。
+
+### P3-04 Skills：讀 `SKILL.md`、`load_skill`
+
+- **範圍**：
+  - 核心（`@kwkevinchan/ai-chat-harness`）：
+    - `application/ports/extensions.ts`：新增 `@public` 型別 `Skill`（`id`、`description`、`load(ctx)`，`ctx` 是 P3-05 的 `StepContext`）；在 `AiChatHarnessExtensionPoint` 加入 `addSkill(skill: Skill)`；在 `Extensions` 加入 `skills?: readonly Skill[]`。
+    - `application/steps/skills.ts`：定義內建常數 `LOAD_SKILL_TOOL_ID = 'load_skill'`、`resolveAgentSkills(agent, registered)`、`loadSkillDescriptor(skills)`、`skillsContextBlock(skills)`、`validateLoadSkillInput(input, skills)` 與 `executeLoadSkill(call, req, skills)`。`load_skill` 標為 `readOnly: true`（預設政策 `allow`），參數為 `{ id: string }`（`additionalProperties: false`）。
+    - `callModel.ts` 與 `executeTools.ts`：每一步依 Agent 解析可用 Skill，只有當 Agent 有可用 Skill 且 `decidePolicy(loadSkillTool, policy) !== 'deny'` 時，才把清單文字（只含 `id` 與一句 `description`，絕不呼叫 `skill.load()`）加進系統上下文並提供 `load_skill` 工具；模型呼叫 `load_skill` 時以內建驗證與執行處理，以 `stepContextOf` 組出這一步的 `StepContext`，呼叫 `skill.load(ctx)` 後將 `{ id, description, content }` 寫為 `tool_result`。
+  - Node 套件（`@kwkevinchan/backstage-plugin-ai-chat-node`）：重新匯出 `Skill`。
+  - 宿主（`@kwkevinchan/backstage-plugin-ai-chat-backend`）：
+    - 設定 `aiChat.skills.directories`：讀取設定檔裡的目錄陣列（預設 `[]`），逐一掃描一級子目錄內的 `SKILL.md`（使用 `yaml` 解析 frontmatter）。
+    - `AiChatHarnessRegistry` 新增 `addSkill` 與 `skills()`；啟動時驗證並合併目錄 Skill 與模組 Skill，將已知 Skill 集合傳入 `ConfigAgentCatalog` 檢查 Agent 的 `skills` 欄位；再把 Skill 和 Hook 一起放進 `createHost` 的 `extensions`，傳給核心與 `ListSessionTools`。
+  - 範例 module（`@kwkevinchan/backstage-plugin-ai-chat-backend-module-example`）：於 `aiChatExampleModule` 示範呼叫 `addSkill` 註冊 `getting-started` Skill（對齊範例 Agent `guide`）。
+  - 不做：`SKILL.md` 的 `allowed-tools` 放寬或限制權限、跨目錄遞迴搜尋、熱重載目錄檔案。
+- **依賴**：P3-01（`AgentDefinition.skills` 與 `aiChatHarnessExtensionPoint`）、P3-05（`StepContext`、`stepContextOf`）。
+- **驗收**：
+  - `aiChatHarnessExtensionPoint.addSkill` 與 `Skill` 由核心定義並由 `ai-chat-node` 重新匯出。
+  - 模型呼叫 `load_skill` 之前，系統上下文只出現可用 Skill 的 `id` 與一行 `description`，完全不包含 `SKILL.md` 本文，且 `skill.load()` 尚未被呼叫（延遲讀取）。
+  - 模型呼叫 `load_skill({ id })` 時：工具標為 `readOnly: true`，預設政策為 `allow`（不需核准直接執行）；`skill.load(ctx)` 收到包含 `sessionId`、`runId`、`agentId`、`step`、`signal`、`principal`、`page` 的 `StepContext`；回傳 `{ id, description, content }` 寫入 `tool_result` 並於下一步提供給模型。
+  - Agent 範圍控管：`agent.skills` 有寫出清單時僅提供名單內的 Skill，未列入的 Skill 不出現在上下文、呼叫時回答 `invalid` 且不執行 `load()`；`agent.skills` 設為 `[]` 時不提供上下文清單也不提供 `load_skill`；`agent.skills` 未填寫時可使用所有已註冊的 Skill。
+  - 政策控制：`policy['load_skill'] = 'deny'` 時既不提供 `load_skill` 也不把 Skill 清單放進上下文，強行呼叫回答 `denied`；`policy['load_skill'] = 'ask'` 時進入 `waiting_approval`，使用者允許後才執行 `load()`。
+  - 驗證與失敗隔離：未知 Skill id、缺漏或非字串 `id`、多出未知欄位皆在分類階段標為 `invalid` 而不呼叫 `load()`；`skill.load()` 執行期拋錯或回傳非字串時，不中止整個 Run 也不洩漏檔案路徑或堆疊，改寫入固定錯誤訊息的 `error` 工具結果；尊重 `maxToolCallsPerRun` 與中止 `signal`。
+  - `aiChat.skills.directories` 載入 `SKILL.md`：只掃描設定目錄下不以 `.` 開頭的直接子目錄，要求 `SKILL.md` 為 <= 256 KiB 的一般檔案、含 YAML frontmatter、`name` 符合子目錄名稱與 ID 規則、有非空單行 `description`（<= 1024 字元）且 Markdown 本文非空；允許額外相容欄位（如 `license`、`compatibility`、`metadata`）。啟動時只保留驗證後的中繼資料，待 `load_skill` 時才讀檔。目錄不存在、不是目錄、frontmatter 錯誤、`name` 不符、超出大小或 id 重複（包含目錄間、目錄與 module 之間、或同 module 重複註冊）皆拋 `InputError` 讓後端啟動失敗。
+  - `ConfigAgentCatalog` 傳入已知 Skill id 集合時，設定檔或擴充點 Agent 若指名不存在的 Skill id，啟動時拋 `InputError`；`ListSessionTools`（工具清單端點）於 Agent 有可用 Skill 且未被政策 `deny` 時一併列出 `load_skill`。
+  - `exampleModule` 透過 `addSkill` 註冊 `getting-started`，且不包含對宿主或核心的非法 import；HTTP 端對端測試涵蓋 `aiChat.skills.directories` 與 module 雙方來源的完整 Run 與錯誤阻擋。
+- **規格沒寫、實作選定的地方**：
+  - `Skill.load(ctx)` 收到的 `StepContext` 和 Hook 的是同一個型別，`step` 是 `load_skill` 呼叫所在的那一步；允許同步回傳 `string` 或 `Promise<string>`。
+  - `agent.skills` 未定義代表可使用全部已註冊 Skill；空陣列 `[]` 代表停用所有 Skill；有指定陣列則作為白名單依序呈現，讓未逐個設定 Skill 清單的既有 Agent 也能直接使用全站註冊的 Skill。
+  - `SKILL.md` 解析對齊公開 Agent Skills 規格：檔頭強制含 `---` YAML frontmatter（先去掉 UTF-8 BOM 並正規化 CRLF），要求 `name` 與目錄名稱一致且符合擴充 ID 規則、`description` 將空白壓縮為單行（上限 1024 字元）、本文去空白後不得為空、檔案上限 256 KiB；額外 metadata 欄位放寬允許，隱藏目錄與沒有 `SKILL.md` 的子目錄略過不報錯。
+  - 延遲載入與錯誤遮罩：`loadSkillsFromDirectories` 啟動只驗證中繼資料與目錄存在性，每次 `load_skill` 依 `ctx.signal` 現場讀檔並抽取本文，讀檔失敗時僅由後端 logger 記警告並回傳安全訊息 `Could not load skill <id>.`。
+  - `load_skill` 的工具輸出結構為 `{ id, description, content }`，並以 `builtin:load_skill:v1` 作為 `schemaHash`。
 
 ### P3-05 Hooks
 
@@ -939,3 +970,4 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-25 | 1.2  | PU-07 完成（IN-20，#47）：`POST /sessions/:id/queue/:queuedId/insert` 在同一個 transaction 把排隊的訊息改成插入，圖片從保留轉成已使用。失敗時佇列不變。和 `startNext`、Run 結束並行時只有一邊成功                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 2026-11-25 | 1.2  | PI-07 文件與設定收尾（#49）：新增 [pi-coverage.zh-TW.md](pi-coverage.zh-TW.md)，PI-01 到 PI-05 標為完成（PR #18、#25、#26、#29、#28、#30、#32）、PI-06 為後端完成（PR #41，畫面在 PU-04）、PI-07 文件與設定完成並將綜合端對端與 `usage.zh-TW.html` 畫面說明延至 PU-03/PU-04 之後；P4-01（`delegate`，P-07 到 P-09）標記不做                                                                                                                                                                                                                                                                                                                                                                          |
 | 2026-11-25 | 1.2  | P3-05 完成（X-05，#52）：擴充點加入 `addHook`。迴圈依序呼叫 `beforeModelCall`、`beforeToolCall`、`afterToolCall`，宿主在寫入 Run 的終態之後呼叫 `onRunEnd`。政策只能調嚴；Hook 失敗時 fail closed；停止時不再等 Hook                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 2026-11-25 | 1.2  | P3-04 完成（X-04、D-22，#53）：加入 `aiChat.skills.directories`（`SKILL.md`）、擴充點加入 `addSkill`、內建 `load_skill` 工具（`readOnly: true`，預設 `allow`），依 Agent 過濾並在呼叫時才延遲載入全文                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |

@@ -21,11 +21,13 @@ import type {
   Extensions,
   HookName,
   Hooks,
+  Skill,
   ToolResult,
 } from '@kwkevinchan/ai-chat-harness';
 import type { Logger } from '../../application/ports';
 import { limitToolResult } from './ActionsToolGateway';
 import { readExtensionAgent } from './agentShape';
+import { readExtensionSkill } from './skillShape';
 
 const HOOK_NAMES: readonly HookName[] = [
   'beforeModelCall',
@@ -41,10 +43,12 @@ function isHookName(value: unknown): value is HookName {
 /**
  * What backend modules add through `aiChatHarnessExtensionPoint` (X-02).
  * The plugin registers this object before the modules run, then reads the
- * agents and hooks when it builds the catalog and the host.
+ * agents, hooks and skills when it builds the catalog and the host. A
+ * repeated agent or skill id is refused and the first registration stays.
  */
 export class AiChatHarnessRegistry implements AiChatHarnessExtensionPoint {
   private readonly agentList: AgentDefinition[] = [];
+  private readonly skillList: Skill[] = [];
   private readonly hookLists: {
     [K in HookName]: Hooks[K][];
   } = {
@@ -72,8 +76,20 @@ export class AiChatHarnessRegistry implements AiChatHarnessExtensionPoint {
     this.hookLists[name].push(hook);
   }
 
+  addSkill(skill: Skill): void {
+    const checked = readExtensionSkill(skill);
+    if (this.skillList.some(existing => existing.id === checked.id)) {
+      throw new InputError(`skill ${checked.id} is already registered`);
+    }
+    this.skillList.push(checked);
+  }
+
   agents(): readonly AgentDefinition[] {
     return [...this.agentList];
+  }
+
+  skills(): readonly Skill[] {
+    return [...this.skillList];
   }
 
   hookCount(): number {

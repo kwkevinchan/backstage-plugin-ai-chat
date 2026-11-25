@@ -19,9 +19,9 @@
  * in the harness and re-exported here, so a module does not import the
  * harness or the backend plugin.
  *
- * This version exposes `addAgent` and `addHook`. Context providers, skills and
- * a model client are added on later items, together with the loop calling
- * them.
+ * This version exposes `addAgent`, `addHook` and `addSkill`. Context
+ * providers and a model client are added on later items, together with the
+ * loop calling them.
  *
  * @packageDocumentation
  */
@@ -37,6 +37,7 @@ export type {
   Hooks,
   PlanningMode,
   RunSummary,
+  Skill,
   StepContext,
   ToolCall,
   ToolResult,

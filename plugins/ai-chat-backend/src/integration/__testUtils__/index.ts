@@ -19,6 +19,7 @@ import type {
   ActionsServiceAction,
 } from '@backstage/backend-plugin-api/alpha';
 import type { BackstageCredentials } from '@backstage/backend-plugin-api';
+import type { JsonObject } from '@backstage/types';
 import { mockCredentials, mockServices } from '@backstage/backend-test-utils';
 import {
   FakeClock,
@@ -199,6 +200,8 @@ export async function createWorld(
     images?: Partial<ImageSettings>;
     /** `aiChat.input.insert.maxPerRun`; 5 by default. */
     insertMaxPerRun?: number;
+    agents?: JsonObject;
+    policy?: JsonObject;
   } = {},
 ) {
   const knex = await createMigratedDb();
@@ -225,6 +228,8 @@ export async function createWorld(
       data: {
         aiChat: {
           toolsets: { demo: { actions: ['demo:*'], default: true } },
+          ...(options.agents && { agents: options.agents }),
+          ...(options.policy && { policy: options.policy }),
         },
       },
     }),
@@ -323,9 +328,10 @@ export async function createWorld(
     actions,
     audit,
     backend,
-    async newSession(principal: Principal = jane) {
+    async newSession(principal: Principal = jane, agentId?: string) {
       return new CreateSession({ sessions, agents: catalog }).execute({
         principal,
+        ...(agentId !== undefined && { agentId }),
       });
     },
     async runRow(runId: string) {

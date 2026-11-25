@@ -161,6 +161,22 @@ export function assertKnownToolsets(
   }
 }
 
+/**
+ * Every skill an agent names must exist in the merged set of directory and
+ * extension skills when skill validation is active.
+ */
+export function assertKnownSkills(
+  skills: readonly string[] | undefined,
+  known: ReadonlySet<string>,
+  path: string,
+): void {
+  for (const id of skills ?? []) {
+    if (!known.has(id)) {
+      throw new InputError(`${path}.skills: unknown skill ${id}`);
+    }
+  }
+}
+
 function readString(value: unknown, path: string): string {
   if (typeof value !== 'string') {
     throw new InputError(`${path} must be a string`);

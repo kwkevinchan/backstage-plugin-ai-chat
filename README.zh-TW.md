@@ -150,14 +150,14 @@ backend:
 - **Agent**：沒有 `aiChat.agents` 時只有 `default`（內建規則加上 `aiChat.systemPrompt`）。
   設定檔裡的 Agent，系統提示是內建規則再加上該 Agent 的 `systemPrompt`；沒寫就改用全站的
   `aiChat.systemPrompt`，兩段額外說明不疊加。`toolsets` 必須是已經定義的工具組。
-  `skills`、`model`、`limits`、`planning: required` 會記在 Agent 上。迴圈仍用全站的上限和
-  唯一的模型；這些欄位這一版還不執行。值不對會讓後端無法啟動。
-- 別的 backend module 透過 `@kwkevinchan/backstage-plugin-ai-chat-node` 註冊 Agent 與 Hook，不必
+  `toolsets`、`model`、`limits`、`planning: required` 會記在 Agent 上，迴圈仍用全站的上限和
+  唯一的模型；`aiChat.skills.directories` 可載入子目錄內的 `SKILL.md`（上下文只含 id 與一句說明，由唯讀內建工具 `load_skill` 延遲載入全文），並依 Agent 的 `skills` 清單過濾（未填則提供全部已註冊 Skill）。值不對會讓後端無法啟動。
+- 別的 backend module 透過 `@kwkevinchan/backstage-plugin-ai-chat-node` 註冊 Agent、Hook 與 Skill（`addAgent`、`addHook`、`addSkill`），不必
   import 宿主。模組註冊的 Agent 也套同一套內建規則。設定檔和 module 用了同一個 id 時，後端無法啟動。
   `addHook` 支援 `beforeModelCall`、`beforeToolCall`、`afterToolCall` 與 `onRunEnd`。`beforeToolCall` 只能調嚴（`ask`／`deny`），不能放寬。
   Hook 丟例外時：`beforeModelCall` 讓 Run 失敗；`beforeToolCall` 讓這個工具呼叫被拒絕，Run 繼續；
   `afterToolCall` 讓這個工具結果變成錯誤，不保留原始輸出，Run 繼續；`onRunEnd` 只記 log，不影響 Run。
-  這個庫的 `plugins/ai-chat-backend-module-example` 是可以照抄的範例（Agent id 是 `guide`），
+  這個庫的 `plugins/ai-chat-backend-module-example` 是可以照抄的範例（Agent id 是 `guide`、Skill id 是 `getting-started`），
   不是要安裝的套件。
 
 細節見[英文 README](README.md#agents)。

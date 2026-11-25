@@ -878,7 +878,7 @@ export const aiChatPlugin = createBackendPlugin({
 
 ### 6.1 Backend：`ai-chat-node`
 
-擴充點的介面在規格第 7 節。型別定義在核心的 `application/ports/extensions.ts`，`ai-chat-node` 重新匯出它們，並定義 `aiChatHarnessExtensionPoint`。目前公開的是 `addAgent` 和 `addHook`。Context provider、Skill、模型轉接的方法在 P3-02、P3-04、P3-07 才加，連同迴圈的呼叫一起進來。
+擴充點的介面在規格第 7 節。型別定義在核心的 `application/ports/extensions.ts`，`ai-chat-node` 重新匯出它們，並定義 `aiChatHarnessExtensionPoint`。目前公開的是 `addAgent`、`addHook` 和 `addSkill`。Context provider、模型轉接的方法在 P3-02、P3-07 才加，連同迴圈的呼叫一起進來。
 
 別的團隊的 module 長這樣：
 
@@ -895,6 +895,12 @@ export default createBackendModule({
         harness.addAgent({
           id: 'guide',
           systemPrompt: 'You help people find documentation on example.com.',
+          skills: ['getting-started'],
+        });
+        harness.addSkill({
+          id: 'getting-started',
+          description: 'Walks new readers through docs on example.com.',
+          load: async () => 'Read the docs on example.com first.',
         });
       },
     });
@@ -904,7 +910,7 @@ export default createBackendModule({
 
 擴充點在這個架構裡的位置：它們是核心 application 那一圈的 port。別的團隊寫的是 adapter。所以擴充的程式碼天生不能繞過政策，它只拿得到 port 給它的東西。
 
-範例 module 在 `plugins/ai-chat-backend-module-example`。它是可以照抄的私有範例，不是要發佈的套件。它只 import `ai-chat-node` 和 Backstage 的公開 API，註冊一個 Agent（`guide`），說明用 `example.com`。示範 backend（`packages/backend`）掛上它。
+範例 module 在 `plugins/ai-chat-backend-module-example`。它是可以照抄的私有範例，不是要發佈的套件。它只 import `ai-chat-node` 和 Backstage 的公開 API，註冊一個 Agent（`guide`）與一個 Skill（`getting-started`），說明用 `example.com`。示範 backend（`packages/backend`）掛上它。
 
 ### 6.2 Frontend：`ai-chat-react`
 

@@ -322,6 +322,7 @@ exactly `days` ago is kept.
 | `sharing.live.defaultHours`         | Hours a live share lasts when nobody picks a life. Default 24. A positive integer, at most `maxHours`.                                                                                                                                                                                                                      |
 | `sharing.live.maxHours`             | Longest life of a live share, in hours. Default 72. A positive integer, at least `defaultHours`.                                                                                                                                                                                                                            |
 | `retention.days`                    | Days after the last change of a session before it is deleted, with its runs, messages, queued messages and images. Default 90. `0` keeps every session. A session with a run that has not ended is kept until the run ends. The audit log is kept.                                                                          |
+| `skills.directories`                | Optional directories scanned at startup for subdirectories containing `SKILL.md` (`name`, one-line `description`, and Markdown body loaded lazily by the built-in `load_skill` tool). A missing directory, invalid frontmatter, or duplicate skill id stops the backend at startup.                                         |
 
 When the input is over `tokenBudget`, the old outputs of tools are shortened
 to one line first. If that is not enough, the old steps are replaced by a
@@ -366,10 +367,15 @@ toolsets are configured). `skills`, `model`, `limits` and `planning: required`
 are recorded on the agent. A wrong value stops the backend at startup.
 
 The loop still uses the limits of the installation and its one model client.
-It does not filter tools by the agent's toolsets, load a skill, require a
-plan on the first step, or call a model client other than that one.
+It does not filter tools by the agent's toolsets, require a
+plan on the first step, or call a model client other than that one. When skills
+are registered through `aiChat.skills.directories` (`SKILL.md`) or `addSkill`,
+the prompt lists only each allowed skill's `id` and short `description`; the
+full instructions are loaded on demand by the read-only built-in `load_skill`
+tool (`allow` by default; `agent.skills` restricts which skills that agent sees,
+and omitted means all registered skills).
 
-A backend module can register agents and lifecycle hooks through
+A backend module can register agents, lifecycle hooks and skills through
 `@kwkevinchan/backstage-plugin-ai-chat-node`. It depends only on that package.
 An agent a module registers receives the same built-in prompt rules as a
 configured agent. An id that both the configuration and a module define stops
@@ -382,7 +388,8 @@ and `onRunEnd` is only logged. `onRunEnd` runs once after the run ended,
 with the stored status, and the run does not wait for it.
 
 `plugins/ai-chat-backend-module-example` in this repository is a private
-example of such a module, to copy from. It registers the agent `guide`. It is
+example of such a module, to copy from. It registers the agent `guide` and the
+skill `getting-started`. It is
 not a package to install. The example uses `guide`, so `aiChat.agents.guide`
 would also stop the backend.
 
@@ -608,7 +615,7 @@ this plugin until it is updated.
 
 Retrieval over TechDocs, an entity tab or sidebar widget, file uploads,
 several model providers at once, MCP servers outside Backstage, sharing a
-conversation, applying an agent's skills, planning or model (those
+conversation, planning or an agent's model (those
 fields can be set, and a module can register them; the loop does not use them
 yet), and a session list that can search, pin or archive (the page still lists
 recent sessions; a title is stored after the first round ends normally).
