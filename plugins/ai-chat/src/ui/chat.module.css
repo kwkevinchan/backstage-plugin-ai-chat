@@ -55,9 +55,6 @@
   background: var(--bui-bg-neutral-2);
 }
 .chat-conversation-open {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
   flex: 1;
   min-width: 0;
   padding: var(--bui-space-2) var(--bui-space-3);
@@ -69,18 +66,8 @@
   text-align: left;
   cursor: pointer;
   overflow: hidden;
-}
-.chat-conversation-title {
-  max-width: 100%;
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.chat-activity {
-  margin-top: var(--bui-space-1);
-  color: var(--bui-fg-secondary);
-  font-size: var(--bui-font-size-1);
-  font-weight: var(--bui-font-weight-regular);
 }
 .chat-icon-button {
   display: inline-flex;

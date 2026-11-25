@@ -71,12 +71,11 @@ yarn --cwd packages/backend add @kwkevinchan/backstage-plugin-ai-chat-backend
 backend.add(import('@kwkevinchan/backstage-plugin-ai-chat-backend'));
 ```
 
-The session list shows when a run is working or waiting for approval. Without
-Signals the page reads `GET /sessions` about once a second. To push those
-changes instead, install `@backstage/plugin-signals-backend` and
-`@backstage/plugin-signals` the way this Backstage version documents, and add
-the module. The page subscribes only when the Signals frontend plugin is
-installed; otherwise it keeps polling.
+`GET /sessions` includes `activity` (`running` or `waiting_approval`) while a
+run has not ended. To push activity changes (`running`, `waiting_approval`,
+`replied`, `idle`) to the session owner on the `ai-chat` Signals channel,
+install `@backstage/plugin-signals-backend` the way this Backstage version
+documents and add the module:
 
 ```ts
 import { aiChatSignalsModule } from '@kwkevinchan/backstage-plugin-ai-chat-backend';
@@ -479,15 +478,13 @@ session in the list is called "New conversation").
 Limits of this version:
 
 - A client can follow a run that is still going on any backend. The backend
-  that runs the loop sends the text already written, then the rest as it
-  arrives. Another backend sends each finished item about once a second, as
-  one piece, and ends the stream when the run leaves `running`. A run that
-  waits for an approval, a run that ended, or no run answers `204`.
-- The session list shows Processing while a run is working and Waiting for
-  approval while it waits. A session that just received an answer, and is not
-  the one open, shows New reply until it is opened. Without Signals the page
-  reads the list about once a second. With Signals it updates when a signal
-  arrives.
+  that runs the loop sends the text already written, then the rest of that
+  message as it arrives; any subsequent reply in the same run on that stream is
+  sent whole when complete. Another backend polls about once a second and sends
+  each finished item as one piece without step boundaries between polled items,
+  and ends the stream when the run leaves `running` (always reporting
+  `"The run stopped."` for `failed` or `expired`). A run that waits for an
+  approval, a run that ended, or no run answers `204`.
 - A summary covers the steps before the newest message of the user. Inside one
   run the old steps are shortened and then left out, never summarized.
 - The model server may not report token use, so the size of the input is

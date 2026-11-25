@@ -31,11 +31,13 @@ import {
   type Principal,
 } from '../../domain';
 import type { RunSettings } from '../buildRunRequest';
+import type { ActivityNotifier } from '../notifyActivity';
 import { resumeIfDecided } from '../resumeIfDecided';
 import type { RunHandle, RunSupervisor } from '../RunSupervisor';
 import type {
   AgentCatalog,
   AuditLog,
+  Logger,
   RunRepository,
   SessionRepository,
 } from '../ports';
@@ -71,6 +73,8 @@ export class DecideApproval {
       audit: AuditLog;
       clock: Clock;
       settings: RunSettings;
+      notify?: ActivityNotifier;
+      logger?: Logger;
     },
   ) {}
 

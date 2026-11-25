@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Route,
   Routes,
@@ -34,10 +34,7 @@ import { aiChatApiRef } from '../api';
 import type { AiChatApi } from '../api';
 import { describeError } from '../adapters/describeError';
 import { usePageContext } from '../application/usePageContext';
-import {
-  useSessionActivity,
-  useSignalsActivitySubscribe,
-} from '../application/useSessionActivity';
+import { useSessionList } from '../application/useSessionList';
 import { useToolsets } from '../application/useToolsets';
 import { Composer } from './Composer';
 import { SessionView } from './SessionView';
@@ -49,11 +46,10 @@ type Basics = {
   basePath: string;
   toolsets: ChatToolset[];
   onChanged(): void;
-  liveActivity?: 'running' | 'waiting_approval';
 };
 
 /** A session opens on its own URL: `<page>/<session id>` (SE-01). */
-function OpenSession({ api, toolsets, onChanged, liveActivity }: Basics) {
+function OpenSession({ api, toolsets, onChanged }: Basics) {
   const { sessionId = '' } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -120,7 +116,6 @@ function OpenSession({ api, toolsets, onChanged, liveActivity }: Basics) {
       toolsets={toolsets}
       firstMessage={firstMessage}
       onChanged={onChanged}
-      liveActivity={liveActivity}
     />
   );
 }
@@ -180,20 +175,9 @@ function NewSession({ api, basePath, toolsets, onChanged }: Basics) {
 }
 
 /** The list of sessions, the open session and the input box. */
-function activityLabel(session: {
-  activity?: 'running' | 'waiting_approval';
-  newReply?: boolean;
-}): string | undefined {
-  if (session.activity === 'running') return 'Processing';
-  if (session.activity === 'waiting_approval') return 'Waiting for approval';
-  if (session.newReply) return 'New reply';
-  return undefined;
-}
-
 export function ChatPageContent() {
   const api = useApi(aiChatApiRef);
-  const listSessions = useCallback(() => api.listSessions(), [api]);
-  const subscribe = useSignalsActivitySubscribe();
+  const list = useSessionList(api);
   const toolsets = useToolsets(api);
   const navigate = useNavigate();
   const location = useLocation();
@@ -207,36 +191,11 @@ export function ChatPageContent() {
     .map(segment => `/${segment}`)
     .join('');
   const openId = rest[0] ? decodeURIComponent(rest[0]) : '';
-  const {
-    sessions,
-    error: listError,
-    refresh,
-  } = useSessionActivity({
-    listSessions,
-    subscribe,
-    openSessionId: openId,
-  });
-  const [deleteError, setDeleteError] = useState<string>();
-  const remove = useCallback(
-    async (id: string): Promise<boolean> => {
-      try {
-        await api.deleteSession(id);
-        await refresh();
-        return true;
-      } catch (e) {
-        setDeleteError(describeError(e));
-        return false;
-      }
-    },
-    [api, refresh],
-  );
-  const open = sessions.find(session => session.id === openId);
   const basics: Basics = {
     api,
     basePath,
     toolsets,
-    onChanged: refresh,
-    liveActivity: open?.activity,
+    onChanged: list.refresh,
   };
 
   return (
@@ -249,14 +208,13 @@ export function ChatPageContent() {
         >
           New chat
         </Button>
-        {(deleteError || listError) && (
+        {list.error && (
           <div className={cx('chat-error')} role="alert">
-            {deleteError || listError}
+            {list.error}
           </div>
         )}
-        {sessions.map(session => {
+        {list.sessions.map(session => {
           const title = session.title ?? 'New conversation';
-          const activity = activityLabel(session);
           return (
             <div
               key={session.id}
@@ -273,17 +231,17 @@ export function ChatPageContent() {
                   navigate(`${basePath}/${encodeURIComponent(session.id)}`)
                 }
               >
-                <span className={cx('chat-conversation-title')}>{title}</span>
-                {activity && (
-                  <span className={cx('chat-activity')}>{activity}</span>
-                )}
+                {title}
               </button>
               <button
                 type="button"
                 className={cx('chat-icon-button')}
                 aria-label={`Delete conversation ${title}`}
                 onClick={async () => {
-                  if ((await remove(session.id)) && session.id === openId) {
+                  if (
+                    (await list.remove(session.id)) &&
+                    session.id === openId
+                  ) {
                     navigate(basePath || '/');
                   }
                 }}

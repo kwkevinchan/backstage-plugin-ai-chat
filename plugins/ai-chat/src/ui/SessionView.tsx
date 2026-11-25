@@ -38,8 +38,6 @@ export interface SessionViewProps {
   /** The message to send when the session opens, for a session just created. */
   firstMessage?: string;
   onChanged?(): void;
-  /** From the session list: `running` or `waiting_approval` while a run has not ended. */
-  liveActivity?: 'running' | 'waiting_approval';
 }
 
 /** One session: its messages, the toolsets, the input box. Keyed by the session. */
@@ -52,7 +50,6 @@ export function SessionView(props: SessionViewProps) {
     page,
     firstMessage: props.firstMessage,
     onChanged: props.onChanged,
-    liveActivity: props.liveActivity,
   });
   const [enabled, setEnabled] = useState(detail.session.enabledToolsets);
   const tools = useSessionTools(api, detail.session.id, enabled.join(','));

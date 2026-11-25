@@ -580,6 +580,106 @@ describe('useSessionChat', () => {
     expect(api.follow).toHaveBeenCalledTimes(1);
   });
 
+  it('follows when a run resumes after waiting_approval even if opened with liveActivity running', async () => {
+    const api = mockApi();
+    api.follow
+      .mockResolvedValueOnce(
+        streamResponse([
+          { type: 'start', messageId: 'run_r-1' },
+          runChunks('waiting_approval'),
+          { type: 'finish', finishReason: 'tool-calls' },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        streamResponse([
+          { type: 'start', messageId: 'run_r-1' },
+          runChunks('running'),
+          runChunks('completed'),
+          { type: 'finish', finishReason: 'stop' },
+        ]),
+      );
+    const running = detail({
+      run: run('running'),
+      items: items(user('hi')),
+    });
+    const { rerender } = renderHook(
+      ({ liveActivity }: { liveActivity?: 'running' | 'waiting_approval' }) =>
+        useSessionChat({ api, detail: running, page, liveActivity }),
+      {
+        initialProps: {
+          liveActivity: 'running' as 'running' | 'waiting_approval' | undefined,
+        },
+      },
+    );
+    await waitFor(() => expect(api.follow).toHaveBeenCalledTimes(1));
+
+    rerender({ liveActivity: 'waiting_approval' });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    rerender({ liveActivity: 'running' });
+    await waitFor(() => expect(api.follow).toHaveBeenCalledTimes(2));
+  });
+
+  it('follows when liveActivity becomes running while the initial stream is active and later resumes', async () => {
+    const api = mockApi();
+    let releaseInitial!: () => void;
+    const initialGate = new Promise<void>(resolve => {
+      releaseInitial = resolve;
+    });
+    api.follow
+      .mockImplementationOnce(async () => {
+        await initialGate;
+        return streamResponse([
+          { type: 'start', messageId: 'run_r-1' },
+          runChunks('waiting_approval'),
+          { type: 'finish', finishReason: 'tool-calls' },
+        ]);
+      })
+      .mockResolvedValueOnce(
+        streamResponse([
+          { type: 'start', messageId: 'run_r-1' },
+          runChunks('running'),
+          runChunks('completed'),
+          { type: 'finish', finishReason: 'stop' },
+        ]),
+      );
+    const running = detail({
+      run: run('running'),
+      items: items(user('hi')),
+    });
+    const { rerender } = renderHook(
+      ({ liveActivity }: { liveActivity?: 'running' | 'waiting_approval' }) =>
+        useSessionChat({ api, detail: running, page, liveActivity }),
+      {
+        initialProps: {
+          liveActivity: undefined as 'running' | 'waiting_approval' | undefined,
+        },
+      },
+    );
+    await waitFor(() => expect(api.follow).toHaveBeenCalledTimes(1));
+
+    // Activity arrives as running while the initial follow stream is still active.
+    rerender({ liveActivity: 'running' });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    releaseInitial();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    rerender({ liveActivity: 'waiting_approval' });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    rerender({ liveActivity: 'running' });
+    await waitFor(() => expect(api.follow).toHaveBeenCalledTimes(2));
+  });
+
   it('reloads once when an open run leaves running or waiting', async () => {
     const api = mockApi();
     api.getSession.mockResolvedValue(

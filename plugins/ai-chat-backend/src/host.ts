@@ -144,20 +144,24 @@ export function createHost(ports: HostPorts) {
   // on the supervisor: the function is set once both exist.
   const afterRun: { current?: AfterRun } = {};
   const notifier = ports.notifier ?? new NoopNotifier();
+  const notify = (
+    sessionId: string,
+    activity: Parameters<Notifier['notify']>[0]['activity'],
+  ) =>
+    sessions.get(sessionId).then(session =>
+      notifier.notify({
+        ownerRef: session.ownerRef,
+        sessionId,
+        activity,
+      }),
+    );
   const supervisor = new RunSupervisor({
     advance,
     runs,
     logger,
     heartbeatMs: ports.heartbeatMs,
     afterRun: info => afterRun.current!(info),
-    notify: (sessionId, activity) =>
-      sessions.get(sessionId).then(session =>
-        notifier.notify({
-          ownerRef: session.ownerRef,
-          sessionId,
-          activity,
-        }),
-      ),
+    notify,
   });
   const startNext = new StartNextQueued({
     sessions,
@@ -168,6 +172,8 @@ export function createHost(ports: HostPorts) {
     audit,
     clock,
     settings,
+    notify,
+    logger,
   });
   afterRun.current = createAfterRun({
     queue,
@@ -195,6 +201,8 @@ export function createHost(ports: HostPorts) {
         settings,
         attachments,
         images,
+        notify,
+        logger,
       }),
       decideApproval: new DecideApproval({
         sessions,
@@ -205,6 +213,8 @@ export function createHost(ports: HostPorts) {
         audit,
         clock,
         settings,
+        notify,
+        logger,
       }),
       resumeRun: new ResumeRun({
         sessions,
@@ -214,8 +224,10 @@ export function createHost(ports: HostPorts) {
         agents,
         clock,
         settings,
+        notify,
+        logger,
       }),
-      cancelRun: new CancelRun({ sessions, runs, supervisor }),
+      cancelRun: new CancelRun({ sessions, runs, supervisor, notify, logger }),
       insertMessage: new InsertMessage({
         sessions,
         items,
@@ -239,7 +251,13 @@ export function createHost(ports: HostPorts) {
       reorderQueue: new ReorderQueue({ sessions, queue, runs }),
       listQueue: new ListQueue({ sessions, queue, runs }),
       resumeQueue: new ResumeQueue({ sessions, startNext }),
-      followSession: new FollowSession({ sessions, runs, items, supervisor }),
+      followSession: new FollowSession({
+        sessions,
+        runs,
+        items,
+        supervisor,
+        logger,
+      }),
       listToolsets: new ListToolsets({ agents }),
       listSessionTools: new ListSessionTools({ sessions, tools: ports.tools }),
       uploadAttachment: new UploadAttachment({ sessions, attachments, images }),
@@ -253,7 +271,7 @@ export function createHost(ports: HostPorts) {
         clock,
         retentionDays: ports.retentionDays ?? DEFAULT_RETENTION_DAYS,
       }),
-      expireStaleRuns: new ExpireStaleRuns({ runs, logger }),
+      expireStaleRuns: new ExpireStaleRuns({ runs, logger, notify }),
     },
   };
 }

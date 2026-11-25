@@ -5156,7 +5156,6 @@ __metadata:
     "@backstage/errors": "backstage:^"
     "@backstage/frontend-plugin-api": "backstage:^"
     "@backstage/frontend-test-utils": "backstage:^"
-    "@backstage/plugin-signals-react": "backstage:^"
     "@backstage/test-utils": "backstage:^"
     "@backstage/theme": "backstage:^"
     "@backstage/ui": "backstage:^"

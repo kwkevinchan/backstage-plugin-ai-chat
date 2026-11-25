@@ -26,7 +26,11 @@ import {
   SequentialIdGenerator,
   type ScriptedStep,
 } from '@kwkevinchan/ai-chat-harness/testing';
-import type { ItemLog, Limits } from '@kwkevinchan/ai-chat-harness';
+import type {
+  ItemLog,
+  Limits,
+  ModelClient,
+} from '@kwkevinchan/ai-chat-harness';
 import type { ChatInputConfig } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import { ActionsToolGateway } from '../../adapters/backstage/ActionsToolGateway';
 import { ConfigAgentCatalog } from '../../adapters/backstage/ConfigAgentCatalog';
@@ -41,7 +45,7 @@ import {
   type ImageSettings,
   type RunHandle,
 } from '../../application';
-import type { AuditEvent, AuditLog } from '../../application/ports';
+import type { AuditEvent, AuditLog, Notifier } from '../../application/ports';
 import { DEFAULT_IMAGE_LIMITS, type Principal, type Run } from '../../domain';
 import { createHost } from '../../host';
 import { createMigratedDb } from '../../__testUtils__';
@@ -214,6 +218,8 @@ export async function createWorld(
     script: ScriptedStep[],
     extra: {
       items?: (inner: ItemLog) => ItemLog;
+      model?: ModelClient;
+      notifier?: Notifier;
       heartbeatMs?: number;
       /**
        * Runs around every `transition` of this backend: `call()` makes the
@@ -260,11 +266,12 @@ export async function createWorld(
           (await sessions.get(ctx.sessionId)).enabledToolsets,
         maxOutputChars: 20000,
       }),
-      model,
+      model: extra.model ?? model,
       audit,
       clock,
       ids,
       logger,
+      ...(extra.notifier && { notifier: extra.notifier }),
       settings: {
         limits,
         budget: { tokenBudget: 100000, keepRecentSteps: 6 },

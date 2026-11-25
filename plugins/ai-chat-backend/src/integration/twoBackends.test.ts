@@ -336,13 +336,14 @@ describe('two backends on one database', () => {
         if (done) throw new Error('the stream ended before the new item');
         raw += decoder.decode(value, { stream: true });
       }
+      await reader.cancel();
       const deltas = [...raw.matchAll(/"type":"text-delta"/g)];
       expect(deltas).toHaveLength(1);
       expect(raw).toContain('"delta":"Finished later"');
       expect(raw).toContain('"type":"text-start"');
       expect(raw).toContain('"type":"text-end"');
-      expect(raw).not.toContain('"type":"item.delta"');
-      await reader.cancel();
+      expect([...raw.matchAll(/"type":"start-step"/g)]).toHaveLength(1);
+      expect(raw).not.toContain('"type":"finish-step"');
       expect((await world.runRow(handle.runId)).status).toBe('running');
     }, 20000);
   });

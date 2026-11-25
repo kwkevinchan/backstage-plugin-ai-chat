@@ -31,6 +31,7 @@ import {
   type Run,
 } from '../domain';
 import { EventChannel } from './EventChannel';
+import { notifyActivity, type ActivityNotifier } from './notifyActivity';
 import type { AfterRun, HostEvent } from './hostEvents';
 import type {
   Logger,
@@ -70,7 +71,7 @@ export type RunSupervisorDeps = {
    * Tells the owner that the activity of the session changed (B-05). A failure
    * is logged and does not fail the run. Unset in tests that do not care.
    */
-  notify?: (sessionId: string, activity: SessionActivity) => Promise<void>;
+  notify?: ActivityNotifier;
 };
 
 type Loop = {
@@ -85,6 +86,8 @@ type Loop = {
   done: Promise<void>;
   /** The agent text that is open, so a client that joins can be given it. */
   draft?: { draftId: string; text: string };
+  /** Highest item `seq` published as `item.completed` in this loop (or before resume). */
+  emittedSeq: number;
 };
 
 const DEFAULT_HEARTBEAT_MS = 10_000;
@@ -147,7 +150,11 @@ export class RunSupervisor {
    * `ShuttingDown` after `shutdown` began; the caller still holds the lease
    * then and must end the run.
    */
-  launch(run: LeasedRun, request: LaunchRequest): RunHandle {
+  launch(
+    run: LeasedRun,
+    request: LaunchRequest,
+    opts?: { initialSeq?: number },
+  ): RunHandle {
     if (this.closed) throw new ShuttingDown();
     const loop: Loop = {
       run,
@@ -157,6 +164,7 @@ export class RunSupervisor {
       ended: false,
       shuttingDown: false,
       done: Promise.resolve(),
+      emittedSeq: opts?.initialSeq ?? 0,
     };
     const events = this.addSubscriber(loop);
     this.fences.set(run.id, run.fence);
@@ -183,10 +191,16 @@ export class RunSupervisor {
    * subscriber. `undefined` when this process does not run the run, or no
    * agent message is open.
    */
-  openDraft(runId: string): { draftId: string; text: string } | undefined {
+  openDraft(
+    runId: string,
+  ): { draftId: string; text: string; emittedSeq: number } | undefined {
     const loop = this.loopOf(runId);
     if (!loop || loop.ended || !loop.draft) return undefined;
-    return { draftId: loop.draft.draftId, text: loop.draft.text };
+    return {
+      draftId: loop.draft.draftId,
+      text: loop.draft.text,
+      emittedSeq: loop.emittedSeq,
+    };
   }
 
   /** Stops the loop of the run if this process runs it. Returns whether it did. */
@@ -263,6 +277,9 @@ export class RunSupervisor {
 
   private publish(loop: Loop, event: HostEvent): void {
     if (event.type === 'run.ended') loop.ended = true;
+    if (event.type === 'item.completed') {
+      loop.emittedSeq = Math.max(loop.emittedSeq, event.item.seq);
+    }
     this.noteDraft(loop, event);
     for (const subscriber of loop.subscribers) subscriber.push(event);
   }
@@ -294,17 +311,12 @@ export class RunSupervisor {
    * not affected.
    */
   private tell(loop: Loop, activity: SessionActivity): void {
-    const notify = this.deps.notify;
-    if (!notify) return;
-    const sessionId = loop.run.sessionId;
-    void Promise.resolve()
-      .then(() => notify(sessionId, activity))
-      .catch(error => {
-        this.deps.logger.warn('Could not notify the activity of a session', {
-          sessionId,
-          error: describe(error),
-        });
-      });
+    notifyActivity(
+      this.deps.notify,
+      this.deps.logger,
+      loop.run.sessionId,
+      activity,
+    );
   }
 
   private async runLoop(loop: Loop): Promise<void> {

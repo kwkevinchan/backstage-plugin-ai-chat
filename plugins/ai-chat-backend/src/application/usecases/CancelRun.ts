@@ -16,8 +16,9 @@
 
 import { InvalidRunTransition } from '@kwkevinchan/ai-chat-harness';
 import { assertOwner, RunNotFound, type Principal } from '../../domain';
+import { notifyActivity, type ActivityNotifier } from '../notifyActivity';
 import type { RunSupervisor } from '../RunSupervisor';
-import type { RunRepository, SessionRepository } from '../ports';
+import type { Logger, RunRepository, SessionRepository } from '../ports';
 
 /** The user stops a run (H-06). The results that are stored stay. */
 export class CancelRun {
@@ -26,6 +27,8 @@ export class CancelRun {
       sessions: SessionRepository;
       runs: RunRepository;
       supervisor: RunSupervisor;
+      notify?: ActivityNotifier;
+      logger?: Logger;
     },
   ) {}
 
@@ -57,6 +60,7 @@ export class CancelRun {
     if ((await runs.get(run.id)).status === 'waiting_approval') {
       try {
         await runs.transition(run.id, 'cancelled', { endReason: 'user' });
+        notifyActivity(this.deps.notify, this.deps.logger, session.id, 'idle');
       } catch (error) {
         // Ended in the meantime.
         if (!(error instanceof InvalidRunTransition)) throw error;

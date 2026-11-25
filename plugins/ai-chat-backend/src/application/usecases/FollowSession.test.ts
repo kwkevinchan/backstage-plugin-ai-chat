@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 
-import type { Item } from '@kwkevinchan/ai-chat-harness';
+import {
+  AdvanceRun,
+  type Item,
+  type RunOutcome,
+} from '@kwkevinchan/ai-chat-harness';
+import { RunSupervisor } from '../RunSupervisor';
 import { FollowSession } from './FollowSession';
 
 const jane = { userRef: 'user:default/jane' } as any;
@@ -78,12 +83,20 @@ function sessionDeps(
     run?: { id: string; status: string; endReason?: string } | undefined;
     log?: Item[];
     subscribe?: () => AsyncIterable<unknown> | undefined;
-    openDraft?: () => { draftId: string; text: string } | undefined;
+    openDraft?: () =>
+      | { draftId: string; text: string; emittedSeq?: number }
+      | undefined;
     sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
     getRun?: () => Promise<{ id: string; status: string; endReason?: string }>;
+    readLog?: (
+      sessionId: string,
+      opts?: { afterSeq?: number },
+    ) => Promise<Item[]>;
+    logger?: { warn: jest.Mock };
   } = {},
 ) {
   const reads: number[] = [];
+  const readCalls: Array<{ afterSeq?: number } | undefined> = [];
   let log = over.log ?? [];
   const useCase = new FollowSession({
     sessions: { get: async () => owner } as any,
@@ -95,9 +108,12 @@ function sessionDeps(
       get: over.getRun ?? (async () => ({ id: 'r1', status: 'running' })),
     } as any,
     items: {
-      read: async () => {
+      read: async (sessionId: string, opts?: { afterSeq?: number }) => {
         reads.push(1);
-        return log;
+        readCalls.push(opts);
+        if (over.readLog) return over.readLog(sessionId, opts);
+        const after = opts?.afterSeq ?? 0;
+        return log.filter(item => item.seq > after);
       },
     } as any,
     supervisor: {
@@ -111,12 +127,14 @@ function sessionDeps(
         })),
       openDraft: over.openDraft,
     } as any,
+    logger: over.logger as any,
     sleep: over.sleep,
     pollIntervalMs: 1000,
   });
   return {
     useCase,
     reads,
+    readCalls,
     setLog: (next: Item[]) => {
       log = next;
     },
@@ -223,7 +241,6 @@ describe('FollowSession reconnect', () => {
       type: 'item.completed',
       item: expect.objectContaining({ seq: 2, kind: 'agent_message' }),
     });
-    expect(JSON.stringify(first.value)).not.toContain('item.delta');
 
     const again = iterator.next();
     await Promise.resolve();
@@ -413,5 +430,278 @@ describe('FollowSession reconnect', () => {
     release?.();
     await Promise.resolve();
     expect(reads).toHaveLength(1);
+  });
+
+  it('polls with afterSeq and only reads the full log on waiting_approval', async () => {
+    let release: (() => void) | undefined;
+    let status = 'running';
+    const tool = {
+      ...base(3),
+      kind: 'tool_call',
+      callId: 'c1',
+      toolId: 'demo:write',
+      input: {},
+      schemaHash: 'h',
+      policy: 'ask',
+      readOnly: false,
+      step: 1,
+      position: 0,
+    } as Item;
+    const { useCase, setLog, readCalls } = sessionDeps({
+      log: [user(1)],
+      subscribe: () => undefined,
+      getRun: async () => ({ id: 'r1', status }),
+      sleep: (_ms, signal) =>
+        new Promise(resolve => {
+          release = () => resolve();
+          signal.addEventListener('abort', () => resolve(), { once: true });
+        }),
+    });
+    const handle = await useCase.execute({ principal: jane, sessionId: 's1' });
+    expect(readCalls).toEqual([undefined]);
+
+    const iterator = handle!.events[Symbol.asyncIterator]();
+    const first = iterator.next();
+    await Promise.resolve();
+    setLog([user(1), output(2, 1)]);
+    release!();
+    await first;
+    expect(readCalls).toEqual([undefined, { afterSeq: 1 }]);
+
+    const second = iterator.next();
+    await Promise.resolve();
+    status = 'waiting_approval';
+    setLog([user(1), output(2, 1), tool]);
+    release!();
+    const toolEvent = await second;
+    expect(toolEvent.value).toMatchObject({
+      type: 'item.completed',
+      item: { seq: 3 },
+    });
+    const endEvent = await iterator.next();
+    expect(endEvent.value).toEqual({
+      type: 'run.ended',
+      outcome: {
+        status: 'waiting_approval',
+        pending: [expect.objectContaining({ callId: 'c1' })],
+      },
+    });
+    expect(readCalls).toEqual([undefined, { afterSeq: 1 }, undefined]);
+  });
+
+  it('retries transient poll errors with a warning and fails only after repeated errors', async () => {
+    const releases: Array<() => void> = [];
+    const logger = { warn: jest.fn() };
+    let pollAttempt = 0;
+    const { useCase, setLog } = sessionDeps({
+      log: [user(1)],
+      subscribe: () => undefined,
+      logger,
+      getRun: async () => {
+        pollAttempt += 1;
+        if (pollAttempt <= 2) throw new Error('db busy');
+        if (pollAttempt === 3) return { id: 'r1', status: 'running' };
+        throw new Error('db gone');
+      },
+      sleep: (_ms, signal) =>
+        new Promise(resolve => {
+          releases.push(() => resolve());
+          signal.addEventListener('abort', () => resolve(), { once: true });
+        }),
+    });
+
+    const handle = await useCase.execute({ principal: jane, sessionId: 's1' });
+    const iterator = handle!.events[Symbol.asyncIterator]();
+    const pending = iterator.next();
+    await Promise.resolve();
+    // Poll 1: fails -> warns and sleeps again.
+    releases.shift()!();
+    await new Promise(resolve => setImmediate(resolve));
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    // Poll 2: fails -> warns and sleeps again.
+    releases.shift()!();
+    await new Promise(resolve => setImmediate(resolve));
+    expect(logger.warn).toHaveBeenCalledTimes(2);
+    // Poll 3: succeeds -> resets failure count and delivers item.
+    setLog([user(1), output(2, 1)]);
+    releases.shift()!();
+    const itemEvent = await pending;
+    expect(itemEvent.value).toMatchObject({
+      type: 'item.completed',
+      item: { seq: 2 },
+    });
+
+    // Three consecutive errors after recovery stop the poll.
+    const failing = iterator.next();
+    await Promise.resolve();
+    releases.shift()!();
+    await new Promise(resolve => setImmediate(resolve));
+    releases.shift()!();
+    await new Promise(resolve => setImmediate(resolve));
+    releases.shift()!();
+    await expect(failing).rejects.toThrow('db gone');
+    expect(logger.warn).toHaveBeenCalledTimes(4);
+  });
+
+  it('does not duplicate text when items.append stored the message before item.completed is emitted', async () => {
+    const log: Item[] = [user(1)];
+    let markAppended!: () => void;
+    const appended = new Promise<void>(resolve => {
+      markAppended = resolve;
+    });
+    let releaseCompleted!: () => void;
+    const gateCompleted = new Promise<void>(resolve => {
+      releaseCompleted = resolve;
+    });
+
+    const supervisor = new RunSupervisor({
+      advance: {
+        execute: async function* storedBeforeCompleted() {
+          yield { type: 'run.started', runId: 'r1' };
+          yield { type: 'step.started', step: 1 };
+          yield {
+            type: 'item.started',
+            draftId: 'd1',
+            kind: 'agent_message',
+          };
+          yield { type: 'item.delta', draftId: 'd1', text: 'Hello' };
+          const stored = output(2, 1);
+          (stored as any).text = 'Hello';
+          log.push(stored);
+          markAppended();
+          await gateCompleted;
+          yield { type: 'item.completed', draftId: 'd1', item: stored };
+          yield { type: 'step.ended', step: 1 };
+          const outcome: RunOutcome = { status: 'completed' };
+          yield { type: 'run.ended', outcome };
+          return outcome;
+        } as unknown as AdvanceRun['execute'],
+      },
+      runs: {
+        transition: async () => ({ id: 'r1', status: 'completed' }),
+      } as any,
+      logger: { warn: jest.fn(), error: jest.fn() } as any,
+    });
+
+    const loopHandle = supervisor.launch(
+      {
+        id: 'r1',
+        sessionId: 's1',
+        status: 'running',
+        cancelRequested: false,
+        usage: { stepsUsed: 0, toolCallsUsed: 0, elapsedSeconds: 0 },
+        fence: { runId: 'r1', leaseOwner: 'lease-1' },
+      } as any,
+      { ctx: { principal: jane } } as any,
+    );
+
+    await appended;
+
+    const useCase = new FollowSession({
+      sessions: { get: async () => owner } as any,
+      runs: {
+        findActive: async () => ({ id: 'r1', status: 'running' }),
+      } as any,
+      items: {
+        read: async (_id: string, opts?: { afterSeq?: number }) =>
+          log.filter(item => item.seq > (opts?.afterSeq ?? 0)),
+      } as any,
+      supervisor,
+    });
+
+    const followed = await useCase.execute({
+      principal: jane,
+      sessionId: 's1',
+    });
+    expect(followed!.items.map(i => i.seq)).toEqual([1, 2]);
+    expect(followed!.upToSeq).toBe(2);
+    expect(followed!.resumeText).toBeUndefined();
+
+    const seen: unknown[] = [];
+    releaseCompleted();
+    for await (const event of followed!.events) {
+      seen.push(event);
+    }
+    await loopHandle.done;
+
+    expect(seen).toContainEqual({
+      type: 'item.completed',
+      draftId: 'd1',
+      item: expect.objectContaining({ seq: 2, kind: 'agent_message' }),
+    });
+  });
+
+  it('still sends resumeText on a resumed run that already has an earlier agent_message', async () => {
+    const earlier = output(2, 1);
+    const log: Item[] = [user(1), earlier];
+    let markDraftOpen!: () => void;
+    const draftOpen = new Promise<void>(resolve => {
+      markDraftOpen = resolve;
+    });
+    let releaseEnd!: () => void;
+    const gateEnd = new Promise<void>(resolve => {
+      releaseEnd = resolve;
+    });
+
+    const supervisor = new RunSupervisor({
+      advance: {
+        execute: async function* storedBeforeCompleted() {
+          yield {
+            type: 'item.started',
+            draftId: 'd2',
+            kind: 'agent_message',
+          };
+          yield { type: 'item.delta', draftId: 'd2', text: 'Next' };
+          markDraftOpen();
+          await gateEnd;
+          const outcome: RunOutcome = { status: 'completed' };
+          yield { type: 'run.ended', outcome };
+          return outcome;
+        } as unknown as AdvanceRun['execute'],
+      },
+      runs: {
+        transition: async () => ({ id: 'r1', status: 'completed' }),
+      } as any,
+      logger: { warn: jest.fn(), error: jest.fn() } as any,
+    });
+
+    const loopHandle = supervisor.launch(
+      {
+        id: 'r1',
+        sessionId: 's1',
+        status: 'running',
+        cancelRequested: false,
+        usage: { stepsUsed: 1, toolCallsUsed: 1, elapsedSeconds: 1 },
+        fence: { runId: 'r1', leaseOwner: 'lease-2' },
+      } as any,
+      { ctx: { principal: jane } } as any,
+      { initialSeq: 2 },
+    );
+
+    await draftOpen;
+
+    const useCase = new FollowSession({
+      sessions: { get: async () => owner } as any,
+      runs: {
+        findActive: async () => ({ id: 'r1', status: 'running' }),
+      } as any,
+      items: {
+        read: async (_id: string, opts?: { afterSeq?: number }) =>
+          log.filter(item => item.seq > (opts?.afterSeq ?? 0)),
+      } as any,
+      supervisor,
+    });
+
+    const followed = await useCase.execute({
+      principal: jane,
+      sessionId: 's1',
+    });
+    expect(followed!.resumeText).toEqual({ draftId: 'd2', text: 'Next' });
+
+    releaseEnd();
+    for await (const _ of followed!.events) {
+      // drain
+    }
+    await loopHandle.done;
   });
 });

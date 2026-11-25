@@ -745,7 +745,11 @@ describe('RunSupervisor activity (B-05)', () => {
     const handle = supervisor.launch(leased('r1', 'lease-1'), request);
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(stage).toBe(1);
-    expect(supervisor.openDraft('r1')).toEqual({ draftId: 'd1', text: 'Hel' });
+    expect(supervisor.openDraft('r1')).toEqual({
+      draftId: 'd1',
+      text: 'Hel',
+      emittedSeq: 0,
+    });
     releaseDraft();
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(stage).toBe(2);

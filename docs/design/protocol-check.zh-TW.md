@@ -359,7 +359,7 @@ Tests:       2 passed, 2 total
 - **停止。** `useChat.stop()` 只會中斷 fetch。文件把這種中斷視為斷線，不是取消（見 Chatbot Resume Streams 的警告）。要取消 Run，transport 的 `abortSignal` 不能直接取消伺服器的工作，要由使用者按「停止」時另外呼叫 `POST .../cancel`。
 - **接回（A-07）。** 規格的 A-07 已改成「從目前 Run 的第一個 Item 重送，再接著送新的」。重送要先送 `start`（同一個 `messageId`）。還沒完成的 Item 要補送 `text-start` 加已累積的文字，不能只送缺開頭的 `text-delta`（3.4）。`afterSeq` 留作其他用戶端的下限。
 - **`data-plan`。** 固定 `id` 取代先前的，只在同一則訊息裡成立。前一個 Run 的計畫留在舊訊息，畫面要取最新的那一個。
-- **`GET /stream` 只在 Run 是 `running` 時串流。** `waiting_approval` 或已結束時伺服器回 204，transport 轉成 `null`。（H-03 把 `waiting_approval` 算進行中的 Run，這裡的「串流」不同：停在核准上的 Run 沒有東西可送，開著串流會讓 `useChat` 停在 `submitted`，之後按核准不會自動送出，卡片卡住。）端點在 P1-09 加入。P2-06 之後，Run 在別台而且是 `running` 時也串流：每秒送已完成的 Item，沒有逐字片段；連線當下沒有 `running` 的 Run 仍回 204。
+- **`GET /stream` 只在 Run 是 `running` 時串流。** `waiting_approval` 或已結束時伺服器回 204，transport 轉成 `null`。（H-03 把 `waiting_approval` 算進行中的 Run，這裡的「串流」不同：停在核准上的 Run 沒有東西可送，開著串流會讓 `useChat` 停在 `submitted`，之後按核准不會自動送出，卡片卡住。）端點在 P1-09 加入。P2-06 之後，Run 在別台而且是 `running` 時也串流：每秒送已完成的 Item，沒有逐字片段；連線當下沒有 `running` 的 Run 仍回 204。與直接送訊息／同一台即時串流有三處差異：別台的 `failed`／`expired` 沒有失敗原因，一律送 `"The run stopped."`；別台只讀已存的 Item，輪詢項目之間沒有 `start-step`／`finish-step` 邊界；同一台接回時因為 presenter 採 `typing: false`，補送完當時草稿後，同一個 Run 的下一則回答會等完成再整段送出。
 - **zod 版本。** `ai` 的 peer 是 `zod@^3.25.76 || ^4.1.8`。
 
 ## 6. 沒有驗證的事

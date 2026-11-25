@@ -16,9 +16,15 @@
 
 import { assertOwner, type Principal } from '../../domain';
 import type { RunSettings } from '../buildRunRequest';
+import type { ActivityNotifier } from '../notifyActivity';
 import { resumeIfDecided } from '../resumeIfDecided';
 import type { RunHandle, RunSupervisor } from '../RunSupervisor';
-import type { AgentCatalog, RunRepository, SessionRepository } from '../ports';
+import type {
+  AgentCatalog,
+  Logger,
+  RunRepository,
+  SessionRepository,
+} from '../ports';
 import type { Clock, ItemLog } from '@kwkevinchan/ai-chat-harness';
 
 /**
@@ -37,6 +43,8 @@ export class ResumeRun {
       agents: AgentCatalog;
       clock: Clock;
       settings: RunSettings;
+      notify?: ActivityNotifier;
+      logger?: Logger;
     },
   ) {}
 

@@ -28,10 +28,12 @@ import {
 } from '../../domain';
 import type { HostEvent } from '../hostEvents';
 import type { RunSupervisor } from '../RunSupervisor';
-import type { RunRepository, SessionRepository } from '../ports';
+import type { Logger, RunRepository, SessionRepository } from '../ports';
 
 /** How often a run on another backend is read. The spec says one second. */
 const DEFAULT_POLL_MS = 1000;
+/** Stop polling after this many consecutive read failures. */
+const MAX_POLL_ERRORS = 3;
 
 const STOP_REASONS: readonly StopReason[] = [
   'max_steps',
@@ -89,6 +91,7 @@ export class FollowSession {
       runs: RunRepository;
       items: ItemLog;
       supervisor: RunSupervisor;
+      logger?: Logger;
       /** Waits between reads of a run on another backend. One second by default. */
       sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
       /** The wait. One second by default, so a test does not really wait. */
@@ -121,7 +124,7 @@ export class FollowSession {
       const draft = supervisor.openDraft?.(run.id);
       try {
         const log = await this.logOf(session.id, run.id);
-        const resumeText = prefixOf(draft, bufferedOf(events));
+        const resumeText = prefixOf(draft, bufferedOf(events), log);
         return {
           ...viewOf(log, input.afterSeq ?? 0),
           run,
@@ -143,9 +146,13 @@ export class FollowSession {
     };
   }
 
-  private logOf(sessionId: string, runId: string): Promise<Item[]> {
+  private logOf(
+    sessionId: string,
+    runId: string,
+    afterSeq?: number,
+  ): Promise<Item[]> {
     return this.deps.items
-      .read(sessionId)
+      .read(sessionId, afterSeq !== undefined ? { afterSeq } : undefined)
       .then(log => log.filter(item => item.runId === runId));
   }
 
@@ -165,6 +172,7 @@ export class FollowSession {
     const abort = new AbortController();
     let cursor = fromSeq;
     let stopped = false;
+    let pollErrors = 0;
     const waiting: Item[] = [];
 
     return {
@@ -183,8 +191,32 @@ export class FollowSession {
               if (stopped || abort.signal.aborted) {
                 return { value: undefined, done: true };
               }
-              const run = await this.deps.runs.get(runId);
-              const log = await this.logOf(sessionId, runId);
+              let run: Run;
+              let log: Item[];
+              let fullLog: Item[] = [];
+              try {
+                run = await this.deps.runs.get(runId);
+                if (run.status === 'waiting_approval') {
+                  fullLog = await this.logOf(sessionId, runId);
+                  log = fullLog;
+                } else {
+                  log = await this.logOf(sessionId, runId, cursor);
+                }
+                pollErrors = 0;
+              } catch (error) {
+                pollErrors += 1;
+                if (pollErrors >= MAX_POLL_ERRORS) throw error;
+                this.deps.logger?.warn(
+                  'Could not poll a run on another backend',
+                  {
+                    runId,
+                    attempt: pollErrors,
+                    error:
+                      error instanceof Error ? error.message : String(error),
+                  },
+                );
+                continue;
+              }
               const after = cursor;
               const fresh = log
                 .filter(item => item.seq > after)
@@ -214,7 +246,7 @@ export class FollowSession {
               if (run.status !== 'running') {
                 pending.push({
                   type: 'run.ended',
-                  outcome: outcomeOfStoredRun(run, log),
+                  outcome: outcomeOfStoredRun(run, fullLog),
                 });
                 stopped = true;
               }
@@ -255,14 +287,22 @@ function viewOf(log: Item[], afterSeq: number) {
  * Deltas that are only queued are not added; the live stream sends them.
  */
 function prefixOf(
-  draft: { draftId: string; text: string } | undefined,
+  draft: { draftId: string; text: string; emittedSeq?: number } | undefined,
   buffered: readonly HostEvent[],
+  log: readonly Item[],
 ): { draftId: string; text: string } | undefined {
   if (!draft) return undefined;
-  const completed = buffered.some(
+  const completedInEvents = buffered.some(
     event => event.type === 'item.completed' && event.draftId === draft.draftId,
   );
-  return completed ? undefined : draft;
+  const completedInLog =
+    draft.emittedSeq !== undefined &&
+    log.some(
+      item => item.kind === 'agent_message' && item.seq > draft.emittedSeq!,
+    );
+  return completedInEvents || completedInLog
+    ? undefined
+    : { draftId: draft.draftId, text: draft.text };
 }
 
 function bufferedOf(events: AsyncIterable<HostEvent>): HostEvent[] {

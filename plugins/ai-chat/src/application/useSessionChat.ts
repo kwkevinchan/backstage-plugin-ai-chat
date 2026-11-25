@@ -413,11 +413,17 @@ export function useSessionChat(options: UseSessionChatOptions) {
     activityBefore.current = liveActivity;
     if (!sawActivity.current) {
       sawActivity.current = true;
+      if (liveActivity !== undefined) openedRunning.current = false;
       return;
     }
     const current = chatRef.current.status;
-    if (current === 'streaming' || current === 'submitted') return;
-    if (liveActivity === 'running' && before !== 'running') {
+    const becameRunning = liveActivity === 'running' && before !== 'running';
+    if (liveActivity === 'waiting_approval') openedRunning.current = false;
+    if (current === 'streaming' || current === 'submitted') {
+      if (becameRunning) openedRunning.current = false;
+      return;
+    }
+    if (becameRunning) {
       if (openedRunning.current) {
         openedRunning.current = false;
         return;
