@@ -54,8 +54,10 @@ const POLICY_NAMES: readonly string[] = ['allow', 'ask', 'deny'];
  * it. The two extra texts are not combined. An agent from a module keeps the
  * system prompt the module passed.
  *
- * `toolsets`, `skills`, `model`, `limits` and `planning` are recorded. The
- * loop does not apply them yet.
+ * `skills` chooses which registered skills the agent offers through
+ * `load_skill`: all of them when it is omitted, none when it is empty. An id
+ * that no skill has stops the backend. `toolsets`, `model`, `limits` and
+ * `planning` are recorded; the loop does not apply them yet.
  *
  * Without `aiChat.toolsets` it builds one toolset, `default`, switched on for
  * every session, from the deprecated `aiChat.actions.include` and
