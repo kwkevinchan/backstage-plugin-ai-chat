@@ -10,6 +10,7 @@ AI Chat Harness 的設計。從上往下讀。
 | [implementation-plan.zh-TW.md](implementation-plan.zh-TW.md) | 實作規劃：PI、PU 和四期拆成哪些 PR、怎麼驗收、要驗證的事、風險 | 要排工作的人                 |
 | [protocol-check.zh-TW.md](protocol-check.zh-TW.md)           | 協定驗證：AI SDK 的事件對照、核准的表示法、前端用 `useChat`    | 要寫串流和前端的人           |
 | [p1-coverage.zh-TW.md](p1-coverage.zh-TW.md)                 | P1 對照表：每一條 P1 需求對到哪個測試                          | 要驗收或接手 P1 的人         |
+| [pi-coverage.zh-TW.md](pi-coverage.zh-TW.md)                 | PI 對照表：每一條 PI 需求對到哪個測試                          | 要驗收或接手 PI 的人         |
 
 規則：
 

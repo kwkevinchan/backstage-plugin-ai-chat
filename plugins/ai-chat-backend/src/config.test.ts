@@ -313,11 +313,22 @@ describe('the configuration in the READMEs', () => {
 
       const config = readAiChatConfig(root);
       expect(config).toMatchObject({
-        llm: { model: 'gpt-4o-mini' },
+        llm: { model: 'gpt-4o-mini', images: false },
         maxTurns: 10,
         maxToolCallsPerRun: 30,
         runTimeoutSeconds: 300,
         context: { tokenBudget: 100000, keepRecentSteps: 6 },
+        input: {
+          insertMaxPerRun: 5,
+          queueMaxMessages: 5,
+          images: {
+            maxPerMessage: 4,
+            maxBytes: 5242880,
+            maxBytesPerInput: 20971520,
+            maxPendingPerSession: 12,
+            tokensPerImage: 1600,
+          },
+        },
         maxToolOutputChars: 20000,
         sharing: { live: { enabled: true, defaultHours: 24, maxHours: 72 } },
         retentionDays: 90,
@@ -350,4 +361,16 @@ describe('the configuration in the READMEs', () => {
       expect(logger.warn).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('usage.zh-TW.html', () => {
+  it('loads no external resource', () => {
+    const html = readFileSync(
+      resolve(__dirname, '../../../docs/design/usage.zh-TW.html'),
+      'utf8',
+    );
+    expect(html).not.toMatch(/(?:src|href)\s*=\s*["']\s*(?:https?:)?\/\//i);
+    expect(html).not.toMatch(/url\(\s*["']?\s*(?:https?:)?\/\//i);
+    expect(html).not.toMatch(/@import\b/i);
+  });
 });
