@@ -75,6 +75,8 @@ aiChat:
       maxBytesPerInput: 20971520 # 一次 Run 和一次模型呼叫的圖片位元組上限；預設 20 MB，不小於 maxPerMessage 乘 maxBytes
       maxPendingPerSession: 12 # 上傳了但還沒進訊息的圖片；預設 12
       tokensPerImage: 1600 # 一張圖片在預算裡的估計 token；預設 1600
+  retention:
+    days: 90 # 最後一次變更超過這麼多天的對話會刪除；0 代表保留；預設 90
 backend:
   actions:
     pluginSources: [catalog] # 對話只看得到這些外掛的 action
@@ -86,6 +88,8 @@ backend:
 
 `input.images.tokensPerImage`（預設 1600）是一張圖片在上下文預算裡算幾個 token。
 它是估計值，沒有對照實際模型量過。請管理員照自己的模型調整：估太低，送給模型的內容可能超過模型的上下文上限；估太高，舊圖片會太早被拿掉。
+
+**保存期限。** 每小時會刪除最後一次變更超過 `aiChat.retention.days`（預設 90，一天是 24 小時）的對話，連同它的 Run、訊息、排隊的訊息和圖片。稽核紀錄會留下。還有 Run 沒結束的對話會留到那個 Run 結束。釘選或封存不會讓對話超過期限還留著；改名、釘選、封存、開關工具組，以及新的訊息，都算一次變更。`days` 設成 `0` 就全部保留。剛好滿 `days` 的對話會留下。
 
 - **Toolset**：對話只看得到自己開啟的工具組裡的 action。不在任何一組裡的 action 不會出現。
   使用者在自己的對話裡開關工具組（對話欄最上面、訊息列表之上的 **Toolsets**），範圍不超過你定義的。

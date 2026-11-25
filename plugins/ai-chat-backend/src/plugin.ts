@@ -47,6 +47,12 @@ const EXPIRE_STALE_RUNS_EVERY = { seconds: 30 };
 const PURGE_ATTACHMENTS_EVERY = { hours: 1 };
 
 /**
+ * How often sessions past `aiChat.retention.days` are deleted (SE-05).
+ * The same hour as the unused images: a day is the unit of the retention.
+ */
+const PURGE_EXPIRED_SESSIONS_EVERY = { hours: 1 };
+
+/**
  * Backend plugin of the AI chat. Serves the routes under `/api/ai-chat`: the
  * conversations of the signed-in user and the response streams. The model
  * calls the actions of the actions registry as that user; an action that is
@@ -153,6 +159,7 @@ export const aiChatPlugin = createBackendPlugin({
               maxImageBytesPerInput: aiChat.input.images.maxBytesPerInput,
             },
           },
+          retentionDays: aiChat.retentionDays,
         });
         lifecycle.addShutdownHook(() => host.supervisor.shutdown());
         await scheduler.scheduleTask({
@@ -173,6 +180,20 @@ export const aiChatPlugin = createBackendPlugin({
               await host.useCases.purgeUnusedAttachments.execute();
             if (deleted > 0) {
               logger.info(`AI chat deleted ${deleted} unused images`);
+            }
+          },
+        });
+
+        await scheduler.scheduleTask({
+          id: 'ai-chat-purge-expired-sessions',
+          frequency: PURGE_EXPIRED_SESSIONS_EVERY,
+          timeout: { minutes: 5 },
+          fn: async () => {
+            const deleted = await host.useCases.purgeExpiredSessions.execute();
+            if (deleted > 0) {
+              logger.info(
+                `AI chat deleted ${deleted} session(s) past the retention of ${aiChat.retentionDays} day(s)`,
+              );
             }
           },
         });
