@@ -33,11 +33,23 @@ export type AdvanceRunRequest = {
   usage: RunUsage;
 };
 
-// @public (undocumented)
+// @public
 export type AgentDefinition = {
   id: string;
   title?: string;
   systemPrompt: string;
+  toolsets?: readonly string[];
+  skills?: readonly string[];
+  model?: string;
+  limits?: AgentLimits;
+  planning?: PlanningMode;
+};
+
+// @public
+export type AgentLimits = {
+  maxSteps?: number;
+  maxToolCallsPerRun?: number;
+  runTimeoutSeconds?: number;
 };
 
 // @public
@@ -46,6 +58,12 @@ export type AgentMessageBody = {
   text: string;
   readUpToSeq?: number;
 };
+
+// @public
+export interface AiChatHarnessExtensionPoint {
+  // (undocumented)
+  addAgent(agent: AgentDefinition): void;
+}
 
 // @public
 export type ApprovalBody = {
@@ -151,6 +169,9 @@ export class DuplicateItem extends HarnessError {
   // (undocumented)
   readonly dedupeKey: string;
 }
+
+// @public
+export function emptyExtensions(): Extensions;
 
 // @public
 export function estimateTokens(text: string): number;
@@ -431,6 +452,9 @@ export type PlanItem = {
 
 // @public (undocumented)
 export type PlanItemStatus = 'pending' | 'in_progress' | 'completed';
+
+// @public
+export type PlanningMode = 'required';
 
 // @public
 export function planSummary(
