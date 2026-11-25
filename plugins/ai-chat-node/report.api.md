@@ -6,20 +6,8 @@
 import { AgentDefinition } from '@kwkevinchan/ai-chat-harness';
 import { AgentLimits } from '@kwkevinchan/ai-chat-harness';
 import { AiChatHarnessExtensionPoint } from '@kwkevinchan/ai-chat-harness';
-import { BeforeToolCallResult } from '@kwkevinchan/ai-chat-harness';
-import { ContextProvider } from '@kwkevinchan/ai-chat-harness';
 import { ExtensionPoint } from '@backstage/backend-plugin-api';
-import { Extensions } from '@kwkevinchan/ai-chat-harness';
-import { HookName } from '@kwkevinchan/ai-chat-harness';
-import { Hooks } from '@kwkevinchan/ai-chat-harness';
-import { ModelChunk } from '@kwkevinchan/ai-chat-harness';
-import { ModelClient } from '@kwkevinchan/ai-chat-harness';
 import { PlanningMode } from '@kwkevinchan/ai-chat-harness';
-import { RunSummary } from '@kwkevinchan/ai-chat-harness';
-import { Skill } from '@kwkevinchan/ai-chat-harness';
-import { StepContext } from '@kwkevinchan/ai-chat-harness';
-import { ToolCall } from '@kwkevinchan/ai-chat-harness';
-import { ToolResult } from '@kwkevinchan/ai-chat-harness';
 
 export { AgentDefinition };
 
@@ -30,29 +18,5 @@ export { AiChatHarnessExtensionPoint };
 // @public
 export const aiChatHarnessExtensionPoint: ExtensionPoint<AiChatHarnessExtensionPoint>;
 
-export { BeforeToolCallResult };
-
-export { ContextProvider };
-
-export { Extensions };
-
-export { HookName };
-
-export { Hooks };
-
-export { ModelChunk };
-
-export { ModelClient };
-
 export { PlanningMode };
-
-export { RunSummary };
-
-export { Skill };
-
-export { StepContext };
-
-export { ToolCall };
-
-export { ToolResult };
 ```

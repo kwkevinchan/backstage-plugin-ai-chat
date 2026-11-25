@@ -31,7 +31,7 @@ backend.add(import('@backstage/plugin-catalog-backend'));
 // The chat. It lists the actions of the plugins in
 // backend.actions.pluginSources.
 backend.add(import('@kwkevinchan/backstage-plugin-ai-chat-backend'));
-// Example of a backend module: one agent and one context provider.
+// Example of a backend module: one agent (a private example, to copy from).
 backend.add(
   import('@kwkevinchan/backstage-plugin-ai-chat-backend-module-example'),
 );

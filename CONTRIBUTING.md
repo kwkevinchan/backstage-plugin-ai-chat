@@ -47,16 +47,16 @@ BACKSTAGE_TEST_DATABASE_POSTGRES16_CONNECTION_STRING=postgresql://postgres:postg
 
 ## Layout
 
-| Package                          | Role                                                                                        |
-| -------------------------------- | ------------------------------------------------------------------------------------------- |
-| `ai-chat-backend`                | Backend plugin `ai-chat`; depends on `ai-chat-harness`, `ai-chat-common` and `ai-chat-node` |
-| `ai-chat-node`                   | Extension point for backend modules; depends only on `ai-chat-harness`                      |
-| `ai-chat-backend-module-example` | Example module; depends only on `ai-chat-node` and the Backstage backend API                |
-| `ai-chat`                        | Frontend plugin; depends on no other package of this repository                             |
-| `app`, `app-next`                | Development apps (legacy and new frontend system); private                                  |
-| `backend`                        | Development backend; private                                                                |
-| `ai-chat-harness` (`packages/`)  | Core of the agent loop; published, depends on no `@backstage/*` package                     |
-| `ai-chat-common`                 | Types shared by the frontend and the backend; published                                     |
+| Package                          | Role                                                                                                |
+| -------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `ai-chat-backend`                | Backend plugin `ai-chat`; depends on `ai-chat-harness`, `ai-chat-common` and `ai-chat-node`         |
+| `ai-chat-node`                   | Extension point for backend modules; depends only on `ai-chat-harness`                              |
+| `ai-chat-backend-module-example` | Private example module, not published; depends only on `ai-chat-node` and the Backstage backend API |
+| `ai-chat`                        | Frontend plugin; depends on no other package of this repository                                     |
+| `app`, `app-next`                | Development apps (legacy and new frontend system); private                                          |
+| `backend`                        | Development backend; private                                                                        |
+| `ai-chat-harness` (`packages/`)  | Core of the agent loop; published, depends on no `@backstage/*` package                             |
+| `ai-chat-common`                 | Types shared by the frontend and the backend; published                                             |
 
 `yarn constraints` (`yarn.config.cjs`) checks the directions: frontend
 packages never depend on backend packages or Node-only packages, and the other

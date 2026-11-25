@@ -111,7 +111,7 @@ export function readAgentBody(value: unknown, path: string): AgentBody {
   return body;
 }
 
-/** An agent a module registered. The system prompt is the text it passed. */
+/** An agent a module registered. The catalog then wraps the prompt with the built-in rules. */
 export function readExtensionAgent(value: unknown): AgentDefinition {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new InputError('agent must be an object');

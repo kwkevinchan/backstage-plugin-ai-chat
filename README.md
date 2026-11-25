@@ -301,23 +301,16 @@ The loop still uses the limits of the installation and its one model client.
 It does not filter tools by the agent's toolsets, load a skill, require a
 plan on the first step, or call a model client other than that one.
 
-A backend module can register more agents, and context providers, skills,
-hooks and model clients, through
+A backend module can register more agents through
 `@kwkevinchan/backstage-plugin-ai-chat-node`. It depends only on that package.
-`@kwkevinchan/backstage-plugin-ai-chat-backend-module-example` registers the
-agent `guide` and one context provider. Add it next to the backend plugin:
+An agent a module registers receives the same built-in prompt rules as a
+configured agent. An id that both the configuration and a module define stops
+the backend.
 
-```ts
-backend.add(import('@kwkevinchan/backstage-plugin-ai-chat-backend'));
-backend.add(
-  import('@kwkevinchan/backstage-plugin-ai-chat-backend-module-example'),
-);
-```
-
-An id that both the configuration and a module define stops the backend. The
-example uses `guide`, so `aiChat.agents.guide` would. A context provider is
-recorded and is not added to the model input yet. The same is true of skills,
-hooks and a model client a module registers.
+`plugins/ai-chat-backend-module-example` in this repository is a private
+example of such a module, to copy from. It registers the agent `guide`. It is
+not a package to install. The example uses `guide`, so `aiChat.agents.guide`
+would also stop the backend.
 
 Any OpenAI-compatible server works, for example a local server: set `baseUrl`
 to `http://localhost:11434/v1` and leave out `apiKey`.

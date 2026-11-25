@@ -1,7 +1,7 @@
 {
   "name": "@kwkevinchan/backstage-plugin-ai-chat-node",
   "version": "0.0.0",
-  "description": "Extension point for backend modules of the AI chat for Backstage. A module depends on this package to register agents, context providers, skills, hooks and model clients",
+  "description": "Extension point for backend modules of the AI chat for Backstage. A module depends on this package to register agents",
   "license": "Apache-2.0",
   "keywords": [
     "backstage",

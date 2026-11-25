@@ -63,13 +63,6 @@ export type AgentMessageBody = {
 export interface AiChatHarnessExtensionPoint {
   // (undocumented)
   addAgent(agent: AgentDefinition): void;
-  // (undocumented)
-  addContextProvider(provider: ContextProvider): void;
-  // (undocumented)
-  addHook<K extends HookName>(name: K, hook: Hooks[K]): void;
-  // (undocumented)
-  addSkill(skill: Skill): void;
-  setModelClient(id: string, client: ModelClient): void;
 }
 
 // @public
@@ -93,19 +86,6 @@ export type AttachmentRef = {
   name: string;
   size: number;
 };
-
-// @public
-export type BeforeToolCallResult =
-  | {
-      action: 'continue';
-    }
-  | {
-      action: 'ask';
-    }
-  | {
-      action: 'deny';
-      reason: string;
-    };
 
 // @public
 export function buildModelInput(
@@ -153,13 +133,6 @@ export type ContextBudget = {
 };
 
 // @public
-export interface ContextProvider {
-  // (undocumented)
-  id: string;
-  provide(ctx: StepContext): Promise<string | undefined>;
-}
-
-// @public
 export function currentPlan(items: readonly Item[]): Plan | undefined;
 
 // @public
@@ -204,14 +177,7 @@ export function emptyExtensions(): Extensions;
 export function estimateTokens(text: string): number;
 
 // @public
-export type Extensions = {
-  readonly contextProviders: readonly ContextProvider[];
-  readonly skills: readonly Skill[];
-  readonly hooks: {
-    readonly [K in HookName]: readonly Hooks[K][];
-  };
-  readonly modelClients: ReadonlyMap<string, ModelClient>;
-};
+export type Extensions = Readonly<Record<string, never>>;
 
 // @public
 export class HarnessError extends Error {
@@ -270,24 +236,6 @@ export type HarnessEvent =
       type: 'run.ended';
       outcome: RunOutcome;
     };
-
-// @public (undocumented)
-export type HookName = keyof Hooks;
-
-// @public
-export interface Hooks {
-  // (undocumented)
-  afterToolCall(call: ToolCall, result: ToolResult): Promise<ToolResult>;
-  // (undocumented)
-  beforeModelCall(ctx: StepContext): Promise<void>;
-  // (undocumented)
-  beforeToolCall(
-    call: ToolCall,
-    ctx: StepContext,
-  ): Promise<BeforeToolCallResult>;
-  // (undocumented)
-  onRunEnd(run: RunSummary): Promise<void>;
-}
 
 // @public
 export interface IdGenerator {
@@ -576,38 +524,10 @@ export type RunStatus =
   | 'expired';
 
 // @public
-export type RunSummary = {
-  runId: string;
-  sessionId: string;
-  status: RunStatus;
-};
-
-// @public
 export type RunUsage = {
   stepsUsed: number;
   toolCallsUsed: number;
   elapsedSeconds: number;
-};
-
-// @public
-export interface Skill {
-  description: string;
-  // (undocumented)
-  id: string;
-  // (undocumented)
-  load(ctx: StepContext): Promise<string>;
-}
-
-// @public
-export type StepContext = {
-  sessionId: string;
-  runId: string;
-  principal: unknown;
-  page?: {
-    path: string;
-    entityRef?: string;
-  };
-  agentId: string;
 };
 
 // @public (undocumented)
@@ -632,9 +552,6 @@ export type SummaryPlan = {
   previousSummary?: string;
   items: Item[];
 };
-
-// @public
-export type ToolCall = ToolCallItem;
 
 // @public
 export type ToolCallBody = {
@@ -688,9 +605,6 @@ export type ToolOutput = {
   truncated?: boolean;
   message?: string;
 };
-
-// @public
-export type ToolResult = ToolResultBody;
 
 // @public (undocumented)
 export type ToolResultBody = {

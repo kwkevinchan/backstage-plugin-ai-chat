@@ -18,7 +18,6 @@ import { createBackendModule } from '@backstage/backend-plugin-api';
 import {
   aiChatHarnessExtensionPoint,
   type AgentDefinition,
-  type ContextProvider,
 } from '@kwkevinchan/backstage-plugin-ai-chat-node';
 
 const guide: AgentDefinition = {
@@ -30,16 +29,9 @@ const guide: AgentDefinition = {
   planning: 'required',
 };
 
-const site: ContextProvider = {
-  id: 'site',
-  async provide() {
-    return 'The site is example.com.';
-  },
-};
-
 /**
- * Registers one agent and one context provider. The text mentions
- * `example.com` only. Install it next to the AI chat backend plugin.
+ * Registers one agent. The text mentions `example.com` only. This package is
+ * a private example in the repository, to copy from, not to install.
  *
  * @public
  */
@@ -51,7 +43,6 @@ export const aiChatExampleModule = createBackendModule({
       deps: { harness: aiChatHarnessExtensionPoint },
       async init({ harness }) {
         harness.addAgent(guide);
-        harness.addContextProvider(site);
       },
     });
   },

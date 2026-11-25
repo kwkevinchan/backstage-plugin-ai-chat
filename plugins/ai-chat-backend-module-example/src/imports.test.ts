@@ -19,7 +19,6 @@ import { startTestBackend } from '@backstage/backend-test-utils';
 import {
   aiChatHarnessExtensionPoint,
   type AgentDefinition,
-  type ContextProvider,
 } from '@kwkevinchan/backstage-plugin-ai-chat-node';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
@@ -73,9 +72,8 @@ describe('the example module', () => {
     expect(outside).toEqual([]);
   });
 
-  it('registers an agent and a context provider for example.com', async () => {
+  it('registers an agent for example.com', async () => {
     const agents: AgentDefinition[] = [];
-    const providers: ContextProvider[] = [];
     const stub = createBackendPlugin({
       pluginId: 'ai-chat',
       register(env) {
@@ -83,12 +81,6 @@ describe('the example module', () => {
           addAgent(agent) {
             agents.push(agent);
           },
-          addContextProvider(provider) {
-            providers.push(provider);
-          },
-          addSkill() {},
-          addHook() {},
-          setModelClient() {},
         });
         // A plugin has to register an init, even when the module does the work.
         env.registerInit({
@@ -101,17 +93,9 @@ describe('the example module', () => {
     await startTestBackend({ features: [stub, exampleModule] });
 
     expect(agents.length).toBeGreaterThanOrEqual(1);
-    expect(providers.length).toBeGreaterThanOrEqual(1);
     expect(agents.map(agent => agent.id)).toContain('guide');
     expect(
       agents.some(agent => agent.systemPrompt.includes('example.com')),
     ).toBe(true);
-    const text = await providers[0].provide({
-      sessionId: 'session-1',
-      runId: 'run-1',
-      principal: {},
-      agentId: 'guide',
-    });
-    expect(text).toContain('example.com');
   });
 });

@@ -326,7 +326,7 @@ describe('ConfigAgentCatalog', () => {
       expect(() => catalogFor(aiChat)).toThrow(/aiChat\.agents/);
     });
 
-    it('keeps an extension agent next to the configured agents, with the prompt the module gave', async () => {
+    it('keeps an extension agent next to the configured agents, with the built-in rules and the prompt the module gave', async () => {
       const { catalog } = catalogFor(
         {
           toolsets: catalogToolsets,
@@ -343,8 +343,8 @@ describe('ConfigAgentCatalog', () => {
         ],
       );
       const guide = await catalog.agent('guide');
-      expect(guide.systemPrompt).toBe('You help people on example.com.');
-      expect(guide.systemPrompt).not.toContain('Rules that always apply');
+      expect(guide.systemPrompt).toContain('Rules that always apply');
+      expect(guide.systemPrompt).toContain('You help people on example.com.');
       expect(guide).toMatchObject({
         title: 'Guide',
         skills: ['getting-started'],

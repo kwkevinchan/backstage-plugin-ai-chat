@@ -19,9 +19,9 @@
  * in the harness and re-exported here, so a module does not import the
  * harness or the backend plugin.
  *
- * The loop receives what a module registers and does not call it yet: a
- * context provider is not added to the model input, a skill is not loaded, a
- * hook does not run, and a model client registered here is not used.
+ * This version only exposes `addAgent`. Context providers, skills, hooks and
+ * a model client are added on later items, together with the loop calling
+ * them.
  *
  * @packageDocumentation
  */
@@ -33,16 +33,4 @@ export type {
   AgentLimits,
   PlanningMode,
   AiChatHarnessExtensionPoint,
-  BeforeToolCallResult,
-  ContextProvider,
-  Extensions,
-  HookName,
-  Hooks,
-  ModelChunk,
-  ModelClient,
-  RunSummary,
-  Skill,
-  StepContext,
-  ToolCall,
-  ToolResult,
 } from '@kwkevinchan/ai-chat-harness';

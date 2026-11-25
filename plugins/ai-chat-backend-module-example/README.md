@@ -1,24 +1,13 @@
-# @kwkevinchan/backstage-plugin-ai-chat-backend-module-example
+# Example backend module
 
-Example backend module of the unofficial
+This directory is a private example in the repository. Copy it when you write
+a backend module of the unofficial
 [AI chat for Backstage](https://github.com/kwkevinchan/backstage-plugin-ai-chat).
+It is not published, and it is not a package to install.
 
-It registers one agent, `guide`, and one context provider, `site`. The text
-of both mentions `example.com`. It imports only
-`@kwkevinchan/backstage-plugin-ai-chat-node` and
-`@backstage/backend-plugin-api`.
+It registers one agent, `guide`. The text mentions `example.com` only. A
+module depends only on `@kwkevinchan/backstage-plugin-ai-chat-node` and the
+Backstage public API.
 
-```sh
-yarn --cwd packages/backend add @kwkevinchan/backstage-plugin-ai-chat-backend-module-example
-```
-
-```ts
-backend.add(import('@kwkevinchan/backstage-plugin-ai-chat-backend'));
-backend.add(
-  import('@kwkevinchan/backstage-plugin-ai-chat-backend-module-example'),
-);
-```
-
-A session can then use `agentId: guide`. The context provider is recorded and
-is not added to the model input yet. If `aiChat.agents` also defines `guide`,
-the backend does not start.
+The demo backend in this repository mounts it so the smoke tests can start.
+If `aiChat.agents` also defines `guide`, the backend does not start.

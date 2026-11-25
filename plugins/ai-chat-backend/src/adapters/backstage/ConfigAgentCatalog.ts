@@ -118,7 +118,10 @@ export class ConfigAgentCatalog implements AgentCatalog {
       if (this.agents.has(agent.id)) {
         throw new InputError(`agent ${agent.id} is already defined`);
       }
-      this.agents.set(agent.id, agent);
+      this.agents.set(agent.id, {
+        ...agent,
+        systemPrompt: buildSystemPrompt(agent.systemPrompt),
+      });
     }
   }
 

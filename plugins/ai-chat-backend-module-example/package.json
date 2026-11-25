@@ -1,7 +1,7 @@
 {
   "name": "@kwkevinchan/backstage-plugin-ai-chat-backend-module-example",
   "version": "0.0.0",
-  "description": "Example backend module of the AI chat for Backstage. It registers one agent and one context provider, and it depends only on the extension-point package",
+  "description": "Private example backend module of the AI chat for Backstage. It registers one agent and depends only on the extension-point package. Copy from this directory; do not publish it.",
   "license": "Apache-2.0",
   "keywords": [
     "backstage",
@@ -30,9 +30,6 @@
       ]
     }
   },
-  "publishConfig": {
-    "access": "public"
-  },
   "backstage": {
     "role": "backend-plugin-module",
     "pluginId": "ai-chat",
@@ -57,5 +54,6 @@
   "devDependencies": {
     "@backstage/backend-test-utils": "backstage:^",
     "@backstage/cli": "backstage:^"
-  }
+  },
+  "private": true
 }

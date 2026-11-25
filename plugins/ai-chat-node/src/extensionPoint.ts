@@ -18,9 +18,9 @@ import { createExtensionPoint } from '@backstage/backend-plugin-api';
 import type { AiChatHarnessExtensionPoint } from '@kwkevinchan/ai-chat-harness';
 
 /**
- * The extension point a backend module uses to add an agent, a context
- * provider, a skill, a hook or a model client (X-02). The backend plugin
- * registers the implementation. A module depends only on this package.
+ * The extension point a backend module uses to add an agent (X-02). The
+ * backend plugin registers the implementation. A module depends only on this
+ * package. Further methods are added on later items.
  *
  * @public
  */

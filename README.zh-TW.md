@@ -123,12 +123,11 @@ backend:
   設定檔裡的 Agent，系統提示是內建規則再加上該 Agent 的 `systemPrompt`；沒寫就改用全站的
   `aiChat.systemPrompt`，兩段額外說明不疊加。`toolsets` 必須是已經定義的工具組。
   `skills`、`model`、`limits`、`planning: required` 會記在 Agent 上。迴圈仍用全站的上限和
-  唯一的模型；這些欄位、以及 module 註冊的 Context provider、Skill、Hook、模型，這一版還不執行。
-  值不對會讓後端無法啟動。
-- 別的 backend module 透過 `@kwkevinchan/backstage-plugin-ai-chat-node` 註冊 Agent 和
-  Context provider，不必 import 宿主。範例是
-  `@kwkevinchan/backstage-plugin-ai-chat-backend-module-example`（Agent id 是 `guide`）。
-  設定檔和 module 用了同一個 id 時，後端無法啟動。
+  唯一的模型；這些欄位這一版還不執行。值不對會讓後端無法啟動。
+- 別的 backend module 透過 `@kwkevinchan/backstage-plugin-ai-chat-node` 註冊 Agent，不必
+  import 宿主。模組註冊的 Agent 也套同一套內建規則。設定檔和 module 用了同一個 id 時，後端無法啟動。
+  這個庫的 `plugins/ai-chat-backend-module-example` 是可以照抄的範例（Agent id 是 `guide`），
+  不是要安裝的套件。
 
 細節見[英文 README](README.md#agents)。
 

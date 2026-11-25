@@ -15,7 +15,7 @@
  */
 
 /**
- * Example backend module of the AI chat: one agent and one context provider.
+ * Example backend module of the AI chat: one agent, to copy from.
  *
  * @packageDocumentation
  */

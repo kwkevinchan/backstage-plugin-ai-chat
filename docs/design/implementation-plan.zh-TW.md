@@ -437,20 +437,21 @@ flowchart LR
 
 每一項的驗收重點：
 
-- **P3-01**：一個範例 module 註冊 Agent 和 Context provider，不 import 宿主的任何內部檔案。逐項驗收見下方 P3-01。
+- **P3-01**：一個範例 module 註冊 Agent，不 import 宿主的任何內部檔案。逐項驗收見下方 P3-01。
+- **P3-02**：在擴充點加上 `addContextProvider`。Context provider 和 entity 綁定的執行行為見這一項的其餘範圍。
 - **P3-03**：`planning: required` 的 Agent，第一步送給模型的工具只有 `update_plan`。舊的 `plan_update` 可能在摘要涵蓋的範圍內，所以 `update_plan` 取目前的計畫要另外讀（例如查最新的 `plan_update`），或做摘要時把當時的計畫帶進摘要的輸入。
-- **P3-04**：上下文裡只有 Skill 的名稱和說明。載入全文之後才出現內容。
-- **P3-05**：Hook 回傳 `continue` 時，`ask` 的工具仍然要核准。Hook 丟例外時，這個工具呼叫被拒絕，Run 繼續。
+- **P3-04**：在擴充點加上 `addSkill`。上下文裡只有 Skill 的名稱和說明。載入全文之後才出現內容。
+- **P3-05**：在擴充點加上 `addHook`。Hook 回傳 `continue` 時，`ask` 的工具仍然要核准。Hook 丟例外時，這個工具呼叫被拒絕，Run 繼續。
 - **P3-06**：搜尋結果只有使用者有權限看的文件。先確認 Backstage 有沒有官方的 search action，有就直接用。
-- **P3-07**：四個唯讀工具同時執行，其中一個逾時，其他三個的結果照原本順序交回。
+- **P3-07**：在擴充點加上 `setModelClient`。四個唯讀工具同時執行，其中一個逾時，其他三個的結果照原本順序交回。
 
 ### P3-01 `ai-chat-node`、擴充點、設定檔裡的 Agent
 
 - **範圍**：
-  - 核心：`AgentDefinition` 補上設定檔要記下的欄位（Toolsets、Skills、模型、上限、規劃模式；既有的 `id`、`title`、`systemPrompt` 保留）。`application/ports/extensions.ts` 換成規格第 7 節的介面（`AiChatHarnessExtensionPoint` 的 `addAgent`、`addContextProvider`、`addSkill`、`addHook`、`setModelClient`，以及 `ContextProvider`、`Skill`、`Hooks`）。`Extensions` 從空型別改成這些註冊內容。迴圈收到它們，但不呼叫（Context provider 組進上下文是 P3-02，`load_skill` 是 P3-04，Hook 的四個時機是 P3-05，`setModelClient` 換掉模型轉接是 P3-07，`planning: required` 限制第一步的工具是 P3-03）。
-  - 新套件 `plugins/ai-chat-node`（`@kwkevinchan/backstage-plugin-ai-chat-node`，`node-library`）：重新匯出上述型別，並定義 `aiChatHarnessExtensionPoint`。它只依賴 harness。
+  - 核心：`AgentDefinition` 補上設定檔要記下的欄位（Toolsets、Skills、模型、上限、規劃模式；既有的 `id`、`title`、`systemPrompt` 保留）。`application/ports/extensions.ts` 公開 `AiChatHarnessExtensionPoint` 的 `addAgent`，以及 `AgentDefinition`、`AgentLimits`、`PlanningMode`。`addContextProvider`、`addSkill`、`addHook`、`setModelClient` 和它們的型別在 P3-02、P3-04、P3-05、P3-07 才加，連同迴圈的呼叫和測試一起進來。
+  - 新套件 `plugins/ai-chat-node`（`@kwkevinchan/backstage-plugin-ai-chat-node`，`node-library`）：重新匯出 `addAgent` 用到的型別，並定義 `aiChatHarnessExtensionPoint`。它只依賴 harness。不重新匯出迴圈內部的 `Extensions`。
   - 宿主：`ai-chat-backend` 依賴 `ai-chat-node`。`plugin.ts` 註冊擴充點，模組的 init 跑完才建 `ConfigAgentCatalog`。Catalog 讀取並檢查 `aiChat.agents`，並納入擴充點註冊的 Agent。值不對就丟 `InputError`，後端啟動失敗。沒有 `aiChat.agents`、擴充點也沒有註冊 Agent 時，只有內建的 `default`（內建系統提示加 `aiChat.systemPrompt`）。
-  - 範例 module：`plugins/ai-chat-backend-module-example`。它註冊一個 Agent 和一個 Context provider，原始碼只 import `ai-chat-node` 和 Backstage 的公開 API。示範 backend（`packages/backend`）掛上它，讓煙霧測試跑得起來。
+  - 範例 module：`plugins/ai-chat-backend-module-example`。它是可以照抄的私有範例，不是要發佈的套件。它只示範 `addAgent`，原始碼只 import `ai-chat-node` 和 Backstage 的公開 API。示範 backend（`packages/backend`）掛上它，讓煙霧測試跑得起來。
   - `yarn.config.cjs` 只放寬三個方向：`ai-chat-node` → harness、`ai-chat-backend` → `ai-chat-node`、`backend-plugin-module` → `ai-chat-node`。不放寬反方向，module 也不能依賴宿主或 harness。
   - 不做：`aiChat.models` 與 `aiChat.skills.directories` 的讀取和執行、`GET /agents`、把 Agent 的 Toolsets 拿來過濾送給模型的工具。
 - **依賴**：無。P3-03 和 P3-04 使用這裡的 Agent 定義。
@@ -458,20 +459,16 @@ flowchart LR
   - 沒有 `aiChat.agents`：`agent('default')` 的系統提示含內建規則；有 `aiChat.systemPrompt` 時那段文字也在；`defaultAgentId()` 是 `default`；其他 id 是 `AgentNotFound`。跟現在一樣。
   - 設定檔的 Agent：`agents.sre` 的 `title`、`systemPrompt`、`toolsets`、`skills`、`model`、`limits`、`planning` 都在 `agent('sre')` 上回得來。系統提示仍含內建規則（`Rules that always apply`），再接上該 Agent 的 `systemPrompt`。該 Agent 沒寫 `systemPrompt` 時，用全站的 `aiChat.systemPrompt`。設定檔沒有 `default` 時，內建的 `default` 還在，其他 Agent 照樣加進來。設定檔有 `default` 時，用它寫下的欄位（沒寫的 `title`、`toolsets`、`skills`、`model`、`limits`、`planning` 就是沒有），系統提示仍是內建規則加上該筆的 `systemPrompt`，該筆沒寫則用全站的 `aiChat.systemPrompt`。
   - 值不對就丟 `InputError`，訊息指出 `aiChat.agents…`：id 不符合工具組 id 的寫法；`toolsets` 不是字串陣列，或其中一個 id 不是已存在的工具組；`skills` 不是字串陣列、id 寫法不對，或同一個 Agent 裡重複；`model` 有寫但不是合格的 id；`planning` 不是 `required`；`limits` 的 `maxSteps`、`maxToolCallsPerRun` 不是大於等於 0 的整數，或 `runTimeoutSeconds` 不是 0 到 600 的整數；`agents` 或其中一筆不是物件。Backend 用這種設定啟動時失敗。
-  - 擴充點註冊的 Agent 跟設定檔的 Agent 一起在 catalog 裡。`agent(id)` 回傳擴充點註冊的那一筆（系統提示用 module 傳入的原文，不再包一層內建規則）。同一個 id 出現兩次（設定檔和擴充點，或擴充點註冊兩次，或擴充點註冊 `default` 而內建或設定檔已經有 `default`）就丟 `InputError`，後端啟動失敗。
-  - 擴充點的另外四個方法註冊之後讀得回來，順序保留：兩個 Context provider、兩個 Skill、同一個時機的兩個 Hook、兩個 model client。重複的 provider id、Skill id 或 model id 丟 `InputError`，不覆寫。`addHook` 的名字不是 `beforeModelCall`、`beforeToolCall`、`afterToolCall`、`onRunEnd` 就丟 `InputError`。
-  - 迴圈不執行這些註冊：`AdvanceRun` 跑完一輪文字回答時，Context provider 的 `provide`、Skill 的 `load`、四種 Hook、以及 `setModelClient` 註冊的 client 的 `stream` 都沒有被呼叫。模型仍是 `AdvanceRun` 收到的那個 `ModelClient`。
-  - 範例 module 的原始碼沒有 import `@kwkevinchan/backstage-plugin-ai-chat-backend`、`@kwkevinchan/ai-chat-harness`，也沒有指向宿主或核心原始碼的相對路徑。它向擴充點註冊的 Agent 和 Context provider 各至少一個，說明文字用 `example.com`。`yarn constraints` 拒絕這個 module 依賴宿主或 harness，也拒絕 `ai-chat-node` 依賴宿主、宿主以外的套件依賴 `ai-chat-node` 以外的新方向。
-  - 示範 backend 掛上範例 module。Plugin 組裝之後，用擴充點註冊的 Agent id 建立 Session 得到 201，`agentId` 是那個 id；logger 記下一筆擴充點的數量（Agent、Context provider）。
+  - 擴充點註冊的 Agent 跟設定檔的 Agent 一起在 catalog 裡。`agent(id)` 回傳擴充點註冊的那一筆，系統提示同樣套 `buildSystemPrompt`（含內建規則，再接上 module 傳入的 `systemPrompt`）。同一個 id 出現兩次（設定檔和擴充點，或擴充點註冊兩次，或擴充點註冊 `default` 而內建或設定檔已經有 `default`）就丟 `InputError`，後端啟動失敗。
+  - 範例 module 的原始碼沒有 import `@kwkevinchan/backstage-plugin-ai-chat-backend`、`@kwkevinchan/ai-chat-harness`，也沒有指向宿主或核心原始碼的相對路徑。它向擴充點註冊至少一個 Agent，說明文字用 `example.com`。`yarn constraints` 拒絕這個 module 依賴宿主或 harness，也拒絕 `ai-chat-node` 依賴宿主、宿主以外的套件依賴 `ai-chat-node` 以外的新方向。
+  - 示範 backend 掛上範例 module。Plugin 組裝之後，用擴充點註冊的 Agent id 建立 Session 得到 201，`agentId` 是那個 id；logger 記下一筆擴充點的 Agent 數量。
 - **規格沒寫、實作選定的地方**（對齊既有的工具組 id、`buildSystemPrompt`，和 domain 的 `Limits`）：
   - Agent、Skill、model、Context provider 的 id，跟工具組 id 同一套寫法：字母開頭，其餘是字母、數字，以及夾在中間的 `-`、`_`。
   - `limits` 只收 domain `Limits` 已有的三個欄位：`maxSteps`、`maxToolCallsPerRun`、`runTimeoutSeconds`。0 代表不允許（domain 已寫）。`runTimeoutSeconds` 上限 600，和全站的 `aiChat.runTimeoutSeconds` 一樣。這三個欄位只記在 Agent 上，這一項不拿來取代全站上限。
   - `planning` 只接受 `required`。沒寫就是沒有這個欄位，不表示另一種模式。
   - `model` 只檢查 id 的寫法，不讀 `aiChat.models`（模型轉接是 P3-07）。`skills` 只檢查 id 的寫法，不讀 `aiChat.skills.directories`，也不要求擴充點已經註冊同名 Skill（載入全文是 P3-04）。
-  - 設定檔裡的 Agent，系統提示一律是內建規則再加上該 Agent 的 `systemPrompt`；該欄沒寫就用全站的 `aiChat.systemPrompt`。兩段額外說明不疊加。擴充點註冊的 Agent 使用 module 傳入的 `systemPrompt` 原文。
+  - 設定檔裡的 Agent，系統提示一律是內建規則再加上該 Agent 的 `systemPrompt`；該欄沒寫就用全站的 `aiChat.systemPrompt`。兩段額外說明不疊加。擴充點註冊的 Agent 也套 `buildSystemPrompt(systemPrompt)`，和設定檔同一條規則。
   - 沒有人定義 `default` 時才放內建的那一個。設定檔的 `agents.default` 取代它。擴充點再註冊 `default` 算重複，啟動失敗。
-  - `ToolCall` 用紀錄裡的 `ToolCallItem`，`ToolResult` 用 `ToolResultBody`。`StepContext` 是 `sessionId`、`runId`、`principal`、`page?`、`agentId`。`RunSummary` 是 `runId`、`sessionId`、`status`。這一項只定型別，不填這些值。
-  - 同一個 Hook 時機可以註冊多個，照註冊順序保留。同一個 model id 不能註冊第二次。
 
 ### P4：擴大
 
@@ -591,5 +588,4 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-24 | 1.1  | PI 審查後：暫停時直接送出的順序寫進 IN-15、IN-18；複製帶走圖片（IN-19，P2-05 驗收）；模型輸出的 `append` 取 `FOR NO KEY UPDATE`、取鎖順序表；`readUpToSeq` 定義為這一輪開始讀紀錄時的最大序號；`afterRun` 對 `waiting_approval` 不送出；已結束 Run 的 `unread` 插入訊息不再送給模型；`message.read` 不走 `seq` 去重；插入 409 的三種處理；圖片位元組上限 `maxBytesPerInput`；`Cache-Control` 改 `private, no-cache`；`ModelClient.stream` 帶 `sessionId`；設定統一用 `aiChat.llm.images`；SQLite 的理由改寫                                                                                                                                                                                          |
 | 2026-11-24 | 1.1  | PI-05 後續：刪除 Session 先鎖 `runs`（`FOR UPDATE`，依 `id`）再鎖 `sessions`，和 13.8 的取鎖順序一致，並加 PostgreSQL 的並行測試。SQLite 多連線實測是 `SQLITE_BUSY` 而不是「插入先」或「結束先」，啟動時要求 pool `max` 是 1。上傳路由的 OpenAPI 說明錯字改正；二進位 `requestBody` 仍不寫進規格（repo-tools 的 lint 仍要求 `application/json`）                                                                                                                                                                                                                                                                                                                                                     |
 | 2026-11-25 | 1.1  | P2-02 完成（SE-05）：`aiChat.retention.days` 預設 90，`0` 不刪。每小時刪除 `updated_at` 早於期限的 Session（runs、items、queued messages、attachments 連帶刪除）。進行中的 Run 不刪；釘選和封存不例外。稽核在 Auditor，刪除不碰它。PostgreSQL 用 `FOR UPDATE SKIP LOCKED`，兩台同時跑不重複刪、也不等已鎖的列。程式架構第 5.3 節和第 13.8 節照實作更新                                                                                                                                                                                                                                                                                                                                               |
-| 2026-11-25 | 1.1  | P3-01 補上驗收清單（X-01、X-02）：範圍、依賴，以及可對到測試的條目。表上的 PR 與狀態等 PR 開出再填                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| 2026-11-25 | 1.1  | P3-01：新增 `ai-chat-node` 與範例 module，設定檔讀取 `aiChat.agents`，擴充點可註冊 Agent、Context provider、Skill、Hook 和 model client。迴圈收到這些註冊，尚未呼叫。表上的狀態在 PR 合併前維持進行中                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 2026-11-25 | 1.1  | P3-01：補上驗收清單（X-01、X-02）。新增 `ai-chat-node` 與私有範例 module，設定檔讀取 `aiChat.agents`，擴充點公開 `addAgent`。模組註冊的 Agent 也套內建規則。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |

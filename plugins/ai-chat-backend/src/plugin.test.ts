@@ -519,7 +519,7 @@ describe('aiChatPlugin', () => {
     });
     try {
       expect(logger.info).toHaveBeenCalledWith(
-        expect.stringContaining('1 agent(s), 1 context provider(s)'),
+        expect.stringContaining('1 agent(s)'),
       );
       const created = await request(server)
         .post('/api/ai-chat/sessions')

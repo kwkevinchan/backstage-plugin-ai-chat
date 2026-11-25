@@ -4,25 +4,17 @@ Extension point for backend modules of the unofficial
 [AI chat for Backstage](https://github.com/kwkevinchan/backstage-plugin-ai-chat).
 
 A module depends on this package, and not on the backend plugin or the
-harness. It receives `aiChatHarnessExtensionPoint` and can call:
+harness. It receives `aiChatHarnessExtensionPoint` and can call `addAgent`
+to register an agent: a system prompt, toolsets, skills, a model, limits and
+`planning: required`. `skills`, `model`, `limits` and `planning` are recorded
+on the agent and are not applied yet.
 
-| Method               | Adds                                                                 |
-| -------------------- | -------------------------------------------------------------------- |
-| `addAgent`           | An agent: system prompt, toolsets, skills, model, limits, planning   |
-| `addContextProvider` | Text that will be added to the model input on every step             |
-| `addSkill`           | A skill id, a one-sentence description, and a function that loads it |
-| `addHook`            | A function for one of the four hook names                            |
-| `setModelClient`     | A model client for a model id                                        |
+An id that the configuration also defines, or that another module already
+registered, stops the backend. The system prompt is wrapped with the same
+built-in rules as a configured agent.
 
-The hook names are `beforeModelCall`, `beforeToolCall`, `afterToolCall` and
-`onRunEnd`.
-
-The backend records these at startup. It does not call them yet: a context
-provider is not added to the input, a skill is not loaded, a hook does not
-run, `planning: required` does not change the first step, and a model client
-registered here is not the client the loop calls. An agent id that the
-configuration also defines, or that another module already registered, stops
-the backend.
+Further methods (context providers, skills, hooks, a model client) are added
+on later items, together with the loop calling them.
 
 ```ts
 import { createBackendModule } from '@backstage/backend-plugin-api';
@@ -39,18 +31,13 @@ export default createBackendModule({
           id: 'guide',
           systemPrompt: 'You help people find documentation on example.com.',
         });
-        harness.addContextProvider({
-          id: 'site',
-          async provide() {
-            return 'The site is example.com.';
-          },
-        });
       },
     });
   },
 });
 ```
 
-`plugins/ai-chat-backend-module-example` is that module, ready to install.
-Agents can also be written in `aiChat.agents`; see the
+`plugins/ai-chat-backend-module-example` in this repository is a private
+example of that module, to copy from. Agents can also be written in
+`aiChat.agents`; see the
 [README of the repository](https://github.com/kwkevinchan/backstage-plugin-ai-chat#readme).
