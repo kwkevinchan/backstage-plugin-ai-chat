@@ -465,6 +465,27 @@ flowchart LR
 - **第 5 節的安全測試，這一項測的**：超過 `up_to_seq` 的 Item 不在 `visibleItems`（也就是 `GetSession` 回給被分享的人的內容）。超過 `outputs_up_to_seq` 的工具輸出只有狀態。`summary` 同一條規則。不在群組、離開群組、`revoked_at` 已填，都讀不到。
 - **留給後面的安全測試**：被分享的人直接打 HTTP（含用序號把 Item 再讀一次）是 P2-04，這一項不加分享路由。附件位元組的 HTTP 讀取是 P2-04 的 IN-19，`ReadAttachment` 仍只允許擁有者。複製是 P2-05。接回端點是 P2-06，`FollowSession` 仍只允許擁有者。
 
+## PU：前端對齊 assistant-ui（PU-07）
+
+| 編號  | 工作項目                                   | 大小 | 完成的需求 | PR  | 狀態   |
+| ----- | ------------------------------------------ | ---- | ---------- | --- | ------ |
+| PU-07 | 後端：把排隊的訊息改成插入（「現在就送」） | M    | IN-20      |     | 進行中 |
+
+### PU-07 後端：把排隊的訊息改成插入（「現在就送」）
+
+- **範圍**：
+  - 規格（IN-20）：Run 是 `running` 時，可以把一則排隊的訊息改成插入這個 Run。結果只有兩種：那一則從佇列消失並寫進紀錄（`delivery` 是 `inserted`），或什麼都沒變並回錯誤。
+  - 程式架構：路由、use case（`InsertQueuedMessage`）、第 13.8 節取鎖順序表加一列。
+  - API：`POST /sessions/:id/queue/:queuedId/insert`，請求帶 `{ runId }`，回傳 `201 JSON`（寫入的 `ChatItem`）。OpenAPI 一起改。`ai-chat-common` 加路徑（`chatPaths.insertQueuedMessage`）和型別（`InsertQueuedMessageRequest`）；前端 `AiChatApi` 和 `AiChatClient` 加 `insertQueuedMessage` 方法（不含畫面）。
+  - 同一個 transaction：檢查 `runId` 是 `running` 且租約沒過期、刪掉那一則排隊訊息、寫入 `delivery: inserted` 的 `user_message`、帶著的圖片從「保留」轉成「已使用」（仍有其他排隊訊息使用同一張圖片時保留給最前面那一則）。
+  - 插入的所有限制照舊：Run 不是 `running`、`waiting_approval`、`runId` 不對、租約過期、或超過每個 Run 最多 5 則，回 409，佇列不變；圖片位元組超過上限回 400，佇列不變；排隊的訊息已經被改掉、刪掉或送出回 404。佇列剩下的訊息順序不變，暫停的狀態不因為這個動作改變。
+  - 這個動作和 `startNext` 搶同一則時，只有一邊成功。取鎖順序與第 13.8 節一致。
+- **依賴**：無。
+- **驗收**：
+  - 每一條行為有測試：成功（含剩餘佇列順序不變、不改暫停狀態）、Run 不是 `running`、`waiting_approval`、`runId` 不對、租約過期、超過插入上限、那一則已不存在、帶圖片（含圖片位元組上限與共用保留）。
+  - PostgreSQL 的並行測試：和 `startNext` 同時搶同一則 100 輪，每一輪恰好一邊成功，沒有重複的 `user_message`，沒有死結。
+  - 兩台 backend 的整合測試涵蓋一次成功的情境（請求送到未執行迴圈的 backend B，A 正在跑的 Run 在下一步讀到插入的訊息）。
+
 ## 6. P3 和 P4
 
 ### P3：Harness
