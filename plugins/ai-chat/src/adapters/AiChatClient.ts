@@ -67,8 +67,17 @@ export class AiChatClient implements AiChatApi {
     });
   }
 
-  async listSessions(): Promise<ChatSession[]> {
-    const response = await this.request(chatPaths.sessions());
+  async listSessions(options?: {
+    query?: string;
+    includeArchived?: boolean;
+  }): Promise<ChatSession[]> {
+    const params = new URLSearchParams();
+    if (options?.query) params.set('q', options.query);
+    if (options?.includeArchived) params.set('includeArchived', 'true');
+    const search = params.toString();
+    const response = await this.request(
+      `${chatPaths.sessions()}${search ? `?${search}` : ''}`,
+    );
     return (await response.json()).items;
   }
 

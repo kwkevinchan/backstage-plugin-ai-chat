@@ -144,7 +144,13 @@ test('reload keeps the stored result, and the session has its own URL', async ({
   await expect(page.getByText('Here is the result of the action')).toHaveCount(
     1,
   );
-  await expect(page.getByText('list services', { exact: true })).toHaveCount(1);
+  // Auto-title repeats these words in the list. Count the stored message
+  // as the one copy outside the conversation list.
+  const list = page.getByRole('navigation', { name: 'Conversations' });
+  const inList = await list.getByText('list services', { exact: true }).count();
+  await expect(page.getByText('list services', { exact: true })).toHaveCount(
+    inList + 1,
+  );
   await shot('08-after-reload');
 
   // The URL opens that session in a new page, and the list names it.

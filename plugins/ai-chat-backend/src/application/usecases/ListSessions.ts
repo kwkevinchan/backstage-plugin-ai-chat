@@ -17,7 +17,10 @@
 import type { Principal, Session } from '../../domain';
 import type { SessionRepository } from '../ports';
 
-/** The sessions of the signed-in user, the most recently updated first. */
+/**
+ * The sessions of the signed-in user. Pinned ones come first, then the most
+ * recently updated. `query` matches the title (SE-03).
+ */
 export class ListSessions {
   constructor(private readonly deps: { sessions: SessionRepository }) {}
 
@@ -25,10 +28,12 @@ export class ListSessions {
     principal: Principal;
     includeArchived?: boolean;
     limit?: number;
+    query?: string;
   }): Promise<Session[]> {
     return this.deps.sessions.listByOwner(input.principal.userRef, {
       includeArchived: input.includeArchived,
       limit: input.limit,
+      query: input.query,
     });
   }
 }

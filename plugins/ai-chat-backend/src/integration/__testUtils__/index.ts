@@ -26,7 +26,11 @@ import {
   SequentialIdGenerator,
   type ScriptedStep,
 } from '@kwkevinchan/ai-chat-harness/testing';
-import type { ItemLog, Limits } from '@kwkevinchan/ai-chat-harness';
+import type {
+  ItemLog,
+  Limits,
+  ModelClient,
+} from '@kwkevinchan/ai-chat-harness';
 import type { ChatInputConfig } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import { ActionsToolGateway } from '../../adapters/backstage/ActionsToolGateway';
 import { ConfigAgentCatalog } from '../../adapters/backstage/ConfigAgentCatalog';
@@ -39,6 +43,7 @@ import { KnexShareRepository } from '../../adapters/persistence/KnexShareReposit
 import {
   CreateSession,
   OwnerOrShareAccessControl,
+  TITLE_PROMPT_MARK,
   type HostEvent,
   type ImageSettings,
   type RunHandle,
@@ -168,6 +173,23 @@ export const testInputConfig: ChatInputConfig = {
   queueMaxMessages: 5,
 };
 
+/**
+ * Answers a title request without touching the scripted model, so a call that
+ * names the session does not consume a step or show up in `inputs`.
+ */
+function withTitleAnswers(scripted: ScriptedModel): ModelClient {
+  return {
+    capabilities: scripted.capabilities,
+    async *stream(input, opts) {
+      if (input.system.startsWith(TITLE_PROMPT_MARK)) {
+        yield { type: 'text', text: 'Generated title' };
+        return;
+      }
+      yield* scripted.stream(input, opts);
+    },
+  };
+}
+
 export async function createWorld(
   options: {
     leaseSeconds?: number;
@@ -228,6 +250,9 @@ export async function createWorld(
     } = {},
   ) {
     const model = new ScriptedModel(script, { images: images.enabled });
+    // A title call is not a step of the script: the tests keep counting the
+    // calls of the conversation, and a session that ends normally is named.
+    const modelForHost = withTitleAnswers(model);
     const runs = new KnexRunRepository(knex, clock, ids, {
       leaseSeconds: options.leaseSeconds,
     });
@@ -264,7 +289,7 @@ export async function createWorld(
           (await sessions.get(ctx.sessionId)).enabledToolsets,
         maxOutputChars: 20000,
       }),
-      model,
+      model: modelForHost,
       audit,
       clock,
       ids,
