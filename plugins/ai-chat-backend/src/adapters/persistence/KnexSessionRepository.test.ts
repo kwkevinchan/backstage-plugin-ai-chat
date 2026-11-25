@@ -158,6 +158,21 @@ describe('KnexSessionRepository', () => {
     expect(await ids('red')).toEqual([plain.id]);
   });
 
+  it('matches a non-ASCII capital in the title the same way on both databases', async () => {
+    const umlaut = await p.sessions.create({
+      ...NEW_SESSION,
+      title: 'Über build',
+    });
+    const owner = 'user:default/jane';
+    const ids = async (query: string) =>
+      (await p.sessions.listByOwner(owner, { query })).map(s => s.id);
+
+    // The same letters as stored, and an ASCII substring: both sides of LIKE
+    // use SQL lower(), so this holds on SQLite and on PostgreSQL.
+    expect(await ids('Über')).toEqual([umlaut.id]);
+    expect(await ids('build')).toEqual([umlaut.id]);
+  });
+
   it('setTitleIfAbsent writes only while the title is empty', async () => {
     const created = await p.sessions.create(NEW_SESSION);
     expect(await p.sessions.setTitleIfAbsent(created.id, 'Generated')).toBe(

@@ -18,58 +18,16 @@ import type { Item } from '@kwkevinchan/ai-chat-harness';
 import {
   GENERATED_TITLE_MAX_CHARS,
   TITLE_SOURCE_MAX_CHARS,
-  compareSessionsForList,
   conversationForTitle,
   searchLikePattern,
-  sessionMatchesSearch,
   shouldAutoTitle,
   titleFromModelAnswer,
 } from './sessionList';
 
-const row = (
-  id: string,
-  pinned: boolean,
-  updatedAt: string,
-): { id: string; pinned: boolean; updatedAt: string } => ({
-  id,
-  pinned,
-  updatedAt,
-});
-
-describe('session search', () => {
-  it('matches a title by a case-insensitive substring, and an empty query matches all', () => {
-    expect(sessionMatchesSearch({ title: 'Build is Red' }, 'build')).toBe(true);
-    expect(sessionMatchesSearch({ title: 'Build is Red' }, '  RED  ')).toBe(
-      true,
-    );
-    expect(sessionMatchesSearch({ title: 'Build is Red' }, 'catalog')).toBe(
-      false,
-    );
-    expect(sessionMatchesSearch({ title: 'Build' }, '')).toBe(true);
-    expect(sessionMatchesSearch({ title: 'Build' }, '   ')).toBe(true);
-    expect(sessionMatchesSearch({ title: 'Build' }, undefined)).toBe(true);
-  });
-
-  it('does not match a session with no title, and treats % and _ as letters', () => {
-    expect(sessionMatchesSearch({}, 'build')).toBe(false);
-    expect(sessionMatchesSearch({ title: '100% done' }, '%')).toBe(true);
-    expect(sessionMatchesSearch({ title: '100 done' }, '%')).toBe(false);
-    expect(sessionMatchesSearch({ title: 'a_b' }, '_')).toBe(true);
-    expect(sessionMatchesSearch({ title: 'ab' }, '_')).toBe(false);
+describe('searchLikePattern', () => {
+  it('trims the query, keeps its letters, and escapes %, _ and !', () => {
+    expect(searchLikePattern('  Build  ')).toBe('%Build%');
     expect(searchLikePattern('100%_done!')).toBe('%100!%!_done!!%');
-    expect(searchLikePattern('  Build  ')).toBe('%build%');
-  });
-});
-
-describe('session list order', () => {
-  it('puts pinned sessions first, then the newest update, then the id', () => {
-    const sessions = [
-      row('b', false, '2026-01-03T00:00:00.000Z'),
-      row('c', true, '2026-01-01T00:00:00.000Z'),
-      row('a', true, '2026-01-01T00:00:00.000Z'),
-      row('d', false, '2026-01-02T00:00:00.000Z'),
-    ].sort(compareSessionsForList);
-    expect(sessions.map(session => session.id)).toEqual(['a', 'c', 'b', 'd']);
   });
 });
 

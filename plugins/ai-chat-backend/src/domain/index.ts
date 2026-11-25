@@ -76,11 +76,9 @@ export type { NewSession, Session, SessionPatch } from './session';
 export {
   GENERATED_TITLE_MAX_CHARS,
   TITLE_SOURCE_MAX_CHARS,
-  compareSessionsForList,
   conversationForTitle,
   normalizeSearchQuery,
   searchLikePattern,
-  sessionMatchesSearch,
   shouldAutoTitle,
   titleFromModelAnswer,
 } from './sessionList';

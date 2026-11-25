@@ -748,7 +748,7 @@ export class SendMessage {
 - **訂閱**：每個 Run 可以有多個訂閱者（`subscribe(runId)` 從現在起收事件，`FollowSession` 在 P2 用它）。訂閱者斷線不影響 Run（H-07、A-06）。
 - **續租**：核心每一輪呼叫一次 `heartbeat`；執行不是唯讀的工具之前也會呼叫，讓停止要求在兩個寫入工具之間生效。模型呼叫很久時，另外有計時器每 10 秒續租一次；續租得到 `LeaseLost` 或停止要求時中止迴圈。其他錯誤（資料庫暫時很慢）只記 warn，不中止：一次失敗不代表租約丟了，下一次續租或核心自己的 `heartbeat` 會再試。租約長度 30 秒。
 - **結束**：依照 `RunOutcome` 用 `transition(runId, to, { leaseOwner })` 更新 Run 的狀態（`completed` 的 `end_reason` 是 `endReason`，`failed` 是 `error`，使用者取消是 `user`），清掉 `active_session_id`。先更新狀態，再把 `run.ended` 交給訂閱者：收到串流結束的用戶端馬上送決定時，Run 已經是 `waiting_approval`。`transition` 得到 `LeaseLost` 或 `InvalidRunTransition`（Run 已被別人結束或接手）就略過。`failed` 的 `cause` 和 `summary.failed` 的 `cause` 只記 log，交給訂閱者的事件是拿掉 `cause` 的副本。寫成 `waiting_approval` 之後如果回傳的 Run 帶著 `cancelRequested`（停止要求在迴圈最後一次 `heartbeat` 之後才存進來），再 `transition` 成 `cancelled`（`end_reason` 是 `user`），Run 不會卡在等核准。其餘事件（`summary.started`、`context.trimmed` 等）只交給訂閱者，不影響 Run 的狀態。
-- **自動標題**（SE-04）：狀態寫入、佇列的 `afterRun` 處理完之後、`run.ended` 交給訂閱者之前，若這段 Session 沒有標題、而且沒有更早的正常結束，用同一台的 `ModelClient` 產生一行標題。失敗只記 log，不改 Run 的狀態，訂閱者仍收到 `run.ended`。使用者已經改名的不蓋掉。
+- **自動標題**（SE-04）：狀態寫入、佇列的 `afterRun` 處理完之後，先把 `run.ended` 交給訂閱者並結束訂閱，再若這段 Session 沒有標題、而且沒有更早的正常結束，用同一台的 `ModelClient` 產生一行標題。這一步仍在迴圈裡，關機仍會等到它結束。失敗只記 log，不改 Run 的狀態。使用者已經改名的不蓋掉。
 - **port 丟例外**：核心的 port 丟例外（例如 `LeaseLost`）時迴圈沒有 `run.ended`。supervisor 自己處理：`LeaseLost` 表示租約已在別人手上，Run 的狀態不動；其他例外用 `leaseOwner` 把 Run 標成 `failed`（`end_reason` 是 `error`）並記 log。兩種情形都給訂閱者一個 `run.ended`（`failed`，固定文字 `The run stopped.`，沒有 `cause`）。
 - **已用時間**：等核准的時間不算。核心每次呼叫只算這次呼叫內經過的時間，加上 request 帶入的 `usage.elapsedSeconds`；宿主接手時帶入存在 Run 裡的用量（`acquireLease` 回傳的 Run），不用現在時間減 `started_at`。
 - **關機**（H-11）：`shutdown(graceMs = 20 秒)` 先停止接新的 Run（`launch` 丟 `ShuttingDown`，`SendMessage` 在 `start` 之前就檢查），等進行中的 Run 最多 `graceMs`。沒跑完的，只對 Map 裡的 Run 中止迴圈並呼叫 `transition(runId, 'expired', { leaseOwner: fence.leaseOwner })`；得到 `LeaseLost` 表示已被別台接手，略過。不用沒帶 `leaseOwner` 的 `transition` 結束 Run：那會結束別台接手的 Run。
@@ -1133,7 +1133,7 @@ plugins/ai-chat/src/
     describeError.ts
   application/              React hooks，包 useChat
     useSessionChat.ts       一個 Session 的 useChat：還原、決定、接續、停止、重新讀取
-    useSessionList.ts       Session 列表：搜尋標題、釘選在前、顯示已封存
+    useSessionList.ts       Session 列表
     useToolsets.ts          GET /toolsets
     useSessionTools.ts      GET /sessions/:id/tools
     usePageContext.ts       B-01：路徑和 entityRef
@@ -1151,7 +1151,7 @@ plugins/ai-chat/src/
 
 **網址（SE-01）**。頁面掛在 `<path>/*` 底下：`<path>` 是新對話，`<path>/<sessionId>` 是那一段 Session，直接打開網址會載入它。第一則訊息先 `POST /sessions`，再導向新 Session 的網址（訊息放在 location state），該頁載入之後送出它，並把 state 清掉。
 
-**列表（SE-03、SE-04）**。側邊列表用 `useSessionList`：依標題搜尋、釘選、改名、封存，以及「顯示已封存」後恢復。封存正在看的對話不會離開它的網址。第一輪正常結束後，列表重新讀取時會看到自動標題。
+**列表（SE-03、SE-04）**。後端的 `GET /sessions?q=`、`PATCH`（改名、釘選、封存）和自動標題已可用；`AiChatClient` 也帶了對應的方法。目前的側邊列表仍只列出最近的 Session。搜尋、釘選、封存與「顯示已封存」的畫面在後續的前端工作。自動標題寫在 `run.ended` 送出、串流結束之後，仍在迴圈裡，所以稍後再讀列表才看得到標題。
 
 **一個 Session 一個 `useChat`**。`SessionView` 以 Session id 當 key，載入 `GET /sessions/:id` 之後才建立；`useChat` 的 `messages` 是 `itemsToMessages` 還原的結果。
 

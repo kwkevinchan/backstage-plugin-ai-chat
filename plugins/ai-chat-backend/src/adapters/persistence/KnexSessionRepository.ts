@@ -97,10 +97,11 @@ export class KnexSessionRepository implements SessionRepository {
       owner_ref: ownerRef,
     });
     if (!opts.includeArchived) query.whereNull('archived_at');
-    // Same rule as `sessionMatchesSearch`: the stored title, ASCII case
-    // folded. `%` and `_` in the query are ordinary characters.
+    // JS only trims the query. Both sides of LIKE use SQL lower(), so
+    // SQLite and PostgreSQL apply the same function. `%` and `_` in the
+    // query are ordinary characters.
     if (normalizeSearchQuery(opts.query).length > 0) {
-      query.whereRaw("lower(title) like ? escape '!'", [
+      query.whereRaw("lower(title) like lower(?) escape '!'", [
         searchLikePattern(opts.query ?? ''),
       ]);
     }

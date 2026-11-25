@@ -15,8 +15,6 @@
  */
 
 import type { Item } from '@kwkevinchan/ai-chat-harness';
-import type { Session } from './session';
-
 /**
  * How long a generated title may be, in characters. A title a person sets may
  * be longer (the API allows 200); a generated one has to fit the list.
@@ -26,48 +24,20 @@ export const GENERATED_TITLE_MAX_CHARS = 80;
 /** How much of one message is given to the model that writes the title. */
 export const TITLE_SOURCE_MAX_CHARS = 500;
 
-/** The query with the spaces at the ends removed, in lower case. */
+/** The query with the spaces at the ends removed. Empty after that means no filter. */
 export function normalizeSearchQuery(query: string | undefined): string {
-  return (query ?? '').trim().toLowerCase();
-}
-
-/**
- * Whether a session matches a list search (SE-03). An empty query matches
- * every session. Otherwise the stored title must contain the query, without
- * regard to ASCII case. A session with no title does not match. `%` and `_`
- * are ordinary characters.
- */
-export function sessionMatchesSearch(
-  session: Pick<Session, 'title'>,
-  query: string | undefined,
-): boolean {
-  const q = normalizeSearchQuery(query);
-  if (q.length === 0) return true;
-  return (session.title ?? '').toLowerCase().includes(q);
+  return (query ?? '').trim();
 }
 
 /**
  * The `LIKE` pattern of a query, with `!` as the escape character, so `%` and
- * `_` in the query match themselves. The caller matches it against
- * `lower(title)`.
+ * `_` in the query match themselves. The caller matches
+ * `lower(title) like lower(pattern)`, so SQLite and PostgreSQL apply the same
+ * function on both sides. Case folding then follows each database's `lower()`.
  */
 export function searchLikePattern(query: string): string {
   const q = normalizeSearchQuery(query);
   return `%${q.replace(/[!%_]/g, char => `!${char}`)}%`;
-}
-
-/**
- * List order (SE-03): pinned sessions first, then the most recently updated,
- * and `id` when those are equal so the order does not jump around.
- */
-export function compareSessionsForList(
-  a: Pick<Session, 'id' | 'pinned' | 'updatedAt'>,
-  b: Pick<Session, 'id' | 'pinned' | 'updatedAt'>,
-): number {
-  if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-  if (a.updatedAt !== b.updatedAt) return a.updatedAt > b.updatedAt ? -1 : 1;
-  if (a.id !== b.id) return a.id < b.id ? -1 : 1;
-  return 0;
 }
 
 /**

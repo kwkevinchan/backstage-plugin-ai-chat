@@ -26,9 +26,10 @@ export interface SessionRepository {
 
   /**
    * The sessions of an owner. Pinned ones come first, then the most recently
-   * updated. Archived ones are left out unless `includeArchived` is set.
-   * `query` keeps the sessions whose title contains it (see
-   * `sessionMatchesSearch`).
+   * updated, then `id`. Archived ones are left out unless `includeArchived`
+   * is set. `query` keeps the sessions whose title contains it, with both
+   * sides of the match passed through SQL `lower()`. A session with no title
+   * is left out. `%` and `_` match themselves.
    */
   listByOwner(
     ownerRef: string,

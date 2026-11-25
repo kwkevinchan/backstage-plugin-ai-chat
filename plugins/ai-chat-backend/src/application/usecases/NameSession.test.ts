@@ -71,6 +71,7 @@ function setup(
     earlier?: boolean;
     reply?: string | Error | 'hang';
     timeoutMs?: number;
+    onStream?: () => void | Promise<void>;
   } = {},
 ) {
   let stored = over.title;
@@ -93,12 +94,19 @@ function setup(
     read: jest.fn(async () => log),
   } as unknown as Pick<ItemLog, 'read'>;
   const inputs: ModelInput[] = [];
+  const signals: AbortSignal[] = [];
   const model: ModelClient = {
     capabilities: { parallelToolCalls: false, images: false },
     async *stream(input, opts) {
       inputs.push(input);
+      signals.push(opts.signal);
+      if (over.onStream) await over.onStream();
       if (over.reply === 'hang') {
         await new Promise((_resolve, reject) => {
+          if (opts.signal.aborted) {
+            reject(new Error('aborted'));
+            return;
+          }
           opts.signal.addEventListener('abort', () =>
             reject(new Error('aborted')),
           );
@@ -127,7 +135,11 @@ function setup(
     sessions,
     inputs,
     logger,
+    signals,
     title: () => stored,
+    setTitle: (title: string) => {
+      stored = title;
+    },
   };
 }
 
@@ -202,6 +214,7 @@ describe('NameSession', () => {
       undefined,
     );
     expect(t.title()).toBeUndefined();
+    expect(t.signals[0]?.aborted).toBe(true);
     expect(t.logger.warn).toHaveBeenCalledWith(
       'Could not name the session',
       expect.objectContaining({ error: 'timed out' }),
@@ -209,9 +222,14 @@ describe('NameSession', () => {
   });
 
   it('does not replace a title that was set while the model was answering', async () => {
-    const t = setup();
-    t.sessions.setTitleIfAbsent.mockImplementation(async () => false);
+    const over: { onStream?: () => void } = {};
+    const t = setup(over);
+    over.onStream = () => t.setTitle('Mine');
     await t.name.execute({ run, outcome: normal });
-    expect(t.title()).toBeUndefined();
+    expect(t.sessions.setTitleIfAbsent).toHaveBeenCalledWith(
+      's1',
+      'Build is red',
+    );
+    expect(t.title()).toBe('Mine');
   });
 });

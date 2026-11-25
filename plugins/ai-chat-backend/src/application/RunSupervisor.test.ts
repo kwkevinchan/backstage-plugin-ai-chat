@@ -118,8 +118,12 @@ describe('RunSupervisor', () => {
     ]);
   });
 
-  it('names the session on a normal end, before the subscribers see that it ended', async () => {
-    let sawEnd = false;
+  it('names the session on a normal end, after the subscribers see that it ended', async () => {
+    let named = false;
+    let releaseName!: () => void;
+    const gate = new Promise<void>(resolve => {
+      releaseName = resolve;
+    });
     const { supervisor, calls } = setup(
       () => ending({ status: 'completed' }),
       {
@@ -130,19 +134,35 @@ describe('RunSupervisor', () => {
       },
       {
         nameSession: async info => {
-          expect(sawEnd).toBe(false);
           expect(info.outcome).toEqual({ status: 'completed' });
+          expect(info.signal.aborted).toBe(false);
           calls.push('nameSession');
+          await gate;
+          named = true;
         },
       },
     );
     const handle = supervisor.launch(leased('r1', 'lease-1'), request);
+    const events: HostEvent[] = [];
+    // The stream ends once run.ended is published, while naming is still going:
+    // a client that reads the stream does not wait for the title.
+    let sawEnd = false;
     for await (const event of handle.events) {
+      events.push(event);
       if (event.type === 'run.ended') {
         sawEnd = true;
         calls.push('subscriber saw run.ended');
       }
     }
+    expect(sawEnd).toBe(true);
+    expect(named).toBe(false);
+    expect(events[events.length - 1]).toEqual({
+      type: 'run.ended',
+      outcome: { status: 'completed' },
+    });
+    releaseName();
+    await handle.done;
+    expect(named).toBe(true);
     expect(calls).toEqual([
       'transition r1 completed lease-1',
       'nameSession',
@@ -191,6 +211,7 @@ describe('RunSupervisor', () => {
       type: 'run.ended',
       outcome: { status: 'completed' },
     });
+    await handle.done;
     expect(logger.error).toHaveBeenCalledWith(
       'Could not name the session',
       expect.objectContaining({ runId: 'r1', error: 'title model down' }),

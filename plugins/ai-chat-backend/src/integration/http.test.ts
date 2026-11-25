@@ -1212,6 +1212,13 @@ describe('the HTTP routes', () => {
         const id = await newSession(b);
         const res = await send(b, id).expect(200);
         await parseSse(res.text);
+        // The stream can end before the supervisor names the session; the
+        // loop's timer is cleared when that finishes.
+        await until(() => {
+          const made = set.mock.results.map(r => r.value);
+          const gone = clear.mock.calls.map(c => c[0]);
+          return made.length >= 2 && made.every(timer => gone.includes(timer));
+        });
         created.push(...set.mock.results.map(r => r.value));
         cleared.push(...clear.mock.calls.map(c => c[0]));
       } finally {

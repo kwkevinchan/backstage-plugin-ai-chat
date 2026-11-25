@@ -62,7 +62,11 @@ export class NameSession {
     this.timeoutMs = deps.timeoutMs ?? TITLE_TIMEOUT_MS;
   }
 
-  async execute(input: { run: Run; outcome: RunOutcome }): Promise<void> {
+  async execute(input: {
+    run: Run;
+    outcome: RunOutcome;
+    signal?: AbortSignal;
+  }): Promise<void> {
     if (!isNormalEnd(input.outcome)) return;
     const { sessions, runs, items, model, logger } = this.deps;
     const session = await sessions.get(input.run.sessionId);
@@ -90,30 +94,40 @@ export class NameSession {
       messages: [{ role: 'user', content: source }],
       tools: [],
     };
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timeout = AbortSignal.timeout(this.timeoutMs);
+    const signal = input.signal
+      ? AbortSignal.any([input.signal, timeout])
+      : timeout;
     let text = '';
     try {
       text = await Promise.race([
-        collectText(model, modelInput, session.id, controller.signal),
+        collectText(model, modelInput, session.id, signal),
         new Promise<string>(resolve => {
-          controller.signal.addEventListener('abort', () => resolve(''));
+          if (signal.aborted) {
+            resolve('');
+            return;
+          }
+          signal.addEventListener('abort', () => resolve(''), { once: true });
         }),
       ]);
     } catch (error) {
-      let message = String(error);
-      if (controller.signal.aborted) message = 'timed out';
-      else if (error instanceof Error) message = error.message;
+      if (timeout.aborted) {
+        logger.warn('Could not name the session', {
+          sessionId: session.id,
+          runId: input.run.id,
+          error: 'timed out',
+        });
+        return;
+      }
+      if (signal.aborted) return;
       logger.warn('Could not name the session', {
         sessionId: session.id,
         runId: input.run.id,
-        error: message,
+        error: error instanceof Error ? error.message : String(error),
       });
       return;
-    } finally {
-      clearTimeout(timer);
     }
-    if (controller.signal.aborted) {
+    if (timeout.aborted) {
       logger.warn('Could not name the session', {
         sessionId: session.id,
         runId: input.run.id,
@@ -121,6 +135,7 @@ export class NameSession {
       });
       return;
     }
+    if (signal.aborted) return;
     const title = titleFromModelAnswer(text);
     if (title === undefined) return;
     await sessions.setTitleIfAbsent(session.id, title);
