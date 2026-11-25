@@ -23,7 +23,8 @@ import type {
 import type { Skill } from '../ports/extensions';
 import type { ToolOutput, ValidationResult } from '../ports/ToolGateway';
 import type { AdvanceRunRequest } from '../types';
-import { stepContextOf } from './stepContext';
+import { settle } from './hooks';
+import { copyStepContext, stepContextOf } from './stepContext';
 
 /**
  * Built-in read-only tool id that loads the full instructions of an available
@@ -172,30 +173,33 @@ export async function executeLoadSkill(
       message: `Unknown skill: ${id}`,
     };
   }
-  try {
-    const content = await skill.load(stepContextOf(req, call.step));
-    if (req.signal.aborted) return undefined;
-    if (typeof content !== 'string') {
-      return {
-        status: 'error',
-        message: 'The skill returned invalid content.',
-      };
-    }
-    return {
-      status: 'ok',
-      output: {
-        id: skill.id,
-        description: normalizeInline(skill.description),
-        content,
-      },
-    };
-  } catch {
-    if (req.signal.aborted) return undefined;
+  // A `load` that ignores the signal must not keep a stopped run waiting.
+  const settled = await settle(
+    () => skill.load(copyStepContext(stepContextOf(req, call.step))),
+    req.signal,
+  );
+  if (settled.aborted) return undefined;
+  if (!settled.ok) {
     return {
       status: 'error',
       message: `Could not load skill ${skill.id}.`,
     };
   }
+  const content = settled.value;
+  if (typeof content !== 'string') {
+    return {
+      status: 'error',
+      message: 'The skill returned invalid content.',
+    };
+  }
+  return {
+    status: 'ok',
+    output: {
+      id: skill.id,
+      description: normalizeInline(skill.description),
+      content,
+    },
+  };
 }
 
 function normalizeInline(value: string): string {

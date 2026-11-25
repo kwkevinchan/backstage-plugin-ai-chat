@@ -536,4 +536,72 @@ describe('AdvanceRun: skills and load_skill (X-04)', () => {
       output: { replaced: true },
     });
   });
+
+  it('lets a beforeToolCall hook make load_skill wait for an approval', async () => {
+    const load = jest.fn(async () => 'Skill body');
+    const h = await setupSkillsHarness({
+      skills: [{ id: 'known', description: 'Known skill', load }],
+      hooks: { beforeToolCall: [() => ({ action: 'ask' as const })] },
+      script: [
+        [callTool('m1', LOAD_SKILL_TOOL_ID, { id: 'known' })],
+        [say('Loaded after approval.')],
+      ],
+    });
+
+    const { outcome } = await h.execute();
+    expect(outcome.status).toBe('waiting_approval');
+    expect(load).not.toHaveBeenCalled();
+    expect((await h.read()).find(i => i.kind === 'tool_call')).toMatchObject({
+      toolId: LOAD_SKILL_TOOL_ID,
+      policy: 'ask',
+    });
+  });
+
+  it('stops waiting for a load() that never answers when the run is stopped', async () => {
+    const h = await setupSkillsHarness({
+      skills: [
+        {
+          id: 'stuck',
+          description: 'Never answers',
+          load: () => {
+            setTimeout(() => h.controller.abort(), 0);
+            return new Promise<string>(() => {});
+          },
+        },
+      ],
+      script: [[callTool('m1', LOAD_SKILL_TOOL_ID, { id: 'stuck' })]],
+    });
+
+    const { outcome } = await h.execute();
+    expect(outcome).toEqual({ status: 'cancelled' });
+    expect((await h.read()).filter(i => i.kind === 'tool_result')).toEqual([]);
+  });
+
+  it('gives load() a copy of the principal', async () => {
+    const seen: unknown[] = [];
+    const h = await setupSkillsHarness({
+      skills: [
+        {
+          id: 'mutating',
+          description: 'Changes its context',
+          load: ctx => {
+            seen.push({ ...(ctx.principal as object) });
+            (ctx.principal as { user: string }).user = 'user:changed';
+            return 'Body';
+          },
+        },
+      ],
+      script: [
+        [
+          callTool('m1', LOAD_SKILL_TOOL_ID, { id: 'mutating' }),
+          callTool('m2', LOAD_SKILL_TOOL_ID, { id: 'mutating' }),
+        ],
+        [say('Done.')],
+      ],
+    });
+
+    await h.execute();
+    // The second call sees the principal of the run, not what the first changed.
+    expect(seen).toEqual([{ user: 'user:a' }, { user: 'user:a' }]);
+  });
 });
