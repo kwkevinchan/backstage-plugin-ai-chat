@@ -27,6 +27,7 @@ import {
   type AdvanceRunRequest,
   type Extensions,
   type HarnessEvent,
+  type HookRegistry,
   type ItemDraft,
   type RunFence,
   type RunOutcome,
@@ -60,6 +61,7 @@ async function setupSkillsHarness(options: {
   script: ScriptedStep[];
   agent?: AgentDefinition;
   skills?: readonly Skill[];
+  hooks?: Partial<HookRegistry>;
   policy?: PolicySettings;
   limits?: Partial<Limits>;
 }) {
@@ -79,9 +81,10 @@ async function setupSkillsHarness(options: {
   const run = new FakeRunControl();
   const ids = new SequentialIdGenerator('call');
   const controller = new AbortController();
-  const extensions: Extensions = options.skills
-    ? { skills: options.skills }
-    : emptyExtensions();
+  const extensions: Extensions =
+    options.skills || options.hooks
+      ? { skills: options.skills, hooks: options.hooks }
+      : emptyExtensions();
   const loop = new AdvanceRun({
     items,
     model,
@@ -475,5 +478,58 @@ describe('AdvanceRun: skills and load_skill (X-04)', () => {
         output: expect.objectContaining({ id: 's1', content: 'Body 1' }),
       }),
     ]);
+  });
+
+  it('lets a beforeToolCall hook deny load_skill without calling load()', async () => {
+    const load = jest.fn(async () => 'Skill body');
+    const beforeToolCall = jest.fn(() => ({
+      action: 'deny' as const,
+      reason: 'Skills are off today.',
+    }));
+    const h = await setupSkillsHarness({
+      skills: [{ id: 'known', description: 'Known skill', load }],
+      hooks: { beforeToolCall: [beforeToolCall] },
+      script: [
+        [callTool('m1', LOAD_SKILL_TOOL_ID, { id: 'known' })],
+        [say('Denied by the hook.')],
+      ],
+    });
+
+    const { outcome } = await h.execute();
+    expect(outcome).toEqual({ status: 'completed' });
+    expect(beforeToolCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolId: LOAD_SKILL_TOOL_ID,
+        input: { id: 'known' },
+        readOnly: true,
+      }),
+      expect.objectContaining({ agentId: 'default', step: 1 }),
+    );
+    expect(load).not.toHaveBeenCalled();
+    expect((await h.read()).find(i => i.kind === 'tool_result')).toMatchObject({
+      status: 'denied',
+      message: 'Skills are off today.',
+    });
+  });
+
+  it('passes the load_skill result through afterToolCall hooks', async () => {
+    const h = await setupSkillsHarness({
+      skills: [{ id: 'known', description: 'Known skill', load: () => 'Body' }],
+      hooks: {
+        afterToolCall: [
+          (_call, result) => ({ ...result, output: { replaced: true } }),
+        ],
+      },
+      script: [
+        [callTool('m1', LOAD_SKILL_TOOL_ID, { id: 'known' })],
+        [say('Done.')],
+      ],
+    });
+
+    await h.execute();
+    expect((await h.read()).find(i => i.kind === 'tool_result')).toMatchObject({
+      status: 'ok',
+      output: { replaced: true },
+    });
   });
 });
