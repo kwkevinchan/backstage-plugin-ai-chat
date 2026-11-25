@@ -17,14 +17,12 @@
 import { useEffect, useRef } from 'react';
 import { isToolUIPart } from 'ai';
 import type {
-  ChatAttachment,
   ChatNoticeData,
   ChatTool,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { DecisionInfo } from '../domain/itemsToMessages';
 import { toolIdOf } from '../domain/toolView';
 import type { ChatUiMessage, ToolPart } from '../domain/types';
-import { AttachmentList } from './AttachmentThumb';
 import { Markdown } from './Markdown';
 import { cx } from './styles';
 import { ApprovalCard, needsCard, ToolCallRow } from './ToolCallCard';
@@ -52,9 +50,7 @@ export interface MessageListProps {
   /** Sends the first message of the run again (the run gave no answer). */
   onSendAgain?(): void;
   /** Sends a message that the run did not read again. */
-  onSendTextAgain?(text: string, attachments?: ChatAttachment[]): void;
-  /** Reads one image of the session, with the signed-in request. */
-  loadAttachment?(id: string): Promise<Blob>;
+  onSendTextAgain?(text: string): void;
 }
 
 /** The label of an inserted message that the run ended without reading. */
@@ -67,44 +63,26 @@ function MessageParts({
   disabled,
   onDecide,
   onSendTextAgain,
-  loadAttachment,
 }: {
   message: ChatUiMessage;
   tools?: Record<string, ChatTool>;
   decisions?: Record<string, DecisionInfo>;
   disabled: boolean;
   onDecide(callId: string, approved: boolean): void;
-  onSendTextAgain?(text: string, attachments?: ChatAttachment[]): void;
-  loadAttachment?(id: string): Promise<Blob>;
+  onSendTextAgain?(text: string): void;
 }) {
   const text = message.parts.find(part => part.type === 'text');
-  const attachments = message.metadata?.attachments ?? [];
   return (
     <>
       {message.parts.map((part, index) => {
         const key = `${message.id}:${index}`;
         if (part.type === 'text') {
-          if (message.role === 'user') {
-            const first = message.parts.find(item => item.type === 'text');
-            if (first !== part) return null;
-            if (!part.text && attachments.length === 0) return null;
-            return (
-              <div
-                key={key}
-                className={cx('chat-message', 'chat-message-user')}
-              >
-                {part.text}
-                {attachments.length > 0 && loadAttachment && (
-                  <AttachmentList
-                    attachments={attachments}
-                    load={loadAttachment}
-                  />
-                )}
-              </div>
-            );
-          }
           if (!part.text) return null;
-          return (
+          return message.role === 'user' ? (
+            <div key={key} className={cx('chat-message', 'chat-message-user')}>
+              {part.text}
+            </div>
+          ) : (
             <div
               key={key}
               className={cx('chat-message', 'chat-message-assistant')}
@@ -116,41 +94,29 @@ function MessageParts({
         if (part.type === 'data-inserted') {
           // A message that the user added to the run, shown where the model
           // read it.
-          const inserted = part.data.attachments ?? [];
-          if (!part.data.text && inserted.length === 0) return null;
           return (
             <div key={key} className={cx('chat-message', 'chat-message-user')}>
               {part.data.text}
-              {inserted.length > 0 && loadAttachment && (
-                <AttachmentList attachments={inserted} load={loadAttachment} />
-              )}
             </div>
           );
         }
         if (part.type === 'data-unread') {
-          const userText = text?.type === 'text' ? text.text : '';
-          const canSend =
-            text?.type === 'text' &&
-            (userText.length > 0 || attachments.length > 0);
           return (
             <div key={key} className={cx('chat-unread')} role="status">
               {UNREAD_TEXT}
-              {part.data.sendAgain && onSendTextAgain && canSend && (
-                <>
-                  {' '}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onSendTextAgain(
-                        userText,
-                        attachments.length > 0 ? attachments : undefined,
-                      )
-                    }
-                  >
-                    Send this message again
-                  </button>
-                </>
-              )}
+              {part.data.sendAgain &&
+                onSendTextAgain &&
+                text?.type === 'text' && (
+                  <>
+                    {' '}
+                    <button
+                      type="button"
+                      onClick={() => onSendTextAgain(text.text)}
+                    >
+                      Send this message again
+                    </button>
+                  </>
+                )}
             </div>
           );
         }
@@ -212,7 +178,6 @@ export function MessageList(props: MessageListProps) {
             disabled={props.disabled || props.busy}
             onDecide={props.onDecide}
             onSendTextAgain={props.onSendTextAgain}
-            loadAttachment={props.loadAttachment}
           />
         </div>
       ))}

@@ -14,35 +14,21 @@
  * limitations under the License.
  */
 
-import type { ChatAttachment } from '@kwkevinchan/backstage-plugin-ai-chat-common';
-import { AttachmentList } from './AttachmentThumb';
 import { cx } from './styles';
 
 export interface PendingInsertsProps {
   /** The messages that were added to the run and not read yet. */
-  items: { seq: number; text: string; attachments?: ChatAttachment[] }[];
-  /** Reads one image of the session, with the signed-in request. */
-  loadAttachment?: (id: string) => Promise<Blob>;
+  items: { seq: number; text: string }[];
 }
 
 /** The messages that wait for the model to read them: above the input box. */
-export function PendingInserts({ items, loadAttachment }: PendingInsertsProps) {
+export function PendingInserts({ items }: PendingInsertsProps) {
   if (items.length === 0) return null;
   return (
     <ul className={cx('chat-pending')} aria-label="Waiting to be read">
       {items.map(item => (
         <li key={item.seq} className={cx('chat-pending-item')}>
-          {item.text && (
-            <span className={cx('chat-pending-text')}>{item.text}</span>
-          )}
-          {item.attachments &&
-            item.attachments.length > 0 &&
-            loadAttachment && (
-              <AttachmentList
-                attachments={item.attachments}
-                load={loadAttachment}
-              />
-            )}
+          <span className={cx('chat-pending-text')}>{item.text}</span>
           <span className={cx('chat-pending-label')}>
             The agent has not read this yet. It will at the next step.
           </span>

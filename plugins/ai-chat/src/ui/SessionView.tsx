@@ -16,13 +16,11 @@
 
 import { useCallback, useState } from 'react';
 import type {
-  ChatAttachment,
   ChatSessionDetail,
   ChatToolset,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { AiChatApi } from '../api';
 import { describeError } from '../adapters/describeError';
-import { useInputConfig } from '../application/useInputConfig';
 import { useSessionChat } from '../application/useSessionChat';
 import { useSessionTools } from '../application/useSessionTools';
 import { usePageContext } from '../application/usePageContext';
@@ -39,8 +37,6 @@ export interface SessionViewProps {
   toolsets: ChatToolset[];
   /** The message to send when the session opens, for a session just created. */
   firstMessage?: string;
-  /** Images of that first message. */
-  firstAttachments?: ChatAttachment[];
   onChanged?(): void;
 }
 
@@ -53,36 +49,8 @@ export function SessionView(props: SessionViewProps) {
     detail,
     page,
     firstMessage: props.firstMessage,
-    firstAttachments: props.firstAttachments,
     onChanged: props.onChanged,
   });
-  const inputConfig = useInputConfig(api);
-  const imageLimits = inputConfig?.images.enabled
-    ? {
-        mediaTypes: inputConfig.images.mediaTypes,
-        maxPerMessage: inputConfig.images.maxPerMessage,
-        maxBytes: inputConfig.images.maxBytes,
-      }
-    : undefined;
-  const loadAttachment = useCallback(
-    (id: string) => api.readAttachment(detail.session.id, id),
-    [api, detail.session.id],
-  );
-  const uploadImage = useCallback(
-    async (file: File, onProgress: (loaded: number, total: number) => void) => {
-      try {
-        return await api.uploadAttachment(
-          detail.session.id,
-          file,
-          file.name,
-          onProgress,
-        );
-      } catch (error) {
-        throw new Error(describeError(error));
-      }
-    },
-    [api, detail.session.id],
-  );
   const [enabled, setEnabled] = useState(detail.session.enabledToolsets);
   const tools = useSessionTools(api, detail.session.id, enabled.join(','));
   const [toolsetError, setToolsetError] = useState<string>();
@@ -147,7 +115,6 @@ export function SessionView(props: SessionViewProps) {
         onDecide={chat.decide}
         onSendAgain={chat.sendAgain}
         onSendTextAgain={running || chat.busy ? undefined : chat.sendTextAgain}
-        loadAttachment={loadAttachment}
       />
       <QueuePanel
         items={chat.queue}
@@ -160,7 +127,7 @@ export function SessionView(props: SessionViewProps) {
         moving={chat.queueMoving}
         onMove={chat.moveQueued}
       />
-      <PendingInserts items={chat.pending} loadAttachment={loadAttachment} />
+      <PendingInserts items={chat.pending} />
       <Composer
         onSend={chat.send}
         onQueue={running && !waiting ? chat.queueMessage : undefined}
@@ -169,8 +136,6 @@ export function SessionView(props: SessionViewProps) {
         hint={hint}
         placeholder={placeholder}
         onStop={running ? chat.stop : undefined}
-        images={imageLimits}
-        uploadImage={imageLimits ? uploadImage : undefined}
       />
     </div>
   );

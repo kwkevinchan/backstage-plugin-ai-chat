@@ -985,7 +985,7 @@ paths:
       operationId: updateQueuedMessage
       tags: [Queue]
       summary: Change a queued message.
-      description: Only the fields in the body change; `page` as `null` removes the page. 404 `QueuedMessageNotFound` when the message was deleted or sent.
+      description: Only the fields in the body change; `page` as `null` removes the page. 404 `QueuedMessageNotFound` when the message was deleted or sent. 400 when the message would have no text and no image after the change.
       requestBody:
         required: true
         content:

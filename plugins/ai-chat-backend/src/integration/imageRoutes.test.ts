@@ -820,6 +820,58 @@ describe('the routes of the images', () => {
       await pending;
     });
 
+    it('refuses a change that would leave a queued message with no text and no image', async () => {
+      await start();
+      const b = backend([waitForAbort]);
+      const id = await newSession(b);
+      const [a] = await uploadedIn(b, id);
+      const pending = as(JANE, request(b.app).post(`/sessions/${id}/runs`))
+        .send({ text: 'go' })
+        .then(res => res);
+      await until(() => b.model.inputs.length === 1);
+      const runId = (await world.knex('runs').where({ session_id: id }).first())
+        .id;
+
+      const queued = await as(
+        JANE,
+        request(b.app).post(`/sessions/${id}/queue`),
+      )
+        .send({ text: '', attachmentIds: [a] })
+        .expect(201);
+
+      const refused = await as(
+        JANE,
+        request(b.app).patch(`/sessions/${id}/queue/${queued.body.id}`),
+      )
+        .send({ attachmentIds: [] })
+        .expect(400);
+      expect(refused.body.error).toMatchObject({
+        name: 'EmptyMessage',
+        message: 'must have text or at least one image',
+      });
+      const still = await as(
+        JANE,
+        request(b.app).get(`/sessions/${id}`),
+      ).expect(200);
+      expect(still.body.queue.items[0]).toMatchObject({
+        id: queued.body.id,
+        text: '',
+        attachments: [{ id: a }],
+      });
+
+      await as(
+        JANE,
+        request(b.app).patch(`/sessions/${id}/queue/${queued.body.id}`),
+      )
+        .send({ text: 'later', attachmentIds: [] })
+        .expect(200);
+      await as(
+        JANE,
+        request(b.app).post(`/sessions/${id}/runs/${runId}/cancel`),
+      ).expect(202);
+      await pending;
+    });
+
     it('refuses a message with no text and no image on send, insert and queue', async () => {
       await start();
       const b = backend([waitForAbort]);
