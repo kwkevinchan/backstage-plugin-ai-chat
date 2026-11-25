@@ -14,18 +14,20 @@
  * limitations under the License.
  */
 
-import { createAiChatPanelStore } from './panelStore';
+import { createAiChatPanelStore, getAiChatPanelStore } from './panelStore';
 
 describe('createAiChatPanelStore', () => {
   it('open, close, and setSession notify and keep the snapshot stable', () => {
-    const store = createAiChatPanelStore();
+    const api = createAiChatPanelStore();
+    const store = getAiChatPanelStore(api);
     const first = store.getSnapshot();
     const seen: unknown[] = [];
-    store.subscribe(() => seen.push(store.getSnapshot()));
+    api.subscribe(() => seen.push(store.getSnapshot()));
 
-    store.reveal();
-    store.reveal();
+    api.open();
+    api.open();
     expect(seen).toHaveLength(1);
+    expect(api.isOpen()).toBe(true);
     expect(store.getSnapshot()).toEqual({ open: true, launchId: 0 });
     expect(store.getSnapshot()).not.toBe(first);
     expect(store.getSnapshot()).toBe(store.getSnapshot());
@@ -36,9 +38,10 @@ describe('createAiChatPanelStore', () => {
     expect(store.getSnapshot().sessionId).toBe('s-1');
 
     const open = store.getSnapshot();
-    store.close();
-    store.close();
+    api.close();
+    api.close();
     expect(seen).toHaveLength(3);
+    expect(api.isOpen()).toBe(false);
     expect(store.getSnapshot()).toEqual({
       open: false,
       launchId: 0,
@@ -47,8 +50,37 @@ describe('createAiChatPanelStore', () => {
     expect(store.getSnapshot()).not.toBe(open);
   });
 
+  it('treats open with prompt or entityRef as a launch and trims/validates', () => {
+    const api = createAiChatPanelStore();
+    const store = getAiChatPanelStore(api);
+    api.open({
+      prompt: '  where  ',
+      entityRef: 'component:default/example.com',
+    });
+    expect(store.getSnapshot()).toEqual({
+      open: true,
+      launchId: 1,
+      launch: {
+        prompt: 'where',
+        entityRef: 'component:default/example.com',
+      },
+    });
+
+    store.setSession('s-1');
+    api.open();
+    expect(store.getSnapshot()).toEqual({
+      open: true,
+      launchId: 1,
+      sessionId: 's-1',
+      launch: {
+        prompt: 'where',
+        entityRef: 'component:default/example.com',
+      },
+    });
+  });
+
   it('runs one task per launch and shares it with a second caller', async () => {
-    const store = createAiChatPanelStore();
+    const store = getAiChatPanelStore(createAiChatPanelStore());
     let runs = 0;
     const task = () => {
       runs += 1;
@@ -63,7 +95,7 @@ describe('createAiChatPanelStore', () => {
   });
 
   it('forgets a launch whose task failed', async () => {
-    const store = createAiChatPanelStore();
+    const store = getAiChatPanelStore(createAiChatPanelStore());
     let runs = 0;
     const task = () => {
       runs += 1;

@@ -1,0 +1,69 @@
+{
+  "name": "@kwkevinchan/backstage-plugin-ai-chat-node",
+  "version": "0.0.0",
+  "description": "Extension point for backend modules of the AI chat for Backstage. A module depends on this package to register agents",
+  "license": "Apache-2.0",
+  "keywords": [
+    "backstage",
+    "ai",
+    "chat",
+    "extension"
+  ],
+  "homepage": "https://github.com/kwkevinchan/backstage-plugin-ai-chat/tree/main/plugins/ai-chat-node",
+  "bugs": {
+    "url": "https://github.com/kwkevinchan/backstage-plugin-ai-chat/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kwkevinchan/backstage-plugin-ai-chat",
+    "directory": "plugins/ai-chat-node"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "typesVersions": {
+    "*": {
+      "package.json": [
+        "package.json"
+      ]
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "backstage": {
+    "role": "node-library",
+    "pluginId": "ai-chat",
+    "pluginPackages": [
+      "@kwkevinchan/backstage-plugin-ai-chat",
+      "@kwkevinchan/backstage-plugin-ai-chat-backend",
+      "@kwkevinchan/backstage-plugin-ai-chat-common",
+      "@kwkevinchan/backstage-plugin-ai-chat-node",
+      "@kwkevinchan/backstage-plugin-ai-chat-react"
+    ]
+  },
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "backstage-cli package build",
+    "lint": "backstage-cli package lint",
+    "test": "backstage-cli package test",
+    "clean": "backstage-cli package clean",
+    "prepack": "backstage-cli package prepack",
+    "postpack": "backstage-cli package postpack"
+  },
+  "dependencies": {
+    "@backstage/backend-plugin-api": "backstage:^",
+    "@kwkevinchan/ai-chat-harness": "workspace:^"
+  },
+  "devDependencies": {
+    "@backstage/cli": "backstage:^",
+    "@types/eslint": "^8.56.0",
+    "eslint": "^8.57.0"
+  }
+}

@@ -18,26 +18,11 @@ import {
   isEntityRef,
   type ChatPageContext,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
-
-/**
- * What a plugin asks the panel to open with. A missing field is left out.
- * A blank prompt and an entity that is not an entity reference are left out
- * by `launchContextOf`.
- *
- * @public
- */
-export interface AiChatLaunchRequest {
-  /** The first message of a new conversation. */
-  prompt?: string;
-  /** The entity this conversation is about, `kind:namespace/name`. */
-  entityRef?: string;
-}
+import type { AiChatLaunchRequest } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 
 /**
  * The prompt and the entity a launch actually carries. The prompt is trimmed.
  * An entity that fails `isEntityRef` from the common package is absent.
- *
- * @public
  */
 export interface LaunchContext {
   prompt?: string;
@@ -48,8 +33,6 @@ export interface LaunchContext {
  * The prompt and the entity to keep from a launch. A prompt that is empty
  * after trimming is not a prompt. The text that is sent is the trimmed one.
  * An entity reference that fails the catalog check is dropped.
- *
- * @public
  */
 export function launchContextOf(
   request: AiChatLaunchRequest = {},
@@ -66,8 +49,6 @@ export function launchContextOf(
  * The page of a message sent from the panel. A launched entity wins over the
  * entity on the page. Without one, the page's own context is used. The path
  * is the path of the page at the moment of sending.
- *
- * @public
  */
 export function panelMessagePage(
   launch: LaunchContext | undefined,

@@ -52,22 +52,20 @@ const isWebOnlyDep = name =>
 const roleOf = workspace => workspace.manifest.backstage?.role;
 
 /**
- * The plugin ships one backend and one frontend package. The frontend
- * depends on the react package. Another frontend package depends only on
- * that react package, not on the host plugin.
+ * The plugin ships one backend and one frontend package. Neither depends on
+ * the other. The backend depends on the harness, the common types and
+ * `ai-chat-node`. `ai-chat-node` depends only on the harness. A backend
+ * module of this plugin depends only on `ai-chat-node`.
+ *
+ * The harness is the framework-free core of the agent loop. It does not know
+ * Backstage, so no @backstage/* package and no Node-only package (express,
+ * knex) is a runtime dependency (dev dependencies, such as the CLI that
+ * builds it, are fine).
  */
-const BACKEND_CORE = '@kwkevinchan/backstage-plugin-ai-chat-backend';
-const FRONTEND_CORE = '@kwkevinchan/backstage-plugin-ai-chat';
-const AI_CHAT_REACT = '@kwkevinchan/backstage-plugin-ai-chat-react';
-
-/**
- * The framework-free core of the agent loop. It does not know Backstage, so
- * no @backstage/* package and no Node-only package (express, knex) is a
- * runtime dependency (dev dependencies, such as the CLI that builds it, are
- * fine).
- */
-const HARNESS = '@kwkevinchan/ai-chat-harness';
-const COMMON = '@kwkevinchan/backstage-plugin-ai-chat-common';
+const {
+  HARNESS,
+  workspaceDependencyError,
+} = require('./scripts/workspace-deps.cjs');
 
 module.exports = defineConfig({
   async constraints({ Yarn }) {
@@ -132,46 +130,22 @@ module.exports = defineConfig({
         );
       }
 
-      // Published packages: no private workspaces. The backend depends on
-      // the harness and common. The frontend depends on common and the react
-      // package. The react package depends on common. Another frontend
-      // package depends only on the react package, not on the host. A
-      // backend package that is not the backend itself depends only on the
-      // backend.
+      // Published packages: no private workspaces. Which package may depend
+      // on which other package of this repository is `workspaceDependencyError`.
       if (isPublished && target && dep.type !== 'devDependencies') {
-        const isCore = [BACKEND_CORE, FRONTEND_CORE, HARNESS, COMMON].includes(
-          workspace.ident,
-        );
         if (target.manifest.private === true) {
           dep.error(
             `Published packages must not depend on the private package ${dep.ident}`,
           );
-        } else if (
-          workspace.ident === BACKEND_CORE &&
-          (dep.ident === HARNESS || dep.ident === COMMON)
-        ) {
-          // The backend plugin is built on the harness and the common types.
-        } else if (
-          workspace.ident === FRONTEND_CORE &&
-          (dep.ident === COMMON || dep.ident === AI_CHAT_REACT)
-        ) {
-          // The frontend plugin shares the API types and renders the panel.
-        } else if (workspace.ident === AI_CHAT_REACT && dep.ident === COMMON) {
-          // The react package shares the page-context checks.
-        } else if (isCore || workspace.ident === AI_CHAT_REACT) {
-          dep.error(
-            `${workspace.ident} must not depend on other packages of this repository (${dep.ident})`,
-          );
-        } else if (!BACKEND_ROLES.has(roleOf(workspace))) {
-          if (dep.ident !== AI_CHAT_REACT) {
-            dep.error(
-              `${workspace.ident} may only depend on ${AI_CHAT_REACT} of this repository, not ${dep.ident}`,
-            );
-          }
-        } else if (dep.ident !== BACKEND_CORE) {
-          dep.error(
-            `${workspace.ident} may only depend on ${BACKEND_CORE} of this repository, not ${dep.ident}`,
-          );
+        } else {
+          const message = workspaceDependencyError({
+            from: workspace.ident,
+            to: dep.ident,
+            backendRole: BACKEND_ROLES.has(roleOf(workspace)),
+            role: roleOf(workspace),
+            pluginId: workspace.manifest.backstage?.pluginId,
+          });
+          if (message) dep.error(message);
         }
       }
 

@@ -17,20 +17,28 @@
 import {
   insertStatesOf,
   unreadInserted,
+  type Clock,
   type Item,
   type ItemLog,
 } from '@kwkevinchan/ai-chat-harness';
 import {
-  assertOwner,
+  NotSessionOwner,
   callsAwaitingDecision,
+  effectiveShare,
+  isSessionOwner,
+  shareGrantsRead,
+  visibleItems,
   type Principal,
   type Run,
   type Session,
+  type Share,
 } from '../../domain';
 import type {
+  AccessControl,
   QueuedMessageRepository,
   RunRepository,
   SessionRepository,
+  ShareRepository,
 } from '../ports';
 import { queueViewOf, type QueueView } from './ListQueue';
 
@@ -60,7 +68,11 @@ export type SessionView = {
   insertStates: ReadonlyMap<number, 'read' | 'pending' | 'unread'>;
 };
 
-/** The session with its items and its active run, for the owner (SE-01). */
+/**
+ * The session with its items and its active run (SE-01, SH-05). The owner
+ * sees the same view as before. Someone a share names sees only `visibleItems`.
+ * Anyone else gets `NotSessionOwner`.
+ */
 export class GetSession {
   constructor(
     private readonly deps: {
@@ -68,6 +80,9 @@ export class GetSession {
       runs: RunRepository;
       items: ItemLog;
       queue: QueuedMessageRepository;
+      shares: ShareRepository;
+      access: AccessControl;
+      clock: Clock;
     },
   ) {}
 
@@ -77,9 +92,18 @@ export class GetSession {
     /** Only the items after this sequence number. */
     afterSeq?: number;
   }): Promise<SessionView> {
-    const { sessions, runs, items } = this.deps;
-    const session = await sessions.get(input.sessionId);
-    assertOwner(session, input.principal);
+    const { runs, items } = this.deps;
+    const session = await this.deps.sessions.get(input.sessionId);
+    const shares = await this.deps.shares.listBySession(session.id);
+    const allowed = await this.deps.access.canReadSession({
+      session,
+      principal: input.principal,
+      shares,
+    });
+    if (!allowed) throw new NotSessionOwner(session.id);
+    if (!isSessionOwner(session, input.principal.userRef)) {
+      return this.forSharee(session, input.principal, shares, input.afterSeq);
+    }
     const run = await runs.findActive(session.id);
     const list = await items.read(session.id, { afterSeq: input.afterSeq });
     let awaitingDecision: string[] = [];
@@ -131,4 +155,69 @@ export class GetSession {
       ]),
     );
   }
+
+  /**
+   * A sharee sees only the items the shares allow. The queue, the decisions
+   * and resume are the owner's. A snapshot or a frozen share does not include
+   * a run that started after its seq cap. Insert states come from the visible
+   * items, so a hidden item cannot change them or leak through them.
+   */
+  private async forSharee(
+    session: Session,
+    principal: Principal,
+    shares: readonly Share[],
+    afterSeq?: number,
+  ): Promise<SessionView> {
+    const now = this.deps.clock.now().toISOString();
+    const all = await this.deps.items.read(session.id);
+    const share = effectiveShare(
+      shares.filter(one => shareGrantsRead(one, principal)),
+      all,
+      now,
+    );
+    if (share === undefined) throw new NotSessionOwner(session.id);
+    const visible = visibleItems(all, { isOwner: false, share }, now);
+    const list =
+      afterSeq === undefined
+        ? visible
+        : visible.filter(item => item.seq > afterSeq);
+    const active = await this.deps.runs.findActive(session.id);
+    // A snapshot or a frozen share must not show a run that started after it.
+    const run =
+      active !== undefined &&
+      (share.upToSeq === undefined ||
+        visible.some(item => item.runId === active.id))
+        ? active
+        : undefined;
+    return {
+      session,
+      ...(run && { run }),
+      items: list,
+      awaitingDecision: [],
+      resumable: false,
+      queue: { items: [], paused: false },
+      insertStates: statesOf(list, visible, run),
+    };
+  }
+}
+
+function statesOf(
+  list: Item[],
+  source: readonly Item[],
+  run: Run | undefined,
+): ReadonlyMap<number, 'read' | 'pending' | 'unread'> {
+  const inserted = list.filter(
+    item => item.kind === 'user_message' && item.delivery === 'inserted',
+  );
+  if (inserted.length === 0) return new Map();
+  const states = insertStatesOf(source);
+  const pending = new Set(
+    run ? unreadInserted(source).map(item => item.seq) : [],
+  );
+  return new Map(
+    inserted.map(item => [
+      item.seq,
+      pending.has(item.seq) ? 'pending' : states.get(item.seq) ?? 'unread',
+    ]),
+  );
 }

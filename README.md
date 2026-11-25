@@ -120,10 +120,14 @@ function AskAboutThis() {
 }
 ```
 
-Another plugin opens the same chat in a side panel, without linking to the
-page. The panel stays mounted when the page changes. A prompt starts a new
-conversation and is sent at once. An entity reference is sent with the
-messages of that conversation.
+Another plugin opens the same chat in a side panel through the
+`aiChatPanelApiRef` Utility API, without linking to the page. The panel waits
+until sign-in completes before rendering and stays mounted when the page
+changes. A `prompt` starts a new conversation and is sent at once as the
+signed-in user (pass fixed text or values your plugin controls, not URL query
+parameters or other untrusted input). An `entityRef` is sent with the messages
+of that conversation. `AiChatLauncher` accepts `className` and renders nothing
+when the chat plugin is not installed in the app.
 
 ```tsx
 import { AiChatLauncher } from '@kwkevinchan/backstage-plugin-ai-chat-react';
@@ -136,9 +140,10 @@ import { AiChatLauncher } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 </AiChatLauncher>;
 ```
 
-`useAiChatPanel()` from the same package opens and closes that panel from
-code. `open()` with no prompt and no entity reference does not replace the
-conversation. `close()` hides the panel and leaves the conversation mounted.
+`useAiChatPanel()` from the same package reads `isOpen` and exposes `open()`
+and `close()` through `aiChatPanelApiRef`. `open()` with no prompt and no
+entity reference does not replace the conversation. `close()` hides the panel
+and leaves the conversation mounted.
 
 On the legacy frontend system, render `<AiChatPanel>` once inside the router
 and outside the routes. The new frontend system mounts the same panel with
@@ -190,6 +195,21 @@ aiChat:
   policy: # by complete action ID: allow, ask or deny
     'catalog:get-entity': allow
     'temporal:terminate-workflow': deny
+  agents: # optional; without this block the only agent is default
+    default:
+      title: Backstage Agent
+      toolsets: [catalog]
+    sre:
+      title: SRE Agent
+      systemPrompt: You help the on-call engineer of example.com. Write a plan first, and cite the source.
+      toolsets: [catalog, temporal]
+      skills: [deploy-failure, rollback]
+      model: default
+      planning: required
+      limits:
+        maxSteps: 8
+        maxToolCallsPerRun: 20
+        runTimeoutSeconds: 300
   # Limits of one run (a message and the approvals after it)
   maxTurns: 10 # model calls; default 10
   maxToolCallsPerRun: 30 # tool calls the model may ask for; default 30
@@ -211,6 +231,11 @@ aiChat:
       maxBytesPerInput: 20971520 # image bytes in one run and in one model call; default 20 MB, at least maxPerMessage times maxBytes
       maxPendingPerSession: 12 # uploaded images that are in no message yet; default 12
       tokensPerImage: 1600 # estimated tokens per image in the budget; default 1600
+  sharing: # read at startup; sharing a conversation is not in this version
+    live:
+      enabled: true # a share may keep updating; default true
+      defaultHours: 24 # life of a live share when nobody picks one; default 24
+      maxHours: 72 # longest life, in hours; default 72
   retention:
     days: 90 # delete a session this many days after its last change; 0 keeps every session; default 90
 
@@ -230,6 +255,14 @@ sees only the actions that the actions service lists for the user. The
 `backend.actions.filter` rules of Backstage apply first, then the toolsets of
 the chat. An action that declares `secrets` is not offered: a chat cannot
 supply them.
+
+**Sharing limits.** `aiChat.sharing.live` is read at startup. `enabled`
+(default true) is whether a share may keep updating. `defaultHours` (default 24) is how long a live share lasts when nobody picks a life, and `maxHours`
+(default 72) is the longest life. Leave `sharing` or `live` out and these
+defaults are used. `enabled: false` is stored as false. Both hour values must
+be positive integers, and `defaultHours` must not be greater than `maxHours`;
+otherwise the backend does not start. Creating or changing a share is not in
+this version, so the values are only checked and kept.
 
 **Images.** With `aiChat.llm.images: true`, a user can attach PNG, JPEG, WebP
 or GIF images to a message. **The images are sent to the model server** as part
@@ -253,17 +286,20 @@ pin, an archive or a change of toolsets does count as a change, and so does a
 new message. Set `days` to `0` to keep every session. A session changed
 exactly `days` ago is kept.
 
-| Setting                   | Meaning                                                                                                                                                                                                                                                                                                                     |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maxTurns`                | Most model calls in one run.                                                                                                                                                                                                                                                                                                |
-| `maxToolCallsPerRun`      | Most tool calls the model may ask for in one run. A call beyond the limit is answered with "tool call limit" and does not run.                                                                                                                                                                                              |
-| `runTimeoutSeconds`       | Most seconds of work in one run, at most 600. The tools run with the token of the user, so a run also ends before that token expires (the shortest life that Backstage allows is 10 minutes).                                                                                                                               |
-| `context.tokenBudget`     | Size of the model input in estimated tokens (one token is a quarter of an ASCII character or one other character). Set it well below the context window of the model.                                                                                                                                                       |
-| `context.keepRecentSteps` | The newest steps that are never shortened or left out.                                                                                                                                                                                                                                                                      |
-| `input.insert.maxPerRun`  | Most messages the user may insert into one run that is going on (at most 20). The model reads an inserted message in its next call, and a run that is about to end reads it first. A run that stops without reading it (a limit, an error, Stop) leaves it marked as not read.                                              |
-| `input.queue.maxMessages` | Most messages in the queue of one session. A queued message waits for the run to end; when the run ends the normal way (the model answered, no limit stopped it) and the credentials of the user last for another run, the first message starts a new run. After any other end the queue waits until the user continues it. |
-| `maxToolOutputChars`      | The output of an action is cut here, and the cut is stated.                                                                                                                                                                                                                                                                 |
-| `retention.days`          | Days after the last change of a session before it is deleted, with its runs, messages, queued messages and images. Default 90. `0` keeps every session. A session with a run that has not ended is kept until the run ends. The audit log is kept.                                                                          |
+| Setting                     | Meaning                                                                                                                                                                                                                                                                                                                     |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxTurns`                  | Most model calls in one run.                                                                                                                                                                                                                                                                                                |
+| `maxToolCallsPerRun`        | Most tool calls the model may ask for in one run. A call beyond the limit is answered with "tool call limit" and does not run.                                                                                                                                                                                              |
+| `runTimeoutSeconds`         | Most seconds of work in one run, at most 600. The tools run with the token of the user, so a run also ends before that token expires (the shortest life that Backstage allows is 10 minutes).                                                                                                                               |
+| `context.tokenBudget`       | Size of the model input in estimated tokens (one token is a quarter of an ASCII character or one other character). Set it well below the context window of the model.                                                                                                                                                       |
+| `context.keepRecentSteps`   | The newest steps that are never shortened or left out.                                                                                                                                                                                                                                                                      |
+| `input.insert.maxPerRun`    | Most messages the user may insert into one run that is going on (at most 20). The model reads an inserted message in its next call, and a run that is about to end reads it first. A run that stops without reading it (a limit, an error, Stop) leaves it marked as not read.                                              |
+| `input.queue.maxMessages`   | Most messages in the queue of one session. A queued message waits for the run to end; when the run ends the normal way (the model answered, no limit stopped it) and the credentials of the user last for another run, the first message starts a new run. After any other end the queue waits until the user continues it. |
+| `maxToolOutputChars`        | The output of an action is cut here, and the cut is stated.                                                                                                                                                                                                                                                                 |
+| `sharing.live.enabled`      | Whether a share may keep updating. Default true. Creating or changing a share is not in this version, so this is only checked and kept.                                                                                                                                                                                     |
+| `sharing.live.defaultHours` | Hours a live share lasts when nobody picks a life. Default 24. A positive integer, at most `maxHours`.                                                                                                                                                                                                                      |
+| `sharing.live.maxHours`     | Longest life of a live share, in hours. Default 72. A positive integer, at least `defaultHours`.                                                                                                                                                                                                                            |
+| `retention.days`            | Days after the last change of a session before it is deleted, with its runs, messages, queued messages and images. Default 90. `0` keeps every session. A session with a run that has not ended is kept until the run ends. The audit log is kept.                                                                          |
 
 When the input is over `tokenBudget`, the old outputs of tools are shortened
 to one line first. If that is not enough, the old steps are replaced by a
@@ -293,6 +329,34 @@ of the chat, above the messages), only the ones that you define.
 they make the one default toolset, with `toolsets` they are ignored, and the
 backend logs a warning when either is set. They will be removed in a later
 version.
+
+### Agents
+
+Without `aiChat.agents` there is one agent, `default`: the built-in rules plus
+`aiChat.systemPrompt`. An entry in `aiChat.agents` is another agent. An entry
+whose id is `default` replaces the built-in one.
+
+The system prompt of a configured agent is the built-in rules plus that
+agent's `systemPrompt`. When the agent omits `systemPrompt`, the installation
+`aiChat.systemPrompt` is used instead. The two extra texts are not combined.
+`toolsets` names toolsets from `aiChat.toolsets` (or `default`, when no
+toolsets are configured). `skills`, `model`, `limits` and `planning: required`
+are recorded on the agent. A wrong value stops the backend at startup.
+
+The loop still uses the limits of the installation and its one model client.
+It does not filter tools by the agent's toolsets, load a skill, require a
+plan on the first step, or call a model client other than that one.
+
+A backend module can register more agents through
+`@kwkevinchan/backstage-plugin-ai-chat-node`. It depends only on that package.
+An agent a module registers receives the same built-in prompt rules as a
+configured agent. An id that both the configuration and a module define stops
+the backend.
+
+`plugins/ai-chat-backend-module-example` in this repository is a private
+example of such a module, to copy from. It registers the agent `guide`. It is
+not a package to install. The example uses `guide`, so `aiChat.agents.guide`
+would also stop the backend.
 
 Any OpenAI-compatible server works, for example a local server: set `baseUrl`
 to `http://localhost:11434/v1` and leave out `apiKey`.
@@ -362,10 +426,44 @@ than one backend and restart them.
 ## Security notes
 
 - Every route needs the credentials of a signed-in **user**; a service token is
-  refused. A user reads and changes only their own sessions.
+  refused. A user changes only their own sessions. Reading a session uses the
+  permission `ai-chat.session.read`: the owner, or someone a share names, can
+  read, unless a policy tightens that (see below).
 - The actions run with the credentials of the user, so the permissions and
   policies of the plugins that own the actions apply as they do on their own
-  pages. The chat adds no permissions.
+  pages.
+
+### `ai-chat.session.read`
+
+The plugin registers this permission and two conditions, `isSessionOwner` and
+`isSharedWith`. What the policy returns changes who can open a session:
+
+1. **DENY** refuses even the owner. A default-deny policy (every permission
+   that is not granted is DENY) will make every session open as not found
+   after you upgrade, until the policy allows this permission.
+2. **ALLOW** does not widen the range. Granting a role ALLOW does not let it
+   read every session: the plugin still checks the owner and the shares.
+3. **CONDITIONAL** applies only the conditions the policy returned. If the
+   policy grants only `isSharedWith`, the owner cannot read their own session.
+
+A policy that keeps the default behaviour is an `anyOf` of the two
+conditions, with the caller's identity:
+
+```ts
+if (isPermission(request.permission, aiChatSessionReadPermission)) {
+  return createAiChatConditionalDecision(request.permission, {
+    anyOf: [
+      aiChatSessionConditions.isSessionOwner({
+        userRefs: [userEntityRef],
+      }),
+      aiChatSessionConditions.isSharedWith({
+        subjectRefs: [userEntityRef, ...ownershipRefs],
+      }),
+    ],
+  });
+}
+```
+
 - The core of the loop can run no code, reach no file and open no network: its
   only way to act is a tool, which is an action of the actions service. The
   lint rules of the repository keep out the imports of `fs`, `child_process`,
@@ -482,9 +580,10 @@ this plugin until it is updated.
 
 Retrieval over TechDocs, an entity tab or sidebar widget, file uploads,
 several model providers at once, MCP servers outside Backstage, sharing a
-conversation, agents of your own with skills and hooks, and the list of
-sessions with search, pin, archive and automatic titles (until then every
-session in the list is called "New conversation").
+conversation, applying an agent's skills, hooks, planning or model (those
+fields can be set, and a module can register them; the loop does not use them
+yet), and the list of sessions with search, pin, archive and automatic titles
+(until then every session in the list is called "New conversation").
 
 Limits of this version:
 

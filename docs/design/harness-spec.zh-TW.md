@@ -378,7 +378,7 @@ aiChat:
 
 ## 7. 擴充點介面
 
-backend 的擴充點放在 `ai-chat-node` 套件，型別來自核心。前端的擴充點放在 `ai-chat-react` 套件。介面的完整版本在程式架構文件的第 6 節。
+backend 的擴充點放在 `ai-chat-node` 套件，型別來自核心。前端的擴充點放在 `ai-chat-react` 套件。介面的完整版本在程式架構文件的第 6 節。目前公開的只有 `addAgent`。其餘方法在 P3-02（Context provider）、P3-04（Skill）、P3-05（Hook）、P3-07（模型轉接）才加，連同迴圈的呼叫一起進來。下面是最終形狀。
 
 ```ts
 interface AiChatHarnessExtensionPoint {

@@ -16,13 +16,14 @@
 
 import {
   messageIdOfRun,
+  type ChatAttachment,
   type ChatInsertState,
   type ChatItem,
   type ChatPlan,
   type ChatSessionDetail,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import { NOT_RUN, RESULT_NOT_KNOWN } from './toolView';
-import type { ChatUiMessage } from './types';
+import type { ChatUiMessage, OutgoingMessage } from './types';
 
 type Part = ChatUiMessage['parts'][number];
 type ToolItem = ChatItem & { kind: 'tool_call' };
@@ -161,6 +162,7 @@ export function itemsToMessages(
           messages.push({
             id: userMessageId(item.seq),
             role: 'user',
+            ...messageMetadata(item.attachments),
             parts: [
               { type: 'text', text: item.text },
               {
@@ -179,6 +181,7 @@ export function itemsToMessages(
       messages.push({
         id: userMessageId(item.seq),
         role: 'user',
+        ...messageMetadata(item.attachments),
         parts: [{ type: 'text', text: item.text }],
       });
       continue;
@@ -212,6 +215,10 @@ export function itemsToMessages(
             seq: read.seq,
             text: read.text,
             ...(read.page && { page: read.page }),
+            ...(read.attachments &&
+              read.attachments.length > 0 && {
+                attachments: read.attachments,
+              }),
           },
         });
         newStep.add(item.runId);
@@ -293,14 +300,21 @@ function insertStatesOf(
 /** The inserted messages that wait for the model to read them. */
 export function pendingInserts(
   detail: Pick<ChatSessionDetail, 'items' | 'run'>,
-): { seq: number; text: string }[] {
+): { seq: number; text: string; attachments?: ChatAttachment[] }[] {
   const states = insertStatesOf(detail.items, detail.run);
   return detail.items
     .filter(item => isInserted(item) && states.get(item.seq) === 'pending')
-    .map(item => ({
-      seq: item.seq,
-      text: (item as InsertedItem).text,
-    }));
+    .map(item => {
+      const inserted = item as InsertedItem;
+      return {
+        seq: item.seq,
+        text: inserted.text,
+        ...(inserted.attachments &&
+          inserted.attachments.length > 0 && {
+            attachments: inserted.attachments,
+          }),
+      };
+    });
 }
 
 /**
@@ -336,15 +350,35 @@ export function lastRunInterrupted(
 }
 
 /**
- * The text of the first message of the last run, to send it again: the last
- * message of the user that was not inserted into a run.
+ * The first message of the last run, to send it again: the last message of
+ * the user that was not inserted into a run, text and images.
  */
-export function lastUserText(items: readonly ChatItem[]): string | undefined {
+export function lastUserDraft(
+  items: readonly ChatItem[],
+): OutgoingMessage | undefined {
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
-    if (item.kind === 'user_message' && !isInserted(item)) return item.text;
+    if (item.kind === 'user_message' && !isInserted(item)) {
+      return {
+        text: item.text,
+        ...(item.attachments &&
+          item.attachments.length > 0 && { attachments: item.attachments }),
+      };
+    }
   }
   return undefined;
+}
+
+/** The text of {@link lastUserDraft}. */
+export function lastUserText(items: readonly ChatItem[]): string | undefined {
+  return lastUserDraft(items)?.text;
+}
+
+/** Metadata for a user message that has images. Omitted when it has none. */
+function messageMetadata(attachments?: ChatAttachment[]) {
+  return attachments && attachments.length > 0
+    ? { metadata: { attachments } }
+    : {};
 }
 
 /** Who decided a call, and when. */

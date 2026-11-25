@@ -18,7 +18,7 @@
     "build:backend": "yarn workspace backend build",
     "build:all": "backstage-cli repo build --all",
     "build:api-reports": "yarn build:api-reports:only --tsc",
-    "build:api-reports:only": "backstage-repo-tools api-reports -o ae-wrong-input-file-type,ae-undocumented --validate-release-tags packages/ai-chat-harness plugins/ai-chat-common plugins/ai-chat-react plugins/ai-chat-backend plugins/ai-chat",
+    "build:api-reports:only": "backstage-repo-tools api-reports -o ae-wrong-input-file-type,ae-undocumented --validate-release-tags packages/ai-chat-harness plugins/ai-chat-common plugins/ai-chat-node plugins/ai-chat-react plugins/ai-chat-backend plugins/ai-chat-backend-module-example plugins/ai-chat",
     "tsc": "tsc",
     "tsc:full": "tsc --skipLibCheck false --incremental false",
     "clean": "backstage-cli repo clean",
@@ -33,6 +33,7 @@
     "prettier:check": "prettier --check .",
     "new": "backstage-cli new",
     "boundaries": "node scripts/check-boundaries.mjs",
+    "test:workspace-deps": "node --test scripts/workspace-deps.test.mjs",
     "boundaries:selftest": "node scripts/check-boundaries.test.mjs",
     "changeset": "changeset",
     "prepare": "husky"

@@ -32,8 +32,9 @@ describe('ai-chat (new frontend system)', () => {
     expect(tester.get(coreExtensionData.icon)).toBeTruthy();
   });
 
-  it('adds the API of the chat backend', () => {
+  it('adds the API of the chat backend and the side panel API', () => {
     expect(aiChatPlugin.getExtension('api:ai-chat')).toBeDefined();
+    expect(aiChatPlugin.getExtension('api:ai-chat/panel')).toBeDefined();
   });
 
   it('mounts the side panel at the app root', () => {

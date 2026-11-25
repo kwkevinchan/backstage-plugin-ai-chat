@@ -15,7 +15,8 @@
  */
 
 import type { ReactNode } from 'react';
-import { useAiChatPanel } from '../application/useAiChatPanel';
+import { useApiHolder } from '@backstage/core-plugin-api';
+import { aiChatPanelApiRef } from '../api';
 
 /**
  * Props of {@link AiChatLauncher}. Both fields are optional. A prompt starts
@@ -28,6 +29,8 @@ export interface AiChatLauncherProps {
   prompt?: string;
   /** The entity this conversation is about, `kind:namespace/name`. */
   entityRef?: string;
+  /** CSS class applied to the button. */
+  className?: string;
   /** The button label. Defaults to "Ask AI chat". */
   children?: ReactNode;
 }
@@ -35,24 +38,27 @@ export interface AiChatLauncherProps {
 /**
  * A button that opens the side panel. With a prompt or an entity reference,
  * that launch is carried into the conversation. With neither, the panel
- * opens and nothing is replaced.
+ * opens and nothing is replaced. When the chat plugin is not installed, no
+ * button is rendered.
  *
  * Render it from another plugin. It does not import the chat plugin.
  *
  * @public
  */
-export function AiChatLauncher(props: AiChatLauncherProps) {
-  const panel = useAiChatPanel();
-  const { prompt, entityRef } = props;
+export function AiChatLauncher(props: AiChatLauncherProps): JSX.Element | null {
+  const api = useApiHolder().get(aiChatPanelApiRef);
+  if (!api) return null;
+  const { prompt, entityRef, className, children } = props;
   return (
     <button
       type="button"
+      className={className}
       onClick={() => {
-        if (prompt === undefined && entityRef === undefined) panel.open();
-        else panel.open({ prompt, entityRef });
+        if (prompt === undefined && entityRef === undefined) api.open();
+        else api.open({ prompt, entityRef });
       }}
     >
-      {props.children ?? 'Ask AI chat'}
+      {children ?? 'Ask AI chat'}
     </button>
   );
 }

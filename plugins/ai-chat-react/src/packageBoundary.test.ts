@@ -18,11 +18,11 @@ import * as published from './index';
 import pkg from '../package.json';
 
 describe('ai-chat-react package', () => {
-  it('is a web library that depends on the common package only', () => {
+  it('is a web library that does not depend on other repository packages', () => {
     expect(pkg.name).toBe('@kwkevinchan/backstage-plugin-ai-chat-react');
     expect(pkg.backstage.role).toBe('web-library');
     expect(pkg.dependencies).toEqual({
-      '@kwkevinchan/backstage-plugin-ai-chat-common': 'workspace:^',
+      '@backstage/core-plugin-api': 'backstage:^',
     });
     expect(pkg.dependencies).not.toHaveProperty(
       '@kwkevinchan/backstage-plugin-ai-chat',
@@ -30,12 +30,26 @@ describe('ai-chat-react package', () => {
     expect(pkg.dependencies).not.toHaveProperty(
       '@kwkevinchan/backstage-plugin-ai-chat-backend',
     );
+    expect(pkg.dependencies).not.toHaveProperty(
+      '@kwkevinchan/backstage-plugin-ai-chat-common',
+    );
     expect(pkg.dependencies).not.toHaveProperty('@kwkevinchan/ai-chat-harness');
   });
 
-  it('exports the launcher and the panel hook, and not the later blueprints', () => {
+  it('exports only the panel API ref, launcher, and panel hook', () => {
+    expect(Object.keys(published).sort()).toEqual([
+      'AiChatLauncher',
+      'aiChatPanelApiRef',
+      'useAiChatPanel',
+    ]);
+    expect(published.aiChatPanelApiRef.id).toBe('plugin.ai-chat.panel');
     expect(typeof published.AiChatLauncher).toBe('function');
     expect(typeof published.useAiChatPanel).toBe('function');
+    expect('AiChatPanelProvider' in published).toBe(false);
+    expect('createAiChatPanelStore' in published).toBe(false);
+    expect('useAiChatPanelStore' in published).toBe(false);
+    expect('launchContextOf' in published).toBe(false);
+    expect('panelMessagePage' in published).toBe(false);
     expect('AiChatToolResultBlueprint' in published).toBe(false);
     expect('AiChatClientToolBlueprint' in published).toBe(false);
   });

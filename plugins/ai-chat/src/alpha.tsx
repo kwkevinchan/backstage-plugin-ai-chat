@@ -17,10 +17,10 @@
 /**
  * Entry point for the new frontend system: the plugin (default export), with
  * the chat page on `/ai-chat`, the API of the chat backend, and the side
- * panel at the app root. The page's title and icon make the app list it in
- * the sidebar. The panel stays mounted when the page changes. The extensions
- * are not exported by name; an app reaches them with `getExtension()` and
- * `withOverrides()` of the plugin.
+ * panel and its Utility API at the app root. The page's title and icon make
+ * the app list it in the sidebar. The panel stays mounted when the page
+ * changes. The extensions are not exported by name; an app reaches them with
+ * `getExtension()` and `withOverrides()` of the plugin.
  *
  * @packageDocumentation
  */
@@ -38,9 +38,11 @@ import {
   fetchApiRef,
   PageBlueprint,
 } from '@backstage/frontend-plugin-api';
+import { aiChatPanelApiRef } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import { RiChat3Line } from '@remixicon/react';
 import { aiChatApiRef } from './api';
 import { AiChatClient } from './adapters/AiChatClient';
+import { createAiChatPanelStore } from './application/panelStore';
 import { rootRouteRef } from './routes';
 import { AiChatPanel } from './ui/AiChatPanel';
 
@@ -51,6 +53,16 @@ const aiChatApi = ApiBlueprint.make({
       deps: { discoveryApi: discoveryApiRef, fetchApi: fetchApiRef },
       factory: ({ discoveryApi, fetchApi }) =>
         new AiChatClient({ discoveryApi, fetchApi }),
+    }),
+});
+
+const aiChatPanelApi = ApiBlueprint.make({
+  name: 'panel',
+  params: defineParams =>
+    defineParams({
+      api: aiChatPanelApiRef,
+      deps: {},
+      factory: () => createAiChatPanelStore(),
     }),
 });
 
@@ -84,7 +96,7 @@ const aiChatPage = PageBlueprint.make({
  */
 export default createFrontendPlugin({
   pluginId: 'ai-chat',
-  extensions: [aiChatApi, aiChatPage, aiChatPanel],
+  extensions: [aiChatApi, aiChatPanelApi, aiChatPage, aiChatPanel],
   routes: convertLegacyRouteRefs({
     root: rootRouteRef,
   }),

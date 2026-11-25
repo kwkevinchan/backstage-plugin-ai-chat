@@ -33,9 +33,11 @@ backend.add(import('@kwkevinchan/backstage-plugin-ai-chat-backend'));
 頁面在 `/ai-chat`，每一段對話有自己的網址 `/ai-chat/<session id>`。
 `/ai-chat?entityRef=component:default/my-service` 會以那個 entity 開啟對話。
 別的 frontend plugin 用 `@kwkevinchan/backstage-plugin-ai-chat-react` 的
-`<AiChatLauncher prompt="…" entityRef="…" />` 或 `useAiChatPanel()` 開啟側邊面板，
-並帶入 prompt 和 entity。有 prompt 會開始一段新的對話並立刻送出；只有 entity 時，
-下一則從面板送出的訊息帶著它。面板掛在路由外面，換頁不會卸下進行中的對話。
+`<AiChatLauncher prompt="…" entityRef="…" />`、`useAiChatPanel()` 或
+`aiChatPanelApiRef` Utility API 開啟側邊面板，並帶入 prompt 和 entity（app
+沒裝 chat 外掛時按鈕不顯示）。`prompt` 會以登入者的身分立刻送出，請使用固定字串
+或程式可控的內容，不要從網址參數或不受信任的輸入組合；只有 entity 時，下一則從面板
+送出的訊息帶著它。面板等登入完成後才出現，掛在路由外面，換頁不會卸下進行中的對話。
 舊前端系統要在 router 裡、路由外面掛一次 `<AiChatPanel>`；新前端系統註冊 plugin 就有這塊面板。
 舊前端系統的接法見[英文 README](README.md#frontend-legacy-frontend-system)。
 
@@ -62,6 +64,21 @@ aiChat:
   policy: # 用完整的 action ID：allow、ask 或 deny
     'catalog:get-entity': allow
     'temporal:terminate-workflow': deny
+  agents: # 選用；沒有這一段時只有 default 這一個 Agent
+    default:
+      title: Backstage Agent
+      toolsets: [catalog]
+    sre:
+      title: SRE Agent
+      systemPrompt: 你協助 example.com 的值班工程師排查問題。動手前先寫計畫，回答附上來源。
+      toolsets: [catalog]
+      skills: [deploy-failure, rollback]
+      model: default
+      planning: required
+      limits:
+        maxSteps: 8
+        maxToolCallsPerRun: 20
+        runTimeoutSeconds: 300
   maxTurns: 10 # 一次 Run 的模型呼叫數；預設 10
   maxToolCallsPerRun: 30 # 一次 Run 的工具呼叫數；預設 30
   runTimeoutSeconds: 300 # 一次 Run 的工作時間（不含等核准）；預設 300，最大 600
@@ -80,6 +97,11 @@ aiChat:
       maxBytesPerInput: 20971520 # 一次 Run 和一次模型呼叫的圖片位元組上限；預設 20 MB，不小於 maxPerMessage 乘 maxBytes
       maxPendingPerSession: 12 # 上傳了但還沒進訊息的圖片；預設 12
       tokensPerImage: 1600 # 一張圖片在預算裡的估計 token；預設 1600
+  sharing: # 啟動時讀取；這一版還不能建立或修改分享
+    live:
+      enabled: true # 分享能不能持續更新；預設 true
+      defaultHours: 24 # 沒指定時，持續更新的分享維持幾小時；預設 24
+      maxHours: 72 # 最長幾小時；預設 72
   retention:
     days: 90 # 最後一次變更超過這麼多天的對話會刪除；0 代表保留；預設 90
 backend:
@@ -88,6 +110,8 @@ backend:
 ```
 
 只有 `aiChat.llm` 是必填。啟動時會讀取並檢查整段設定，值不對會讓後端無法啟動。
+
+**分享的上限。** `aiChat.sharing.live` 在啟動時讀取。`enabled`（預設 true）是分享能不能持續更新。`defaultHours`（預設 24）是沒有指定時，持續更新的分享維持幾小時；`maxHours`（預設 72）是最長的時數。沒寫 `sharing` 或 `live` 就用這些預設。`enabled: false` 會存成 false。兩個小時數都必須是正整數，而且 `defaultHours` 不能大於 `maxHours`，否則後端無法啟動。這一版還不能建立或修改分享，所以這些值只會被檢查並留下。
 
 **圖片。** `aiChat.llm.images: true` 時，使用者可以在訊息附上 PNG、JPEG、WebP 或 GIF。**圖片會隨訊息送到模型伺服器**；伺服器在組織之外時，圖片就離開組織。不允許時保持預設（關閉）。圖片存在後端的資料庫、屬於一段對話，只有擁有者讀得到；沒有進任何訊息的圖片 24 小時後刪除。
 
@@ -109,8 +133,17 @@ backend:
   畫面會提示較早的內容被省略。紀錄本身不變。
 - `actions.include`、`actions.exclude` 已淘汰：沒設定 `toolsets` 時它們組成預設的那一組，
   有設定時被忽略，啟動時會記警告。
+- **Agent**：沒有 `aiChat.agents` 時只有 `default`（內建規則加上 `aiChat.systemPrompt`）。
+  設定檔裡的 Agent，系統提示是內建規則再加上該 Agent 的 `systemPrompt`；沒寫就改用全站的
+  `aiChat.systemPrompt`，兩段額外說明不疊加。`toolsets` 必須是已經定義的工具組。
+  `skills`、`model`、`limits`、`planning: required` 會記在 Agent 上。迴圈仍用全站的上限和
+  唯一的模型；這些欄位這一版還不執行。值不對會讓後端無法啟動。
+- 別的 backend module 透過 `@kwkevinchan/backstage-plugin-ai-chat-node` 註冊 Agent，不必
+  import 宿主。模組註冊的 Agent 也套同一套內建規則。設定檔和 module 用了同一個 id 時，後端無法啟動。
+  這個庫的 `plugins/ai-chat-backend-module-example` 是可以照抄的範例（Agent id 是 `guide`），
+  不是要安裝的套件。
 
-細節見[英文 README](README.md#toolsets-and-policy)。
+細節見[英文 README](README.md#agents)。
 
 ## 核准的規則
 

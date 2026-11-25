@@ -14,137 +14,112 @@
  * limitations under the License.
  */
 
-import { act, fireEvent, render, screen } from '@testing-library/react';
-import { launchContextOf } from '../domain/launch';
-import { resetDefaultAiChatPanelStore } from './panelStore';
+import { TestApiProvider } from '@backstage/test-utils';
+import { fireEvent, render, screen } from '@testing-library/react';
 import {
-  AiChatPanelProvider,
-  useAiChatPanel,
-  useAiChatPanelStore,
-} from './useAiChatPanel';
-import { createAiChatPanelStore } from './panelStore';
+  aiChatPanelApiRef,
+  type AiChatLaunchRequest,
+  type AiChatPanelApi,
+} from '../api';
+import { useAiChatPanel } from './useAiChatPanel';
 
-function Reader() {
-  const panel = useAiChatPanel();
-  return (
-    <div data-testid="state">
-      {JSON.stringify({
-        isOpen: panel.isOpen,
-        sessionId: panel.sessionId ?? null,
-        launch: panel.launch ?? null,
-        launchId: panel.launchId,
-      })}
-    </div>
-  );
+function createFakePanelApi(): AiChatPanelApi & {
+  requests: Array<AiChatLaunchRequest | undefined>;
+} {
+  let open = false;
+  const listeners = new Set<() => void>();
+  const requests: Array<AiChatLaunchRequest | undefined> = [];
+  const notify = () => {
+    for (const listener of listeners) listener();
+  };
+  return {
+    requests,
+    isOpen: () => open,
+    open(request) {
+      requests.push(request);
+      if (!open) {
+        open = true;
+        notify();
+      }
+    },
+    close() {
+      if (open) {
+        open = false;
+        notify();
+      }
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
 }
 
 function Controls() {
   const panel = useAiChatPanel();
   return (
     <>
+      <div data-testid="open">{String(panel.isOpen)}</div>
       <button
         type="button"
         onClick={() =>
           panel.open({
-            prompt: '  where  ',
+            prompt: 'where',
             entityRef: 'component:default/example.com',
           })
         }
       >
         launch
       </button>
-      <button type="button" onClick={() => panel.setSession('s-1')}>
-        session
+      <button type="button" onClick={() => panel.open()}>
+        reveal
       </button>
       <button type="button" onClick={() => panel.close()}>
         close
       </button>
-      <button type="button" onClick={() => panel.open()}>
-        reveal
-      </button>
-      <Reader />
     </>
   );
 }
 
-const state = () =>
-  JSON.parse(screen.getByTestId('state').textContent ?? '{}') as {
-    isOpen: boolean;
-    sessionId: string | null;
-    launch: { prompt?: string; entityRef?: string } | null;
-    launchId: number;
-  };
-
 describe('useAiChatPanel', () => {
-  afterEach(() => {
-    act(() => {
-      resetDefaultAiChatPanelStore();
-    });
-  });
-
-  it('a launch through the hook is the launch context, and close keeps the session', () => {
-    const store = createAiChatPanelStore();
+  it('reads and updates open state through aiChatPanelApiRef', () => {
+    const api = createFakePanelApi();
     render(
-      <AiChatPanelProvider store={store}>
+      <TestApiProvider apis={[[aiChatPanelApiRef, api]]}>
         <Controls />
-      </AiChatPanelProvider>,
+      </TestApiProvider>,
     );
 
+    expect(screen.getByTestId('open')).toHaveTextContent('false');
     fireEvent.click(screen.getByRole('button', { name: 'launch' }));
-    expect(state()).toMatchObject({
-      isOpen: true,
-      sessionId: null,
-      launch: launchContextOf({
-        prompt: '  where  ',
-        entityRef: 'component:default/example.com',
-      }),
-    });
-    // The prompt cleared the session, so remember one after the launch.
-    fireEvent.click(screen.getByRole('button', { name: 'session' }));
+    expect(screen.getByTestId('open')).toHaveTextContent('true');
+    expect(api.requests).toEqual([
+      { prompt: 'where', entityRef: 'component:default/example.com' },
+    ]);
+
     fireEvent.click(screen.getByRole('button', { name: 'close' }));
-    expect(state()).toMatchObject({
-      isOpen: false,
-      sessionId: 's-1',
-      launch: { prompt: 'where', entityRef: 'component:default/example.com' },
-    });
+    expect(screen.getByTestId('open')).toHaveTextContent('false');
 
     fireEvent.click(screen.getByRole('button', { name: 'reveal' }));
-    expect(state()).toMatchObject({
-      isOpen: true,
-      sessionId: 's-1',
-      launchId: 1,
-    });
+    expect(screen.getByTestId('open')).toHaveTextContent('true');
+    expect(api.requests).toEqual([
+      { prompt: 'where', entityRef: 'component:default/example.com' },
+      undefined,
+    ]);
   });
 
-  it('shares the default store when there is no provider', () => {
-    function Opener() {
-      const panel = useAiChatPanel();
-      return (
-        <button type="button" onClick={() => panel.open({ prompt: 'where' })}>
-          open
-        </button>
-      );
-    }
+  it('returns closed state and no-op actions when aiChatPanelApiRef is absent', () => {
     render(
-      <>
-        <Opener />
-        <Reader />
-      </>,
+      <TestApiProvider apis={[]}>
+        <Controls />
+      </TestApiProvider>,
     );
-    expect(state().isOpen).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: 'open' }));
-    expect(state()).toMatchObject({
-      isOpen: true,
-      launch: { prompt: 'where' },
-    });
 
-    function Mark() {
-      const store = useAiChatPanelStore();
-      return (
-        <div data-testid="shared">{store.getSnapshot().launch?.prompt}</div>
-      );
-    }
-    render(<Mark />);
-    expect(screen.getByTestId('shared')).toHaveTextContent('where');
+    expect(screen.getByTestId('open')).toHaveTextContent('false');
+    fireEvent.click(screen.getByRole('button', { name: 'launch' }));
+    fireEvent.click(screen.getByRole('button', { name: 'close' }));
+    expect(screen.getByTestId('open')).toHaveTextContent('false');
   });
 });

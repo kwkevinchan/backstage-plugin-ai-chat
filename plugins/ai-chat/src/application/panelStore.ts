@@ -14,7 +14,10 @@
  * limitations under the License.
  */
 
-import type { AiChatLaunchRequest } from '../domain/launch';
+import type {
+  AiChatLaunchRequest,
+  AiChatPanelApi,
+} from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import {
   applyClose,
   applyLaunch,
@@ -25,22 +28,14 @@ import {
 } from '../domain/panel';
 
 /**
- * The panel state, and the one-shot start of a launch. `getSnapshot` returns
- * the same object until the state changes.
- *
- * @public
+ * The internal panel state and one-shot launch coordination backing an
+ * {@link AiChatPanelApi} instance.
  */
 export interface AiChatPanelStore {
   /** The current state. The same object until something changes. */
   getSnapshot(): PanelState;
   /** Calls `listener` after a change. Returns the unsubscribe function. */
   subscribe(listener: () => void): () => void;
-  /** Opens the panel without a launch. */
-  reveal(): void;
-  /** Opens the panel for a launch. */
-  launch(request: AiChatLaunchRequest): void;
-  /** Closes the panel. */
-  close(): void;
   /** Remembers or forgets the conversation on the panel. */
   setSession(sessionId: string | undefined): void;
   /**
@@ -51,12 +46,13 @@ export interface AiChatPanelStore {
   start<T>(launchId: number, task: () => Promise<T>): Promise<T>;
 }
 
-interface ResettableStore {
-  store: AiChatPanelStore;
-  reset(): void;
-}
+const stores = new WeakMap<AiChatPanelApi, AiChatPanelStore>();
 
-function createStore(): ResettableStore {
+/**
+ * Creates one independent panel Utility API instance and associates its
+ * internal store so the panel UI can coordinate sessions and launches.
+ */
+export function createAiChatPanelStore(): AiChatPanelApi {
   let state = initialPanelState();
   const listeners = new Set<() => void>();
   const started = new Map<number, Promise<unknown>>();
@@ -67,23 +63,34 @@ function createStore(): ResettableStore {
     for (const listener of listeners) listener();
   };
 
-  const store: AiChatPanelStore = {
-    getSnapshot: () => state,
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
-    reveal() {
-      commit(applyOpen(state));
-    },
-    launch(request) {
-      commit(applyLaunch(state, request));
+  const subscribe = (listener: () => void) => {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  };
+
+  const api: AiChatPanelApi = {
+    isOpen: () => state.open,
+    open(request?: AiChatLaunchRequest) {
+      if (
+        request !== undefined &&
+        (request.prompt !== undefined || request.entityRef !== undefined)
+      ) {
+        commit(applyLaunch(state, request));
+      } else {
+        commit(applyOpen(state));
+      }
     },
     close() {
       commit(applyClose(state));
     },
+    subscribe,
+  };
+
+  const store: AiChatPanelStore = {
+    getSnapshot: () => state,
+    subscribe,
     setSession(sessionId) {
       commit(applySession(state, sessionId));
     },
@@ -100,34 +107,20 @@ function createStore(): ResettableStore {
     },
   };
 
-  return {
-    store,
-    reset() {
-      started.clear();
-      state = initialPanelState();
-      for (const listener of listeners) listener();
-    },
-  };
-}
-
-const shared = createStore();
-
-/** A new, independent panel state. @public */
-export function createAiChatPanelStore(): AiChatPanelStore {
-  return createStore().store;
-}
-
-/** The panel state used when no provider is rendered. */
-export function getDefaultAiChatPanelStore(): AiChatPanelStore {
-  return shared.store;
+  stores.set(api, store);
+  return api;
 }
 
 /**
- * Puts the shared panel state back to closed and empty, including a launch
- * that was not closed. Tests use it so one case does not leak into the next.
- *
- * @internal
+ * Returns the internal store backing `api`. Throws when `api` was not created
+ * by {@link createAiChatPanelStore}.
  */
-export function resetDefaultAiChatPanelStore(): void {
-  shared.reset();
+export function getAiChatPanelStore(api: AiChatPanelApi): AiChatPanelStore {
+  const store = stores.get(api);
+  if (!store) {
+    throw new Error(
+      'aiChatPanelApiRef must be implemented by createAiChatPanelStore()',
+    );
+  }
+  return store;
 }

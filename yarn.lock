@@ -5088,6 +5088,17 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@kwkevinchan/backstage-plugin-ai-chat-backend-module-example@workspace:^, @kwkevinchan/backstage-plugin-ai-chat-backend-module-example@workspace:plugins/ai-chat-backend-module-example":
+  version: 0.0.0-use.local
+  resolution: "@kwkevinchan/backstage-plugin-ai-chat-backend-module-example@workspace:plugins/ai-chat-backend-module-example"
+  dependencies:
+    "@backstage/backend-plugin-api": "backstage:^"
+    "@backstage/backend-test-utils": "backstage:^"
+    "@backstage/cli": "backstage:^"
+    "@kwkevinchan/backstage-plugin-ai-chat-node": "workspace:^"
+  languageName: unknown
+  linkType: soft
+
 "@kwkevinchan/backstage-plugin-ai-chat-backend@workspace:^, @kwkevinchan/backstage-plugin-ai-chat-backend@workspace:plugins/ai-chat-backend":
   version: 0.0.0-use.local
   resolution: "@kwkevinchan/backstage-plugin-ai-chat-backend@workspace:plugins/ai-chat-backend"
@@ -5098,9 +5109,13 @@ __metadata:
     "@backstage/cli": "backstage:^"
     "@backstage/config": "backstage:^"
     "@backstage/errors": "backstage:^"
+    "@backstage/plugin-permission-common": "backstage:^"
+    "@backstage/plugin-permission-node": "backstage:^"
     "@backstage/types": "backstage:^"
     "@kwkevinchan/ai-chat-harness": "workspace:^"
+    "@kwkevinchan/backstage-plugin-ai-chat-backend-module-example": "workspace:^"
     "@kwkevinchan/backstage-plugin-ai-chat-common": "workspace:^"
+    "@kwkevinchan/backstage-plugin-ai-chat-node": "workspace:^"
     "@types/compression": "npm:^1.7.5"
     "@types/eslint": "npm:^8.56.0"
     "@types/express": "npm:^4.17.6"
@@ -5126,7 +5141,20 @@ __metadata:
   resolution: "@kwkevinchan/backstage-plugin-ai-chat-common@workspace:plugins/ai-chat-common"
   dependencies:
     "@backstage/cli": "backstage:^"
+    "@backstage/plugin-permission-common": "backstage:^"
     "@backstage/types": "backstage:^"
+  languageName: unknown
+  linkType: soft
+
+"@kwkevinchan/backstage-plugin-ai-chat-node@workspace:^, @kwkevinchan/backstage-plugin-ai-chat-node@workspace:plugins/ai-chat-node":
+  version: 0.0.0-use.local
+  resolution: "@kwkevinchan/backstage-plugin-ai-chat-node@workspace:plugins/ai-chat-node"
+  dependencies:
+    "@backstage/backend-plugin-api": "backstage:^"
+    "@backstage/cli": "backstage:^"
+    "@kwkevinchan/ai-chat-harness": "workspace:^"
+    "@types/eslint": "npm:^8.56.0"
+    eslint: "npm:^8.57.0"
   languageName: unknown
   linkType: soft
 
@@ -5135,7 +5163,8 @@ __metadata:
   resolution: "@kwkevinchan/backstage-plugin-ai-chat-react@workspace:plugins/ai-chat-react"
   dependencies:
     "@backstage/cli": "backstage:^"
-    "@kwkevinchan/backstage-plugin-ai-chat-common": "workspace:^"
+    "@backstage/core-plugin-api": "backstage:^"
+    "@backstage/test-utils": "backstage:^"
     "@testing-library/jest-dom": "npm:^6.0.0"
     "@testing-library/react": "npm:^14.0.0"
     react: "npm:^18.0.0"
@@ -10439,6 +10468,7 @@ __metadata:
     "@backstage/plugin-auth-backend-module-guest-provider": "backstage:^"
     "@backstage/plugin-catalog-backend": "backstage:^"
     "@kwkevinchan/backstage-plugin-ai-chat-backend": "workspace:^"
+    "@kwkevinchan/backstage-plugin-ai-chat-backend-module-example": "workspace:^"
     app: "workspace:^"
     better-sqlite3: "npm:^12.0.0"
     node-gyp: "npm:^10.0.0"

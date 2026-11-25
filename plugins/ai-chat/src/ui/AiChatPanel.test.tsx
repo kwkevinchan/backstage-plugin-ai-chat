@@ -16,16 +16,21 @@
 
 import { ReactNode } from 'react';
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import {
+  identityApiRef,
+  type BackstageUserIdentity,
+  type IdentityApi,
+} from '@backstage/core-plugin-api';
 import { renderInTestApp, TestApiProvider } from '@backstage/test-utils';
 import {
   AiChatLauncher,
-  AiChatPanelProvider,
-  createAiChatPanelStore,
+  aiChatPanelApiRef,
 } from '@kwkevinchan/backstage-plugin-ai-chat-react';
+import { act, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { aiChatApiRef } from '../api';
-import { mockApi, streamResponse } from '../testData';
+import { createAiChatPanelStore } from '../application/panelStore';
+import { detail, mockApi, session, streamResponse } from '../testData';
 import { AiChatPanel } from './AiChatPanel';
 
 function Navigation() {
@@ -58,24 +63,33 @@ function answer(text: string) {
 
 async function renderPanel(
   api: ReturnType<typeof mockApi>,
-  options: { entry?: string; launcher?: ReactNode } = {},
+  options: {
+    entry?: string;
+    launcher?: ReactNode;
+    identityApi?: Partial<IdentityApi>;
+  } = {},
 ) {
-  const store = createAiChatPanelStore();
+  const panelApi = createAiChatPanelStore();
+  const apis: Array<readonly [never, never]> = [
+    [aiChatApiRef as never, api as never],
+    [aiChatPanelApiRef as never, panelApi as never],
+  ];
+  if (options.identityApi) {
+    apis.push([identityApiRef as never, options.identityApi as never]);
+  }
   const view = await renderInTestApp(
-    <TestApiProvider apis={[[aiChatApiRef, api]]}>
-      <AiChatPanelProvider store={store}>
-        <Navigation />
-        <Routes>
-          <Route path="/catalog" element={<div>Catalog page</div>} />
-          <Route path="/settings" element={<div>Settings page</div>} />
-        </Routes>
-        <AiChatPanel />
-        {options.launcher}
-      </AiChatPanelProvider>
+    <TestApiProvider apis={apis}>
+      <Navigation />
+      <Routes>
+        <Route path="/catalog" element={<div>Catalog page</div>} />
+        <Route path="/settings" element={<div>Settings page</div>} />
+      </Routes>
+      <AiChatPanel />
+      {options.launcher}
     </TestApiProvider>,
     { routeEntries: [options.entry ?? '/catalog'] },
   );
-  return { store, ...view };
+  return { panelApi, ...view };
 }
 
 describe('AiChatPanel', () => {
@@ -192,6 +206,61 @@ describe('AiChatPanel', () => {
     );
   });
 
+  it('keeps the composer enabled when an entity-only launch interrupts a pending prompt launch', async () => {
+    let resolvePendingSession!: (value: typeof session) => void;
+    const pendingCreate = new Promise<typeof session>(resolve => {
+      resolvePendingSession = resolve;
+    });
+    const api = mockApi();
+    api.createSession
+      .mockReturnValueOnce(pendingCreate)
+      .mockResolvedValueOnce({ ...session, id: 's-2' });
+    api.getSession.mockImplementation(async id =>
+      detail({ session: { ...session, id } }),
+    );
+    api.sendMessage.mockResolvedValue(answer('About the entity'));
+
+    await renderPanel(api, {
+      launcher: (
+        <>
+          <AiChatLauncher prompt="where is this">Prompt launch</AiChatLauncher>
+          <AiChatLauncher entityRef="component:default/example.com">
+            Entity only
+          </AiChatLauncher>
+        </>
+      ),
+    });
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Prompt launch' }),
+    );
+    await userEvent.type(screen.getByLabelText('Message'), 'hello');
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Entity only' }));
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+
+    await act(async () => {
+      resolvePendingSession(session);
+      await Promise.resolve();
+    });
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(api.sendMessage).toHaveBeenCalledWith(
+      's-2',
+      {
+        text: 'hello',
+        page: {
+          path: '/catalog',
+          entityRef: 'component:default/example.com',
+        },
+      },
+      expect.anything(),
+    );
+  });
+
   it('starts a conversation from the panel itself', async () => {
     const api = mockApi();
     api.sendMessage.mockResolvedValue(answer('Hello from the model'));
@@ -284,5 +353,50 @@ describe('AiChatPanel', () => {
     });
     expect(api.createSession).toHaveBeenCalledTimes(1);
     expect(api.getSession.mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it('does not render until identityApi.getBackstageIdentity resolves', async () => {
+    let resolveIdentity!: (identity: BackstageUserIdentity) => void;
+    const identityPromise = new Promise<BackstageUserIdentity>(resolve => {
+      resolveIdentity = resolve;
+    });
+    const api = mockApi();
+    await renderPanel(api, {
+      identityApi: {
+        getBackstageIdentity: () => identityPromise,
+      },
+    });
+
+    expect(
+      screen.queryByRole('button', { name: 'Open AI chat' }),
+    ).not.toBeInTheDocument();
+    expect(document.querySelector('aside')).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveIdentity({
+        type: 'user',
+        userEntityRef: 'user:default/guest',
+        ownershipEntityRefs: ['user:default/guest'],
+      });
+      await Promise.resolve();
+    });
+
+    expect(
+      await screen.findByRole('button', { name: 'Open AI chat' }),
+    ).toBeInTheDocument();
+  });
+
+  it('stays hidden when identityApi.getBackstageIdentity rejects', async () => {
+    const api = mockApi();
+    await renderPanel(api, {
+      identityApi: {
+        getBackstageIdentity: () => Promise.reject(new Error('not signed in')),
+      },
+    });
+
+    expect(
+      screen.queryByRole('button', { name: 'Open AI chat' }),
+    ).not.toBeInTheDocument();
+    expect(document.querySelector('aside')).not.toBeInTheDocument();
   });
 });

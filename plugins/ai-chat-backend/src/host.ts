@@ -16,7 +16,9 @@
 
 import {
   AdvanceRun,
+  emptyExtensions,
   type Clock,
+  type Extensions,
   type IdGenerator,
   type ItemLog,
   type ModelClient,
@@ -56,6 +58,7 @@ import {
   type RunSettings,
 } from './application';
 import type {
+  AccessControl,
   AgentCatalog,
   AttachmentStore,
   AuditLog,
@@ -63,6 +66,7 @@ import type {
   QueuedMessageRepository,
   RunRepository,
   SessionRepository,
+  ShareRepository,
 } from './application/ports';
 import {
   DEFAULT_IMAGE_LIMITS,
@@ -78,6 +82,8 @@ export type HostPorts = {
   queue: QueuedMessageRepository;
   agents: AgentCatalog;
   attachments: AttachmentStore;
+  shares: ShareRepository;
+  access: AccessControl;
   tools: ToolGateway;
   model: ModelClient;
   audit: AuditLog;
@@ -95,6 +101,11 @@ export type HostPorts = {
   images?: ImageSettings;
   /** How often the supervisor renews the lease of a run; 10 seconds by default. */
   heartbeatMs?: number;
+  /**
+   * Registrations from backend modules. The loop receives them and does not
+   * call them yet. Omitted means nothing was registered.
+   */
+  extensions?: Extensions;
   /**
    * `aiChat.retention.days`. Sessions last changed longer ago than this are
    * deleted. 0 keeps every session. Defaults to 90.
@@ -119,6 +130,8 @@ export function createHost(ports: HostPorts) {
     logger,
     settings,
     attachments,
+    shares,
+    access,
   } = ports;
   const images: ImageSettings = ports.images ?? {
     ...DEFAULT_IMAGE_LIMITS,
@@ -131,7 +144,7 @@ export function createHost(ports: HostPorts) {
     run: runs,
     clock,
     ids: ports.ids,
-    extensions: {},
+    extensions: ports.extensions ?? emptyExtensions(),
   });
   // The supervisor calls `afterRun` for the queue, and the queue starts runs
   // on the supervisor: the function is set once both exist.
@@ -165,7 +178,15 @@ export function createHost(ports: HostPorts) {
     supervisor,
     useCases: {
       createSession: new CreateSession({ sessions, agents }),
-      getSession: new GetSession({ sessions, runs, items, queue }),
+      getSession: new GetSession({
+        sessions,
+        runs,
+        items,
+        queue,
+        shares,
+        access,
+        clock,
+      }),
       listSessions: new ListSessions({ sessions }),
       updateSession: new UpdateSession({ sessions, agents }),
       deleteSession: new DeleteSession({ sessions, runs }),

@@ -14,17 +14,12 @@
  * limitations under the License.
  */
 
-import {
-  launchContextOf,
-  type AiChatLaunchRequest,
-  type LaunchContext,
-} from './launch';
+import type { AiChatLaunchRequest } from '@kwkevinchan/backstage-plugin-ai-chat-react';
+import { launchContextOf, type LaunchContext } from './launch';
 
 /**
  * The side panel. The route is not stored: changing it does not close the
  * panel and does not drop the conversation.
- *
- * @public
  */
 export interface PanelState {
   /** Whether the panel is open. */

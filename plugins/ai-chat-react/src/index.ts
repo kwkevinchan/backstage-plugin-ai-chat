@@ -15,29 +15,19 @@
  */
 
 /**
- * Entry points another frontend plugin uses to open the AI chat: a button
- * that carries a prompt and an entity reference, and a hook for the side
- * panel. The chat plugin renders the panel. This package does not render a
- * result and does not register a client tool.
+ * Entry points another frontend plugin uses to open the AI chat: the panel
+ * Utility API reference, a button that carries a prompt and an entity
+ * reference, and a hook for the side panel. The chat plugin implements the API
+ * and renders the panel. This package does not render a result and does not
+ * register a client tool.
  *
  * @packageDocumentation
  */
 
 export {
-  launchContextOf,
-  panelMessagePage,
+  aiChatPanelApiRef,
   type AiChatLaunchRequest,
-  type LaunchContext,
-} from './domain/launch';
-export type { PanelState } from './domain/panel';
-export {
-  createAiChatPanelStore,
-  type AiChatPanelStore,
-} from './application/panelStore';
-export {
-  AiChatPanelProvider,
-  useAiChatPanel,
-  useAiChatPanelStore,
-  type AiChatPanelController,
-} from './application/useAiChatPanel';
+  type AiChatPanelApi,
+} from './api';
+export { useAiChatPanel } from './application/useAiChatPanel';
 export { AiChatLauncher, type AiChatLauncherProps } from './ui/AiChatLauncher';

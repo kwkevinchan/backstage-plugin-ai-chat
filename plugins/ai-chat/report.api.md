@@ -5,6 +5,7 @@
 ```ts
 import { ApiRef } from '@backstage/frontend-plugin-api';
 import { BackstagePlugin } from '@backstage/core-plugin-api';
+import type { ChatInputConfig } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ChatItem } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ChatQueue } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ChatQueuedMessage } from '@kwkevinchan/backstage-plugin-ai-chat-common';
@@ -12,10 +13,10 @@ import type { ChatSession } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ChatSessionDetail } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ChatTool } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ChatToolset } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { ChatUploadedAttachment } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { CreateChatSessionRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { DecideToolCallRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { InsertChatMessageRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
-import { JSX as JSX_2 } from 'react';
 import type { QueueChatMessageRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ReorderQueueRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ResumeChatRunRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
@@ -40,6 +41,7 @@ export interface AiChatApi {
   // (undocumented)
   deleteSession(id: string): Promise<void>;
   follow(id: string, signal?: AbortSignal): Promise<Response | undefined>;
+  getInputConfig(): Promise<ChatInputConfig>;
   getQueue(id: string): Promise<ChatQueue>;
   // (undocumented)
   getSession(id: string): Promise<ChatSessionDetail>;
@@ -57,6 +59,7 @@ export interface AiChatApi {
     id: string,
     request: QueueChatMessageRequest,
   ): Promise<ChatQueuedMessage>;
+  readAttachment(sessionId: string, attachmentId: string): Promise<Blob>;
   reorderQueue(id: string, request: ReorderQueueRequest): Promise<ChatQueue>;
   resume(
     id: string,
@@ -80,6 +83,12 @@ export interface AiChatApi {
     id: string,
     request: UpdateChatSessionRequest,
   ): Promise<ChatSession>;
+  uploadAttachment(
+    sessionId: string,
+    body: Blob,
+    name: string,
+    onProgress?: (loaded: number, total: number) => void,
+  ): Promise<ChatUploadedAttachment>;
 }
 
 // @public
@@ -89,7 +98,7 @@ export const aiChatApiRef: ApiRef<AiChatApi>;
 export const AiChatPage: () => JSX.Element;
 
 // @public
-export function AiChatPanel(): JSX_2.Element;
+export function AiChatPanel(): JSX.Element | null;
 
 // @public
 export const aiChatPlugin: BackstagePlugin<

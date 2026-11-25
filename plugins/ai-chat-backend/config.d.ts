@@ -174,6 +174,88 @@ export interface Config {
       [actionId: string]: 'allow' | 'ask' | 'deny';
     };
     /**
+     * Limits for a share that keeps updating. Read at startup. Creating or
+     * changing a share is not in this version, so these values are only
+     * checked and kept. When `sharing` or `live` is left out, the defaults
+     * are used.
+     */
+    sharing?: {
+      live?: {
+        /**
+         * Whether a share may keep updating. Defaults to true. `false` is
+         * stored as false.
+         */
+        enabled?: boolean;
+        /**
+         * Hours a live share lasts when nobody picks a life. A positive
+         * integer, at most `maxHours`. Defaults to 24.
+         */
+        defaultHours?: number;
+        /**
+         * Longest life of a live share, in hours. A positive integer, at
+         * least `defaultHours`. Defaults to 72.
+         */
+        maxHours?: number;
+      };
+    };
+    /**
+     * Agents. Without this, the only agent is `default`: the built-in system
+     * prompt plus `systemPrompt`. An agent here is added next to that one.
+     * An agent whose id is `default` replaces the built-in agent.
+     *
+     * The system prompt of a configured agent is the built-in rules plus this
+     * agent's `systemPrompt`, or plus the installation `systemPrompt` when the
+     * agent omits it. The two extra texts are not combined.
+     *
+     * `toolsets`, `skills`, `model`, `limits` and `planning` are recorded. The
+     * loop still uses the limits of the installation and its one model client.
+     * It does not filter tools by the agent's toolsets, load skills, require a
+     * plan, or call another model client yet. A value that is not valid stops
+     * the backend at startup.
+     *
+     * A backend module can register further agents through
+     * `@kwkevinchan/backstage-plugin-ai-chat-node`. An id that both this block
+     * and a module define stops the backend.
+     */
+    agents?: {
+      [agentId: string]: {
+        /** Name shown to the user. */
+        title?: string;
+        /**
+         * Instructions added to the built-in rules, instead of the
+         * installation `systemPrompt`.
+         */
+        systemPrompt?: string;
+        /**
+         * Toolset ids this agent names. Each one has to exist in `toolsets`
+         * (or be `default`, when `toolsets` is not set).
+         */
+        toolsets?: string[];
+        /** Skill ids. The text of a skill is not loaded yet. */
+        skills?: string[];
+        /** Id of a model. The client for it is not selected yet. */
+        model?: string;
+        /**
+         * `required`: a run of this agent is meant to plan first. That is not
+         * enforced yet.
+         */
+        planning?: 'required';
+        /**
+         * Limits recorded for this agent. They do not replace `maxTurns`,
+         * `maxToolCallsPerRun` or `runTimeoutSeconds`. 0 allows nothing.
+         * `runTimeoutSeconds` is at most 600.
+         */
+        limits?: {
+          /** Model calls. */
+          maxSteps?: number;
+          /** Tool calls the model may ask for. */
+          maxToolCallsPerRun?: number;
+          /** Seconds of working time, at most 600. */
+          runTimeoutSeconds?: number;
+        };
+      };
+    };
+    /**
      * Most characters of the output of an action that are stored and sent to
      * the model; the rest is cut. At least 100 (a smaller value stops the
      * backend at startup). Defaults to 20000.

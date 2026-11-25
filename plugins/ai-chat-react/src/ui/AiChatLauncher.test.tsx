@@ -14,67 +14,70 @@
  * limitations under the License.
  */
 
+import { TestApiProvider } from '@backstage/test-utils';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { createAiChatPanelStore } from '../application/panelStore';
-import {
-  AiChatPanelProvider,
-  useAiChatPanel,
-} from '../application/useAiChatPanel';
+import { aiChatPanelApiRef, type AiChatPanelApi } from '../api';
 import { AiChatLauncher } from './AiChatLauncher';
 
-function State() {
-  const panel = useAiChatPanel();
-  return (
-    <div data-testid="state">
-      {JSON.stringify({
-        isOpen: panel.isOpen,
-        launch: panel.launch ?? null,
-      })}
-    </div>
-  );
-}
-
-function renderLauncher(props: {
-  prompt?: string;
-  entityRef?: string;
-  children?: string;
-}) {
-  const store = createAiChatPanelStore();
-  render(
-    <AiChatPanelProvider store={store}>
-      <AiChatLauncher {...props} />
-      <State />
-    </AiChatPanelProvider>,
-  );
-  return store;
+function mockPanelApi(): jest.Mocked<AiChatPanelApi> {
+  return {
+    isOpen: jest.fn(() => false),
+    open: jest.fn(),
+    close: jest.fn(),
+    subscribe: jest.fn((_listener: () => void) => () => {}),
+  };
 }
 
 describe('AiChatLauncher', () => {
   it('opens the panel with the prompt and the entity', () => {
-    renderLauncher({
-      prompt: ' where is this ',
-      entityRef: 'component:default/example.com',
-      children: 'Ask about example.com',
-    });
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Ask about example.com' }),
+    const api = mockPanelApi();
+    render(
+      <TestApiProvider apis={[[aiChatPanelApiRef, api]]}>
+        <AiChatLauncher
+          prompt="where is this"
+          entityRef="component:default/example.com"
+          className="custom-launcher"
+        >
+          Ask about example.com
+        </AiChatLauncher>
+      </TestApiProvider>,
     );
-    expect(JSON.parse(screen.getByTestId('state').textContent ?? '')).toEqual({
-      isOpen: true,
-      launch: {
-        prompt: 'where is this',
-        entityRef: 'component:default/example.com',
-      },
+
+    const button = screen.getByRole('button', {
+      name: 'Ask about example.com',
+    });
+    expect(button).toHaveClass('custom-launcher');
+    fireEvent.click(button);
+    expect(api.open).toHaveBeenCalledTimes(1);
+    expect(api.open).toHaveBeenCalledWith({
+      prompt: 'where is this',
+      entityRef: 'component:default/example.com',
     });
   });
 
   it('opens the panel without a prompt or an entity', () => {
-    const store = renderLauncher({});
+    const api = mockPanelApi();
+    render(
+      <TestApiProvider apis={[[aiChatPanelApiRef, api]]}>
+        <AiChatLauncher />
+      </TestApiProvider>,
+    );
+
     fireEvent.click(screen.getByRole('button', { name: 'Ask AI chat' }));
-    expect(store.getSnapshot()).toEqual({ open: true, launchId: 0 });
-    expect(JSON.parse(screen.getByTestId('state').textContent ?? '')).toEqual({
-      isOpen: true,
-      launch: null,
-    });
+    expect(api.open).toHaveBeenCalledTimes(1);
+    expect(api.open).toHaveBeenCalledWith();
+  });
+
+  it('renders nothing when aiChatPanelApiRef is not registered', () => {
+    const { container } = render(
+      <TestApiProvider apis={[]}>
+        <AiChatLauncher prompt="where is this">
+          Ask about example.com
+        </AiChatLauncher>
+      </TestApiProvider>,
+    );
+
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 });

@@ -31,6 +31,7 @@ export {
   AttachmentNotFound,
   AttachmentTooLarge,
   ChatDomainError,
+  EmptyMessage,
   ImagesNotSupported,
   InsertLimitReached,
   InvalidAttachment,
@@ -71,8 +72,17 @@ export {
   isSessionExpired,
   sessionRetentionCutoff,
 } from './retention';
-export { assertOwner } from './session';
+export { allowsSessionRead, shareGrantsRead, shareScope } from './share';
+export type { NewShare, Share, ShareScope, ShareScopeInput } from './share';
+export { assertOwner, isSessionOwner } from './session';
 export type { NewSession, Session, SessionPatch } from './session';
+export {
+  NOT_SHARED_OUTPUT,
+  effectiveShare,
+  visibleItems,
+  visibleSeqLimit,
+} from './visibility';
+export type { VisibleItem } from './visibility';
 export { buildSystemPrompt } from './systemPrompt';
 export {
   defaultToolsetIds,

@@ -55,8 +55,47 @@ describe('readAiChatConfig', () => {
       systemPrompt: undefined,
       actions: { include: [], exclude: [] },
       maxToolOutputChars: 20000,
+      sharing: { live: { enabled: true, defaultHours: 24, maxHours: 72 } },
       retentionDays: 90,
     });
+  });
+
+  it('reads sharing.live and refuses a life that is not a positive integer or longer than the maximum', () => {
+    const read = (sharing?: JsonObject) =>
+      readAiChatConfig(
+        mockServices.rootConfig({
+          data: {
+            aiChat: { llm, ...(sharing === undefined ? {} : { sharing }) },
+          },
+        }),
+      ).sharing;
+    expect(read()).toEqual({
+      live: { enabled: true, defaultHours: 24, maxHours: 72 },
+    });
+    expect(read({})).toEqual({
+      live: { enabled: true, defaultHours: 24, maxHours: 72 },
+    });
+    expect(read({ live: { enabled: false } })).toEqual({
+      live: { enabled: false, defaultHours: 24, maxHours: 72 },
+    });
+    expect(read({ live: { defaultHours: 12, maxHours: 48 } })).toEqual({
+      live: { enabled: true, defaultHours: 12, maxHours: 48 },
+    });
+    expect(() => read({ live: { defaultHours: 0 } })).toThrow(
+      /sharing\.live\.defaultHours must be a positive integer/,
+    );
+    expect(() => read({ live: { defaultHours: 1.5 } })).toThrow(
+      /sharing\.live\.defaultHours must be a positive integer/,
+    );
+    expect(() => read({ live: { maxHours: 1.5 } })).toThrow(
+      /sharing\.live\.maxHours must be a positive integer/,
+    );
+    expect(() => read({ live: { defaultHours: 80 } })).toThrow(
+      /sharing\.live\.defaultHours \(80\) must not be greater than sharing\.live\.maxHours \(72\)/,
+    );
+    expect(() => read({ live: { maxHours: 10 } })).toThrow(
+      /sharing\.live\.defaultHours \(24\) must not be greater than sharing\.live\.maxHours \(10\)/,
+    );
   });
 
   it('reads the limits of the inserted and the queued messages, and refuses a value that is not a positive integer', () => {
@@ -280,6 +319,7 @@ describe('the configuration in the READMEs', () => {
         runTimeoutSeconds: 300,
         context: { tokenBudget: 100000, keepRecentSteps: 6 },
         maxToolOutputChars: 20000,
+        sharing: { live: { enabled: true, defaultHours: 24, maxHours: 72 } },
         retentionDays: 90,
       });
       const catalog = new ConfigAgentCatalog(root, logger);
@@ -290,6 +330,23 @@ describe('the configuration in the READMEs', () => {
         'catalog:get-entity': 'allow',
         'temporal:terminate-workflow': 'deny',
       });
+      const sre = await catalog.agent('sre');
+      expect(sre.title).toBe('SRE Agent');
+      expect(sre.systemPrompt).toContain('Rules that always apply');
+      expect(sre.systemPrompt).toContain('example.com');
+      expect(sre.toolsets).toEqual(expect.arrayContaining(['catalog']));
+      expect(sre.skills).toEqual(['deploy-failure', 'rollback']);
+      expect(sre.model).toBe('default');
+      expect(sre.planning).toBe('required');
+      expect(sre.limits).toEqual({
+        maxSteps: 8,
+        maxToolCallsPerRun: 20,
+        runTimeoutSeconds: 300,
+      });
+      const fallback = await catalog.agent('default');
+      expect(fallback.title).toBe('Backstage Agent');
+      expect(fallback.toolsets).toEqual(['catalog']);
+      expect(fallback.systemPrompt).toContain('Rules that always apply');
       expect(logger.warn).not.toHaveBeenCalled();
     },
   );

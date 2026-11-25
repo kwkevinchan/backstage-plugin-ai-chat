@@ -14,17 +14,24 @@
  * limitations under the License.
  */
 
-import { useEffect, useRef, useState } from 'react';
-import { useApi } from '@backstage/core-plugin-api';
-import type { ChatSessionDetail } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
-  panelMessagePage,
-  useAiChatPanel,
-} from '@kwkevinchan/backstage-plugin-ai-chat-react';
+  identityApiRef,
+  useApi,
+  useApiHolder,
+} from '@backstage/core-plugin-api';
+import type { ChatSessionDetail } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import { aiChatPanelApiRef } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import { aiChatApiRef } from '../api';
 import { describeError } from '../adapters/describeError';
+import {
+  getAiChatPanelStore,
+  type AiChatPanelStore,
+} from '../application/panelStore';
 import { usePageContext } from '../application/usePageContext';
 import { useToolsets } from '../application/useToolsets';
+import { panelMessagePage } from '../domain/launch';
+import type { PanelState } from '../domain/panel';
 import { Composer } from './Composer';
 import { SessionView } from './SessionView';
 import { cx } from './styles';
@@ -40,23 +47,56 @@ interface HeldSession {
  * the routes, so a conversation stays mounted when the page changes. The new
  * frontend system mounts this at the app root.
  *
- * A conversation that has started stays mounted while the panel is closed, so
- * a run is not stopped by closing it or by changing page. Before the first
- * message the closed panel is only the button on the edge.
+ * Nothing renders while the user has not finished signing in. A conversation
+ * that has started stays mounted while the panel is closed, so a run is not
+ * stopped by closing it or by changing page. Before the first message the
+ * closed panel is only the button on the edge.
  *
  * @public
  */
-export function AiChatPanel() {
-  const panel = useAiChatPanel();
-  const showConversation = panel.isOpen || panel.sessionId !== undefined;
+export function AiChatPanel(): JSX.Element | null {
+  const identityApi = useApiHolder().get(identityApiRef);
+  const [signedIn, setSignedIn] = useState(!identityApi);
+
+  useEffect(() => {
+    if (!identityApi) {
+      setSignedIn(true);
+      return () => undefined;
+    }
+    let cancelled = false;
+    setSignedIn(false);
+    identityApi.getBackstageIdentity().then(
+      () => {
+        if (!cancelled) setSignedIn(true);
+      },
+      () => {},
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [identityApi]);
+
+  if (!signedIn) return null;
+  return <AiChatPanelInner />;
+}
+
+function AiChatPanelInner() {
+  const panelApi = useApi(aiChatPanelApiRef);
+  const store = getAiChatPanelStore(panelApi);
+  const state = useSyncExternalStore(
+    store.subscribe,
+    store.getSnapshot,
+    store.getSnapshot,
+  );
+  const showConversation = state.open || state.sessionId !== undefined;
   return (
     <>
-      {!panel.isOpen && (
+      {!state.open && (
         <button
           type="button"
           className={cx('panel-tab')}
           aria-label="Open AI chat"
-          onClick={() => panel.open()}
+          onClick={() => panelApi.open()}
         >
           AI chat
         </button>
@@ -64,7 +104,7 @@ export function AiChatPanel() {
       {showConversation && (
         <aside
           className={cx('panel-frame')}
-          hidden={!panel.isOpen}
+          hidden={!state.open}
           aria-label="AI chat"
         >
           <div className={cx('panel-bar')}>
@@ -72,13 +112,13 @@ export function AiChatPanel() {
             <button
               type="button"
               aria-label="Close AI chat"
-              onClick={() => panel.close()}
+              onClick={() => panelApi.close()}
             >
               Close
             </button>
           </div>
           <div className={cx('panel-body')}>
-            <PanelConversation />
+            <PanelConversation store={store} state={state} />
           </div>
         </aside>
       )}
@@ -87,21 +127,24 @@ export function AiChatPanel() {
 }
 
 /** The one conversation on the panel. Not mounted until the panel opens or a conversation exists. */
-function PanelConversation() {
+function PanelConversation(props: {
+  store: AiChatPanelStore;
+  state: PanelState;
+}) {
+  const { store, state } = props;
   const api = useApi(aiChatApiRef);
   const toolsets = useToolsets(api);
   const live = usePageContext();
-  const panel = useAiChatPanel();
-  const page = panelMessagePage(panel.launch, live);
+  const page = panelMessagePage(state.launch, live);
   const [held, setHeld] = useState<HeldSession>();
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState<string>();
-  const active = held && held.sessionId === panel.sessionId ? held : undefined;
+  const active = held && held.sessionId === state.sessionId ? held : undefined;
 
-  const prompt = panel.launch?.prompt;
-  const launchId = panel.launchId;
-  const sessionId = panel.sessionId;
-  const { setSession, start } = panel;
+  const prompt = state.launch?.prompt;
+  const launchId = state.launchId;
+  const sessionId = state.sessionId;
+  const { setSession, start } = store;
   const launchIdRef = useRef(launchId);
   launchIdRef.current = launchId;
 
@@ -144,6 +187,7 @@ function PanelConversation() {
     );
     return () => {
       cancelled = true;
+      setOpening(false);
     };
   }, [api, launchId, prompt, sessionId, setSession, start, toolsets]);
 

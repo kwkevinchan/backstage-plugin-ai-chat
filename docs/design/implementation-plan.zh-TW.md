@@ -229,15 +229,15 @@ flowchart LR
   PI06 --> PI07["PI-07 收尾"]
 ```
 
-| 編號  | 工作項目         | 大小 | 完成的需求                          | PR       | 狀態   |
-| ----- | ---------------- | ---- | ----------------------------------- | -------- | ------ |
-| PI-01 | 規格和設計文件   | S    | D-27 到 D-30；IN-01 到 IN-19 的定義 |          | 進行中 |
-| PI-02 | 核心：插入       | M    | IN-10、IN-11、IN-17（核心的部分）   | #25      | 進行中 |
-| PI-03 | 宿主：插入和排隊 | L    | IN-10 到 IN-17                      | #26      | 進行中 |
-| PI-04 | 前端：插入和排隊 | M    | IN-12、IN-13、IN-15、IN-18          | #28      | 進行中 |
-| PI-05 | 核心和宿主：圖片 | L    | IN-01 到 IN-07                      | #30、#32 | 進行中 |
-| PI-06 | 前端：圖片       | M    | IN-08、IN-09                        |          |        |
-| PI-07 | 收尾             | S    | 整體驗收                            |          |        |
+| 編號  | 工作項目         | 大小 | 完成的需求                          | PR       | 狀態                   |
+| ----- | ---------------- | ---- | ----------------------------------- | -------- | ---------------------- |
+| PI-01 | 規格和設計文件   | S    | D-27 到 D-30；IN-01 到 IN-19 的定義 |          | 進行中                 |
+| PI-02 | 核心：插入       | M    | IN-10、IN-11、IN-17（核心的部分）   | #25      | 進行中                 |
+| PI-03 | 宿主：插入和排隊 | L    | IN-10 到 IN-17                      | #26      | 進行中                 |
+| PI-04 | 前端：插入和排隊 | M    | IN-12、IN-13、IN-15、IN-18          | #28      | 進行中                 |
+| PI-05 | 核心和宿主：圖片 | L    | IN-01 到 IN-07                      | #30、#32 | 進行中                 |
+| PI-06 | 前端：圖片       | M    | IN-08、IN-09                        | #41      | 後端完成，畫面在 PU-04 |
+| PI-07 | 收尾             | S    | 整體驗收                            |          |                        |
 
 順序：PI-02 到 PI-05 依序做，PI-04 和 PI-05 互相獨立（PI-03 之後都可以開始）。PI-03 的排隊先不帶附件（`attachment_ids` 一律是空陣列），PI-05 加上保留和標記。IN-19 屬於 P2，在 P2-04、P2-05 做。
 
@@ -373,15 +373,15 @@ flowchart LR
 
 完成後的狀態：可以管理自己的 Session，可以分享給同事（快照或持續更新），同事可以複製走。
 
-| 編號  | 工作項目                    | 大小 | 完成的需求                                       | 驗收重點                                                                                                                                                                                                                                                                         | PR  | 狀態   |
-| ----- | --------------------------- | ---- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- | ------ |
+| 編號  | 工作項目                    | 大小 | 完成的需求                                       | 驗收重點                                                                                                                                                                                                                                                                         | PR  | 狀態 |
+| ----- | --------------------------- | ---- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- | ---- |
 | P2-01 | 列表管理和自動標題          | M    | SE-03、SE-04                                     | 搜尋、釘選、改名、封存。標題在第一輪結束後產生，產生失敗不影響對話                                                                                                                                                                                                               |
-| P2-02 | 保存期限                    | S    | SE-05                                            | 定期工作刪除過期的 Session。稽核紀錄還在。多台同時跑不會重複刪。逐項驗收見下方 P2-02                                                                                                                                                                                             | #34 | 完成   |
-| P2-03 | Permission 和分享的資料模型 | M    | SH-01、SH-05、SH-08、SH-09、SH-11                | `shares` 表。`visibleItems` 每一列規則一個測試。條件規則「是擁有者」「有分享給我或我的群組」                                                                                                                                                                                     |
+| P2-02 | 保存期限                    | S    | SE-05                                            | 定期工作刪除過期的 Session。稽核紀錄還在。多台同時跑不會重複刪。逐項驗收見下方 P2-02                                                                                                                                                                                             | #34 | 完成 |
+| P2-03 | Permission 和分享的資料模型 | M    | SH-01、SH-05、SH-08、SH-09、SH-11                | `shares` 表。`visibleItems` 每一列規則一個測試。條件規則「是擁有者」「有分享給我或我的群組」                                                                                                                                                                                     | #36 | 完成 |
 | P2-04 | 分享的 use case 和 API      | M    | SH-02、SH-03、SH-06、SH-10、SH-11、IN-19（讀取） | 被分享的人送訊息和核准都被拒絕。到期後變成快照。每個動作有稽核紀錄                                                                                                                                                                                                               |
 | P2-05 | 分享的畫面和複製            | M    | SH-04、SH-07、SH-10、SH-12、IN-19（複製）        | 分享對話框的說明文字。持續更新時上方的提示列。複製出來的 Session 沒有工具輸出                                                                                                                                                                                                    |
 | P2-06 | 斷線接回和即時狀態          | M    | A-07、B-05                                       | 斷線後接回：從目前 Run 的第一個 Item 重送再接新的，先送 `start`，未完成的文字補送 `text-start` 加已累積的文字（Run 在別台時等它完成再整段送），Item 不重複不遺漏。逐字輸出到一半時重新整理，畫面接得上。Run 在別台時，每秒查一次新的 Item（沒有逐字片段）。沒裝 Signals 也能運作 |
-| P2-07 | 側邊面板和入口元件          | M    | B-02                                             | 新增 `ai-chat-react`。面板在換頁時保留。別的 plugin 用 `<AiChatLauncher>` 開啟對話。逐項驗收見下方 P2-07                                                                                                                                                                         | #37 | 進行中 |
+| P2-07 | 側邊面板和入口元件          | M    | B-02                                             | 新增 `ai-chat-react`。面板在換頁時保留。別的 plugin 用 `<AiChatLauncher>` 開啟對話。逐項驗收見下方 P2-07                                                                                                                                                                         | #37 | 完成 |
 
 ### P2-02 保存期限
 
@@ -404,23 +404,25 @@ flowchart LR
 
 ### P2-07 側邊面板和入口元件
 
-- **範圍**：新增 `plugins/ai-chat-react`（公開名稱 `@kwkevinchan/backstage-plugin-ai-chat-react`，`web-library`）。公開出口是 `<AiChatLauncher prompt="…" entityRef="…" />` 和 `useAiChatPanel()`。`ai-chat-react` 依賴 `ai-chat-common`；`ai-chat` 前端依賴 `ai-chat-react`。別的 frontend plugin 只依賴 `ai-chat-react`，不 import 宿主或核心的內部檔案。側邊面板由 `ai-chat` 畫在路由外面：換頁不卸下進行中的對話。Launcher 開啟面板，並把 prompt 和 entity 帶進那一次開啟的對話。不做結果顯示元件（B-03，P3）和 client tool（B-04，P4）。
+- **範圍**：新增 `plugins/ai-chat-react`（公開名稱 `@kwkevinchan/backstage-plugin-ai-chat-react`，`web-library`）。公開出口是 `aiChatPanelApiRef`、`AiChatPanelApi`、`useAiChatPanel()` 和 `<AiChatLauncher prompt="…" entityRef="…" className="…" />`。`ai-chat` 前端依賴 `ai-chat-react` 並實作與註冊 `aiChatPanelApiRef` Utility API（新前端系統用 `ApiBlueprint`、舊前端系統用 plugin 的 `apis`）。別的 frontend plugin 只依賴 `ai-chat-react`，不 import 宿主或核心的內部檔案。側邊面板由 `ai-chat` 畫在路由外面，等 `identityApiRef.getBackstageIdentity()` 解析後才顯示，換頁不卸下進行中的對話。Launcher 開啟面板，並把 prompt 和 entity 帶進那一次開啟的對話；`aiChatPanelApiRef` 未註冊時不畫按鈕。不做結果顯示元件（B-03，P3）和 client tool（B-04，P4）。
 - **依賴**：無。P2-06 獨立，可以平行。頁面上下文沿用已完成的 B-01（`isEntityRef`、`isPagePath`）。
-- **驗收**（規則在 `ai-chat-react` 的 domain，畫面行為在 `ai-chat` 的 ui；不靠煙霧測試）：
-  - 套件：`package.json` 的 role 是 `web-library`，名稱是 `@kwkevinchan/backstage-plugin-ai-chat-react`。runtime dependency 有 `ai-chat-common`，沒有 `ai-chat`、`ai-chat-backend`、`ai-chat-harness`。測試讀這份 `package.json`。
-  - 出口：套件匯出 `AiChatLauncher` 和 `useAiChatPanel`。沒有 `AiChatToolResultBlueprint`，沒有 `AiChatClientToolBlueprint`。測試對照出口。
+- **驗收**（`ai-chat-react` 只定義 Utility API 契約、hook 與 launcher；規則與 store 在 `ai-chat`，畫面行為在 `ai-chat` 的 ui；不靠煙霧測試）：
+  - 套件：`package.json` 的 role 是 `web-library`，名稱是 `@kwkevinchan/backstage-plugin-ai-chat-react`。runtime dependency 為 `@backstage/core-plugin-api`，沒有 `ai-chat`、`ai-chat-backend`、`ai-chat-common`、`ai-chat-harness`。測試讀這份 `package.json`。
+  - 出口：套件匯出 `aiChatPanelApiRef`、`AiChatPanelApi`（`isOpen`、`open`、`close`、`subscribe`）、`useAiChatPanel` 和 `AiChatLauncher`。沒有 `AiChatPanelProvider`、`createAiChatPanelStore`、`AiChatToolResultBlueprint`、`AiChatClientToolBlueprint`。測試對照出口。
   - 帶入的上下文（domain，`launchContextOf`）：`prompt` 去掉前後空白後還有字才算有 prompt，送出的文字是去掉前後空白的那段。只有空白不算有 prompt。`entityRef` 通過 `isEntityRef` 才留下，不合格就沒有 entity。
   - 送出時的頁面（domain，`panelMessagePage`）：有帶入合格的 entity 時，訊息的 `page.entityRef` 用它，不用網址上另一個 `entityRef` 蓋掉。沒有帶入 entity 時，沿用畫面自己的 page context（B-01）。`page.path` 用送出當下的路徑：換頁之後再送，路徑換成新的那一頁。
   - 面板狀態（domain，`applyLaunch`、`applyClose`、`applySession`）：`open` 把面板打開。這次有 prompt 時清掉目前的 session（換成新的對話）；沒有 prompt 時 session 留著。`close` 只把 `open` 設成關，session 和帶入的上下文都還在。沒有任何轉移會因為路由改變而關面板或清 session：狀態裡不放路由。
-  - `useAiChatPanel()`：`open({ prompt, entityRef })` 之後 `isOpen` 為真，帶入的上下文等於 `launchContextOf` 的結果；`close()` 之後 `isOpen` 為假，session 還在。沒有包 provider 時用套件預設的那一份狀態，所以頁面裡的 Launcher 和掛在 app root 的面板看得到同一份（新前端系統兩者不在同一棵 React context 下）。測試可以換一份自己的 store。
-  - `<AiChatLauncher prompt entityRef>`：是一顆按鈕。按下之後開啟面板，並帶上這兩個 prop。沒有 prop 時仍開啟面板，不帶 prompt、不帶 entity。
+  - `useAiChatPanel()`：透過 `useApiHolder().get(aiChatPanelApiRef)` 訂閱 `isOpen` 並委派 `open(request?)`、`close()`；API 未註冊時 `isOpen` 為假且呼叫不報錯。測試用 `TestApiProvider`。
+  - `<AiChatLauncher prompt entityRef className>`：是一顆按鈕，`aiChatPanelApiRef` 存在時渲染並套用 `className`，按下之後呼叫 `open` 並帶上這兩個 prop（沒有 prop 時呼叫 `open()`）；`aiChatPanelApiRef` 不存在時回傳 `null`。
   - 換頁仍保留（ui）：面板畫在 `<Routes>` 外面。面板裡已經有一段對話（使用者訊息在畫面上、session id 不變）時，路由從一個頁面換到另一個，同一段文字還在，而且不會再向 API 要一次這段 session。
   - Launcher 開啟並帶入上下文（ui，假的 `AiChatApi`）：按下 Launcher（有 prompt、有合格的 entityRef）之後，面板打開，建立 session，`sendMessage` 的文字是那個 prompt，`page.entityRef` 是那個 entity，`page.path` 是按下時的路徑。entityRef 不合格時，訊息仍送出，`page` 沒有 `entityRef`。只有 entity、沒有 prompt 時，不建立 session；下一則從面板送出的訊息帶那個 entity。
-  - 從面板自己開對話（ui）：面板有輸入框。送出後建立 session 並送出那段文字。沒有 Launcher 時，`page` 用目前路由（B-01）。
+  - 從面板自己開對話（ui）：面板有輸入框。送出後建立 session 並送出那段文字。沒有 Launcher 時，`page` 用目前路由（B-01）。prompt 送出建立 session 尚未完成時若被只有 entity 的開啟中斷，輸入框送出按鈕保持可用，不會卡在停用。
+  - 登入頁不顯示（ui）：`identityApiRef.getBackstageIdentity()` 尚未完成或被拒絕時，面板不渲染任何內容；登入完成後才顯示開關按鈕。
   - 關上再打開（ui）：進行中的對話還在，session 沒有清掉，也不重新跟 API 要這段 session。
-  - 既有的 `/ai-chat` 頁面不改行為（既有的頁面測試仍通過）。新前端系統的 plugin 多掛一個 app root 上的面板，註冊 plugin 就有，不要求 app 再包一層。
+  - 既有的 `/ai-chat` 頁面不改行為（既有的頁面測試仍通過）。新前端系統的 plugin 註冊 `aiChatPanelApi` 並多掛一個 app root 上的面板，註冊 plugin 就有，不要求 app 再包一層。
 - **規格沒寫、實作選定的地方**（程式架構第 6.2 節和第 9 節照這份選定更新）：
-  - 面板在畫面右側，每一頁都在，預設關上。邊上有一顆「AI chat」按鈕可以打開，面板裡有關閉。關上時，已經開始的對話元件不卸載，所以進行中的 Run 不會因為關上或換頁而停。還沒開始對話時，關上的面板只有那顆按鈕，不畫第二個對話區。
+  - 面板透過 Backstage Utility API（`aiChatPanelApiRef`）在 `ai-chat-react` 與 `ai-chat` 之間傳遞狀態，不使用模組層級的全域單例或獨立 React Provider。
+  - 面板在畫面右側，等登入完成後每一頁都在，預設關上。邊上有一顆「AI chat」按鈕可以打開，面板裡有關閉。關上時，已經開始的對話元件不卸載，所以進行中的 Run 不會因為關上或換頁而停。還沒開始對話時，關上的面板只有那顆按鈕，不畫第二個對話區。
   - 有 prompt 的開啟會開始一段新的對話，並立刻送出那個 prompt（跟聊天頁的第一則訊息一樣：先 `POST /sessions`，再送出）。沒有 prompt 時只打開面板，entity 留給下一則從面板送出的訊息。
   - 帶入的 entity 在這段面板對話之後的訊息也用，直到下一次有 prompt 的開啟換成新的對話。路徑每次送出時用當時的頁面。
   - 面板一次一段對話，不做列表（列表是 P2-01）。`/ai-chat` 的完整頁面保持原樣。
@@ -439,6 +441,37 @@ flowchart LR
 - 持續更新的分享，被分享的人用接回的端點（P2-06）也只收到他能看的內容。
 - `summary` 含工具輸出的內容，所以分享和複製（SH-04、SH-09、D-21）時，`summary` 跟工具輸出用同樣的規則：超過 `outputs_up_to_seq` 的摘要不給看，複製時不帶。
 
+### P2-03 Permission 和分享的資料模型
+
+- **範圍**：`shares` 表和 `KnexShareRepository`（程式架構第 7 節）。domain 的 `Share`、`visibleItems`（第 5.2 節的規則表）、持續更新時工具輸出範圍的預設（SH-09）。`ai-chat-common` 放讀取 Session 的 permission 定義；backend 用 Backstage permission 的條件規則實作「是擁有者」「有分享給我或我的群組」，`PermissionAccessControl` 實作 `AccessControl`（SH-05）。`GetSession` 改走 `AccessControl`：擁有者看到的和現在一樣；有有效分享的人只拿到 `visibleItems` 的結果；沒有權限的人得到 `NotSessionOwner`（HTTP 仍是 404，文字和找不到相同）。設定 `aiChat.sharing.live`。分享沒有寫入權限欄位：`subject_ref` 是 `user:…` 或 `group:…`，表達唯讀（SH-01）。
+- **不做**：`ShareSession`、`UpdateShare`、`ForkSession`、`POST`／`PATCH`／`DELETE /sessions/:id/shares`、`POST /sessions/:id/fork`、附件讀取放行、複製、接回。其他 use case 仍只查擁有者（`assertOwner`）。送訊息和核准的拒絕是 P2-04，這裡不改那些路由。
+- **依賴**：P1 的 Session、Item、`GetSession`。不依賴 P2-01、P2-02、PI-06。
+- **驗收**（domain 的每一列是表格式單元測試，不靠整合測試）：
+  - `shares` 的欄位就是第 7 節那一組（`id`、`session_id`、`subject_ref`、`up_to_seq`、`outputs_up_to_seq`、`expires_at`、`created_by`、`created_at`、`revoked_at`），沒有寫入權限或角色欄位。`session_id` 和 `subject_ref` 都有索引，存得下 `user:…` 和 `group:…`。`up_to_seq`、`outputs_up_to_seq`、`expires_at`、`revoked_at` 可以是空值。
+  - 刪除 Session 時，它的分享列連帶刪除。Session 不存在時不能寫入分享。`down` 只拿掉 `shares`，其他表還在。SQLite 和 PostgreSQL 都跑。
+  - `KnexShareRepository` 把一列原樣寫入再讀出（含空值）。依 `subject_ref` 列出時，只含這些對象、而且 `revoked_at` 是空值的列；已取消的、別人的不在裡面。
+  - 擁有者：全部 Item、全部工具輸出都在，即使這段 Session 已有分享。
+  - 快照（`up_to_seq` 有值）：序號大於 `up_to_seq` 的 Item 不在；等於的在。
+  - 持續更新（`up_to_seq` 空值）且未到期：全部 Item 都在。
+  - 工具輸出：序號不大於 `outputs_up_to_seq` 的 `tool_result` 保留輸出；大於的保留 `status`，輸出換成固定文字 `not shared`（文件裡的「沒有分享」；跟宿主其他存下來的說明一樣用英文，例如 `tool call limit`），`message` 和 `truncated` 拿掉，避免內容從那裡漏出。`tool_call` 的工具 id 和參數仍在（SH-09）。
+  - `outputs_up_to_seq` 空值：看得到的範圍裡，工具輸出都保留。`0`：範圍裡每一筆 `tool_result` 都只有狀態。序號剛好等於界線的保留輸出，大 1 的換成 `not shared`。
+  - `summary` 跟工具輸出同一條界線：`seq` 或 `coversUpToSeq` 大於 `outputs_up_to_seq` 的摘要整筆不在（摘要正文含工具輸出，不能只塗掉幾個字）。界線是空值時，看得到的範圍裡的摘要保留；界線是 `0` 時摘要都不在。
+  - 其餘種類（`user_message`、`agent_message`、`approval`、`tool_started`、`plan_update`、`note`）在序號範圍內整筆保留。
+  - 過了到期時間（`now` 晚於 `expires_at`；剛好等於還沒過）：當成快照，停在 `createdAt` 不大於 `expires_at` 的最後一筆序號。分享本來就有 `up_to_seq` 時，取兩者較小的，到期不會多露出快照以外的 Item。工具輸出仍用 `outputs_up_to_seq`。`expires_at` 空值不會因為時間被凍住。到期只縮小看得到的內容，不取消讀取。
+  - 持續更新的預設（SH-09，domain 算出要存的兩個序號，不經 HTTP）：沒有另外指定工具輸出界線時，`outputs_up_to_seq` 是分享當下的序號，`up_to_seq` 是空值。明確給空值表示範圍內都給看（擁有者打開）；明確給數字就用那個數字。快照的 `up_to_seq` 是分享當下的序號；工具輸出界線沒給時是空值（範圍內都給看，也就是快照裡已有的輸出，D-13）。
+  - 同一個人同時有多筆有效分享時，看得到的範圍是各筆的聯集：任一筆是未到期的持續更新，Item 就全部看得到；否則序號上界取各筆有效上界的最大。每一筆的工具輸出界線先限制在自己的序號上界之內（空的 `outputs_up_to_seq` 在這一筆裡是「到這筆的序號上界為止都給看」，不是「全部輸出都給看」），再取各筆這個值的最大；這個最大沒有上界，才是範圍內的輸出和摘要都給看。文件的 `visibleItems` 收一筆分享，多筆先收成這一筆再套規則。
+  - 條件規則「是擁有者」：`ownerRef` 等於這個人的 user entity ref 才成立。群組 ref 不是擁有者。
+  - 條件規則「有分享給我或我的群組」：有一筆 `revoked_at` 為空、`subject_ref` 是這個人或他的群組（`ownershipRefs`）的分享才成立。不在群組裡不成立；把群組從 `ownershipRefs` 拿掉（離開群組）後不成立；只剩已取消的分享不成立。直接分享給這個人時，離開群組仍成立。已到期的分享仍算數（內容被凍住，讀取還在）。
+  - `PermissionAccessControl`：permission 服務回 `DENY` 時，連擁有者也不准讀。回 `ALLOW`（這個 app 預設沒有打開 permission 框架時就是這樣）時，改套上面兩條規則，所以陌生人還是不能讀。回 `CONDITIONAL` 時，只套政策交回來的條件。permission 和這兩條規則向 permission registry 註冊。
+  - `GetSession`：擁有者（沒有分享、或已有分享）的 Item 和現在一樣。快照分享的人只拿到序號以內的 Item。持續更新的人拿到全部 Item，超過工具輸出界線的只有狀態。沒有分享、只有已取消的分享、不在群組裡、離開群組後，都是 `NotSessionOwner`。被分享的人看得到進行中的 Run，但佇列是空的、`awaitingDecision` 是空的、`resumable` 是假：那些是擁有者的操作。快照或已凍結的分享，不會回傳在序號上界之後才開始的 Run。政策是 CONDITIONAL 卻沒有一筆有效分享時，也是 `NotSessionOwner`，不會回傳空的 Session。
+- **設定**（規格範例是 `enabled: true`、`defaultHours: 24`、`maxHours: 72`。沒寫的預設對齊 `config.ts`：選用區塊用規格範例的值，不合格就 `InputError`，後端不起來）：
+  - 沒有 `sharing`，或沒有 `live`：`enabled` 為真、`defaultHours` 為 24、`maxHours` 為 72。
+  - `enabled: false` 讀成假。這一項沒有建立分享的 use case，所以這個旗標只進設定；P2-04 用它拒絕建立持續更新。
+  - `defaultHours`、`maxHours` 必須是正整數，而且 `defaultHours` 不大於 `maxHours`。超過、零、小數都啟動失敗。
+  - README（英文和繁中）的設定範例含這個區塊，`config.test.ts` 照既有方式接受它。
+- **第 5 節的安全測試，這一項測的**：超過 `up_to_seq` 的 Item 不在 `visibleItems`（也就是 `GetSession` 回給被分享的人的內容）。超過 `outputs_up_to_seq` 的工具輸出只有狀態。`summary` 同一條規則。不在群組、離開群組、`revoked_at` 已填，都讀不到。
+- **留給後面的安全測試**：被分享的人直接打 HTTP（含用序號把 Item 再讀一次）是 P2-04，這一項不加分享路由。附件位元組的 HTTP 讀取是 P2-04 的 IN-19，`ReadAttachment` 仍只允許擁有者。複製是 P2-05。接回端點是 P2-06，`FollowSession` 仍只允許擁有者。
+
 ## 6. P3 和 P4
 
 ### P3：Harness
@@ -447,7 +480,7 @@ flowchart LR
 
 | 編號  | 工作項目                                                | 大小 | 完成的需求                         | PR  | 狀態 |
 | ----- | ------------------------------------------------------- | ---- | ---------------------------------- | --- | ---- |
-| P3-01 | `ai-chat-node`、擴充點、設定檔裡的 Agent                | M    | X-01、X-02                         |
+| P3-01 | `ai-chat-node`、擴充點、設定檔裡的 Agent                | M    | X-01、X-02                         | #39 | 完成 |
 | P3-02 | Context provider 和 entity 綁定                         | M    | X-03、SE-02、SE-06                 |
 | P3-03 | 計畫：`update_plan`、`planning: required`、畫面上的清單 | M    | X-06、X-07、D-07                   |
 | P3-04 | Skills：讀 `SKILL.md`、`load_skill`                     | M    | X-04、D-22                         |
@@ -462,12 +495,38 @@ flowchart LR
 
 每一項的驗收重點：
 
-- **P3-01**：一個範例 module 註冊 Agent 和 Context provider，不 import 宿主的任何內部檔案。
+- **P3-01**：一個範例 module 註冊 Agent，不 import 宿主的任何內部檔案。逐項驗收見下方 P3-01。
+- **P3-02**：在擴充點加上 `addContextProvider`。Context provider 和 entity 綁定的執行行為見這一項的其餘範圍。
 - **P3-03**：`planning: required` 的 Agent，第一步送給模型的工具只有 `update_plan`。舊的 `plan_update` 可能在摘要涵蓋的範圍內，所以 `update_plan` 取目前的計畫要另外讀（例如查最新的 `plan_update`），或做摘要時把當時的計畫帶進摘要的輸入。
-- **P3-04**：上下文裡只有 Skill 的名稱和說明。載入全文之後才出現內容。
-- **P3-05**：Hook 回傳 `continue` 時，`ask` 的工具仍然要核准。Hook 丟例外時，這個工具呼叫被拒絕，Run 繼續。
+- **P3-04**：在擴充點加上 `addSkill`。上下文裡只有 Skill 的名稱和說明。載入全文之後才出現內容。
+- **P3-05**：在擴充點加上 `addHook`。Hook 回傳 `continue` 時，`ask` 的工具仍然要核准。Hook 丟例外時，這個工具呼叫被拒絕，Run 繼續。
 - **P3-06**：搜尋結果只有使用者有權限看的文件。先確認 Backstage 有沒有官方的 search action，有就直接用。
-- **P3-07**：四個唯讀工具同時執行，其中一個逾時，其他三個的結果照原本順序交回。
+- **P3-07**：在擴充點加上 `setModelClient`。四個唯讀工具同時執行，其中一個逾時，其他三個的結果照原本順序交回。
+
+### P3-01 `ai-chat-node`、擴充點、設定檔裡的 Agent
+
+- **範圍**：
+  - 核心：`AgentDefinition` 補上設定檔要記下的欄位（Toolsets、Skills、模型、上限、規劃模式；既有的 `id`、`title`、`systemPrompt` 保留）。`application/ports/extensions.ts` 公開 `AiChatHarnessExtensionPoint` 的 `addAgent`，以及 `AgentDefinition`、`AgentLimits`、`PlanningMode`。`addContextProvider`、`addSkill`、`addHook`、`setModelClient` 和它們的型別在 P3-02、P3-04、P3-05、P3-07 才加，連同迴圈的呼叫和測試一起進來。
+  - 新套件 `plugins/ai-chat-node`（`@kwkevinchan/backstage-plugin-ai-chat-node`，`node-library`）：重新匯出 `addAgent` 用到的型別，並定義 `aiChatHarnessExtensionPoint`。它只依賴 harness。不重新匯出迴圈內部的 `Extensions`。
+  - 宿主：`ai-chat-backend` 依賴 `ai-chat-node`。`plugin.ts` 註冊擴充點，模組的 init 跑完才建 `ConfigAgentCatalog`。Catalog 讀取並檢查 `aiChat.agents`，並納入擴充點註冊的 Agent。值不對就丟 `InputError`，後端啟動失敗。沒有 `aiChat.agents`、擴充點也沒有註冊 Agent 時，只有內建的 `default`（內建系統提示加 `aiChat.systemPrompt`）。
+  - 範例 module：`plugins/ai-chat-backend-module-example`。它是可以照抄的私有範例，不是要發佈的套件。它只示範 `addAgent`，原始碼只 import `ai-chat-node` 和 Backstage 的公開 API。示範 backend（`packages/backend`）掛上它，讓煙霧測試跑得起來。
+  - `yarn.config.cjs` 只放寬三個方向：`ai-chat-node` → harness、`ai-chat-backend` → `ai-chat-node`、`backend-plugin-module` → `ai-chat-node`。不放寬反方向，module 也不能依賴宿主或 harness。
+  - 不做：`aiChat.models` 與 `aiChat.skills.directories` 的讀取和執行、`GET /agents`、把 Agent 的 Toolsets 拿來過濾送給模型的工具。
+- **依賴**：無。P3-03 和 P3-04 使用這裡的 Agent 定義。
+- **驗收**：
+  - 沒有 `aiChat.agents`：`agent('default')` 的系統提示含內建規則；有 `aiChat.systemPrompt` 時那段文字也在；`defaultAgentId()` 是 `default`；其他 id 是 `AgentNotFound`。跟現在一樣。
+  - 設定檔的 Agent：`agents.sre` 的 `title`、`systemPrompt`、`toolsets`、`skills`、`model`、`limits`、`planning` 都在 `agent('sre')` 上回得來。系統提示仍含內建規則（`Rules that always apply`），再接上該 Agent 的 `systemPrompt`。該 Agent 沒寫 `systemPrompt` 時，用全站的 `aiChat.systemPrompt`。設定檔沒有 `default` 時，內建的 `default` 還在，其他 Agent 照樣加進來。設定檔有 `default` 時，用它寫下的欄位（沒寫的 `title`、`toolsets`、`skills`、`model`、`limits`、`planning` 就是沒有），系統提示仍是內建規則加上該筆的 `systemPrompt`，該筆沒寫則用全站的 `aiChat.systemPrompt`。
+  - 值不對就丟 `InputError`，訊息指出 `aiChat.agents…`：id 不符合工具組 id 的寫法；`toolsets` 不是字串陣列，或其中一個 id 不是已存在的工具組；`skills` 不是字串陣列、id 寫法不對，或同一個 Agent 裡重複；`model` 有寫但不是合格的 id；`planning` 不是 `required`；`limits` 的 `maxSteps`、`maxToolCallsPerRun` 不是大於等於 0 的整數，或 `runTimeoutSeconds` 不是 0 到 600 的整數；`agents` 或其中一筆不是物件。Backend 用這種設定啟動時失敗。
+  - 擴充點註冊的 Agent 跟設定檔的 Agent 一起在 catalog 裡。`agent(id)` 回傳擴充點註冊的那一筆，系統提示同樣套 `buildSystemPrompt`（含內建規則，再接上 module 傳入的 `systemPrompt`）。同一個 id 出現兩次（設定檔和擴充點，或擴充點註冊兩次，或擴充點註冊 `default` 而內建或設定檔已經有 `default`）就丟 `InputError`，後端啟動失敗。
+  - 範例 module 的原始碼沒有 import `@kwkevinchan/backstage-plugin-ai-chat-backend`、`@kwkevinchan/ai-chat-harness`，也沒有指向宿主或核心原始碼的相對路徑。它向擴充點註冊至少一個 Agent，說明文字用 `example.com`。`yarn constraints` 拒絕這個 module 依賴宿主或 harness，也拒絕 `ai-chat-node` 依賴宿主、宿主以外的套件依賴 `ai-chat-node` 以外的新方向。
+  - 示範 backend 掛上範例 module。Plugin 組裝之後，用擴充點註冊的 Agent id 建立 Session 得到 201，`agentId` 是那個 id；logger 記下一筆擴充點的 Agent 數量。
+- **規格沒寫、實作選定的地方**（對齊既有的工具組 id、`buildSystemPrompt`，和 domain 的 `Limits`）：
+  - Agent、Skill、model、Context provider 的 id，跟工具組 id 同一套寫法：字母開頭，其餘是字母、數字，以及夾在中間的 `-`、`_`。
+  - `limits` 只收 domain `Limits` 已有的三個欄位：`maxSteps`、`maxToolCallsPerRun`、`runTimeoutSeconds`。0 代表不允許（domain 已寫）。`runTimeoutSeconds` 上限 600，和全站的 `aiChat.runTimeoutSeconds` 一樣。這三個欄位只記在 Agent 上，這一項不拿來取代全站上限。
+  - `planning` 只接受 `required`。沒寫就是沒有這個欄位，不表示另一種模式。
+  - `model` 只檢查 id 的寫法，不讀 `aiChat.models`（模型轉接是 P3-07）。`skills` 只檢查 id 的寫法，不讀 `aiChat.skills.directories`，也不要求擴充點已經註冊同名 Skill（載入全文是 P3-04）。
+  - 設定檔裡的 Agent，系統提示一律是內建規則再加上該 Agent 的 `systemPrompt`；該欄沒寫就用全站的 `aiChat.systemPrompt`。兩段額外說明不疊加。擴充點註冊的 Agent 也套 `buildSystemPrompt(systemPrompt)`，和設定檔同一條規則。
+  - 沒有人定義 `default` 時才放內建的那一個。設定檔的 `agents.default` 取代它。擴充點再註冊 `default` 算重複，啟動失敗。
 
 ### P4：擴大
 
@@ -587,6 +646,8 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-24 | 1.1  | PI 審查後：暫停時直接送出的順序寫進 IN-15、IN-18；複製帶走圖片（IN-19，P2-05 驗收）；模型輸出的 `append` 取 `FOR NO KEY UPDATE`、取鎖順序表；`readUpToSeq` 定義為這一輪開始讀紀錄時的最大序號；`afterRun` 對 `waiting_approval` 不送出；已結束 Run 的 `unread` 插入訊息不再送給模型；`message.read` 不走 `seq` 去重；插入 409 的三種處理；圖片位元組上限 `maxBytesPerInput`；`Cache-Control` 改 `private, no-cache`；`ModelClient.stream` 帶 `sessionId`；設定統一用 `aiChat.llm.images`；SQLite 的理由改寫                                                                                                                                                                                          |
 | 2026-11-24 | 1.1  | PI-05 後續：刪除 Session 先鎖 `runs`（`FOR UPDATE`，依 `id`）再鎖 `sessions`，和 13.8 的取鎖順序一致，並加 PostgreSQL 的並行測試。SQLite 多連線實測是 `SQLITE_BUSY` 而不是「插入先」或「結束先」，啟動時要求 pool `max` 是 1。上傳路由的 OpenAPI 說明錯字改正；二進位 `requestBody` 仍不寫進規格（repo-tools 的 lint 仍要求 `application/json`）                                                                                                                                                                                                                                                                                                                                                     |
 | 2026-11-25 | 1.1  | P2-02 完成（SE-05）：`aiChat.retention.days` 預設 90，`0` 不刪。每小時刪除 `updated_at` 早於期限的 Session（runs、items、queued messages、attachments 連帶刪除）。進行中的 Run 不刪；釘選和封存不例外。稽核在 Auditor，刪除不碰它。PostgreSQL 用 `FOR UPDATE SKIP LOCKED`，兩台同時跑不重複刪、也不等已鎖的列。程式架構第 5.3 節和第 13.8 節照實作更新                                                                                                                                                                                                                                                                                                                                               |
-| 2026-11-25 | 1.1  | P2-07 補上逐項驗收（B-02）：新增 `ai-chat-react`；面板畫在路由外面，換頁不卸下進行中的對話；`<AiChatLauncher>` 和 `useAiChatPanel()` 開啟對話並帶入 prompt 與 entity。規則在 domain，畫面行為在 ui。不做 B-03、B-04。表的 PR 和狀態等 PR 開出來再填                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| 2026-11-25 | 1.1  | P2-07 實作側邊面板和入口元件（B-02）：新增 `ai-chat-react`；面板畫在路由外面，換頁不卸下進行中的對話；`<AiChatLauncher>` 和 `useAiChatPanel()` 帶入 prompt 與 entity。程式架構第 6.2 節和第 9 節照選定更新。不做 B-03、B-04。表的 PR 和狀態等 PR 開出來再填                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| 2026-11-25 | 1.1  | P2-07 的表填上 PR #37，狀態是進行中。PR 仍開著，不標完成                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 2026-11-25 | 1.1  | P2-03 完成（SH-01、SH-05、SH-08、SH-09、SH-11）：範圍、依賴和驗收清單（`shares`、`visibleItems` 每一列、兩條 permission 條件、`GetSession` 的讀取、`aiChat.sharing.live` 的預設）。第 5 節裡屬於附件 HTTP、複製、接回的安全測試留到 P2-04、P2-05、P2-06                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 2026-11-25 | 1.1  | P2-03 聯集規則更正：每一筆的工具輸出界線先限制在自己的序號上界之內，再取最大。空的 `outputs_up_to_seq` 不再在聯集時變成「全部輸出都給看」。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 2026-11-25 | 1.1  | P3-01 完成（X-01、X-02）。新增 `ai-chat-node` 與私有範例 module，設定檔讀取 `aiChat.agents`，擴充點公開 `addAgent`。模組註冊的 Agent 也套內建規則。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 2026-11-25 | 1.1  | PI-06（#41）：後端和 client 完成「只有圖片的訊息」（送出、插入、排隊）；PATCH 排隊訊息時用更新後的文字和附件一起檢查，兩個都空就回 400。畫面改在 PU-04。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 2026-11-25 | 1.1  | P2-07 完成（B-02，#37）：新增 `ai-chat-react`（`aiChatPanelApiRef`、`AiChatPanelApi`、`useAiChatPanel()`、`AiChatLauncher`）；面板由 `ai-chat` 實作並畫在路由外面，等身分就緒後才顯示，換頁不卸下進行中的對話；`<AiChatLauncher>` 開啟對話並帶入 prompt 與 entity。程式架構第 6.2 節和第 9 節照選定更新。不做 B-03、B-04。                                                                                                                                                                                                                                                                                                                                                                           |
