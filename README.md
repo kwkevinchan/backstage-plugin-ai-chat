@@ -403,19 +403,16 @@ to `http://localhost:11434/v1` and leave out `apiKey`.
 The chat searches TechDocs with the `search:query` action of the Backstage
 search backend (`@backstage/plugin-search-backend`). This plugin adds no
 search action of its own. Install the search backend with its TechDocs
-collator (`@backstage/plugin-search-backend-module-techdocs`), then:
+collator (`@backstage/plugin-search-backend-module-techdocs`), add `search` to
+the list you already have in `backend.actions.pluginSources` (the setting
+replaces the whole list), and offer the action in a toolset:
 
 ```yaml
 backend:
   actions:
-    pluginSources: [catalog, search]
+    pluginSources: [catalog, search] # your list, plus search
 permission:
   enabled: true # without it, the search backend does not filter by permission
-search:
-  collators:
-    techdocs:
-      # a full address, so that the chat shows the source as a link
-      locationTemplate: https://backstage.example.com/docs/:namespace/:kind/:name/:path
 aiChat:
   toolsets:
     docs:
@@ -426,32 +423,45 @@ aiChat:
     docs:
       title: Docs
       systemPrompt: >-
-        Answer from TechDocs. Search with search:query and the type techdocs.
-        Give the location of every result you use as a link.
+        Answer from TechDocs. Search with the type techdocs and a pageLimit of
+        5. The location of a result is a path under https://backstage.example.com;
+        cite every result you use as a full link, for example
+        https://backstage.example.com/docs/default/component/payments/deploy/.
 ```
 
 - The action runs as the user who sends the message. The search backend
   removes the documents that user may not read only when `permission.enabled`
   is `true`. A TechDocs document needs `catalog.entity.read` on its entity.
   Without the permission framework, every user finds every document.
+- `permission.enabled: true` turns on the permission framework for the whole
+  Backstage installation, not only for the search: every plugin then asks the
+  permission backend (`@backstage/plugin-permission-backend`) for its
+  decisions. Install that backend with a policy that decides
+  `catalog.entity.read`.
 - `search:query` is read-only, so it runs without approval unless `policy`
-  says otherwise.
+  says otherwise. The model sees it as `search_query` (a tool name cannot hold
+  `:`).
 - The text of a result is the text of one section of a page; the chat reads
   documents from the results. The TechDocs backend has
   `techdocs:get-techdocs-metadata`, which gives the structure of a site, not
   its text. To offer it, add `techdocs` to `backend.actions.pluginSources` and
   the action to a toolset.
-- Every result has `document.title` and `document.location`. The default
-  location is a path (`/docs/...`). The chat makes links only of `http`,
-  `https` and `mailto` addresses, so a path shows as text. Set
-  `locationTemplate` to the full address to make it a link.
+- Every result has `document.title` and `document.location`. The location is
+  a path (`/docs/...`), and the chat makes links only of `http`, `https` and
+  `mailto` addresses, so the system prompt above asks the model to write the
+  full address. Keep the default `search.collators.techdocs.locationTemplate`:
+  it applies to the whole search index, and the search box of the TechDocs
+  reader goes to the location as a path inside the app.
+- The input schema of the action has recursive `$ref` entries (in `filters`).
+  A model server that does not accept `$ref` in a tool schema refuses the
+  request.
 - An error of the search comes back to the model as
   `Request failed with <status> <text>`, without the error of the search
   engine. A search that does not answer holds the run until
   `runTimeoutSeconds`.
 - The output counts against `maxToolOutputChars`. The action returns 10
   results by default (`pageLimit`); when the output is cut, the last results
-  and their links are lost.
+  and their links are lost, so ask for fewer results, as above.
 
 ## The approval model
 

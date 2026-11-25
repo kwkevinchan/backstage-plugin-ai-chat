@@ -167,19 +167,15 @@ backend:
 ## TechDocs 搜尋
 
 對話用 Backstage search backend（`@backstage/plugin-search-backend`）的 `search:query` 搜尋 TechDocs。這個外掛沒有自己的搜尋 action。
-安裝 search backend 和它的 TechDocs collator（`@backstage/plugin-search-backend-module-techdocs`），再設定：
+安裝 search backend 和它的 TechDocs collator（`@backstage/plugin-search-backend-module-techdocs`），把 `search` 加進既有的
+`backend.actions.pluginSources` 清單（這個設定會取代整個清單），再把 action 放進一個工具組：
 
 ```yaml
 backend:
   actions:
-    pluginSources: [catalog, search]
+    pluginSources: [catalog, search] # 你原本的清單，再加上 search
 permission:
   enabled: true # 沒有開時，search backend 不依權限過濾
-search:
-  collators:
-    techdocs:
-      # 完整的網址，對話才會把來源顯示成連結
-      locationTemplate: https://backstage.example.com/docs/:namespace/:kind/:name/:path
 aiChat:
   toolsets:
     docs:
@@ -190,19 +186,25 @@ aiChat:
     docs:
       title: Docs
       systemPrompt: >-
-        Answer from TechDocs. Search with search:query and the type techdocs.
-        Give the location of every result you use as a link.
+        Answer from TechDocs. Search with the type techdocs and a pageLimit of
+        5. The location of a result is a path under https://backstage.example.com;
+        cite every result you use as a full link, for example
+        https://backstage.example.com/docs/default/component/payments/deploy/.
 ```
 
 - action 用送出訊息的使用者的身分執行。只有 `permission.enabled` 是 `true` 時，search backend 才拿掉這個使用者不能讀的文件。
   TechDocs 的文件要有它所屬 entity 的 `catalog.entity.read`。沒有開 permission 時，每個人都搜得到全部的文件。
-- `search:query` 是唯讀的，`policy` 沒有另外設定時直接執行，不用核准。
+- `permission.enabled: true` 會讓整個 Backstage 進入權限模式，不只是搜尋：每個外掛都會向 permission backend
+  （`@backstage/plugin-permission-backend`）要決定。要裝這個 backend，並且有會判斷 `catalog.entity.read` 的政策。
+- `search:query` 是唯讀的，`policy` 沒有另外設定時直接執行，不用核准。模型看到的名稱是 `search_query`（工具名稱不能有 `:`）。
 - 每一筆結果的文字是一頁裡一段的全文；對話從搜尋結果讀文件。TechDocs backend 的 `techdocs:get-techdocs-metadata`
   回傳網站的目錄，不回傳內容。要提供它，把 `techdocs` 加進 `backend.actions.pluginSources`，再把它放進一個工具組。
-- 每一筆結果有 `document.title` 和 `document.location`。`location` 預設是路徑（`/docs/...`）。對話只把 `http`、`https`、
-  `mailto` 的網址做成連結，所以路徑只顯示成文字。把 `locationTemplate` 設成完整的網址，才會是連結。
+- 每一筆結果有 `document.title` 和 `document.location`。`location` 是路徑（`/docs/...`），對話只把 `http`、`https`、
+  `mailto` 的網址做成連結，所以上面的系統提示請模型寫成完整的網址。`search.collators.techdocs.locationTemplate` 保留預設：
+  它套用在整個搜尋索引，TechDocs 閱讀頁的搜尋框會把 `location` 當成 app 裡的路徑去換頁。
+- 這個 action 的 input schema 有遞迴的 `$ref`（在 `filters`）。不接受工具 schema 裡有 `$ref` 的模型伺服器會拒絕請求。
 - 搜尋失敗時，模型收到 `Request failed with <狀態碼> <狀態文字>`，不含搜尋引擎的錯誤內容。搜尋不回應時，Run 到 `runTimeoutSeconds` 結束。
-- 輸出算在 `maxToolOutputChars` 裡。action 預設回傳 10 筆（`pageLimit`）；輸出被裁掉時，最後幾筆結果和它們的連結會不見。
+- 輸出算在 `maxToolOutputChars` 裡。action 預設回傳 10 筆（`pageLimit`）；輸出被裁掉時，最後幾筆結果和它們的連結會不見，所以像上面一樣請模型少拿幾筆。
 
 ## 核准的規則
 

@@ -841,8 +841,8 @@ flowchart LR
 ### P3-06 TechDocs 搜尋的 action
 
 - **範圍**：
-  - 用 Backstage 官方的 `search:query`（`@backstage/plugin-search-backend` 2.1.8，Backstage 1.56.2；V-05），不另外寫 action。安裝 search backend 和 TechDocs 的 collator（`@backstage/plugin-search-backend-module-techdocs`），把 `search` 加進 `backend.actions.pluginSources`，再放進一個工具組，對話就能用它。這一項不改 ai-chat 的程式。
-  - 讀取：用搜尋結果的 `document.text`。TechDocs 的 collator 把每一頁的每一段各存成一筆文件，`text` 是那一段的全文，`location` 是那一段的網址。不另外讀 TechDocs 的頁面。
+  - 用 Backstage 官方的 `search:query`（`@backstage/plugin-search-backend` 2.1.8，Backstage 1.56.2；V-05），不另外寫 action。安裝 search backend 和 TechDocs 的 collator（`@backstage/plugin-search-backend-module-techdocs`），把 `search` 加進既有的 `backend.actions.pluginSources` 清單（這個設定取代整個清單），再放進一個工具組，對話就能用它。這一項不改 ai-chat 的程式。
+  - 讀取：用搜尋結果的 `document.text`。TechDocs 的 collator 把每一頁的每一段各存成一筆文件，`text` 是那一段的全文，`location` 是那一段的路徑。不另外讀 TechDocs 的頁面。
   - 測試：`plugins/ai-chat-backend` 的整合測試在同一個測試 backend 裡跑 ai-chat 和真的 search backend。工具清單和呼叫走 Backstage 的 actions service 與 actions registry（HTTP）。search 的 permission 過濾是 search backend 自己的（`permission.enabled: true`）。搜尋引擎是測試用的，collator 只登記 `techdocs` 這個文件類型和它的權限，不抓真的 TechDocs。
   - 文件：README（中英）寫設定範例、需要的設定、限制。
   - 不做：畫面、引用的呈現、ai-chat 自己的 search action、每個工具呼叫的逾時（P-02，在 P3-07）、改 Markdown 的連結規則。
@@ -854,14 +854,18 @@ flowchart LR
   - 搜尋失敗：搜尋引擎丟出帶內部網址的錯誤時，工具結果是 `error`，訊息是 `Request failed with 500 Internal Server Error`。內部網址不在工具結果、送給模型的內容和使用者收到的串流裡。Run 繼續，模型照常回答。
   - 搜尋不回應：Run 在 `runTimeoutSeconds` 到時結束，狀態是 `completed`、`endReason` 是 `timeout`。這個呼叫沒有結果，模型不再被呼叫。每個工具呼叫自己的逾時是 P-02（P3-07）。
   - 輸出上限：輸出超過 `aiChat.maxToolOutputChars` 時，存下並送給模型的輸出是裁過的 `{ text, originalLength }`，序列化後不超過上限，結果標 `truncated`。
-  - 輸入驗證：少了 `term`、`term` 不是字串、`types` 有不存在的文件類型時，呼叫是 `invalid`，action 不執行。
+  - 輸入驗證：少了 `term`、`term` 不是字串、`types` 有不存在的文件類型時，ai-chat 用 action 的 input schema 擋下：存下的工具結果是 `invalid`，訊息是 schema 檢查的訊息，action 不執行（搜尋引擎沒有被呼叫）。
   - 空的 `term`：官方的 schema 接受。結果一樣只有使用者有權限的文件。
 - **規格沒寫、實作選定的地方**：
   - 官方已經有 action，所以不重做（V-05）。X-08 的「搜尋」是 `search:query`，「讀取」是搜尋結果的 `document.text`。TechDocs backend 的 `techdocs:get-techdocs-metadata` 只回傳網站的目錄和中繼資料，不回傳內容；要用的話可以放進同一個工具組。
   - 使用者的權限由 search backend 套用。它只在 `permission.enabled: true` 時才用 `AuthorizedSearchEngine` 過濾結果；沒有開 permission 時，每個人都看得到全部的結果。README 寫明這一條。TechDocs 文件的權限是 `catalog.entity.read`，對象是文件所屬的 entity。
-  - 連結：TechDocs 的 collator 預設的 `location` 是相對路徑（`/docs/:namespace/:kind/:name/:path`）。對話的 Markdown 只把 `http`、`https`、`mailto` 做成連結（S-02），所以相對路徑只顯示成文字。要讓連結可以點，設 `search.collators.techdocs.locationTemplate` 成完整的網址。README 寫這個設定和一段請模型附上 `location` 的 Agent 系統提示範例。
+  - 連結：TechDocs 的 collator 的 `location` 是相對路徑（預設 `/docs/:namespace/:kind/:name/:path`）。對話的 Markdown 只把 `http`、`https`、`mailto` 做成連結（S-02），所以相對路徑只顯示成文字。選定的做法：保留預設的 `search.collators.techdocs.locationTemplate`，在 Agent 的系統提示寫明「location 是 `https://backstage.example.com` 底下的路徑，引用時寫成完整連結」。README 有這段系統提示的範例。理由：`locationTemplate` 套用在整個 Backstage 的 TechDocs 搜尋索引；TechDocs 閱讀頁的搜尋用 `navigate(location)` 換頁（`@backstage/plugin-techdocs` 1.19.0 的 `TechDocsSearch`），完整網址會跳到錯的頁面。
+  - 之後的版本：前端把 `/` 開頭的連結套上 app 的網址，做成站內連結。這一項不做。
+  - 工具名稱：模型看到的是 `search_query`（模型轉接把 `:` 換成 `_`）。系統提示的範例不寫 action 的 id。
+  - `search:query` 的 input schema 在 `filters` 有遞迴的 `$ref`（`#/properties/filters`）。這是在測試 backend 裡由 actions registry 轉出、送給模型伺服器的 schema 確認的。不接受 `$ref` 的模型伺服器會拒絕請求；README 寫明這一條。
+  - `permission.enabled: true` 會讓整個 Backstage 進入權限模式：`PermissionClient` 只在這個設定開著時向 permission backend 要決定，關著時一律允許。所以要裝 permission backend，政策要判斷 `catalog.entity.read`。README 寫明這一條。
   - 錯誤訊息：Backstage 的 actions service 把 action 的錯誤轉成 `Request failed with <狀態碼> <狀態文字>`，原本的訊息只留在 `cause`。`ActionsToolGateway` 只送出 `message`，所以不另外遮蔽。
-  - 輸出上限照現有的裁切：裁的是整段 JSON，後面幾筆結果的 `location` 可能被裁掉。官方的 `pageLimit` 預設 10；結果太長時，可以在 Agent 的系統提示請模型用較小的 `pageLimit`。
+  - 輸出上限照現有的裁切：裁的是整段 JSON，後面幾筆結果的 `location` 可能被裁掉。官方的 `pageLimit` 預設 10；README 的系統提示範例請模型用 `pageLimit` 5。
   - `term` 的長度沒有上限，空字串也可以：這是官方 schema 的規則，ai-chat 不另外限制。
   - 示範 backend（`packages/backend`）不裝 search 和 TechDocs：它沒有 TechDocs 的內容可以搜尋，煙霧測試也不用它。整合測試已經跑真的 search backend。
 

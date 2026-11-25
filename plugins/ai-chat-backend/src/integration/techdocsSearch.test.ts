@@ -460,19 +460,40 @@ describe('TechDocs search through the search:query action (X-08)', () => {
   });
 
   it.each([
-    ['without a term', { types: ['techdocs'] }],
-    ['with a term that is not text', { term: 42 }],
-    ['with a type that does not exist', { term: 'deploy', types: ['nope'] }],
-  ])('does not run the action for an input %s', async (_name, input) => {
-    const server = await start({ input });
+    [
+      'without a term',
+      { types: ['techdocs'] },
+      "input must have required property 'term'",
+    ],
+    ['with a term that is not text', { term: 42 }, 'input/term must be string'],
+    [
+      'with a type that does not exist',
+      { term: 'deploy', types: ['nope'] },
+      'input/types/0 must be equal to one of the allowed values',
+    ],
+  ])(
+    'does not run the action for an input %s',
+    async (_name, input, message) => {
+      const server = await start({ input });
 
-    const { stream } = await ask(server, ALICE);
+      const { sessionId, auth, stream } = await ask(server, ALICE);
 
-    expect(engine.queries).toHaveLength(0);
-    const part = await searchPart(stream);
-    expect(part?.state).toBe('output-error');
-    expect(stream).toContain('Here is what the docs say.');
-  });
+      expect(engine.queries).toHaveLength(0);
+      const part = await searchPart(stream);
+      expect(part?.state).toBe('output-error');
+      const session = await request(server)
+        .get(`/api/ai-chat/sessions/${sessionId}`)
+        .set('Authorization', auth)
+        .expect(200);
+      // The chat checks the input against the schema of the action and stores
+      // `invalid`; the action registry is never asked (it would answer 400).
+      expect(
+        session.body.items.filter((item: any) => item.kind === 'tool_result'),
+      ).toEqual([expect.objectContaining({ status: 'invalid', message })]);
+      expect(part.errorText).toBe(message);
+      expect(stream).toContain('Here is what the docs say.');
+    },
+  );
 
   it('keeps the permission filter for an empty term, which the action accepts', async () => {
     const server = await start({ input: { term: '', types: ['techdocs'] } });
