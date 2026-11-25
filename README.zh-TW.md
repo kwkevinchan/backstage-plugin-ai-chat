@@ -164,6 +164,46 @@ backend:
 
 細節見[英文 README](README.md#agents)。
 
+## TechDocs 搜尋
+
+對話用 Backstage search backend（`@backstage/plugin-search-backend`）的 `search:query` 搜尋 TechDocs。這個外掛沒有自己的搜尋 action。
+安裝 search backend 和它的 TechDocs collator（`@backstage/plugin-search-backend-module-techdocs`），再設定：
+
+```yaml
+backend:
+  actions:
+    pluginSources: [catalog, search]
+permission:
+  enabled: true # 沒有開時，search backend 不依權限過濾
+search:
+  collators:
+    techdocs:
+      # 完整的網址，對話才會把來源顯示成連結
+      locationTemplate: https://backstage.example.com/docs/:namespace/:kind/:name/:path
+aiChat:
+  toolsets:
+    docs:
+      title: Docs
+      actions: ['search:query']
+      default: true
+  agents:
+    docs:
+      title: Docs
+      systemPrompt: >-
+        Answer from TechDocs. Search with search:query and the type techdocs.
+        Give the location of every result you use as a link.
+```
+
+- action 用送出訊息的使用者的身分執行。只有 `permission.enabled` 是 `true` 時，search backend 才拿掉這個使用者不能讀的文件。
+  TechDocs 的文件要有它所屬 entity 的 `catalog.entity.read`。沒有開 permission 時，每個人都搜得到全部的文件。
+- `search:query` 是唯讀的，`policy` 沒有另外設定時直接執行，不用核准。
+- 每一筆結果的文字是一頁裡一段的全文；對話從搜尋結果讀文件。TechDocs backend 的 `techdocs:get-techdocs-metadata`
+  回傳網站的目錄，不回傳內容。要提供它，把 `techdocs` 加進 `backend.actions.pluginSources`，再把它放進一個工具組。
+- 每一筆結果有 `document.title` 和 `document.location`。`location` 預設是路徑（`/docs/...`）。對話只把 `http`、`https`、
+  `mailto` 的網址做成連結，所以路徑只顯示成文字。把 `locationTemplate` 設成完整的網址，才會是連結。
+- 搜尋失敗時，模型收到 `Request failed with <狀態碼> <狀態文字>`，不含搜尋引擎的錯誤內容。搜尋不回應時，Run 到 `runTimeoutSeconds` 結束。
+- 輸出算在 `maxToolOutputChars` 裡。action 預設回傳 10 筆（`pageLimit`）；輸出被裁掉時，最後幾筆結果和它們的連結會不見。
+
 ## 核准的規則
 
 - 核准時執行的是**後端存起來的輸入**；`decision` 路由不接受請求帶來的新輸入。執行前會用
