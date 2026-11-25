@@ -17,8 +17,8 @@
 import type { LoggerService } from '@backstage/backend-plugin-api';
 import { InputError } from '@backstage/errors';
 import type { Skill, StepContext } from '@kwkevinchan/ai-chat-harness';
-import { readdir, readFile, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { MAX_SKILL_FILE_BYTES, parseSkillMarkdown } from './skillMarkdown';
 
 const SKILL_FILENAME = 'SKILL.md';
@@ -29,6 +29,10 @@ const SKILL_FILENAME = 'SKILL.md';
  * Only metadata (`id` and `description`) is retained after startup validation;
  * the Markdown body is read lazily from disk when `load()` is called via
  * `load_skill`.
+ *
+ * A relative directory is resolved against the working directory of the
+ * backend. Symbolic links are followed, but a skill directory or `SKILL.md`
+ * that resolves outside its configured directory stops the backend.
  */
 export async function loadSkillsFromDirectories(
   directories: readonly string[],
@@ -40,6 +44,7 @@ export async function loadSkillsFromDirectories(
   for (const dir of directories) {
     const dirPath = resolve(dir);
     await assertReadableDirectory(dirPath, dir);
+    const root = await realpath(dirPath);
     const entries = (await readdir(dirPath)).sort();
 
     for (const entry of entries) {
@@ -47,12 +52,22 @@ export async function loadSkillsFromDirectories(
       const entryPath = join(dirPath, entry);
       const entryStat = await stat(entryPath);
       if (!entryStat.isDirectory()) continue;
+      if (!isInside(root, await realpath(entryPath))) {
+        throw new InputError(
+          `${entry}: resolves outside the skills directory '${dir}'`,
+        );
+      }
 
       const skillFile = join(entryPath, SKILL_FILENAME);
       const fileStat = await statFileOrMissing(skillFile);
       if (!fileStat) continue;
 
       const label = `${entry}/${SKILL_FILENAME}`;
+      if (!isInside(root, await realpath(skillFile))) {
+        throw new InputError(
+          `${label}: resolves outside the skills directory '${dir}'`,
+        );
+      }
       if (!fileStat.isFile()) {
         throw new InputError(`${label}: must be a regular file`);
       }
@@ -75,7 +90,13 @@ export async function loadSkillsFromDirectories(
       seen.add(parsed.id);
 
       skills.push(
-        lazyDirectorySkill(parsed.id, parsed.description, skillFile, logger),
+        lazyDirectorySkill(
+          parsed.id,
+          parsed.description,
+          skillFile,
+          root,
+          logger,
+        ),
       );
     }
   }
@@ -104,6 +125,7 @@ function lazyDirectorySkill(
   id: string,
   description: string,
   skillFile: string,
+  root: string,
   logger: LoggerService,
 ): Skill {
   return {
@@ -111,6 +133,10 @@ function lazyDirectorySkill(
     description,
     async load(ctx: StepContext): Promise<string> {
       try {
+        // A link may have changed since startup.
+        if (!isInside(root, await realpath(skillFile))) {
+          throw new Error(`SKILL.md of ${id} resolves outside its directory`);
+        }
         const info = await stat(skillFile);
         if (!info.isFile() || info.size > MAX_SKILL_FILE_BYTES) {
           throw new Error(`Invalid SKILL.md size or file type for ${id}`);
@@ -159,4 +185,10 @@ async function statFileOrMissing(path: string) {
     }
     throw error;
   }
+}
+
+/** Whether `path` is `root` or below it; both are real paths. */
+function isInside(root: string, path: string): boolean {
+  const rel = relative(root, path);
+  return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }

@@ -292,7 +292,12 @@ export interface Config {
      * `load_skill`.
      */
     skills?: {
-      /** Paths to directories whose direct subdirectories contain `SKILL.md`. */
+      /**
+       * Paths to directories whose direct subdirectories contain `SKILL.md`.
+       * A relative path is resolved against the working directory of the
+       * backend process. Symbolic links are followed, but a subdirectory or
+       * `SKILL.md` that resolves outside its directory stops the backend.
+       */
       directories?: string[];
     };
   };

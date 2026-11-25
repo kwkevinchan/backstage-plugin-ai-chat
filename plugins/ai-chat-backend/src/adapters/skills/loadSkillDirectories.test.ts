@@ -16,7 +16,14 @@
 
 import { mockServices } from '@backstage/backend-test-utils';
 import type { StepContext } from '@kwkevinchan/ai-chat-harness';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  rm,
+  symlink,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadSkillsFromDirectories, mergeSkills } from './loadSkillDirectories';
@@ -176,5 +183,91 @@ describe('loadSkillsFromDirectories (X-04, D-22)', () => {
         { id: 'dup-skill', description: 'From module', load: () => 'x' },
       ]),
     ).toThrow('skill dup-skill is already defined');
+  });
+});
+
+describe('loadSkillsFromDirectories with symbolic links', () => {
+  const createdDirs: string[] = [];
+  const skillText = (name: string) =>
+    `---\nname: ${name}\ndescription: Linked skill.\n---\nOutside body`;
+
+  async function makeTempDir(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'ai-chat-skills-link-'));
+    createdDirs.push(dir);
+    return dir;
+  }
+
+  afterEach(async () => {
+    for (const dir of createdDirs.splice(0)) {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a skill directory that links outside the configured directory', async () => {
+    const root = await makeTempDir();
+    const outside = await makeTempDir();
+    await mkdir(join(outside, 'linked'));
+    await writeFile(join(outside, 'linked', 'SKILL.md'), skillText('linked'));
+    await symlink(join(outside, 'linked'), join(root, 'linked'), 'dir');
+
+    await expect(
+      loadSkillsFromDirectories([root], mockServices.logger.mock()),
+    ).rejects.toThrow(/linked: resolves outside the skills directory/);
+  });
+
+  it('refuses a SKILL.md that links outside the configured directory', async () => {
+    const root = await makeTempDir();
+    const outside = await makeTempDir();
+    await writeFile(join(outside, 'SKILL.md'), skillText('linked'));
+    await mkdir(join(root, 'linked'));
+    await symlink(join(outside, 'SKILL.md'), join(root, 'linked', 'SKILL.md'));
+
+    await expect(
+      loadSkillsFromDirectories([root], mockServices.logger.mock()),
+    ).rejects.toThrow(
+      /linked\/SKILL\.md: resolves outside the skills directory/,
+    );
+  });
+
+  it('accepts links that stay inside the configured directory', async () => {
+    const root = await makeTempDir();
+    await mkdir(join(root, 'shared'));
+    await writeFile(join(root, 'shared', 'body.md'), skillText('linked'));
+    await mkdir(join(root, 'linked'));
+    await symlink(
+      join(root, 'shared', 'body.md'),
+      join(root, 'linked', 'SKILL.md'),
+    );
+
+    const skills = await loadSkillsFromDirectories(
+      [root],
+      mockServices.logger.mock(),
+    );
+    expect(skills.map(skill => skill.id)).toEqual(['linked']);
+    await expect(skills[0].load(stepCtx())).resolves.toBe('Outside body');
+  });
+
+  it('does not read a SKILL.md that was linked outside after startup', async () => {
+    const root = await makeTempDir();
+    const outside = await makeTempDir();
+    await mkdir(join(root, 'linked'));
+    const skillFile = join(root, 'linked', 'SKILL.md');
+    await writeFile(skillFile, skillText('linked'));
+    await writeFile(join(outside, 'SKILL.md'), skillText('linked'));
+    const logger = mockServices.logger.mock();
+    const [skill] = await loadSkillsFromDirectories([root], logger);
+
+    await unlink(skillFile);
+    await symlink(join(outside, 'SKILL.md'), skillFile);
+
+    await expect(skill.load(stepCtx())).rejects.toThrow(
+      'Could not load skill linked.',
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Failed to load skill linked',
+      expect.objectContaining({
+        error: expect.stringContaining('resolves outside its directory'),
+      }),
+    );
   });
 });

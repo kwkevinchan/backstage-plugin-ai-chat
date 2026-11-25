@@ -774,7 +774,7 @@ flowchart LR
   - Agent 範圍控管：`agent.skills` 有寫出清單時僅提供名單內的 Skill，未列入的 Skill 不出現在上下文、呼叫時回答 `invalid` 且不執行 `load()`；`agent.skills` 設為 `[]` 時不提供上下文清單也不提供 `load_skill`；`agent.skills` 未填寫時可使用所有已註冊的 Skill。
   - 政策控制：`policy['load_skill'] = 'deny'` 時既不提供 `load_skill` 也不把 Skill 清單放進上下文，強行呼叫回答 `denied`；`policy['load_skill'] = 'ask'` 時進入 `waiting_approval`，使用者允許後才執行 `load()`。
   - 驗證與失敗隔離：未知 Skill id、缺漏或非字串 `id`、多出未知欄位皆在分類階段標為 `invalid` 而不呼叫 `load()`；`skill.load()` 執行期拋錯或回傳非字串時，不中止整個 Run 也不洩漏檔案路徑或堆疊，改寫入固定錯誤訊息的 `error` 工具結果；尊重 `maxToolCallsPerRun` 與中止 `signal`。
-  - `aiChat.skills.directories` 載入 `SKILL.md`：只掃描設定目錄下不以 `.` 開頭的直接子目錄，要求 `SKILL.md` 為 <= 256 KiB 的一般檔案、含 YAML frontmatter、`name` 符合子目錄名稱與 ID 規則、有非空單行 `description`（<= 1024 字元）且 Markdown 本文非空；允許額外相容欄位（如 `license`、`compatibility`、`metadata`）。啟動時只保留驗證後的中繼資料，待 `load_skill` 時才讀檔。目錄不存在、不是目錄、frontmatter 錯誤、`name` 不符、超出大小或 id 重複（包含目錄間、目錄與 module 之間、或同 module 重複註冊）皆拋 `InputError` 讓後端啟動失敗。
+  - `aiChat.skills.directories` 載入 `SKILL.md`：只掃描設定目錄下不以 `.` 開頭的直接子目錄，相對路徑以後端的工作目錄為基準；符號連結會跟過去，但子目錄和 `SKILL.md` 用 `realpath` 解析後必須仍在設定的目錄底下（讀全文時再確認一次）；要求 `SKILL.md` 解析後是 <= 256 KiB 的一般檔案、含 YAML frontmatter、`name` 符合子目錄名稱與 ID 規則、有非空單行 `description`（<= 1024 字元）且 Markdown 本文非空；允許額外相容欄位（如 `license`、`compatibility`、`metadata`）。啟動時只保留驗證後的中繼資料，待 `load_skill` 時才讀檔。目錄不存在、不是目錄、解析後在設定目錄外面、frontmatter 錯誤、`name` 不符、超出大小或 id 重複（包含目錄間、目錄與 module 之間、或同 module 重複註冊）皆拋 `InputError` 讓後端啟動失敗。
   - `ConfigAgentCatalog` 傳入已知 Skill id 集合時，設定檔或擴充點 Agent 若指名不存在的 Skill id，啟動時拋 `InputError`；`ListSessionTools`（工具清單端點）於 Agent 有可用 Skill 且未被政策 `deny` 時一併列出 `load_skill`。
   - `exampleModule` 透過 `addSkill` 註冊 `getting-started`，且不包含對宿主或核心的非法 import；HTTP 端對端測試涵蓋 `aiChat.skills.directories` 與 module 雙方來源的完整 Run 與錯誤阻擋。
 - **規格沒寫、實作選定的地方**：
