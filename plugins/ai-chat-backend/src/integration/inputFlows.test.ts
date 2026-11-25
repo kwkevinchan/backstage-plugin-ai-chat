@@ -877,4 +877,127 @@ describe('inserted messages and the queue on a database', () => {
       await drain(handles[0]!);
     });
   });
+
+  describe('Turn a queued message into an insert (IN-20)', () => {
+    it('moves the chosen message to the running run, keeps remaining queue order and paused state, and the model reads it', async () => {
+      const session = await world.newSession();
+      let inserted = false;
+      let written: unknown;
+      let midView: Awaited<ReturnType<typeof view>> | undefined;
+      let q1Id = '';
+      let q3Id = '';
+      const a: Backend = backend(
+        [
+          [readCall],
+          [say('handled both')],
+          [say('q1 answer')],
+          [say('q3 answer')],
+        ],
+        {
+          items: (inner: ItemLog) => ({
+            read: (...args) => inner.read(...args),
+            append: async (sid, drafts, fence) => {
+              if (!inserted && drafts.some(d => d.kind === 'tool_call')) {
+                inserted = true;
+                const q1 = await queue(a, sid, 'first queued');
+                const q2 = await queue(a, sid, 'urgent insert');
+                const q3 = await queue(a, sid, 'last queued');
+                q1Id = q1.id;
+                q3Id = q3.id;
+                written = await a.useCases.insertQueuedMessage.execute({
+                  principal: jane,
+                  sessionId: sid,
+                  queuedId: q2.id,
+                  runId: fence.runId,
+                });
+                midView = await view(a, sid);
+              }
+              return inner.append(sid, drafts, fence);
+            },
+          }),
+        },
+      );
+      const events = await drain(
+        await send(a, session.id, janeFresh, 'initial'),
+      );
+      expect(written).toMatchObject({
+        kind: 'user_message',
+        delivery: 'inserted',
+        text: 'urgent insert',
+      });
+      expect(midView?.queue.paused).toBe(false);
+      expect(midView?.queue.items.map(m => [m.id, m.position, m.text])).toEqual(
+        [
+          [q1Id, 1, 'first queued'],
+          [q3Id, 3, 'last queued'],
+        ],
+      );
+      const state = queueStateOf(events);
+      expect(state?.nextRunId).toBeDefined();
+      await until(
+        async () => (await view(a, session.id)).queue.items.length === 0,
+      );
+      await until(
+        async () =>
+          (
+            await world
+              .knex('runs')
+              .where({ session_id: session.id })
+              .whereNotNull('active_session_id')
+          ).length === 0,
+      );
+
+      expect(userTexts(a.model.inputs[1])).toEqual([
+        'initial',
+        'urgent insert',
+      ]);
+      const items = await world.items.read(session.id);
+      expect(
+        items
+          .filter(i => i.kind === 'user_message')
+          .map(i => [(i as any).text, (i as any).delivery]),
+      ).toEqual([
+        ['initial', undefined],
+        ['urgent insert', 'inserted'],
+        ['first queued', 'queued'],
+        ['last queued', 'queued'],
+      ]);
+    });
+
+    it('refuses with RunNotRunning when waiting_approval and keeps the queue unchanged', async () => {
+      const a = backend([[writeCall], [say('done')], [say('next')]]);
+      const session = await world.newSession();
+      const handle = await send(a, session.id);
+      await drain(handle);
+      expect((await runRow(handle.runId)).status).toBe('waiting_approval');
+      const q1 = await queue(a, session.id, 'waiting');
+
+      await expect(
+        a.useCases.insertQueuedMessage.execute({
+          principal: jane,
+          sessionId: session.id,
+          queuedId: q1.id,
+          runId: handle.runId,
+        }),
+      ).rejects.toBeInstanceOf(RunNotRunning);
+      const after = await view(a, session.id);
+      expect(after.queue.paused).toBe(false);
+      expect(after.queue.items.map(m => m.id)).toEqual([q1.id]);
+
+      const call = (await world.items.read(session.id)).find(
+        i => i.kind === 'tool_call',
+      ) as { callId: string };
+      const decided = await allow(a, session.id, call.callId);
+      await drain(decided.run!);
+      await until(
+        async () =>
+          (
+            await world
+              .knex('runs')
+              .where({ session_id: session.id })
+              .whereNotNull('active_session_id')
+          ).length === 0,
+      );
+    });
+  });
 });

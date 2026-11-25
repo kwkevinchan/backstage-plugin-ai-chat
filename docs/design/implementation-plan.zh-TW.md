@@ -557,7 +557,7 @@ flowchart LR
 | PU-04 | 圖片附件                              | M    | PU-02、PI-06 的後端          | `attachmentAdapter`、草稿和訊息裡的縮圖                                   |     |      |
 | PU-05 | Session 列表                          | M    | PU-02、P2-01 和 P2-06 的後端 | `threadListAdapter`、搜尋、釘選、封存、即時狀態                           |     |      |
 | PU-06 | 側邊面板的內容                        | S    | PU-02、P2-07                 | 面板接上新的訊息串；和整頁同時開著同一段對話時兩邊都正確                  |     |      |
-| PU-07 | 後端：把排隊的訊息改成插入            | M    | 無                           | 「現在就送」的 API 一次做完；和 `startNext` 並行時只有一邊成功            |     |      |
+| PU-07 | 後端：把排隊的訊息改成插入            | M    | 無                           | 「現在就送」的 API 一次做完；和 `startNext` 並行時只有一邊成功            | #47 | 完成 |
 
 順序：PU-07 和 PU-01 沒有互相依賴，都可以先做。PU-02 做完之前，PU-03 到 PU-06 不能開始。PU-03、PU-04、PU-05 彼此獨立。PU-03 還要等 PU-07。PU-04 要等 PI-06 的後端；PU-05 要等 P2-01 和 P2-06 的後端；PU-06 要等 P2-07。
 
@@ -684,17 +684,18 @@ flowchart LR
 ### PU-07 後端：把排隊的訊息改成插入（「現在就送」）
 
 - **範圍**：
-  - 規格加一條需求（IN 的下一個編號）：Run 是 `running` 時，可以把一則排隊的訊息改成插入這個 Run。結果只有兩種：那一則從佇列消失並寫進紀錄（`delivery` 是 `inserted`），或什麼都沒變並回錯誤。
-  - 程式架構：路由、use case、第 13.8 節取鎖順序表加一列。
-  - API：`POST /sessions/:id/queue/:queuedId/insert`，請求帶目前的 `runId`。OpenAPI 一起改。`ai-chat-common` 加路徑和型別；前端的 `AiChatClient` 加一個方法（不含畫面）。
-  - 同一個 transaction：刪掉那一則排隊訊息、寫入插入的 `user_message`、帶著的圖片從「保留」轉成「已使用」。插入的所有限制照舊：Run 必須是 `running`、是這個 `runId`、租約沒過期、每個 Run 最多 5 則。不符合就回 409，佇列不變。排隊的訊息已經被改掉、刪掉或送出：404。`waiting_approval` 時不能插入：409。佇列剩下的訊息順序不變。佇列暫停的狀態不因為這個動作改變。
-  - 這個動作和 `startNext`（Run 結束時自動送出最前面那一則）搶同一則時，只有一邊成功。取鎖順序要和第 13.8 節一致。
+  - 規格（IN-20）：Run 是 `running` 時，可以把一則排隊的訊息改成插入這個 Run。結果只有兩種：那一則從佇列消失並寫進紀錄（`delivery` 是 `inserted`），或什麼都沒變並回錯誤。
+  - 程式架構：路由、use case（`InsertQueuedMessage`）、第 13.8 節取鎖順序表加一列。
+  - API：`POST /sessions/:id/queue/:queuedId/insert`，請求帶 `{ runId }`，回傳 `201 JSON`（寫入的 `ChatItem`）。OpenAPI 一起改。`ai-chat-common` 加路徑（`chatPaths.insertQueuedMessage`）和型別（`InsertQueuedMessageRequest`）；前端 `AiChatApi` 和 `AiChatClient` 加 `insertQueuedMessage` 方法（不含畫面）。
+  - 同一個 transaction：檢查 `runId` 是 `running` 且租約沒過期、刪掉那一則排隊訊息、寫入 `delivery: inserted` 的 `user_message`、帶著的圖片從「保留」轉成「已使用」（仍有其他排隊訊息使用同一張圖片時保留給最前面那一則）。
+  - 插入的所有限制照舊：Run 不是 `running`、`waiting_approval`、`runId` 不對、租約過期、或超過每個 Run 最多 5 則，回 409，佇列不變；圖片位元組超過上限回 400，佇列不變；排隊的訊息已經被刪掉或送出回 404；內容被改過的，照目前的內容插入（和修改、刪除一樣以資料庫為準）。被 `startNext` 送出時，請求帶的 Run 通常已經結束，先檢查到的是 Run，所以回 409。佇列剩下的訊息順序不變，暫停的狀態不因為這個動作改變。
+  - 這個動作和 `startNext`（Run 結束時自動送出最前面那一則）搶同一則時，只有一邊成功。取鎖順序與第 13.8 節一致。
   - 不做畫面。不改插入和排隊既有 API 的行為。
 - **依賴**：無。
 - **驗收**：
-  - 每一條行為有測試：成功、Run 不是 `running`、`waiting_approval`、`runId` 不對、超過插入上限、那一則已不存在、帶圖片。
+  - 每一條行為有測試：成功（含剩餘佇列順序不變、不改暫停狀態）、Run 不是 `running`、`waiting_approval`、`runId` 不對、租約過期、超過插入上限、那一則已不存在、帶圖片（含圖片位元組上限與共用保留）。
   - PostgreSQL 的並行測試：和 `startNext` 同時搶同一則 100 輪，每一輪恰好一邊成功，沒有重複的 `user_message`，沒有死結。
-  - 兩台 backend 的整合測試涵蓋一次成功的情境。
+  - 兩台 backend 的整合測試涵蓋一次成功的情境（請求送到未執行迴圈的 backend B，A 正在跑的 Run 在下一步讀到插入的訊息）。
 
 ## 7. P3 和 P4
 
@@ -883,3 +884,4 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-25 | 1.1  | P2-06：`FollowSession` 在別台每秒以 `afterSeq` 增量讀已完成的 Item，這一台補送訂閱當下的未完成文字並以 `emittedSeq` 擋掉已存檔草稿的重複前綴。`GET /sessions` 帶進行中 Run 的 `activity`。Signals 由 `ai-chat-backend` 的 signals module 裝上（plugin 本身不依賴它）。程式架構第 5、8、9 節、protocol-check 和 README 照實作與三處差異更新                                                                                                                                                                                                                                                                                                                                                           |
 | 2026-11-25 | 1.1  | P2-07 完成（B-02，#46）：新增 `ai-chat-react`（`aiChatPanelApiRef`、`AiChatPanelApi`、`useAiChatPanel()`、`AiChatLauncher`）；面板由 `ai-chat` 實作並畫在路由外面，等身分就緒後才顯示，換頁不卸下進行中的對話；`<AiChatLauncher>` 開啟對話並帶入 prompt 與 entity。程式架構第 6.2 節和第 9 節照選定更新。不做 B-03、B-04。                                                                                                                                                                                                                                                                                                                                                                           |
 | 2026-11-25 | 1.2  | 新增 PU（第 6 節）：前端對齊 assistant-ui。PU-01 到 PU-07，每項有範圍、依賴和驗收清單；P3 以後的節號順延一號。P1-10、PI-04、PI-06 的說明補一句：畫面在 PU 重做。P2-01、P2-06、P2-07 的範圍改成後端，以及不含畫面的前端部分。第 9 節風險加兩條：assistant-ui 在 0.x、佇列介面是 2026-10 才加的。                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 2026-11-25 | 1.2  | PU-07 完成（IN-20，#47）：`POST /sessions/:id/queue/:queuedId/insert` 在同一個 transaction 把排隊的訊息改成插入，圖片從保留轉成已使用。失敗時佇列不變。和 `startNext`、Run 結束並行時只有一邊成功                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |

@@ -27,13 +27,10 @@ import {
   type RunStatus,
 } from '@kwkevinchan/ai-chat-harness';
 import type { Knex } from 'knex';
+import { DEFAULT_IMAGE_LIMITS, DEFAULT_INSERT_MAX_PER_RUN } from '../../domain';
 import {
-  DEFAULT_IMAGE_LIMITS,
-  DEFAULT_INSERT_MAX_PER_RUN,
-  InsertLimitReached,
-  TooManyImageBytes,
-} from '../../domain';
-import {
+  checkImageBytes,
+  checkInsertLimit,
   markAttachmentsUsed,
   reserveSeq,
   toItem,
@@ -203,8 +200,21 @@ export class KnexItemLog implements ItemLog {
         }
         const firstSeq = await reserveSeq(trx, sessionId, drafts.length);
         if (kind === 'insert') {
-          await this.checkInsertLimit(trx, sessionId, fence.runId);
-          await this.checkImageBytes(trx, sessionId, fence.runId, drafts[0]);
+          await checkInsertLimit(
+            trx,
+            sessionId,
+            fence.runId,
+            this.maxInsertsPerRun,
+          );
+          if (drafts[0].kind === 'user_message') {
+            await checkImageBytes(
+              trx,
+              sessionId,
+              fence.runId,
+              drafts[0].attachments,
+              this.maxImageBytesPerInput,
+            );
+          }
         }
         const written = await writeItems(trx, this.clock, {
           sessionId,
@@ -285,48 +295,6 @@ export class KnexItemLog implements ItemLog {
       .where({ id: runId })
       .andWhere('read_up_to_seq', '<', readUpToSeq)
       .update({ read_up_to_seq: readUpToSeq });
-  }
-
-  /** The first message of the run does not count: the run may take `maxInsertsPerRun` more. */
-  private async checkInsertLimit(
-    trx: Knex.Transaction,
-    sessionId: string,
-    runId: string,
-  ): Promise<void> {
-    const [{ n }] = await trx('items')
-      .where({ session_id: sessionId, run_id: runId, kind: 'user_message' })
-      .count({ n: '*' });
-    // PostgreSQL gives a count as text, SQLite as a number.
-    if (Number(n) - 1 >= this.maxInsertsPerRun) {
-      throw new InsertLimitReached(runId, this.maxInsertsPerRun);
-    }
-  }
-
-  /** The images of the user messages of the run, with the draft, are within the limit. */
-  private async checkImageBytes(
-    trx: Knex.Transaction,
-    sessionId: string,
-    runId: string,
-    draft: ItemDraft,
-  ): Promise<void> {
-    if (draft.kind !== 'user_message' || !draft.attachments?.length) return;
-    const rows = await trx('items')
-      .where({ session_id: sessionId, run_id: runId, kind: 'user_message' })
-      .select<{ payload: string }[]>('payload');
-    const bytesOf = (attachments?: { size: number }[]) =>
-      (attachments ?? []).reduce((sum, ref) => sum + ref.size, 0);
-    const total = rows.reduce(
-      (sum, row) =>
-        sum +
-        bytesOf(
-          (JSON.parse(row.payload) as { attachments?: { size: number }[] })
-            .attachments,
-        ),
-      bytesOf(draft.attachments),
-    );
-    if (total > this.maxImageBytesPerInput) {
-      throw new TooManyImageBytes(runId, this.maxImageBytesPerInput);
-    }
   }
 
   private async firstExistingKey(

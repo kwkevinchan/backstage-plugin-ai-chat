@@ -15,11 +15,13 @@
  */
 
 import type {
+  ChatItem,
   ChatQueue,
   ChatQueuedMessage,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type {
   DeleteQueuedMessage,
+  InsertQueuedMessage,
   ListQueue,
   QueueMessage,
   ReorderQueue,
@@ -28,6 +30,7 @@ import type {
 import type { Principal } from '../../../domain';
 import { toChatQueue, toChatQueuedMessage } from '../presenters/session';
 import {
+  insertQueuedMessageBody,
   parse,
   queueMessageBody,
   reorderQueueBody,
@@ -40,6 +43,7 @@ export type QueueUseCases = {
   updateQueuedMessage: Pick<UpdateQueuedMessage, 'execute'>;
   deleteQueuedMessage: Pick<DeleteQueuedMessage, 'execute'>;
   reorderQueue: Pick<ReorderQueue, 'execute'>;
+  insertQueuedMessage: Pick<InsertQueuedMessage, 'execute'>;
 };
 
 /** The JSON routes of the queue of a session. */
@@ -99,6 +103,22 @@ export class QueueController {
       principal,
       sessionId,
       queuedId,
+    });
+  }
+
+  /** `POST /sessions/:id/queue/:queuedId/insert` */
+  async insert(
+    principal: Principal,
+    sessionId: string,
+    queuedId: string,
+    body: unknown,
+  ): Promise<ChatItem> {
+    const { runId } = parse(insertQueuedMessageBody, body);
+    return this.useCases.insertQueuedMessage.execute({
+      principal,
+      sessionId,
+      queuedId,
+      runId,
     });
   }
 

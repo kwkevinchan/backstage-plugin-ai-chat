@@ -240,6 +240,21 @@ export function createRouter(options: RouterOptions): express.Router {
       res.status(204).end();
     }),
   );
+  router.post(
+    '/sessions/:id/queue/:queuedId/insert',
+    route(async (user, req, res) => {
+      res
+        .status(201)
+        .json(
+          await queue.insert(
+            user,
+            req.params.id,
+            req.params.queuedId,
+            req.body,
+          ),
+        );
+    }),
+  );
   router.get(
     '/sessions/:id/stream',
     route(async (user, req, res) => {

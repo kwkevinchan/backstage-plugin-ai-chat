@@ -183,6 +183,7 @@ export const chatPaths: {
   insertMessage: (id: string, runId: string) => string;
   queue: (id: string) => string;
   queuedMessage: (id: string, queuedId: string) => string;
+  insertQueuedMessage: (id: string, queuedId: string) => string;
   queueOrder: (id: string) => string;
   queueResume: (id: string) => string;
   resume: (id: string) => string;
@@ -397,6 +398,12 @@ export interface InsertChatMessageRequest {
   page?: ChatPageContext;
   // (undocumented)
   text: string;
+}
+
+// @public
+export interface InsertQueuedMessageRequest {
+  // (undocumented)
+  runId: string;
 }
 
 // @public

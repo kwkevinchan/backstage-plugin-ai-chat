@@ -1062,6 +1062,7 @@ PI 加兩種寫入：插入的 `user_message` 要求 Run 是 `running` 而且租
 | `DELETE /sessions/:id/queue/:queuedId`                                        | DeleteQueuedMessage       | 204                                                                     | PI                        |
 | `PUT /sessions/:id/queue/order`                                               | ReorderQueue              | JSON：`{ items, paused }`。請求內容 `{ ids }`                           | PI                        |
 | `POST /sessions/:id/queue/resume`                                             | ResumeQueue               | SSE；沒有東西可送時 204                                                 | PI                        |
+| `POST /sessions/:id/queue/:queuedId/insert`                                   | InsertQueuedMessage       | 201 JSON：寫入的 Item                                                   | PU                        |
 | `GET /input-config`                                                           | （設定）                  | JSON：圖片能不能用、張數、大小、型別、佇列和插入的上限                  | PI                        |
 
 PI 的路由、請求和回應的變更、新的錯誤名稱在第 13.7 節。
@@ -1361,19 +1362,20 @@ Session 列表（`threadListAdapter`，實作 `RemoteThreadListAdapter`）。
 
 宿主新增的 use case：
 
-| Use case                 | 做什麼                                                                        | 用到的 port                                                                                      | 規格                |
-| ------------------------ | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------- |
-| `UploadAttachment`       | 檢查擁有者和檔案，存成附件                                                    | SessionRepository、AttachmentStore                                                               | IN-01 到 IN-04      |
-| `ReadAttachment`         | 檢查擁有者，回傳位元組和型別                                                  | SessionRepository、AttachmentStore                                                               | IN-03、IN-08        |
-| `InsertMessage`          | 檢查訊息，寫入 `delivery: inserted` 的 `user_message`。不建立 Run，不啟動迴圈 | SessionRepository、ItemLog、AttachmentStore                                                      | IN-10、IN-11、IN-17 |
-| `QueueMessage`           | 檢查訊息，加進佇列                                                            | SessionRepository、QueuedMessageRepository、AttachmentStore                                      | IN-13               |
-| `UpdateQueuedMessage`    | 改文字、附件、頁面                                                            | SessionRepository、QueuedMessageRepository                                                       | IN-13               |
-| `DeleteQueuedMessage`    | 刪除一則，釋放它保留的附件                                                    | SessionRepository、QueuedMessageRepository                                                       | IN-13、IN-15        |
-| `ReorderQueue`           | 依 id 清單重排，回傳佇列和是否暫停                                            | SessionRepository、QueuedMessageRepository、RunRepository                                        | IN-13               |
-| `ListQueue`              | 回傳佇列和是否暫停（`queueViewOf`，`GetSession`、`ReorderQueue` 也用）        | SessionRepository、QueuedMessageRepository、RunRepository                                        | IN-15               |
-| `StartNextQueued`        | 用最前面那則開新的 Run 並啟動迴圈，寫稽核。自動送出和 `ResumeQueue` 共用      | SessionRepository、RunRepository、QueuedMessageRepository、RunSupervisor、AgentCatalog、AuditLog | IN-14、IN-17        |
-| `ResumeQueue`            | 使用者按「繼續」：對 `StartNextQueued` 用請求的身分，不檢查身分的剩餘時間     | SessionRepository、StartNextQueued                                                               | IN-15               |
-| `PurgeUnusedAttachments` | 刪除超過 24 小時沒進訊息也沒被保留的附件。`plugin.ts` 每小時排一次            | AttachmentStore                                                                                  | IN-04               |
+| Use case                 | 做什麼                                                                                                | 用到的 port                                                                                      | 規格                |
+| ------------------------ | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------- |
+| `UploadAttachment`       | 檢查擁有者和檔案，存成附件                                                                            | SessionRepository、AttachmentStore                                                               | IN-01 到 IN-04      |
+| `ReadAttachment`         | 檢查擁有者，回傳位元組和型別                                                                          | SessionRepository、AttachmentStore                                                               | IN-03、IN-08        |
+| `InsertMessage`          | 檢查訊息，寫入 `delivery: inserted` 的 `user_message`。不建立 Run，不啟動迴圈                         | SessionRepository、ItemLog、AttachmentStore                                                      | IN-10、IN-11、IN-17 |
+| `QueueMessage`           | 檢查訊息，加進佇列                                                                                    | SessionRepository、QueuedMessageRepository、AttachmentStore                                      | IN-13               |
+| `UpdateQueuedMessage`    | 改文字、附件、頁面                                                                                    | SessionRepository、QueuedMessageRepository                                                       | IN-13               |
+| `DeleteQueuedMessage`    | 刪除一則，釋放它保留的附件                                                                            | SessionRepository、QueuedMessageRepository                                                       | IN-13、IN-15        |
+| `ReorderQueue`           | 依 id 清單重排，回傳佇列和是否暫停                                                                    | SessionRepository、QueuedMessageRepository、RunRepository                                        | IN-13               |
+| `ListQueue`              | 回傳佇列和是否暫停（`queueViewOf`，`GetSession`、`ReorderQueue` 也用）                                | SessionRepository、QueuedMessageRepository、RunRepository                                        | IN-15               |
+| `StartNextQueued`        | 用最前面那則開新的 Run 並啟動迴圈，寫稽核。自動送出和 `ResumeQueue` 共用                              | SessionRepository、RunRepository、QueuedMessageRepository、RunSupervisor、AgentCatalog、AuditLog | IN-14、IN-17        |
+| `ResumeQueue`            | 使用者按「繼續」：對 `StartNextQueued` 用請求的身分，不檢查身分的剩餘時間                             | SessionRepository、StartNextQueued                                                               | IN-15               |
+| `InsertQueuedMessage`    | 把一則排隊的訊息從佇列移出並寫成 `delivery: inserted` 的 `user_message`（佇列剩餘順序和暫停狀態不變） | SessionRepository、QueuedMessageRepository                                                       | IN-20               |
+| `PurgeUnusedAttachments` | 刪除超過 24 小時沒進訊息也沒被保留的附件。`plugin.ts` 每小時排一次                                    | AttachmentStore                                                                                  | IN-04               |
 
 `SendMessage` 多收 `attachmentIds`，其他不變。`GetSession` 多回傳佇列和每則插入訊息的狀態（13.7）。`ForkSession`（P2）帶走範圍內的附件（13.5）。
 
@@ -1472,6 +1474,17 @@ export interface QueuedMessageRepository {
   startNext(
     sessionId: string,
   ): Promise<{ run: LeasedRun; message: QueuedMessage } | undefined>;
+  /**
+   * 一個 transaction（13.8）：檢查 `runId` 是 `running` 且租約未過期，
+   * 刪除那一則排隊訊息、寫入 `delivery: inserted` 的 `user_message`、
+   * 附件從保留轉為已使用（並重算剩餘排隊項目的保留）。
+   */
+  insert(
+    sessionId: string,
+    id: string,
+    runId: string,
+    opts?: { maxInsertsPerRun?: number; maxImageBytesPerInput?: number },
+  ): Promise<Item>;
 }
 ```
 
@@ -1768,6 +1781,7 @@ controller 依序做（`controllers/attachments.ts`；`route()` 先取出身分�
 | Run 正常結束的 `transition`                            | `runs`（`FOR UPDATE`），之後只讀 `items`                                                                                                                                                                                                        |
 | 排隊的 `add`                                           | `runs`（`FOR SHARE`）、`sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`attachments`                                                                                                                                                      |
 | `startNext`                                            | `runs`（INSERT）、`sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`attachments`（`FOR UPDATE`，讀出附件的中繼資料）、`items`、`attachments`（標記 `used_seq`、重算 `reserved_by`）                                                        |
+| 排隊轉插入（`InsertQueuedMessage`）                    | `runs`（`FOR SHARE`）、`sessions`（`FOR NO KEY UPDATE`）、`queued_messages`（讀取並刪除）、`attachments`（`FOR UPDATE`，讀出中繼資料）、`items`（檢查上限並寫入）、`attachments`（標記 `used_seq`、重算 `reserved_by`）                         |
 | 排隊的 `update`、`remove`、`reorder`                   | `sessions`（`FOR NO KEY UPDATE`）、`queued_messages`、`attachments`                                                                                                                                                                             |
 | 上傳（`put`）                                          | `sessions`（`FOR NO KEY UPDATE`）、`attachments`                                                                                                                                                                                                |
 | 刪除 Session                                           | `runs`（`FOR UPDATE`，依 `id` 一列一列取）、`sessions`（`FOR UPDATE`），然後刪除 `sessions`（連帶刪除 `items`、`queued_messages`、`attachments`）                                                                                               |

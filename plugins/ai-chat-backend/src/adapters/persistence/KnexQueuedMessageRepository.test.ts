@@ -15,11 +15,13 @@
  */
 
 import {
+  InsertLimitReached,
   NoActiveRun,
   QueueChanged,
   QueuedMessageNotFound,
   QueueFull,
   RunAlreadyActive,
+  RunNotRunning,
 } from '../../domain';
 import {
   CONSTRAINT_ERROR,
@@ -289,6 +291,105 @@ describe('KnexQueuedMessageRepository', () => {
       await expect(p.runs.start(sessionId)).rejects.toBeInstanceOf(
         RunAlreadyActive,
       );
+    });
+  });
+
+  describe('insert (IN-20)', () => {
+    it('removes only that row, writes user_message with delivery inserted, and preserves remaining queue order', async () => {
+      const first = await p.queue.add(sessionId, { text: 'one' }, { max: 5 });
+      const middle = await p.queue.add(
+        sessionId,
+        {
+          text: 'two',
+          page: { path: '/catalog', entityRef: 'component:default/api' },
+        },
+        { max: 5 },
+      );
+      const last = await p.queue.add(sessionId, { text: 'three' }, { max: 5 });
+
+      const item = await p.queue.insert(sessionId, middle.id, runId);
+
+      expect(item).toMatchObject({
+        kind: 'user_message',
+        runId,
+        text: 'two',
+        delivery: 'inserted',
+        page: { path: '/catalog', entityRef: 'component:default/api' },
+      });
+      const remaining = await p.queue.list(sessionId);
+      expect(remaining.map(m => [m.id, m.position, m.text])).toEqual([
+        [first.id, 1, 'one'],
+        [last.id, 3, 'three'],
+      ]);
+      const log = await p.items.read(sessionId);
+      expect(log[log.length - 1]).toEqual(item);
+      expect((await p.runs.findActive(sessionId))?.id).toBe(runId);
+    });
+
+    it('throws RunNotRunning when run is ended, waiting_approval, expired, or from another session, leaving queue unchanged', async () => {
+      const queued = await p.queue.add(sessionId, { text: 'hold' }, { max: 5 });
+      const otherSession = (await p.sessions.create(NEW_SESSION)).id;
+      const otherRun = await p.runs.start(otherSession);
+
+      await expect(
+        p.queue.insert(sessionId, queued.id, otherRun.id),
+      ).rejects.toBeInstanceOf(RunNotRunning);
+      await expect(
+        p.queue.insert(sessionId, queued.id, 'missing-run'),
+      ).rejects.toBeInstanceOf(RunNotRunning);
+
+      await p.runs.transition(runId, 'waiting_approval');
+      await expect(
+        p.queue.insert(sessionId, queued.id, runId),
+      ).rejects.toBeInstanceOf(RunNotRunning);
+
+      await p.runs.acquireLease(runId);
+      p.clock.advance(60);
+      await expect(
+        p.queue.insert(sessionId, queued.id, runId),
+      ).rejects.toBeInstanceOf(RunNotRunning);
+
+      await p.runs.transition(runId, 'completed');
+      await expect(
+        p.queue.insert(sessionId, queued.id, runId),
+      ).rejects.toBeInstanceOf(RunNotRunning);
+
+      expect(await texts()).toEqual(['hold']);
+    });
+
+    it('throws QueuedMessageNotFound when missing or removed, and InsertLimitReached after 5 inserts', async () => {
+      await expect(
+        p.queue.insert(sessionId, 'no-such-queued', runId),
+      ).rejects.toBeInstanceOf(QueuedMessageNotFound);
+
+      for (let i = 1; i <= 5; i++) {
+        const q = await p.queue.add(sessionId, { text: `m${i}` }, { max: 10 });
+        await p.queue.insert(sessionId, q.id, runId, { maxInsertsPerRun: 5 });
+      }
+      const sixth = await p.queue.add(sessionId, { text: 'm6' }, { max: 10 });
+      await expect(
+        p.queue.insert(sessionId, sixth.id, runId, { maxInsertsPerRun: 5 }),
+      ).rejects.toBeInstanceOf(InsertLimitReached);
+      expect(await texts()).toEqual(['m6']);
+    });
+
+    it('only one wins when racing insert with startNext on SQLite', async () => {
+      const q = await p.queue.add(sessionId, { text: 'race' }, { max: 5 });
+      await p.runs.transition(runId, 'completed');
+      const [inserted, started] = await Promise.allSettled([
+        p.queue.insert(sessionId, q.id, runId),
+        p.queue.startNext(sessionId),
+      ]);
+      expect(inserted.status).toBe('rejected');
+      expect((inserted as PromiseRejectedResult).reason).toBeInstanceOf(
+        RunNotRunning,
+      );
+      expect(started.status).toBe('fulfilled');
+      expect((started as PromiseFulfilledResult<any>).value).toBeDefined();
+      const raceItems = (await p.items.read(sessionId)).filter(
+        i => i.kind === 'user_message' && i.text === 'race',
+      );
+      expect(raceItems).toHaveLength(1);
     });
   });
 });

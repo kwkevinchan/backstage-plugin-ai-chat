@@ -17,6 +17,7 @@ import type { ChatUploadedAttachment } from '@kwkevinchan/backstage-plugin-ai-ch
 import type { CreateChatSessionRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { DecideToolCallRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { InsertChatMessageRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { InsertQueuedMessageRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { QueueChatMessageRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ReorderQueueRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ResumeChatRunRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
@@ -49,6 +50,11 @@ export interface AiChatApi {
     id: string,
     runId: string,
     request: InsertChatMessageRequest,
+  ): Promise<ChatItem>;
+  insertQueuedMessage(
+    id: string,
+    queuedId: string,
+    request: InsertQueuedMessageRequest,
   ): Promise<ChatItem>;
   // (undocumented)
   listSessions(options?: {

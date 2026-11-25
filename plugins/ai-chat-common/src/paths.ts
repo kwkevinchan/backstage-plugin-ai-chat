@@ -45,6 +45,10 @@ export const chatPaths = {
   queue: (id: string) => `/sessions/${encodeURIComponent(id)}/queue`,
   queuedMessage: (id: string, queuedId: string) =>
     `/sessions/${encodeURIComponent(id)}/queue/${encodeURIComponent(queuedId)}`,
+  insertQueuedMessage: (id: string, queuedId: string) =>
+    `/sessions/${encodeURIComponent(id)}/queue/${encodeURIComponent(
+      queuedId,
+    )}/insert`,
   queueOrder: (id: string) => `/sessions/${encodeURIComponent(id)}/queue/order`,
   queueResume: (id: string) =>
     `/sessions/${encodeURIComponent(id)}/queue/resume`,
