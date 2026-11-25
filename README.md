@@ -234,7 +234,7 @@ aiChat:
   context:
     tokenBudget: 100000 # estimated tokens of the model input; default 100000
     keepRecentSteps: 6 # newest steps that are never shortened; default 6
-  maxToolOutputChars: 20000 # output stored and sent to the model; default 20000, at least 100
+  maxToolOutputChars: 20000 # output stored and sent to the model, also of load_skill; default 20000, at least 100
   # What the user may add while a run goes on
   input:
     insert:
@@ -317,11 +317,12 @@ exactly `days` ago is kept.
 | `input.images.maxBytesPerInput`     | Most image bytes sent to the model in one call and across one run (`20971520` / 20 MB by default). Must be at least `maxPerMessage * maxBytes`.                                                                                                                                                                             |
 | `input.images.maxPendingPerSession` | Most uploaded images in one session not yet in any message (`12` by default). Unused images are deleted after 24 hours.                                                                                                                                                                                                     |
 | `input.images.tokensPerImage`       | Estimated tokens one image uses in `context.tokenBudget` (`1600` by default). Set it for the model you use.                                                                                                                                                                                                                 |
-| `maxToolOutputChars`                | The output of an action is cut here, and the cut is stated.                                                                                                                                                                                                                                                                 |
+| `maxToolOutputChars`                | The output of an action, and the output of `load_skill`, is cut here, and the cut is stated.                                                                                                                                                                                                                                |
 | `sharing.live.enabled`              | Whether a share may keep updating. Default true. Creating or changing a share is not in this version, so this is only checked and kept.                                                                                                                                                                                     |
 | `sharing.live.defaultHours`         | Hours a live share lasts when nobody picks a life. Default 24. A positive integer, at most `maxHours`.                                                                                                                                                                                                                      |
 | `sharing.live.maxHours`             | Longest life of a live share, in hours. Default 72. A positive integer, at least `defaultHours`.                                                                                                                                                                                                                            |
 | `retention.days`                    | Days after the last change of a session before it is deleted, with its runs, messages, queued messages and images. Default 90. `0` keeps every session. A session with a run that has not ended is kept until the run ends. The audit log is kept.                                                                          |
+| `skills.directories`                | Directories read at startup; each subdirectory with a `SKILL.md` is a skill whose body `load_skill` reads when called. A relative path starts at the working directory. A missing directory, bad frontmatter, a link out of the directory, or a duplicate id stops the backend.                                             |
 
 When the input is over `tokenBudget`, the old outputs of tools are shortened
 to one line first. If that is not enough, the old steps are replaced by a
@@ -362,14 +363,21 @@ The system prompt of a configured agent is the built-in rules plus that
 agent's `systemPrompt`. When the agent omits `systemPrompt`, the installation
 `aiChat.systemPrompt` is used instead. The two extra texts are not combined.
 `toolsets` names toolsets from `aiChat.toolsets` (or `default`, when no
-toolsets are configured). `skills`, `model`, `limits` and `planning: required`
-are recorded on the agent. A wrong value stops the backend at startup.
+toolsets are configured). `skills` chooses the skills the agent offers (see
+below); an id that no skill has stops the backend. `model`, `limits` and
+`planning: required` are recorded on the agent. A wrong value stops the
+backend at startup.
 
 The loop still uses the limits of the installation and its one model client.
-It does not filter tools by the agent's toolsets, load a skill, require a
-plan on the first step, or call a model client other than that one.
+It does not filter tools by the agent's toolsets, require a
+plan on the first step, or call a model client other than that one. When skills
+are registered through `aiChat.skills.directories` (`SKILL.md`) or `addSkill`,
+the prompt lists only each allowed skill's `id` and short `description`; the
+full instructions are loaded on demand by the read-only built-in `load_skill`
+tool (`allow` by default; `agent.skills` restricts which skills that agent sees,
+and omitted means all registered skills).
 
-A backend module can register agents and lifecycle hooks through
+A backend module can register agents, lifecycle hooks and skills through
 `@kwkevinchan/backstage-plugin-ai-chat-node`. It depends only on that package.
 An agent a module registers receives the same built-in prompt rules as a
 configured agent. An id that both the configuration and a module define stops
@@ -382,7 +390,8 @@ and `onRunEnd` is only logged. `onRunEnd` runs once after the run ended,
 with the stored status, and the run does not wait for it.
 
 `plugins/ai-chat-backend-module-example` in this repository is a private
-example of such a module, to copy from. It registers the agent `guide`. It is
+example of such a module, to copy from. It registers the agent `guide` and the
+skill `getting-started`. It is
 not a package to install. The example uses `guide`, so `aiChat.agents.guide`
 would also stop the backend.
 
@@ -608,7 +617,7 @@ this plugin until it is updated.
 
 Retrieval over TechDocs, an entity tab or sidebar widget, file uploads,
 several model providers at once, MCP servers outside Backstage, sharing a
-conversation, applying an agent's skills, planning or model (those
+conversation, planning or an agent's model (those
 fields can be set, and a module can register them; the loop does not use them
 yet), and a session list that can search, pin or archive (the page still lists
 recent sessions; a title is stored after the first round ends normally).

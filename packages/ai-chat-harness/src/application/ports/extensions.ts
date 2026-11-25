@@ -172,9 +172,23 @@ export type HookRegistry = {
 };
 
 /**
- * What a backend module can add (X-02). Context providers (P3-02), skills
- * (P3-04) and a model client (P3-07) are added on those later items, together
- * with the loop calling them.
+ * A reusable instruction set whose name and short description are shown in
+ * context and whose full body is loaded lazily via `load_skill` (X-04, D-22).
+ *
+ * @public
+ */
+export interface Skill {
+  id: string;
+  /** One-line summary placed in the step context. */
+  description: string;
+  /** Returns the full Markdown instructions when the model calls `load_skill`. */
+  load(ctx: StepContext): string | Promise<string>;
+}
+
+/**
+ * What a backend module can add (X-02). Context providers (P3-02) and a model
+ * client (P3-07) are added on those later items, together with the loop
+ * calling them.
  *
  * @public
  */
@@ -185,17 +199,19 @@ export interface AiChatHarnessExtensionPoint {
    * function, stops the backend.
    */
   addHook<K extends HookName>(name: K, hook: Hooks[K]): void;
+  addSkill(skill: Skill): void;
 }
 
 /**
  * The registrations the loop reads from backend modules. The loop calls
- * `beforeModelCall`, `beforeToolCall` and `afterToolCall`; the host calls
- * `onRunEnd`, once it stored the end of the run.
+ * `beforeModelCall`, `beforeToolCall` and `afterToolCall`, and lists the
+ * skills; the host calls `onRunEnd`, once it stored the end of the run.
  *
  * @public
  */
 export type Extensions = {
   readonly hooks?: Partial<HookRegistry>;
+  readonly skills?: readonly Skill[];
 };
 
 /** No registrations. @public */

@@ -64,6 +64,8 @@ export interface AiChatHarnessExtensionPoint {
   // (undocumented)
   addAgent(agent: AgentDefinition): void;
   addHook<K extends HookName>(name: K, hook: Hooks[K]): void;
+  // (undocumented)
+  addSkill(skill: Skill): void;
 }
 
 // @public
@@ -193,6 +195,7 @@ export function estimateTokens(text: string): number;
 // @public
 export type Extensions = {
   readonly hooks?: Partial<HookRegistry>;
+  readonly skills?: readonly Skill[];
 };
 
 // @public
@@ -365,6 +368,12 @@ export type Limits = {
 };
 
 // @public
+export const LOAD_SKILL_TOOL_ID = 'load_skill';
+
+// @public
+export function loadSkillDescriptor(skills: readonly Skill[]): ToolDescriptor;
+
+// @public
 export type ModelChunk =
   | {
       type: 'text';
@@ -520,6 +529,12 @@ export type PolicySettings = {
 export type ReadState = 'read' | 'unread';
 
 // @public
+export function resolveAgentSkills(
+  agent: AgentDefinition,
+  registered?: readonly Skill[],
+): Skill[];
+
+// @public
 export interface RunControl {
   heartbeat(fence: RunFence): Promise<{
     cancelRequested: boolean;
@@ -578,6 +593,14 @@ export type RunUsage = {
   toolCallsUsed: number;
   elapsedSeconds: number;
 };
+
+// @public
+export interface Skill {
+  description: string;
+  // (undocumented)
+  id: string;
+  load(ctx: StepContext): string | Promise<string>;
+}
 
 // @public
 export interface StepContext extends CallContext {

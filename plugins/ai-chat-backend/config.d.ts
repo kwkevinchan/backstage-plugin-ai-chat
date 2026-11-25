@@ -207,15 +207,17 @@ export interface Config {
      * agent's `systemPrompt`, or plus the installation `systemPrompt` when the
      * agent omits it. The two extra texts are not combined.
      *
-     * `toolsets`, `skills`, `model`, `limits` and `planning` are recorded. The
-     * loop still uses the limits of the installation and its one model client.
-     * It does not filter tools by the agent's toolsets, load skills, require a
-     * plan, or call another model client yet. A value that is not valid stops
-     * the backend at startup.
+     * `skills` chooses which configured and module-registered skills the
+     * agent offers through `load_skill` (omitting it offers all registered
+     * skills; an empty list offers none). `toolsets`, `model`, `limits` and
+     * `planning` are recorded. The loop still uses the limits of the
+     * installation and its one model client, and does not filter tools by the
+     * agent's toolsets, require a plan, or call another model client yet. A value that is not
+     * valid stops the backend at startup.
      *
-     * A backend module can register further agents through
+     * A backend module can register further agents and skills through
      * `@kwkevinchan/backstage-plugin-ai-chat-node`. An id that both this block
-     * and a module define stops the backend.
+     * (or `skills.directories`) and a module define stops the backend.
      */
     agents?: {
       [agentId: string]: {
@@ -231,7 +233,10 @@ export interface Config {
          * (or be `default`, when `toolsets` is not set).
          */
         toolsets?: string[];
-        /** Skill ids. The text of a skill is not loaded yet. */
+        /**
+         * Skill ids this agent may load with `load_skill`. Omit to allow all
+         * registered skills; set `[]` to disable skills for this agent.
+         */
         skills?: string[];
         /** Id of a model. The client for it is not selected yet. */
         model?: string;
@@ -256,9 +261,10 @@ export interface Config {
       };
     };
     /**
-     * Most characters of the output of an action that are stored and sent to
-     * the model; the rest is cut. At least 100 (a smaller value stops the
-     * backend at startup). Defaults to 20000.
+     * Most characters of the output of an action, and of the output of
+     * `load_skill`, that are stored and sent to the model; the rest is
+     * cut. At least 100 (a smaller value stops the backend at startup).
+     * Defaults to 20000.
      */
     maxToolOutputChars?: number;
     /**
@@ -278,6 +284,21 @@ export interface Config {
        * Defaults to 90.
        */
       days?: number;
+    };
+    /**
+     * Directories of `SKILL.md` skills read at startup (X-04, D-22). Each
+     * direct subdirectory with a `SKILL.md` registers one skill whose name and
+     * description are placed in step context and whose body is read lazily on
+     * `load_skill`.
+     */
+    skills?: {
+      /**
+       * Paths to directories whose direct subdirectories contain `SKILL.md`.
+       * A relative path is resolved against the working directory of the
+       * backend process. Symbolic links are followed, but a subdirectory or
+       * `SKILL.md` that resolves outside its directory stops the backend.
+       */
+      directories?: string[];
     };
   };
 }

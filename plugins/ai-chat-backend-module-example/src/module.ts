@@ -18,6 +18,7 @@ import { createBackendModule } from '@backstage/backend-plugin-api';
 import {
   aiChatHarnessExtensionPoint,
   type AgentDefinition,
+  type Skill,
 } from '@kwkevinchan/backstage-plugin-ai-chat-node';
 
 const guide: AgentDefinition = {
@@ -29,9 +30,22 @@ const guide: AgentDefinition = {
   planning: 'required',
 };
 
+const gettingStartedSkill: Skill = {
+  id: 'getting-started',
+  description: 'Walks new readers through documentation on example.com.',
+  load: async () =>
+    [
+      '# Getting started with example.com',
+      '',
+      '1. Search the Software Catalog to locate the service owner and repository.',
+      '2. Check the documentation on example.com for runbooks and architecture notes.',
+    ].join('\n'),
+};
+
 /**
- * Registers one agent. The text mentions `example.com` only. This package is
- * a private example in the repository, to copy from, not to install.
+ * Registers one agent and one skill. The text mentions `example.com` only.
+ * This package is a private example in the repository, to copy from, not to
+ * install.
  *
  * @public
  */
@@ -43,6 +57,7 @@ export const aiChatExampleModule = createBackendModule({
       deps: { harness: aiChatHarnessExtensionPoint },
       async init({ harness }) {
         harness.addAgent(guide);
+        harness.addSkill(gettingStartedSkill);
       },
     });
   },

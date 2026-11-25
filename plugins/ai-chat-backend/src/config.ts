@@ -73,6 +73,10 @@ export interface AiChatConfig {
    * Days a session is kept after its last change (SE-05). 0 deletes nothing.
    */
   retentionDays: number;
+  /** Directories scanned for `SKILL.md` skills at startup (X-04, D-22). */
+  skills: {
+    directories: string[];
+  };
 }
 
 /**
@@ -190,6 +194,22 @@ function readSharing(config: Config): AiChatConfig['sharing'] {
   return { live: { enabled, defaultHours, maxHours } };
 }
 
+/**
+ * Reads `aiChat.skills.directories`, defaulting to empty. Rejects non-array
+ * values or blank entries so a typo stops the backend at startup.
+ */
+function readSkillsConfig(config: Config): AiChatConfig['skills'] {
+  const directories = config.getOptionalStringArray('skills.directories') ?? [];
+  for (const dir of directories) {
+    if (dir.trim().length === 0) {
+      throw new InputError(
+        'aiChat.skills.directories must contain non-empty paths',
+      );
+    }
+  }
+  return { directories };
+}
+
 /** Reads and checks the `aiChat` section of the configuration. */
 export function readAiChatConfig(root: Config): AiChatConfig {
   const config = root.getConfig('aiChat');
@@ -269,5 +289,6 @@ export function readAiChatConfig(root: Config): AiChatConfig {
       DEFAULT_RETENTION_DAYS,
       0,
     ),
+    skills: readSkillsConfig(config),
   };
 }

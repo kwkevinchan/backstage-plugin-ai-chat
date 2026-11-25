@@ -32,6 +32,11 @@ import { createRouter } from './adapters/http';
 import { inputConfigOf } from './adapters/http/controllers/attachments';
 import { OpenAiCompatibleClient } from './adapters/model/OpenAiCompatibleClient';
 import { OpenAiCompatibleModelClient } from './adapters/model/OpenAiCompatibleModelClient';
+import { limitSkillContent } from './adapters/skills/limitSkillContent';
+import {
+  loadSkillsFromDirectories,
+  mergeSkills,
+} from './adapters/skills/loadSkillDirectories';
 import {
   assertSingleSqliteConnection,
   KnexAttachmentStore,
@@ -114,17 +119,29 @@ export const aiChatPlugin = createBackendPlugin({
         permissionsRegistry,
       }) {
         const aiChat = readAiChatConfig(config);
+        const directorySkills = await loadSkillsFromDirectories(
+          aiChat.skills.directories,
+          logger,
+        );
+        const skills = mergeSkills(
+          directorySkills,
+          harnessExtensions.skills(),
+        ).map(skill => limitSkillContent(skill, aiChat.maxToolOutputChars));
+        const knownSkills = new Set(skills.map(skill => skill.id));
         // Reads and checks the toolsets, the policy and the agents, and warns
         // about the deprecated include and exclude lists.
         const catalog = new ConfigAgentCatalog(
           config,
           logger,
           harnessExtensions.agents(),
+          knownSkills,
         );
         logger.info(
           `AI chat extensions: ${
             harnessExtensions.agents().length
-          } agent(s), ${harnessExtensions.hookCount()} hook(s)`,
+          } agent(s), ${harnessExtensions.hookCount()} hook(s), ${
+            skills.length
+          } skill(s)`,
         );
         const toolsets = await catalog.toolsets();
         logger.info(
@@ -198,10 +215,13 @@ export const aiChatPlugin = createBackendPlugin({
             },
           },
           retentionDays: aiChat.retentionDays,
-          extensions: harnessExtensions.extensions({
-            logger,
-            maxToolOutputChars: aiChat.maxToolOutputChars,
-          }),
+          extensions: {
+            ...harnessExtensions.extensions({
+              logger,
+              maxToolOutputChars: aiChat.maxToolOutputChars,
+            }),
+            skills,
+          },
           notifier,
         });
         lifecycle.addShutdownHook(() => host.supervisor.shutdown());

@@ -97,18 +97,19 @@ function isValidToolResult(value: unknown): value is ToolResult {
   return true;
 }
 
-type Settled<T> =
+export type Settled<T> =
   | { aborted: true }
   | { aborted: false; ok: true; value: T }
   | { aborted: false; ok: false; error: unknown };
 
 /**
- * Calls the hook and waits for it, or for the signal, whichever comes first.
- * A hook that never answers must not keep the run (and its lease) going after
- * a stop or a timeout. The hook itself may still finish; what it returns then
+ * Calls the hook (or another extension, such as the `load` of a skill) and
+ * waits for it, or for the signal, whichever comes first. A call that never
+ * answers must not keep the run (and its lease) going after
+ * a stop or a timeout. The call itself may still finish; what it returns then
  * is ignored.
  */
-function settle<T>(
+export function settle<T>(
   call: () => T | Promise<T>,
   signal: AbortSignal,
 ): Promise<Settled<T>> {
