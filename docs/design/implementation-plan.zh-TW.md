@@ -383,7 +383,7 @@ flowchart LR
 | P2-04 | 分享的 use case 和 API      | M    | SH-02、SH-03、SH-06、SH-10、SH-11、IN-19（讀取） | 被分享的人送訊息和核准都被拒絕。到期後變成快照。每個動作有稽核紀錄                                                                                                                                                                                                               |
 | P2-05 | 分享的畫面和複製            | M    | SH-04、SH-07、SH-10、SH-12、IN-19（複製）        | 分享對話框的說明文字。持續更新時上方的提示列。複製出來的 Session 沒有工具輸出                                                                                                                                                                                                    |
 | P2-06 | 斷線接回和即時狀態          | M    | A-07、B-05                                       | 斷線後接回：從目前 Run 的第一個 Item 重送再接新的，先送 `start`，未完成的文字補送 `text-start` 加已累積的文字（Run 在別台時等它完成再整段送），Item 不重複不遺漏。逐字輸出到一半時重新整理，畫面接得上。Run 在別台時，每秒查一次新的 Item（沒有逐字片段）。沒裝 Signals 也能運作 | #44 | 後端完成，畫面在 PU-05 |
-| P2-07 | 側邊面板和入口元件          | M    | B-02                                             | 新增 `ai-chat-react`。面板在換頁時保留。別的 plugin 用 `<AiChatLauncher>` 開啟對話                                                                                                                                                                                               |
+| P2-07 | 側邊面板和入口元件          | M    | B-02                                             | 新增 `ai-chat-react`。面板在換頁時保留。別的 plugin 用 `<AiChatLauncher>` 開啟對話。逐項驗收見下方 P2-07                                                                                                                                                                         | #46 | 完成                   |
 
 ### P2-02 保存期限
 
@@ -434,6 +434,33 @@ flowchart LR
   - 跨 backend 的串流在 Run 離開 `running` 時送結束，不在中途改成 204。204 只在連線當下沒有 `running` 的 Run。
   - 接回串流與同一台即時串流的三處差異：別台 `failed`／`expired` 一律送 `"The run stopped."`；別台只送已存的 Item，輪詢項目之間沒有 step 邊界；這一台接回時 `typing: false`，補完當時草稿後，同一個 Run 的下一則回答會在完成時整段送出。
   - 未完成文字的前綴是訂閱當下的草稿，不含這個訂閱已經排進佇列的 `text-delta`。佇列裡已有這則的 `item.completed` 或紀錄裡已有更新的 `agent_message` 時不補前綴。
+
+### P2-07 側邊面板和入口元件
+
+- **範圍**：新增 `plugins/ai-chat-react`（公開名稱 `@kwkevinchan/backstage-plugin-ai-chat-react`，`web-library`）。公開出口是 `aiChatPanelApiRef`、`AiChatPanelApi`、`useAiChatPanel()` 和 `<AiChatLauncher prompt="…" entityRef="…" className="…" />`。`ai-chat` 前端依賴 `ai-chat-react` 並實作與註冊 `aiChatPanelApiRef` Utility API（新前端系統用 `ApiBlueprint`、舊前端系統用 plugin 的 `apis`）。別的 frontend plugin 只依賴 `ai-chat-react`，不 import 宿主或核心的內部檔案。側邊面板由 `ai-chat` 畫在路由外面，等 `identityApiRef.getBackstageIdentity()` 解析後才顯示，換頁不卸下進行中的對話。Launcher 開啟面板，並把 prompt 和 entity 帶進那一次開啟的對話；`aiChatPanelApiRef` 未註冊時不畫按鈕。不做結果顯示元件（B-03，P3）和 client tool（B-04，P4）。
+- **依賴**：無。P2-06 獨立，可以平行。頁面上下文沿用已完成的 B-01（`isEntityRef`、`isPagePath`）。
+- **驗收**（`ai-chat-react` 只定義 Utility API 契約、hook 與 launcher；規則與 store 在 `ai-chat`，畫面行為在 `ai-chat` 的 ui；不靠煙霧測試）：
+  - 套件：`package.json` 的 role 是 `web-library`，名稱是 `@kwkevinchan/backstage-plugin-ai-chat-react`。runtime dependency 為 `@backstage/core-plugin-api`，沒有 `ai-chat`、`ai-chat-backend`、`ai-chat-common`、`ai-chat-harness`。測試讀這份 `package.json`。
+  - 出口：套件匯出 `aiChatPanelApiRef`、`AiChatPanelApi`（`isOpen`、`open`、`close`、`subscribe`）、`useAiChatPanel` 和 `AiChatLauncher`。沒有 `AiChatPanelProvider`、`createAiChatPanelStore`、`AiChatToolResultBlueprint`、`AiChatClientToolBlueprint`。測試對照出口。
+  - 帶入的上下文（domain，`launchContextOf`）：`prompt` 去掉前後空白後還有字才算有 prompt，送出的文字是去掉前後空白的那段。只有空白不算有 prompt。`entityRef` 通過 `isEntityRef` 才留下，不合格就沒有 entity。
+  - 送出時的頁面（domain，`panelMessagePage`）：有帶入合格的 entity 時，訊息的 `page.entityRef` 用它，不用網址上另一個 `entityRef` 蓋掉。沒有帶入 entity 時，沿用畫面自己的 page context（B-01）。`page.path` 用送出當下的路徑：換頁之後再送，路徑換成新的那一頁。
+  - 面板狀態（domain，`applyLaunch`、`applyClose`、`applySession`）：`open` 把面板打開。這次有 prompt 時清掉目前的 session（換成新的對話）；沒有 prompt 時 session 留著。`close` 只把 `open` 設成關，session 和帶入的上下文都還在。沒有任何轉移會因為路由改變而關面板或清 session：狀態裡不放路由。
+  - `useAiChatPanel()`：透過 `useApiHolder().get(aiChatPanelApiRef)` 訂閱 `isOpen` 並委派 `open(request?)`、`close()`；API 未註冊時 `isOpen` 為假且呼叫不報錯。測試用 `TestApiProvider`。
+  - `<AiChatLauncher prompt entityRef className>`：是一顆按鈕，`aiChatPanelApiRef` 存在時渲染並套用 `className`，按下之後呼叫 `open` 並帶上這兩個 prop（沒有 prop 時呼叫 `open()`）；`aiChatPanelApiRef` 不存在時回傳 `null`。
+  - 換頁仍保留（ui）：面板畫在 `<Routes>` 外面。面板裡已經有一段對話（使用者訊息在畫面上、session id 不變）時，路由從一個頁面換到另一個，同一段文字還在，而且不會再向 API 要一次這段 session。
+  - Launcher 開啟並帶入上下文（ui，假的 `AiChatApi`）：按下 Launcher（有 prompt、有合格的 entityRef）之後，面板打開，建立 session，`sendMessage` 的文字是那個 prompt，`page.entityRef` 是那個 entity，`page.path` 是按下時的路徑。entityRef 不合格時，訊息仍送出，`page` 沒有 `entityRef`。只有 entity、沒有 prompt 時，不建立 session；下一則從面板送出的訊息帶那個 entity。
+  - 從面板自己開對話（ui）：面板有輸入框。送出後建立 session 並送出那段文字。沒有 Launcher 時，`page` 用目前路由（B-01）。prompt 送出建立 session 尚未完成時若被只有 entity 的開啟中斷，輸入框送出按鈕保持可用，不會卡在停用。
+  - 登入頁不顯示（ui）：`identityApiRef.getBackstageIdentity()` 尚未完成或被拒絕時，面板不渲染任何內容；登入完成後才顯示開關按鈕。
+  - 關上再打開（ui）：進行中的對話還在，session 沒有清掉，也不重新跟 API 要這段 session。
+  - 既有的 `/ai-chat` 頁面不改行為（既有的頁面測試仍通過）。新前端系統的 plugin 註冊 `aiChatPanelApi` 並多掛一個 app root 上的面板，註冊 plugin 就有，不要求 app 再包一層。
+- **規格沒寫、實作選定的地方**（程式架構第 6.2 節和第 9 節照這份選定更新）：
+  - 面板透過 Backstage Utility API（`aiChatPanelApiRef`）在 `ai-chat-react` 與 `ai-chat` 之間傳遞狀態，不使用模組層級的全域單例或獨立 React Provider。
+  - 面板在畫面右側，等登入完成後每一頁都在，預設關上。邊上有一顆「AI chat」按鈕可以打開，面板裡有關閉。關上時，已經開始的對話元件不卸載，所以進行中的 Run 不會因為關上或換頁而停。還沒開始對話時，關上的面板只有那顆按鈕，不畫第二個對話區。
+  - 有 prompt 的開啟會開始一段新的對話，並立刻送出那個 prompt（跟聊天頁的第一則訊息一樣：先 `POST /sessions`，再送出）。沒有 prompt 時只打開面板，entity 留給下一則從面板送出的訊息。
+  - 帶入的 entity 在這段面板對話之後的訊息也用，直到下一次有 prompt 的開啟換成新的對話。路徑每次送出時用當時的頁面。
+  - 面板一次一段對話，不做列表（列表是 P2-01）。`/ai-chat` 的完整頁面保持原樣。
+  - 舊前端系統要在路由外面掛一次面板（開發用的 `packages/app` 已掛）。新前端系統用 app root element 掛同一塊面板。
+  - 開發用的舊版 app 在側邊欄放一顆 `<AiChatLauncher>`，prompt 問目前的頁面，entity 是 `component:default/example.com`。這是別的 plugin 的接法，不是另一項產品功能。
 
 順序：P2-01 和 P2-02 互相獨立。P2-03 之後才能做 P2-04 和 P2-05。P2-06 和 P2-07 跟分享無關，可以平行。
 
@@ -854,4 +881,5 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-25 | 1.1  | PI-06（#41）：後端和 client 完成「只有圖片的訊息」（送出、插入、排隊）；PATCH 排隊訊息時用更新後的文字和附件一起檢查，兩個都空就回 400。畫面改在 PU-04。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 2026-11-25 | 1.1  | P2-06 驗收清單：斷線接回（這一台補未完成文字的 `text-start` 和已累積文字；別台每秒用 `afterSeq` 增量讀已完成的 Item，短暫錯誤重試，不送逐字片段；沒有 Run、已結束、`waiting_approval` 仍 204）和即時狀態（Signals 通知處理中、等核准、有新回覆、`idle`；`useSessionChat` 依 `liveActivity` 接回與重載）。持續更新的分享用接回端點的那條安全測試留到 P2-04；列表 UI 留到新版前端                                                                                                                                                                                                                                                                                                                      |
 | 2026-11-25 | 1.1  | P2-06：`FollowSession` 在別台每秒以 `afterSeq` 增量讀已完成的 Item，這一台補送訂閱當下的未完成文字並以 `emittedSeq` 擋掉已存檔草稿的重複前綴。`GET /sessions` 帶進行中 Run 的 `activity`。Signals 由 `ai-chat-backend` 的 signals module 裝上（plugin 本身不依賴它）。程式架構第 5、8、9 節、protocol-check 和 README 照實作與三處差異更新                                                                                                                                                                                                                                                                                                                                                           |
+| 2026-11-25 | 1.1  | P2-07 完成（B-02，#46）：新增 `ai-chat-react`（`aiChatPanelApiRef`、`AiChatPanelApi`、`useAiChatPanel()`、`AiChatLauncher`）；面板由 `ai-chat` 實作並畫在路由外面，等身分就緒後才顯示，換頁不卸下進行中的對話；`<AiChatLauncher>` 開啟對話並帶入 prompt 與 entity。程式架構第 6.2 節和第 9 節照選定更新。不做 B-03、B-04。                                                                                                                                                                                                                                                                                                                                                                           |
 | 2026-11-25 | 1.2  | 新增 PU（第 6 節）：前端對齊 assistant-ui。PU-01 到 PU-07，每項有範圍、依賴和驗收清單；P3 以後的節號順延一號。P1-10、PI-04、PI-06 的說明補一句：畫面在 PU 重做。P2-01、P2-06、P2-07 的範圍改成後端，以及不含畫面的前端部分。第 9 節風險加兩條：assistant-ui 在 0.x、佇列介面是 2026-10 才加的。                                                                                                                                                                                                                                                                                                                                                                                                      |

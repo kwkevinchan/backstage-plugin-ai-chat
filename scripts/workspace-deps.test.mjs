@@ -15,7 +15,7 @@
  */
 
 /**
- * The directions `yarn constraints` enforces for the extension package.
+ * The directions `yarn constraints` enforces for the extension packages.
  * `yarn.config.cjs` calls the same function.
  */
 
@@ -30,7 +30,11 @@ const { workspaceDependencyError } = createRequire(import.meta.url)(
 const node = '@kwkevinchan/backstage-plugin-ai-chat-node';
 const host = '@kwkevinchan/backstage-plugin-ai-chat-backend';
 const harness = '@kwkevinchan/ai-chat-harness';
+const common = '@kwkevinchan/backstage-plugin-ai-chat-common';
+const frontend = '@kwkevinchan/backstage-plugin-ai-chat';
+const react = '@kwkevinchan/backstage-plugin-ai-chat-react';
 const example = '@kwkevinchan/backstage-plugin-ai-chat-backend-module-example';
+const otherFrontend = '@kwkevinchan/backstage-plugin-other';
 
 test('rejects a backend module that depends on the host or the harness, and any new direction except the three', () => {
   const moduleEdge = to =>
@@ -77,7 +81,7 @@ test('rejects a backend module that depends on the host or the harness, and any 
   );
   assert.match(
     workspaceDependencyError({
-      from: '@kwkevinchan/backstage-plugin-ai-chat',
+      from: frontend,
       to: node,
       backendRole: false,
       role: 'frontend-plugin',
@@ -89,6 +93,98 @@ test('rejects a backend module that depends on the host or the harness, and any 
     workspaceDependencyError({
       from: harness,
       to: node,
+      backendRole: true,
+      role: 'node-library',
+    }),
+    /must not depend/,
+  );
+});
+
+test('allows frontend -> react -> common and other frontend -> react, and rejects other react edges', () => {
+  assert.equal(
+    workspaceDependencyError({
+      from: frontend,
+      to: react,
+      backendRole: false,
+      role: 'frontend-plugin',
+      pluginId: 'ai-chat',
+    }),
+    undefined,
+  );
+  assert.equal(
+    workspaceDependencyError({
+      from: frontend,
+      to: common,
+      backendRole: false,
+      role: 'frontend-plugin',
+      pluginId: 'ai-chat',
+    }),
+    undefined,
+  );
+  assert.equal(
+    workspaceDependencyError({
+      from: react,
+      to: common,
+      backendRole: false,
+      role: 'web-library',
+      pluginId: 'ai-chat',
+    }),
+    undefined,
+  );
+  assert.match(
+    workspaceDependencyError({
+      from: react,
+      to: frontend,
+      backendRole: false,
+      role: 'web-library',
+      pluginId: 'ai-chat',
+    }),
+    /ai-chat-common/,
+  );
+  assert.match(
+    workspaceDependencyError({
+      from: react,
+      to: harness,
+      backendRole: false,
+      role: 'web-library',
+      pluginId: 'ai-chat',
+    }),
+    /ai-chat-common/,
+  );
+  assert.equal(
+    workspaceDependencyError({
+      from: otherFrontend,
+      to: react,
+      backendRole: false,
+      role: 'frontend-plugin',
+      pluginId: 'other',
+    }),
+    undefined,
+  );
+  assert.match(
+    workspaceDependencyError({
+      from: otherFrontend,
+      to: frontend,
+      backendRole: false,
+      role: 'frontend-plugin',
+      pluginId: 'other',
+    }),
+    /ai-chat-react/,
+  );
+  assert.match(
+    workspaceDependencyError({
+      from: otherFrontend,
+      to: common,
+      backendRole: false,
+      role: 'frontend-plugin',
+      pluginId: 'other',
+    }),
+    /ai-chat-react/,
+  );
+  assert.match(
+    workspaceDependencyError({
+      from: harness,
+      to: react,
       backendRole: true,
       role: 'node-library',
     }),

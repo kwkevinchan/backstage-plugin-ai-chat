@@ -67,14 +67,14 @@ flowchart LR
 
 ## 3. 套件
 
-| 套件                               | 路徑                       | Backstage role    | 內容                                                                         | 分期                         |
-| ---------------------------------- | -------------------------- | ----------------- | ---------------------------------------------------------------------------- | ---------------------------- |
-| `ai-chat-harness`                  | `packages/ai-chat-harness` | `node-library`    | 核心：domain 和 application。另有 `/testing` 入口，放假模型和記憶體版的 port | P1                           |
-| `backstage-plugin-ai-chat-common`  | `plugins/ai-chat-common`   | `common-library`  | 前後端共用：HTTP 的資料型別、permission 的定義                               | P1（型別）、P2（permission） |
-| `backstage-plugin-ai-chat-backend` | `plugins/ai-chat-backend`  | `backend-plugin`  | 宿主：四圈                                                                   | P1                           |
-| `backstage-plugin-ai-chat`         | `plugins/ai-chat`          | `frontend-plugin` | 前端                                                                         | P1                           |
-| `backstage-plugin-ai-chat-node`    | `plugins/ai-chat-node`     | `node-library`    | backend 的擴充點 `aiChatHarnessExtensionPoint`                               | P3                           |
-| `backstage-plugin-ai-chat-react`   | `plugins/ai-chat-react`    | `web-library`     | 前端的擴充點：開啟對話的元件、結果顯示元件、client tool                      | P2 開始                      |
+| 套件                               | 路徑                       | Backstage role    | 內容                                                                                                                                      | 分期                         |
+| ---------------------------------- | -------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `ai-chat-harness`                  | `packages/ai-chat-harness` | `node-library`    | 核心：domain 和 application。另有 `/testing` 入口，放假模型和記憶體版的 port                                                              | P1                           |
+| `backstage-plugin-ai-chat-common`  | `plugins/ai-chat-common`   | `common-library`  | 前後端共用：HTTP 的資料型別、permission 的定義                                                                                            | P1（型別）、P2（permission） |
+| `backstage-plugin-ai-chat-backend` | `plugins/ai-chat-backend`  | `backend-plugin`  | 宿主：四圈                                                                                                                                | P1                           |
+| `backstage-plugin-ai-chat`         | `plugins/ai-chat`          | `frontend-plugin` | 前端                                                                                                                                      | P1                           |
+| `backstage-plugin-ai-chat-node`    | `plugins/ai-chat-node`     | `node-library`    | backend 的擴充點 `aiChatHarnessExtensionPoint`                                                                                            | P3                           |
+| `backstage-plugin-ai-chat-react`   | `plugins/ai-chat-react`    | `web-library`     | 前端的擴充點。P2：`aiChatPanelApiRef`、`AiChatPanelApi`、`useAiChatPanel()`、`<AiChatLauncher>`。結果顯示（P3）和 client tool（P4）尚未做 | P2 開始                      |
 
 套件之間的依賴：
 
@@ -86,7 +86,6 @@ flowchart TD
   backend --> node
   frontend["ai-chat"] --> common
   frontend --> react["ai-chat-react"]
-  react --> common
   othermod["別的團隊的 backend module"] --> node
   otherfe["別的 frontend plugin"] --> react
 ```
@@ -909,12 +908,28 @@ export default createBackendModule({
 
 ### 6.2 Frontend：`ai-chat-react`
 
-| 擴充點       | 形式                                                                   | 分期 |
-| ------------ | ---------------------------------------------------------------------- | ---- |
-| 頁面上下文   | 內建。前端從 router 和 entity context 讀取，每則訊息帶上               | P1   |
-| 入口         | `<AiChatLauncher prompt="…" entityRef="…" />`，以及 `useAiChatPanel()` | P2   |
-| 結果顯示元件 | `AiChatToolResultBlueprint`：為某個 action id 註冊一個元件             | P3   |
-| Client tool  | `AiChatClientToolBlueprint`：在瀏覽器執行的工具                        | P4   |
+| 擴充點       | 形式                                                                                                     | 分期 |
+| ------------ | -------------------------------------------------------------------------------------------------------- | ---- |
+| 頁面上下文   | 內建。前端從 router 和 entity context 讀取，每則訊息帶上                                                 | P1   |
+| 入口         | `aiChatPanelApiRef`、`AiChatPanelApi`、`useAiChatPanel()`、`<AiChatLauncher prompt="…" entityRef="…" />` | P2   |
+| 結果顯示元件 | `AiChatToolResultBlueprint`：為某個 action id 註冊一個元件                                               | P3   |
+| Client tool  | `AiChatClientToolBlueprint`：在瀏覽器執行的工具                                                          | P4   |
+
+P2 先做入口。別的 frontend plugin 從 `ai-chat-react` import，不 import 宿主。`ai-chat-react` 透過 Backstage Utility API（`aiChatPanelApiRef` / `AiChatPanelApi`）溝通，只匯出 `aiChatPanelApiRef`、`AiChatPanelApi`（`isOpen`、`open`、`close`、`subscribe`）、`useAiChatPanel()` 和 `<AiChatLauncher>`（可選 `className`）；當 `aiChatPanelApiRef` 未註冊（app 未安裝 chat 外掛）時，`<AiChatLauncher>` 不畫按鈕。
+
+`ai-chat` 在新前端系統透過 `ApiBlueprint`、舊前端系統透過 plugin 的 `apis` 註冊並實作這份 API。`<AiChatLauncher>` 是一顆按鈕：
+
+- `prompt` 去掉前後空白後還有字：清掉面板上的這一段對話，開一段新的，並立刻送出那段文字（先 `POST /sessions`，再送出）。送出的文字是去掉前後空白的那段。注意 `prompt` 會以登入者身分送出，應由靜態文字或受信任的來源組成，不要直接取自 URL 參數或未受信任輸入。
+- 只有 `entityRef`、沒有 prompt：面板打開，進行中的對話留著。合格的 entity（`isEntityRef`）跟在這段對話之後的訊息上，直到下一次有 prompt 的開啟。不合格的 entity 不送，聊天照常開。
+- 沒有這兩個 prop：只打開面板，不換對話、不清掉已經帶入的 entity。
+
+`useAiChatPanel()` 從 `aiChatPanelApiRef` 讀取並回傳 `{ isOpen, open, close }`，讓任何頁面都能訂閱面板開關狀態或用程式開關。`close()` 只關上，不卸載已經開始的對話。
+
+送出的 `page`：`path` 是送出當下的路徑；有帶入合格的 entity 時用它，不用網址上的 `entityRef` 蓋掉。沒有帶入時沿用 B-01。
+
+面板在右側，等 `identityApiRef.getBackstageIdentity()` 解析（登入完成）後才顯示，預設關上，邊上有「AI chat」。一次一段對話，沒有列表（列表是 P2-01）。`/ai-chat` 整頁不變。舊前端系統在 router 裡、路由外面掛一次 `<AiChatPanel>`（`plugins/ai-chat` 匯出）。新前端系統用 app root element 掛同一塊，註冊 plugin 就有。
+
+結果顯示元件和 client tool 仍是 P3、P4。這個套件現在沒有那兩個 Blueprint。
 
 ## 7. 資料庫
 
@@ -1122,12 +1137,22 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 前端的分層比較輕，但是方向一樣：畫面元件不直接呼叫 `fetch`，狀態的規則是純函式。畫面用 assistant-ui 的無樣式 primitives；狀態留在 `useSessionChat`（D-31）。
 
 ```
+plugins/ai-chat-react/src/
+  api.ts                    aiChatPanelApiRef、AiChatPanelApi、AiChatLaunchRequest
+  application/
+    useAiChatPanel.ts       useAiChatPanel()
+  ui/
+    AiChatLauncher.tsx      別的 plugin 用的按鈕（沒有 API 時不畫）
+  index.ts
+
 plugins/ai-chat/src/
   domain/
     types.ts                ChatUiMessage（UIMessage 加上 data-run、data-item、data-notice、data-plan）
     itemsToMessages.ts      把 GET /sessions/:id 的 Item 轉成 UIMessage；lastRunInterrupted、lastUserText（純函式）
     approval.ts             還在等的呼叫、是不是最後一個要決定的呼叫（讀 UIMessage 的 part，純函式）
     toolView.ts             呼叫的狀態（等核准、已允許、完成、失敗、拒絕、結果不明、沒有執行）和標題
+    launch.ts               launchContextOf、panelMessagePage（純函式）
+    panel.ts                applyOpen、applyLaunch、applyClose、applySession（純函式；狀態裡沒有路由）
   api/                      aiChatApiRef 和 AiChatApi（port）
   adapters/
     AiChatClient.ts         實作 AiChatApi；串流的路由直接回傳 Response
@@ -1140,6 +1165,7 @@ plugins/ai-chat/src/
       threadListAdapter.ts  Session API → RemoteThreadListAdapter
       attachmentAdapter.ts  我們的上傳 → AttachmentAdapter
   application/              不動：React hooks，包 useChat
+    panelStore.ts           實作 aiChatPanelApiRef 的面板狀態與 launch 協調
     useSessionChat.ts       一個 Session 的 useChat：還原、決定、接續、停止、重新讀取
     useSessionList.ts       Session 列表（PU-05 之後刪掉，改由 threadListAdapter 負責）
     useToolsets.ts          GET /toolsets
@@ -1147,11 +1173,12 @@ plugins/ai-chat/src/
     usePageContext.ts       B-01：路徑和 entityRef
   ui/                       assistant-ui 的 primitives，套 @backstage/ui 的樣式
     ChatPage.tsx            路由（SE-01）、Session 列表、新對話
-    SessionView.tsx         一個 Session：Toolset、訊息、輸入框
+    SessionView.tsx         一個 Session：Toolset、訊息、輸入框。可傳 page
+    AiChatPanel.tsx         側邊面板。舊系統由 app 掛在路由外面
     ToolsetPanel.tsx        自己畫（assistant-ui 的模型裡沒有工具組）
     ToolCallCard.tsx        吃工具元件的 props：核准、拒絕、誰決定的、等待中、失敗
     ShareDialog.tsx（P2）  SharedBanner.tsx（P2）  PlanPanel.tsx（P3）
-  alpha.tsx                 新 frontend system 的 extension
+  alpha.tsx                 新 frontend system 的 extension（頁面、API、app root 的面板）
   plugin.ts                 舊 frontend system
 ```
 
@@ -1236,6 +1263,8 @@ Session 列表（`threadListAdapter`，實作 `RemoteThreadListAdapter`）。
 **`data-notice`**。畫面用 `code` 查表顯示英文（`summarizing`、`context_trimmed`）；`text` 不用。`summary` Item 不顯示。
 
 **頁面上下文（B-01）**。`usePageContext` 從 router 讀路徑，從查詢參數 `entityRef` 讀 entity（entity 頁面連到 `…/ai-chat?entityRef=component:default/x`），每則訊息、決定、接續的請求都帶 `page`。`entityRef` 在導向 Session 網址時保留。`page` 是用戶端給的，模型會讀它，所以兩邊都檢查：前端 `usePageContext` 用 `isEntityRef`、`isPagePath`（`ai-chat-common`）檢查，不合格的值不送，聊天照常；後端的 zod（`requestSchemas.ts`，送訊息、decision、resume 都一樣）不合格回 400，OpenAPI 有同樣的 pattern。後端把送訊息帶的 `page` 存在那則 `user_message`，`buildModelInput` 在那則訊息前加一行讓模型看到（見第 4 節）；決定和接續的 `page` 只給工具的 `CallContext`。
+
+**側邊面板（B-02）**。`ai-chat-react` 只暴露 `aiChatPanelApiRef`、`AiChatPanelApi`、`useAiChatPanel()` 和 `AiChatLauncher`。開啟和帶入上下文的規則（`launchContextOf`、`panelMessagePage`、`applyLaunch`、`applyClose`、`applySession`）與 store 實作都在 `ai-chat`，並分別在 `plugin.ts`（`apis`）與 `alpha.tsx`（`ApiBlueprint`）註冊為 Utility API。畫面在 `ai-chat` 的 `ui/AiChatPanel.tsx`，等 `identityApiRef.getBackstageIdentity()` 解析後才渲染，畫在路由外面：舊系統由 app 在 router 裡掛一次，新系統是 `alpha.tsx` 的 app root element。換頁不卸載已經開始的對話，所以進行中的 Run 不會停。還沒開始對話時，關上的面板只有邊上的按鈕，不畫對話區。`SessionView` 接受一個 `page`，面板傳 `panelMessagePage` 的結果；沒傳時仍用 `usePageContext`，整頁的行為不變。
 
 **Toolset（T-11）**。`useToolsets` 讀 `GET /toolsets`；新對話用 `default` 的 Toolset 建立 Session，Session 裡的開關呼叫 `PATCH /sessions/:id`，失敗時還原。進行中的 Run 不能改。
 

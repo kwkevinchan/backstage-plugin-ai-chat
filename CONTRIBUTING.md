@@ -52,7 +52,8 @@ BACKSTAGE_TEST_DATABASE_POSTGRES16_CONNECTION_STRING=postgresql://postgres:postg
 | `ai-chat-backend`                | Backend plugin `ai-chat`; depends on `ai-chat-harness`, `ai-chat-common` and `ai-chat-node`         |
 | `ai-chat-node`                   | Extension point for backend modules; depends only on `ai-chat-harness`                              |
 | `ai-chat-backend-module-example` | Private example module, not published; depends only on `ai-chat-node` and the Backstage backend API |
-| `ai-chat`                        | Frontend plugin; depends on no other package of this repository                                     |
+| `ai-chat`                        | Frontend plugin; depends on `ai-chat-common` and `ai-chat-react`                                    |
+| `ai-chat-react`                  | Web library other frontend plugins use to open the chat; may depend on `ai-chat-common` only        |
 | `app`, `app-next`                | Development apps (legacy and new frontend system); private                                          |
 | `backend`                        | Development backend; private                                                                        |
 | `ai-chat-harness` (`packages/`)  | Core of the agent loop; published, depends on no `@backstage/*` package                             |
@@ -63,7 +64,10 @@ packages never depend on backend packages or Node-only packages, and the other
 way round, and a published package never on a private one. The backend
 depends on the harness, the common types and `ai-chat-node`. `ai-chat-node`
 depends only on the harness. A backend module of this plugin depends only on
-`ai-chat-node`, not on the host or the harness. The core
+`ai-chat-node`, not on the host or the harness. The frontend plugin
+depends on `ai-chat-common` and `ai-chat-react`. `ai-chat-react` may depend on
+`ai-chat-common` and on nothing else here. Another frontend package depends only on `ai-chat-react`,
+not on the host plugin. The core
 (`packages/ai-chat-harness`) depends on no other package of this repository
 and lists no `@backstage/*` package as a runtime
 dependency, and its lint rules (`packages/ai-chat-harness/.eslintrc.js`, tested in
