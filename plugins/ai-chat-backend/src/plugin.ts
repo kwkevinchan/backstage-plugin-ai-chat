@@ -20,7 +20,9 @@ import {
   resolvePackagePath,
 } from '@backstage/backend-plugin-api';
 import { actionsServiceRef } from '@backstage/backend-plugin-api/alpha';
+import { aiChatHarnessExtensionPoint } from '@kwkevinchan/backstage-plugin-ai-chat-node';
 import { ActionsToolGateway } from './adapters/backstage/ActionsToolGateway';
+import { AiChatHarnessRegistry } from './adapters/backstage/AiChatHarnessRegistry';
 import { AuditorAuditLog } from './adapters/backstage/AuditorAuditLog';
 import { ConfigAgentCatalog } from './adapters/backstage/ConfigAgentCatalog';
 import { PermissionAccessControl } from './adapters/backstage/PermissionAccessControl';
@@ -68,6 +70,10 @@ const PURGE_EXPIRED_SESSIONS_EVERY = { hours: 1 };
 export const aiChatPlugin = createBackendPlugin({
   pluginId: 'ai-chat',
   register(env) {
+    // Modules of this plugin run their init before this one, and they add to
+    // the registry through the extension point. It has to exist before that.
+    const harnessExtensions = new AiChatHarnessRegistry();
+    env.registerExtensionPoint(aiChatHarnessExtensionPoint, harnessExtensions);
     env.registerInit({
       deps: {
         logger: coreServices.logger,
@@ -100,9 +106,16 @@ export const aiChatPlugin = createBackendPlugin({
         permissionsRegistry,
       }) {
         const aiChat = readAiChatConfig(config);
-        // Reads and checks the toolsets and the policy, and warns about the
-        // deprecated include and exclude lists.
-        const catalog = new ConfigAgentCatalog(config, logger);
+        // Reads and checks the toolsets, the policy and the agents, and warns
+        // about the deprecated include and exclude lists.
+        const catalog = new ConfigAgentCatalog(
+          config,
+          logger,
+          harnessExtensions.agents(),
+        );
+        logger.info(
+          `AI chat extensions: ${harnessExtensions.agents().length} agent(s)`,
+        );
         const toolsets = await catalog.toolsets();
         logger.info(
           `AI chat toolsets: ${toolsets.map(t => t.id).join(', ') || 'none'}`,

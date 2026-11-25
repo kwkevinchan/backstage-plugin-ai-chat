@@ -330,6 +330,23 @@ describe('the configuration in the READMEs', () => {
         'catalog:get-entity': 'allow',
         'temporal:terminate-workflow': 'deny',
       });
+      const sre = await catalog.agent('sre');
+      expect(sre.title).toBe('SRE Agent');
+      expect(sre.systemPrompt).toContain('Rules that always apply');
+      expect(sre.systemPrompt).toContain('example.com');
+      expect(sre.toolsets).toEqual(expect.arrayContaining(['catalog']));
+      expect(sre.skills).toEqual(['deploy-failure', 'rollback']);
+      expect(sre.model).toBe('default');
+      expect(sre.planning).toBe('required');
+      expect(sre.limits).toEqual({
+        maxSteps: 8,
+        maxToolCallsPerRun: 20,
+        runTimeoutSeconds: 300,
+      });
+      const fallback = await catalog.agent('default');
+      expect(fallback.title).toBe('Backstage Agent');
+      expect(fallback.toolsets).toEqual(['catalog']);
+      expect(fallback.systemPrompt).toContain('Rules that always apply');
       expect(logger.warn).not.toHaveBeenCalled();
     },
   );

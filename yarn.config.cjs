@@ -53,19 +53,19 @@ const roleOf = workspace => workspace.manifest.backstage?.role;
 
 /**
  * The plugin ships one backend and one frontend package. Neither depends on
- * the other, or on any other package of this repository.
+ * the other. The backend depends on the harness, the common types and
+ * `ai-chat-node`. `ai-chat-node` depends only on the harness. A backend
+ * module of this plugin depends only on `ai-chat-node`.
+ *
+ * The harness is the framework-free core of the agent loop. It does not know
+ * Backstage, so no @backstage/* package and no Node-only package (express,
+ * knex) is a runtime dependency (dev dependencies, such as the CLI that
+ * builds it, are fine).
  */
-const BACKEND_CORE = '@kwkevinchan/backstage-plugin-ai-chat-backend';
-const FRONTEND_CORE = '@kwkevinchan/backstage-plugin-ai-chat';
-
-/**
- * The framework-free core of the agent loop. It does not know Backstage, so
- * no @backstage/* package and no Node-only package (express, knex) is a
- * runtime dependency (dev dependencies, such as the CLI that builds it, are
- * fine).
- */
-const HARNESS = '@kwkevinchan/ai-chat-harness';
-const COMMON = '@kwkevinchan/backstage-plugin-ai-chat-common';
+const {
+  HARNESS,
+  workspaceDependencyError,
+} = require('./scripts/workspace-deps.cjs');
 
 module.exports = defineConfig({
   async constraints({ Yarn }) {
@@ -130,39 +130,22 @@ module.exports = defineConfig({
         );
       }
 
-      // Published packages: no private workspaces; the core packages
-      // (frontend, harness, common) depend on no other workspace, except that the
-      // backend depends on the harness and common and the frontend on common; a
-      // module only on the core of its side.
+      // Published packages: no private workspaces. Which package may depend
+      // on which other package of this repository is `workspaceDependencyError`.
       if (isPublished && target && dep.type !== 'devDependencies') {
-        // The harness and the common package are foundations too.
-        const isCore = [BACKEND_CORE, FRONTEND_CORE, HARNESS, COMMON].includes(
-          workspace.ident,
-        );
         if (target.manifest.private === true) {
           dep.error(
             `Published packages must not depend on the private package ${dep.ident}`,
           );
-        } else if (
-          workspace.ident === BACKEND_CORE &&
-          (dep.ident === HARNESS || dep.ident === COMMON)
-        ) {
-          // The backend plugin is built on the harness and the common types.
-        } else if (workspace.ident === FRONTEND_CORE && dep.ident === COMMON) {
-          // The frontend plugin shares the API types with the backend.
-        } else if (isCore) {
-          dep.error(
-            `${workspace.ident} must not depend on other packages of this repository (${dep.ident})`,
-          );
         } else {
-          const core = BACKEND_ROLES.has(roleOf(workspace))
-            ? BACKEND_CORE
-            : FRONTEND_CORE;
-          if (dep.ident !== core) {
-            dep.error(
-              `${workspace.ident} may only depend on ${core} of this repository, not ${dep.ident}`,
-            );
-          }
+          const message = workspaceDependencyError({
+            from: workspace.ident,
+            to: dep.ident,
+            backendRole: BACKEND_ROLES.has(roleOf(workspace)),
+            role: roleOf(workspace),
+            pluginId: workspace.manifest.backstage?.pluginId,
+          });
+          if (message) dep.error(message);
         }
       }
 

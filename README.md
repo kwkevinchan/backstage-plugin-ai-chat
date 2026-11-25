@@ -167,6 +167,21 @@ aiChat:
   policy: # by complete action ID: allow, ask or deny
     'catalog:get-entity': allow
     'temporal:terminate-workflow': deny
+  agents: # optional; without this block the only agent is default
+    default:
+      title: Backstage Agent
+      toolsets: [catalog]
+    sre:
+      title: SRE Agent
+      systemPrompt: You help the on-call engineer of example.com. Write a plan first, and cite the source.
+      toolsets: [catalog, temporal]
+      skills: [deploy-failure, rollback]
+      model: default
+      planning: required
+      limits:
+        maxSteps: 8
+        maxToolCallsPerRun: 20
+        runTimeoutSeconds: 300
   # Limits of one run (a message and the approvals after it)
   maxTurns: 10 # model calls; default 10
   maxToolCallsPerRun: 30 # tool calls the model may ask for; default 30
@@ -286,6 +301,34 @@ of the chat, above the messages), only the ones that you define.
 they make the one default toolset, with `toolsets` they are ignored, and the
 backend logs a warning when either is set. They will be removed in a later
 version.
+
+### Agents
+
+Without `aiChat.agents` there is one agent, `default`: the built-in rules plus
+`aiChat.systemPrompt`. An entry in `aiChat.agents` is another agent. An entry
+whose id is `default` replaces the built-in one.
+
+The system prompt of a configured agent is the built-in rules plus that
+agent's `systemPrompt`. When the agent omits `systemPrompt`, the installation
+`aiChat.systemPrompt` is used instead. The two extra texts are not combined.
+`toolsets` names toolsets from `aiChat.toolsets` (or `default`, when no
+toolsets are configured). `skills`, `model`, `limits` and `planning: required`
+are recorded on the agent. A wrong value stops the backend at startup.
+
+The loop still uses the limits of the installation and its one model client.
+It does not filter tools by the agent's toolsets, load a skill, require a
+plan on the first step, or call a model client other than that one.
+
+A backend module can register more agents through
+`@kwkevinchan/backstage-plugin-ai-chat-node`. It depends only on that package.
+An agent a module registers receives the same built-in prompt rules as a
+configured agent. An id that both the configuration and a module define stops
+the backend.
+
+`plugins/ai-chat-backend-module-example` in this repository is a private
+example of such a module, to copy from. It registers the agent `guide`. It is
+not a package to install. The example uses `guide`, so `aiChat.agents.guide`
+would also stop the backend.
 
 Any OpenAI-compatible server works, for example a local server: set `baseUrl`
 to `http://localhost:11434/v1` and leave out `apiKey`.
@@ -509,7 +552,10 @@ this plugin until it is updated.
 
 Retrieval over TechDocs, an entity tab or sidebar widget, file uploads,
 several model providers at once, MCP servers outside Backstage, sharing a
-conversation, and agents of your own with skills and hooks.
+conversation, applying an agent's skills, hooks, planning or model (those
+fields can be set, and a module can register them; the loop does not use them
+yet), and a session list that can search, pin or archive (the page still lists
+recent sessions; a title is stored after the first round ends normally).
 
 Limits of this version:
 
