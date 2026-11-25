@@ -52,4 +52,41 @@ describe('AiChatHarnessRegistry', () => {
     ).toThrow('agent guide is already registered');
     expect(registry.agents()[0].systemPrompt).toBe('Keep this one.');
   });
+
+  it('keeps multiple hooks per phase in registration order and exposes Extensions', () => {
+    const registry = new AiChatHarnessRegistry();
+    const first = jest.fn();
+    const second = jest.fn();
+    const onEnd = jest.fn();
+
+    registry.addHook('beforeModelCall', first);
+    registry.addHook('beforeModelCall', second);
+    registry.addHook('onRunEnd', onEnd);
+
+    expect(registry.hookCount()).toBe(3);
+    expect(registry.hooks()).toEqual({
+      beforeModelCall: [first, second],
+      beforeToolCall: [],
+      afterToolCall: [],
+      onRunEnd: [onEnd],
+    });
+    expect(registry.extensions()).toEqual({
+      hooks: {
+        beforeModelCall: [first, second],
+        beforeToolCall: [],
+        afterToolCall: [],
+        onRunEnd: [onEnd],
+      },
+    });
+  });
+
+  it('rejects unknown hook names and non-function hooks', () => {
+    const registry = new AiChatHarnessRegistry();
+    expect(() =>
+      registry.addHook('afterModelCall' as never, jest.fn() as never),
+    ).toThrow('unknown hook: afterModelCall');
+    expect(() =>
+      registry.addHook('beforeToolCall', 'not a fn' as never),
+    ).toThrow('hook beforeToolCall must be a function');
+  });
 });

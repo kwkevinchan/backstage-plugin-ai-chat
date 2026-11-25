@@ -25,6 +25,7 @@ import type { HarnessEvent } from '../events';
 import type { ItemDraft } from '../ports/ItemLog';
 import type { ToolOutput } from '../ports/ToolGateway';
 import type { AdvanceRunDeps, AdvanceRunRequest } from '../types';
+import { runAfterToolCall } from './hooks';
 
 /**
  * Calls that may run together: a stretch of read-only calls, or one call that
@@ -103,7 +104,14 @@ export async function* executeTools(
           yield* write({ kind: 'tool_started', callId: call.callId });
           if (req.signal.aborted) return undefined;
         }
-        const output = await run(deps, req, call);
+        const raw = await run(deps, req, call);
+        if (!raw) return undefined;
+        const output = await runAfterToolCall(
+          deps.extensions,
+          call,
+          raw,
+          req.signal,
+        );
         if (!output) return undefined;
         yield* write(resultOf(call, output));
       } else if (decision === 'deny') {

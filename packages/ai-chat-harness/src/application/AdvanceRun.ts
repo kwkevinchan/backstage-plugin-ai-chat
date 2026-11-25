@@ -18,6 +18,7 @@ import { decideNextAction, type Item, type RunUsage } from '../domain';
 import type { HarnessEvent, RunOutcome } from './events';
 import { callModel } from './steps/callModel';
 import { executeTools } from './steps/executeTools';
+import { runOnRunEnd } from './steps/hooks';
 import type { AdvanceRunDeps, AdvanceRunRequest } from './types';
 
 /**
@@ -60,14 +61,24 @@ export class AdvanceRun {
     req: AdvanceRunRequest,
   ): AsyncGenerator<HarnessEvent, RunOutcome> {
     yield { type: 'run.started', runId: req.fence.runId };
-    const outcome = yield* this.loop(req);
+    const { outcome, usage } = yield* this.loop(req);
     yield { type: 'run.ended', outcome };
+    if (outcome.status !== 'waiting_approval') {
+      await runOnRunEnd(this.deps.extensions, {
+        sessionId: req.ctx.sessionId,
+        runId: req.fence.runId,
+        agentId: req.agent.id,
+        principal: req.ctx.principal,
+        outcome,
+        usage,
+      });
+    }
     return outcome;
   }
 
   private async *loop(
     req: AdvanceRunRequest,
-  ): AsyncGenerator<HarnessEvent, RunOutcome> {
+  ): AsyncGenerator<HarnessEvent, { outcome: RunOutcome; usage: RunUsage }> {
     const deadline = deadlineOf(req);
     try {
       return yield* this.steps(req, deadline);
@@ -79,7 +90,7 @@ export class AdvanceRun {
   private async *steps(
     outer: AdvanceRunRequest,
     deadline: Deadline,
-  ): AsyncGenerator<HarnessEvent, RunOutcome> {
+  ): AsyncGenerator<HarnessEvent, { outcome: RunOutcome; usage: RunUsage }> {
     const { deps } = this;
     // The steps see the signal that also aborts at the deadline.
     const req: AdvanceRunRequest = { ...outer, signal: deadline.signal };
@@ -89,10 +100,13 @@ export class AdvanceRun {
       req.usage.elapsedSeconds +
       (deps.clock.now().getTime() - startedAt) / 1000;
 
-    const end = async (outcome: RunOutcome): Promise<RunOutcome> => {
+    const end = async (
+      outcome: RunOutcome,
+    ): Promise<{ outcome: RunOutcome; usage: RunUsage }> => {
       usage.elapsedSeconds = elapsed();
-      await deps.run.recordUsage(req.fence, { ...usage });
-      return outcome;
+      const recorded = { ...usage };
+      await deps.run.recordUsage(req.fence, recorded);
+      return { outcome, usage: recorded };
     };
 
     // A summary that failed is not tried again in this call of the loop.

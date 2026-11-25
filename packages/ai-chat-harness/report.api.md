@@ -63,6 +63,8 @@ export type AgentMessageBody = {
 export interface AiChatHarnessExtensionPoint {
   // (undocumented)
   addAgent(agent: AgentDefinition): void;
+  // (undocumented)
+  addHook<K extends HookName>(name: K, hook: Hooks[K]): void;
 }
 
 // @public
@@ -86,6 +88,19 @@ export type AttachmentRef = {
   name: string;
   size: number;
 };
+
+// @public
+export type BeforeToolCallDecision =
+  | {
+      action: 'continue';
+    }
+  | {
+      action: 'ask';
+    }
+  | {
+      action: 'deny';
+      reason: string;
+    };
 
 // @public
 export function buildModelInput(
@@ -177,7 +192,9 @@ export function emptyExtensions(): Extensions;
 export function estimateTokens(text: string): number;
 
 // @public
-export type Extensions = Readonly<Record<string, never>>;
+export type Extensions = {
+  readonly hooks?: Partial<HookRegistry>;
+};
 
 // @public
 export class HarnessError extends Error {
@@ -236,6 +253,32 @@ export type HarnessEvent =
       type: 'run.ended';
       outcome: RunOutcome;
     };
+
+// @public
+export type HookName = keyof Hooks;
+
+// @public
+export type HookRegistry = {
+  readonly [K in HookName]: readonly Hooks[K][];
+};
+
+// @public
+export interface Hooks {
+  // (undocumented)
+  afterToolCall(
+    call: ToolCall,
+    result: ToolResult,
+  ): ToolResult | Promise<ToolResult>;
+  // (undocumented)
+  beforeModelCall(ctx: StepContext): void | Promise<void>;
+  // (undocumented)
+  beforeToolCall(
+    call: ToolCall,
+    ctx: StepContext,
+  ): BeforeToolCallDecision | Promise<BeforeToolCallDecision>;
+  // (undocumented)
+  onRunEnd(run: RunSummary): void | Promise<void>;
+}
 
 // @public
 export interface IdGenerator {
@@ -524,11 +567,36 @@ export type RunStatus =
   | 'expired';
 
 // @public
+export interface RunSummary {
+  // (undocumented)
+  readonly agentId: string;
+  // (undocumented)
+  readonly outcome: RunOutcome;
+  // (undocumented)
+  readonly principal: unknown;
+  // (undocumented)
+  readonly runId: string;
+  // (undocumented)
+  readonly sessionId: string;
+  // (undocumented)
+  readonly usage: RunUsage;
+}
+
+// @public
 export type RunUsage = {
   stepsUsed: number;
   toolCallsUsed: number;
   elapsedSeconds: number;
 };
+
+// @public
+export interface StepContext extends CallContext {
+  // (undocumented)
+  agentId: string;
+  // (undocumented)
+  signal: AbortSignal;
+  step: number;
+}
 
 // @public (undocumented)
 export type StopReason = 'max_steps' | 'max_tool_calls' | 'timeout';
@@ -552,6 +620,22 @@ export type SummaryPlan = {
   previousSummary?: string;
   items: Item[];
 };
+
+// @public
+export interface ToolCall {
+  // (undocumented)
+  readonly callId: string;
+  // (undocumented)
+  readonly input: JsonObject;
+  // (undocumented)
+  readonly position: number;
+  // (undocumented)
+  readonly readOnly: boolean;
+  // (undocumented)
+  readonly step: number;
+  // (undocumented)
+  readonly toolId: string;
+}
 
 // @public
 export type ToolCallBody = {
@@ -605,6 +689,9 @@ export type ToolOutput = {
   truncated?: boolean;
   message?: string;
 };
+
+// @public
+export type ToolResult = ToolOutput;
 
 // @public (undocumented)
 export type ToolResultBody = {

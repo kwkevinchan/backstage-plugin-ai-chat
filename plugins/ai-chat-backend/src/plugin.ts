@@ -122,7 +122,9 @@ export const aiChatPlugin = createBackendPlugin({
           harnessExtensions.agents(),
         );
         logger.info(
-          `AI chat extensions: ${harnessExtensions.agents().length} agent(s)`,
+          `AI chat extensions: ${
+            harnessExtensions.agents().length
+          } agent(s), ${harnessExtensions.hookCount()} hook(s)`,
         );
         const toolsets = await catalog.toolsets();
         logger.info(
@@ -196,6 +198,7 @@ export const aiChatPlugin = createBackendPlugin({
             },
           },
           retentionDays: aiChat.retentionDays,
+          extensions: harnessExtensions.extensions(),
           notifier,
         });
         lifecycle.addShutdownHook(() => host.supervisor.shutdown());
