@@ -15,13 +15,33 @@
  */
 
 import type { PageContext } from '@kwkevinchan/ai-chat-harness';
-import { assertOwner, type Principal, type QueuedMessage } from '../../domain';
+import {
+  assertOwner,
+  EmptyMessage,
+  QueuedMessageNotFound,
+  type Principal,
+  type QueuedMessage,
+} from '../../domain';
 import { bindAttachments, type ImageSettings } from '../attachments';
 import type {
   AttachmentStore,
   QueuedMessageRepository,
   SessionRepository,
 } from '../ports';
+
+/** The text and images the message would have after the patch. */
+function afterPatch(
+  current: QueuedMessage,
+  patch: { text?: string; attachmentIds?: string[] },
+): { text: string; attachmentIds: string[] } {
+  return {
+    text: patch.text !== undefined ? patch.text : current.text,
+    attachmentIds:
+      patch.attachmentIds !== undefined
+        ? patch.attachmentIds
+        : current.attachments.map(attachment => attachment.id),
+  };
+}
 
 /** The user changes a queued message that was not sent yet (IN-13). */
 export class UpdateQueuedMessage {
@@ -36,7 +56,10 @@ export class UpdateQueuedMessage {
 
   /**
    * Throws `NotSessionOwner`, `QueuedMessageNotFound`, or, for the images,
-   * `ImagesNotSupported`, `TooManyAttachments` or `UnknownAttachment`.
+   * `ImagesNotSupported`, `TooManyAttachments` or `UnknownAttachment`. A
+   * patch that would leave the message with no text and no image is refused
+   * (`EmptyMessage`, 400): the body cannot see what is already stored, so the
+   * result is checked here.
    */
   async execute(input: {
     principal: Principal;
@@ -51,6 +74,14 @@ export class UpdateQueuedMessage {
     const { sessions, queue } = this.deps;
     const session = await sessions.get(input.sessionId);
     assertOwner(session, input.principal);
+    const current = (await queue.list(session.id)).find(
+      message => message.id === input.queuedId,
+    );
+    if (!current) throw new QueuedMessageNotFound(input.queuedId);
+    const next = afterPatch(current, input.patch);
+    if (next.text.length === 0 && next.attachmentIds.length === 0) {
+      throw new EmptyMessage();
+    }
     await bindAttachments(this.deps, session.id, input.patch.attachmentIds);
     return queue.update(session.id, input.queuedId, input.patch);
   }

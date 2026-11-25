@@ -147,6 +147,20 @@ export function mockApi(
     deleteQueuedMessage: jest.fn().mockResolvedValue(undefined),
     reorderQueue: jest.fn(),
     resumeQueue: jest.fn().mockResolvedValue(undefined),
+    getInputConfig: jest.fn().mockResolvedValue({
+      images: {
+        enabled: false,
+        mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+        maxPerMessage: 4,
+        maxBytes: 5 * 1024 * 1024,
+        maxBytesPerInput: 20 * 1024 * 1024,
+        maxPendingPerSession: 12,
+      },
+      insertMaxPerRun: 5,
+      queueMaxMessages: 5,
+    }),
+    uploadAttachment: jest.fn(),
+    readAttachment: jest.fn(),
     ...overrides,
   } as jest.Mocked<AiChatApi>;
 }

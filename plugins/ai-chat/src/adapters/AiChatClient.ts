@@ -18,6 +18,7 @@ import { DiscoveryApi, FetchApi } from '@backstage/core-plugin-api';
 import { ResponseError } from '@backstage/errors';
 import {
   chatPaths,
+  type ChatInputConfig,
   type ChatItem,
   type ChatQueue,
   type ChatQueuedMessage,
@@ -25,6 +26,7 @@ import {
   type ChatSessionDetail,
   type ChatTool,
   type ChatToolset,
+  type ChatUploadedAttachment,
   type CreateChatSessionRequest,
   type DecideToolCallRequest,
   type InsertChatMessageRequest,
@@ -199,5 +201,37 @@ export class AiChatClient implements AiChatApi {
   async resumeQueue(id: string, signal?: AbortSignal) {
     const response = await this.post(chatPaths.queueResume(id), {}, signal);
     return response.status === 204 ? undefined : response;
+  }
+
+  async getInputConfig() {
+    const response = await this.request(chatPaths.inputConfig());
+    return (await response.json()) as ChatInputConfig;
+  }
+
+  async uploadAttachment(
+    sessionId: string,
+    body: Blob,
+    name: string,
+    onProgress?: (loaded: number, total: number) => void,
+  ) {
+    const total = body.size;
+    onProgress?.(0, total);
+    const response = await this.request(
+      `${chatPaths.attachments(sessionId)}?name=${encodeURIComponent(name)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': body.type || 'application/octet-stream' },
+        body,
+      },
+    );
+    onProgress?.(total, total);
+    return (await response.json()) as ChatUploadedAttachment;
+  }
+
+  async readAttachment(sessionId: string, attachmentId: string) {
+    const response = await this.request(
+      chatPaths.attachment(sessionId, attachmentId),
+    );
+    return response.blob();
   }
 }

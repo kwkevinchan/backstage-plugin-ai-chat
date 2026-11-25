@@ -251,3 +251,10 @@ export class TooManyImageBytes extends ChatDomainError {
     );
   }
 }
+
+/** The message would have no text and no image (IN-09). */
+export class EmptyMessage extends ChatDomainError {
+  constructor() {
+    super('EMPTY_MESSAGE', 'must have text or at least one image');
+  }
+}

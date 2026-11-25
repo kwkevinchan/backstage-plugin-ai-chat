@@ -26,6 +26,7 @@ import {
   AgentNotFound,
   AttachmentNotFound,
   AttachmentTooLarge,
+  EmptyMessage,
   ImagesNotSupported,
   InsertLimitReached,
   InvalidAttachment,
@@ -136,7 +137,8 @@ export function toHttpError(
     error instanceof InvalidAttachment ||
     error instanceof TooManyAttachments ||
     error instanceof ImagesNotSupported ||
-    error instanceof TooManyImageBytes
+    error instanceof TooManyImageBytes ||
+    error instanceof EmptyMessage
   ) {
     return new NamedHttpError(error.name, 400, error.message);
   }
