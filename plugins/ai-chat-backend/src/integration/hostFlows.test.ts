@@ -1136,7 +1136,11 @@ describe('the host on a real database', () => {
         text: 'go',
       });
       await drain(h1);
-      await new Promise(resolve => setImmediate(resolve));
+      await until(() =>
+        events.some(
+          e => e.sessionId === s1.id && e.activity === 'waiting_approval',
+        ),
+      );
       events.length = 0;
       expect(
         await a.useCases.cancelRun.execute({
@@ -1145,8 +1149,9 @@ describe('the host on a real database', () => {
           runId: h1.runId,
         }),
       ).toBe(true);
-      await new Promise(resolve => setImmediate(resolve));
-      expect(events).toContainEqual({ sessionId: s1.id, activity: 'idle' });
+      await until(() =>
+        events.some(e => e.sessionId === s1.id && e.activity === 'idle'),
+      );
 
       // 2. ExpireStaleRuns
       const b = backend([waitForAbort], { notifier, heartbeatMs: 60_000 });
@@ -1182,8 +1187,9 @@ describe('the host on a real database', () => {
           text: 'boom',
         }),
       ).rejects.toThrow('launch failed');
-      await new Promise(resolve => setImmediate(resolve));
-      expect(events).toContainEqual({ sessionId: s3.id, activity: 'idle' });
+      await until(() =>
+        events.some(e => e.sessionId === s3.id && e.activity === 'idle'),
+      );
 
       // 4. resumeIfDecided fails to start after acquiring the lease
       const d = backend([[callTool('m1', 'demo:write', { name: 'a' })]], {
@@ -1210,8 +1216,9 @@ describe('the host on a real database', () => {
           decision: 'allow',
         }),
       ).rejects.toThrow('resume launch failed');
-      await new Promise(resolve => setImmediate(resolve));
-      expect(events).toContainEqual({ sessionId: s4.id, activity: 'idle' });
+      await until(() =>
+        events.some(e => e.sessionId === s4.id && e.activity === 'idle'),
+      );
     });
   });
 });
