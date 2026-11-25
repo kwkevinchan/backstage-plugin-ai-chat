@@ -14,8 +14,9 @@ Backstage actions registry 裡的 action：
 
 迴圈寫在獨立的套件 [`@kwkevinchan/ai-chat-harness`](packages/ai-chat-harness)，不依賴
 Backstage。後端外掛把它接上資料庫、actions service 和 HTTP。設計文件在
-[docs/design](docs/design/README.zh-TW.md)；P1 每一條需求對到哪個測試，見
-[p1-coverage.zh-TW.md](docs/design/p1-coverage.zh-TW.md)。
+[docs/design](docs/design/README.zh-TW.md)；P1 每一條需求對到哪個測試見
+[p1-coverage.zh-TW.md](docs/design/p1-coverage.zh-TW.md)，PI 見
+[pi-coverage.zh-TW.md](docs/design/pi-coverage.zh-TW.md)。
 
 ## 安裝
 
