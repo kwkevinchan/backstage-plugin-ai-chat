@@ -34,7 +34,7 @@ import {
 import { EventChannel } from './EventChannel';
 import { notifyActivity, type ActivityNotifier } from './notifyActivity';
 import type { AfterRun, HostEvent } from './hostEvents';
-import type { RunEnded } from './runEnded';
+import { RUN_END_HOOK_TIMEOUT_MS, type RunEnded } from './runEnded';
 import type {
   Logger,
   RunRepository,
@@ -242,7 +242,9 @@ export class RunSupervisor {
 
   /**
    * H-11. Takes no new runs, waits up to `graceMs` for the running ones, then
-   * aborts what is left and marks each of those runs `expired`.
+   * aborts what is left and marks each of those runs `expired`. Last, it waits
+   * up to `RUN_END_HOOK_TIMEOUT_MS` (10 seconds) for the `onRunEnd` hooks
+   * that still run.
    */
   async shutdown(graceMs: number = DEFAULT_GRACE_MS): Promise<void> {
     this.closed = true;
@@ -272,6 +274,7 @@ export class RunSupervisor {
       }
     }
     await this.settled(ABORT_WAIT_MS);
+    await this.deps.runEnded?.drain(RUN_END_HOOK_TIMEOUT_MS);
   }
 
   private async settled(ms: number): Promise<void> {

@@ -89,7 +89,7 @@ describe('AiChatHarnessRegistry', () => {
     expect(registry.agents()[0].systemPrompt).toBe('Keep this one.');
   });
 
-  it('keeps multiple hooks per phase in registration order and exposes Extensions', () => {
+  it('keeps multiple hooks per phase in registration order and exposes Extensions', async () => {
     const registry = new AiChatHarnessRegistry();
     const first = jest.fn();
     const second = jest.fn();
@@ -100,12 +100,14 @@ describe('AiChatHarnessRegistry', () => {
     registry.addHook('onRunEnd', onEnd);
 
     expect(registry.hookCount()).toBe(3);
-    expect(registry.hooks()).toEqual({
-      beforeModelCall: [first, second],
-      beforeToolCall: [],
-      afterToolCall: [],
-      onRunEnd: [onEnd],
-    });
+    const hooks = extensionsOf(registry);
+    expect(hooks.beforeModelCall).toHaveLength(2);
+    expect(hooks.onRunEnd).toHaveLength(1);
+    await hooks.beforeModelCall![1](stepContext);
+    expect(second).toHaveBeenCalledWith(stepContext);
+    expect(first).not.toHaveBeenCalled();
+    await hooks.onRunEnd![0](summary);
+    expect(onEnd).toHaveBeenCalledWith(summary);
   });
 
   it('calls the hooks in order through extensions, and adds nothing when no afterToolCall hook is registered', async () => {
@@ -128,7 +130,13 @@ describe('AiChatHarnessRegistry', () => {
     expect(trace).toEqual(['first', 'second', 'end']);
   });
 
-  it.each<[string, (registry: AiChatHarnessRegistry) => Promise<unknown>]>([
+  it.each<
+    [
+      string,
+      (registry: AiChatHarnessRegistry) => Promise<unknown>,
+      Record<string, string>,
+    ]
+  >([
     [
       'beforeModelCall',
       async registry => {
@@ -137,6 +145,7 @@ describe('AiChatHarnessRegistry', () => {
         });
         return extensionsOf(registry).beforeModelCall![0](stepContext);
       },
+      { runId: 'r' },
     ],
     [
       'beforeToolCall',
@@ -146,6 +155,7 @@ describe('AiChatHarnessRegistry', () => {
         });
         return extensionsOf(registry).beforeToolCall![0](toolCall, stepContext);
       },
+      { runId: 'r', callId: 'c' },
     ],
     [
       'afterToolCall',
@@ -157,6 +167,7 @@ describe('AiChatHarnessRegistry', () => {
           status: 'ok',
         });
       },
+      { callId: 'c' },
     ],
     [
       'onRunEnd',
@@ -166,15 +177,16 @@ describe('AiChatHarnessRegistry', () => {
         });
         return extensionsOf(registry).onRunEnd![0](summary);
       },
+      { runId: 'r' },
     ],
   ])(
     'logs a %s hook that throws with its name, and throws again',
-    async (name, run) => {
+    async (name, run, where) => {
       const registry = new AiChatHarnessRegistry();
       await expect(run(registry)).rejects.toThrow('quota service down');
       expect(logger.warn).toHaveBeenCalledWith(
         `An AI chat ${name} hook failed`,
-        { hook: name, error: 'quota service down' },
+        { hook: name, ...where, error: 'quota service down' },
       );
     },
   );

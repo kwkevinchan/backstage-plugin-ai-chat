@@ -20,7 +20,6 @@ import type {
   AiChatHarnessExtensionPoint,
   Extensions,
   HookName,
-  HookRegistry,
   Hooks,
   ToolResult,
 } from '@kwkevinchan/ai-chat-harness';
@@ -77,15 +76,6 @@ export class AiChatHarnessRegistry implements AiChatHarnessExtensionPoint {
     return [...this.agentList];
   }
 
-  hooks(): HookRegistry {
-    return {
-      beforeModelCall: [...this.hookLists.beforeModelCall],
-      beforeToolCall: [...this.hookLists.beforeToolCall],
-      afterToolCall: [...this.hookLists.afterToolCall],
-      onRunEnd: [...this.hookLists.onRunEnd],
-    };
-  }
-
   hookCount(): number {
     return HOOK_NAMES.reduce(
       (sum, name) => sum + this.hookLists[name].length,
@@ -139,10 +129,48 @@ function logged<K extends HookName>(
     } catch (error) {
       logger.warn(`An AI chat ${name} hook failed`, {
         hook: name,
+        ...definedOf(whereOf(name, args)),
         error: error instanceof Error ? error.message : String(error),
       });
       throw error;
     }
   };
   return wrapped as unknown as Hooks[K];
+}
+
+/**
+ * Which run, or which call, a failed hook was called for. `afterToolCall`
+ * gets no context, so its call id stands for the run.
+ */
+function whereOf(
+  name: HookName,
+  args: unknown[],
+): { runId?: string; callId?: string } {
+  const field = (value: unknown, key: string): string | undefined => {
+    const found =
+      typeof value === 'object' && value !== null
+        ? (value as Record<string, unknown>)[key]
+        : undefined;
+    return typeof found === 'string' ? found : undefined;
+  };
+  switch (name) {
+    case 'beforeModelCall':
+    case 'onRunEnd':
+      return { runId: field(args[0], 'runId') };
+    case 'beforeToolCall':
+      return {
+        runId: field(args[1], 'runId'),
+        callId: field(args[0], 'callId'),
+      };
+    case 'afterToolCall':
+      return { callId: field(args[0], 'callId') };
+    default:
+      return name satisfies never;
+  }
+}
+
+function definedOf(fields: Record<string, string | undefined>) {
+  return Object.fromEntries(
+    Object.entries(fields).filter(([, value]) => value !== undefined),
+  );
 }

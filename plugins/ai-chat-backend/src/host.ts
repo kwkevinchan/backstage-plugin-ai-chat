@@ -256,6 +256,7 @@ export function createHost(ports: HostPorts) {
         settings,
         notify,
         logger,
+        runEnded,
       }),
       resumeRun: new ResumeRun({
         sessions,
@@ -267,6 +268,7 @@ export function createHost(ports: HostPorts) {
         settings,
         notify,
         logger,
+        runEnded,
       }),
       cancelRun: new CancelRun({
         sessions,
@@ -325,7 +327,13 @@ export function createHost(ports: HostPorts) {
         clock,
         retentionDays: ports.retentionDays ?? DEFAULT_RETENTION_DAYS,
       }),
-      expireStaleRuns: new ExpireStaleRuns({ runs, logger, notify }),
+      expireStaleRuns: new ExpireStaleRuns({
+        runs,
+        logger,
+        notify,
+        sessions,
+        runEnded,
+      }),
     },
   };
 }

@@ -433,15 +433,109 @@ describe('harness hooks through host and supervisor (X-05)', () => {
       expect(ends).toHaveLength(0);
     });
 
+    it('fires expired once when ExpireStaleRuns of two backends ends a run whose backend stopped', async () => {
+      const { ends, extensions } = recorder();
+      const crashed = backend([waitForAbort]);
+      const b = backend([], { extensions });
+      const c = backend([], { extensions });
+      const session = await world.newSession();
+      const handle = await crashed.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'long',
+      });
+      await until(() => crashed.model.inputs.length === 1);
+      world.clock.advance(31);
+
+      const [fromB, fromC] = await Promise.all([
+        b.useCases.expireStaleRuns.execute(),
+        c.useCases.expireStaleRuns.execute(),
+      ]);
+      expect([...fromB, ...fromC]).toEqual([handle.runId]);
+      await until(() => ends.length === 1);
+      await settleHooks();
+      expect(ends).toEqual([
+        expect.objectContaining({
+          runId: handle.runId,
+          agentId: 'default',
+          userRef: jane.userRef,
+          status: 'expired',
+          endReason: 'lease_expired',
+        }),
+      ]);
+    });
+
+    it('fires failed when a run that waited for an approval cannot be carried on', async () => {
+      const { ends, extensions } = recorder();
+      const a = backend([[writeCall]], { extensions });
+      const session = await world.newSession();
+      const handle = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'go',
+      });
+      const events = await drain(handle);
+      const ended = events[events.length - 1] as {
+        outcome: { pending: { callId: string }[] };
+      };
+      // The agent of the session is gone, so the loop cannot start again.
+      await world.knex('sessions').where({ id: session.id }).update({
+        agent_id: 'removed',
+      });
+      await expect(
+        a.useCases.decideApproval.execute({
+          principal: jane,
+          sessionId: session.id,
+          callId: ended.outcome.pending[0].callId,
+          decision: 'allow',
+        }),
+      ).rejects.toThrow();
+      expect((await world.runRow(handle.runId)).status).toBe('failed');
+      await until(() => ends.length === 1);
+      expect(ends[0]).toMatchObject({
+        runId: handle.runId,
+        agentId: 'removed',
+        status: 'failed',
+        endReason: 'not_started',
+      });
+    });
+
+    it('lets the shutdown wait for an onRunEnd hook that is slow', async () => {
+      let finished = false;
+      const a = backend([[say('one')]], {
+        extensions: {
+          hooks: {
+            onRunEnd: [
+              async () => {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                finished = true;
+              },
+            ],
+          },
+        },
+      });
+      const session = await world.newSession();
+      const handle = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'go',
+      });
+      await drain(handle);
+      expect(finished).toBe(false);
+      await a.supervisor.shutdown(0);
+      expect(finished).toBe(true);
+    });
+
     it('ends the run while an onRunEnd hook hangs, and the next run starts', async () => {
       const calls: string[] = [];
+      const releases: (() => void)[] = [];
       const a = backend([[say('one')], [say('two')]], {
         extensions: {
           hooks: {
             onRunEnd: [
               summary => {
                 calls.push(summary.status);
-                return new Promise<void>(() => undefined);
+                return new Promise<void>(resolve => releases.push(resolve));
               },
             ],
           },
@@ -462,6 +556,8 @@ describe('harness hooks through host and supervisor (X-05)', () => {
       });
       await drain(second);
       await until(() => calls.length === 2);
+      // The shutdown of `afterEach` would wait for them.
+      for (const release of releases) release();
     });
   });
 

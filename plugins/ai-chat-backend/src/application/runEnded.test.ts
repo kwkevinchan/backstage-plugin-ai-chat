@@ -122,4 +122,34 @@ describe('createRunEnded', () => {
       { runId: 'run-1' },
     );
   });
+
+  it('drains: waits for a hook that is slow, and stops waiting after the limit', async () => {
+    let slowDone = false;
+    const slow = createRunEnded({
+      hooks: [
+        async () => {
+          await new Promise(resolve => setTimeout(resolve, 30));
+          slowDone = true;
+        },
+      ],
+      logger: fakeLogger(),
+    });
+    slow({ run, agentId: 'guide', userRef: 'user:default/jane' });
+    await slow.drain(1000);
+    expect(slowDone).toBe(true);
+
+    const hanging = createRunEnded({
+      hooks: [() => new Promise<void>(() => undefined)],
+      logger: fakeLogger(),
+    });
+    hanging({ run, agentId: 'guide', userRef: 'user:default/jane' });
+    const started = Date.now();
+    await hanging.drain(20);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it('drains at once when no hook runs', async () => {
+    const runEnded = createRunEnded({ hooks: [], logger: fakeLogger() });
+    await expect(runEnded.drain(10_000)).resolves.toBeUndefined();
+  });
 });

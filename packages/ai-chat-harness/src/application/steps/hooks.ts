@@ -225,7 +225,12 @@ export async function runAfterToolCall(
     if (settled.aborted || !settled.ok || !isValidToolResult(settled.value)) {
       return { status: 'error', message: AFTER_HOOK_ERROR_MESSAGE };
     }
-    current = cloneToolResult(settled.value);
+    try {
+      current = cloneToolResult(settled.value);
+    } catch {
+      // An output that is no JSON (a BigInt, a cycle) cannot be stored.
+      return { status: 'error', message: AFTER_HOOK_ERROR_MESSAGE };
+    }
   }
   return current;
 }

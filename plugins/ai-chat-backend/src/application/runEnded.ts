@@ -24,13 +24,20 @@ import type { Logger } from './ports';
  * waits for an approval has not ended and is ignored. It returns at once: the
  * run does not wait for the hooks.
  */
-export type RunEnded = (info: {
-  run: Run;
-  agentId: string;
-  userRef: string;
-}) => void;
+export type RunEnded = {
+  (info: { run: Run; agentId: string; userRef: string }): void;
+  /**
+   * Waits until the hooks of every run that ended have finished, or `ms`
+   * passed, whichever comes first. The shutdown calls it, so that the hooks
+   * still have the database and the other services.
+   */
+  drain(ms: number): Promise<void>;
+};
 
-/** How long one `onRunEnd` hook may take before the next one runs. */
+/**
+ * How long one `onRunEnd` hook may take before the next one runs, and how
+ * long the shutdown waits for the hooks that still run.
+ */
 export const RUN_END_HOOK_TIMEOUT_MS = 10_000;
 
 /**
@@ -46,7 +53,8 @@ export function createRunEnded(deps: {
 }): RunEnded {
   const { hooks, logger } = deps;
   const timeoutMs = deps.timeoutMs ?? RUN_END_HOOK_TIMEOUT_MS;
-  return ({ run, agentId, userRef }) => {
+  const running = new Set<Promise<void>>();
+  const ended = ({ run, agentId, userRef }: Parameters<RunEnded>[0]): void => {
     if (hooks.length === 0) return;
     const status = run.status;
     if (
@@ -66,7 +74,7 @@ export function createRunEnded(deps: {
       ...(run.endReason !== undefined && { endReason: run.endReason }),
       usage: { ...run.usage },
     };
-    void (async () => {
+    const chain = (async () => {
       // The caller goes on first, also when a hook does its work before it
       // returns a promise.
       await Promise.resolve();
@@ -85,7 +93,14 @@ export function createRunEnded(deps: {
         }
       }
     })();
+    running.add(chain);
+    void chain.finally(() => running.delete(chain));
   };
+  const drain = async (ms: number): Promise<void> => {
+    if (running.size === 0) return;
+    await withTimeout(Promise.all([...running]), ms);
+  };
+  return Object.assign(ended, { drain });
 }
 
 /** Whether `promise` settled before `ms` passed. */

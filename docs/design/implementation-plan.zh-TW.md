@@ -760,7 +760,7 @@ flowchart LR
   - 擴充點（`plugins/ai-chat-node`）：重新匯出上述型別。
   - 宿主（`plugins/ai-chat-backend`）：
     - `AiChatHarnessRegistry` 實作 `addHook`（檢查 Hook 名稱與函式型別，保留註冊順序）。`extensions()` 把每個 Hook 包起來：丟例外時帶 Hook 名稱記 log，再丟出。有 `afterToolCall` 時，清單最後再照 `maxToolOutputChars` 裁一次輸出。
-    - `onRunEnd` 由宿主呼叫（`application/runEnded.ts`）：`RunSupervisor` 和 `CancelRun` 自己寫入 Run 的終態之後觸發。
+    - `onRunEnd` 由宿主呼叫（`application/runEnded.ts`）：`RunSupervisor`、`CancelRun`、`ExpireStaleRuns` 和恢復等核准的 Run（`resumeIfDecided`）自己寫入 Run 的終態之後觸發。
     - `plugin.ts` 把註冊結果傳給 `createHost`，並在 log 記錄 Hook 數量。
 - **依賴**：P3-01（`ai-chat-node` 與 `AiChatHarnessRegistry`）。
 - **驗收**：
@@ -788,11 +788,13 @@ flowchart LR
     - 丟例外或回傳不合法的結果：存成 `{ status: 'error', message: 'A hook failed after the tool call.' }`，不帶原始輸出和例外內容，Run 繼續。
     - 工具已經跑完、Hook 還在跑時 Run 被停止：不再等它，存成同一個 `error` 結果，這個呼叫不會變成 `unknown`。
   - `onRunEnd(run)`：
-    - 宿主自己把 Run 寫成終態之後觸發，每個 Run 一次：`RunSupervisor` 用 fence 寫入終態之後、埠丟例外而標成 `failed` 之後、停止請求在寫入等核准之後才到而改成 `cancelled` 之後、關機標成 `expired` 之後；`CancelRun` 取消等核准的 Run 之後。
+    - 宿主自己把 Run 寫成終態之後觸發，每個 Run 一次：`RunSupervisor` 用 fence 寫入終態之後、埠丟例外而標成 `failed` 之後、停止請求在寫入等核准之後才到而改成 `cancelled` 之後、關機標成 `expired` 之後；`CancelRun` 取消等核准的 Run 之後；`ExpireStaleRuns` 把後端沒有正常關機留下的 Run 標成 `expired`（`lease_expired`）之後；等核准的 Run 恢復時迴圈起不來、標成 `failed`（`not_started`）之後。
     - 結果是宿主寫進去的狀態（`completed`、`failed`、`cancelled`、`expired`）和 `endReason`，例如上限停止是 `completed` 加 `max_steps`。
     - 等核准不觸發；`RunSupervisor` 因 `UnreadMessages` 重跑迴圈時也不提前觸發。
-    - 轉換被拒絕的一方（租約被別的後端拿走、Run 已經被別人結束）不觸發，所以兩台後端只會觸發一次。
+    - 轉換被拒絕的一方（租約被別的後端拿走、Run 已經被別人結束）不觸發，所以兩台後端只會觸發一次。兩台同時跑 `ExpireStaleRuns` 時，`expireStale` 的 `UPDATE … RETURNING` 每個 Run 只回給一台。
+    - 讀不到 Session 的過期 Run 記 log，不觸發。
     - Run 的結束不等 Hook。Hook 依序執行；一個丟例外或超過 10 秒，下一個照樣執行，逾時記 log。
+    - 關機時，`RunSupervisor.shutdown` 最後再等還在跑的 `onRunEnd`，最多 10 秒，超過就不等。
 - **規格沒寫、實作選定的地方**：
   - `StepContext` 擴充 `CallContext`，加上 `agentId`、`step`（目前這一步，從 1 起算）與 `signal`。
   - `StepContext.principal` 在這個後端是 `{ userRef, ownershipRefs, credentials }`：使用者的 entity ref、使用者透過哪些 ref 擁有東西、啟動或接續這個 Run 的請求的 `BackstageCredentials`。每次呼叫 Hook 都給一份複本（物件和陣列複製，credentials 本身不複製），只在這次呼叫期間有效，不能保存。
@@ -801,7 +803,7 @@ flowchart LR
   - `beforeModelCall` 丟例外時 Run 是 `failed`，不是跳過這一步或拒絕之後繼續。
   - Fail-closed 的固定值：`beforeToolCall` 失敗寫 `'Denied by hook.'`；`afterToolCall` 失敗寫 `{ status: 'error', message: 'A hook failed after the tool call.' }`。輸入和輸出用 JSON 深複製，Hook 改不到紀錄裡的物件。
   - 四個時機都可以同步回傳，或回傳 `Promise`。`afterToolCall` 沒有 `signal`：停止時迴圈不再等它。
-  - 沒有正常關機的後端留下的 Run 由 `ExpireStaleRuns` 標成 `expired`；沒有啟動迴圈就結束的 Run（`not_started`）。這兩種不觸發 `onRunEnd`。
+  - 從沒啟動迴圈就結束的 Run（`SendMessage`、`StartNextQueued` 的 `not_started`）不觸發 `onRunEnd`：它沒有跑過任何一步。
 
 ### P4：擴大
 

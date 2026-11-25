@@ -146,8 +146,11 @@ export interface Hooks {
   ): ToolResult | Promise<ToolResult>;
   /**
    * Runs once after the host stored the end of a run, also when it was
-   * stopped, failed or expired; not when it waits for an approval. The run
-   * does not wait for it, and a failure does not change the run.
+   * stopped, failed or expired; not when it waits for an approval, and not
+   * for a run that ended before its loop started. The run does not wait for
+   * it, and a failure does not change the run. The backend plugin waits at
+   * most 10 seconds for each hook, and at its shutdown at most 10 seconds
+   * for the hooks that still run.
    */
   onRunEnd(run: RunSummary): void | Promise<void>;
 }

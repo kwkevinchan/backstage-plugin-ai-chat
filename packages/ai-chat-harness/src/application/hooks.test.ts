@@ -38,6 +38,13 @@ function fakeTool(
   };
 }
 
+/** A result whose output refers to itself: it has no JSON. */
+function cyclicResult(): unknown {
+  const output: Record<string, unknown> = {};
+  output.self = output;
+  return { status: 'ok', output };
+}
+
 /** A promise that never settles, as a hook that hangs gives. */
 function never<T>(): Promise<T> {
   return new Promise<T>(() => undefined);
@@ -661,6 +668,8 @@ describe('AdvanceRun: hooks (X-05)', () => {
     ],
     ['a message that is not a string', { status: 'ok', message: 42 }],
     ['an array', [{ status: 'ok' }]],
+    ['an output with a BigInt', { status: 'ok', output: { n: BigInt(1) } }],
+    ['an output with a cycle', cyclicResult()],
   ])(
     'stores an error result when afterToolCall returns %s',
     async (_name, returned) => {
