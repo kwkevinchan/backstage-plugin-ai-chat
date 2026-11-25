@@ -76,6 +76,36 @@ describe('AiChatTransport', () => {
     expect(chunks).toEqual([{ type: 'start', messageId: 'run_r-1' }]);
   });
 
+  it('sends the image ids of the last message of the user', async () => {
+    const { api, transport } = setup();
+    api.sendMessage.mockResolvedValue(
+      streamResponse([{ type: 'start', messageId: 'run_r-1' }]),
+    );
+    const withImage: ChatUiMessage[] = [
+      {
+        id: 'c',
+        role: 'user',
+        parts: [{ type: 'text', text: '' }],
+        metadata: {
+          attachments: [
+            { id: 'att-1', mediaType: 'image/png', name: 'dot.png', size: 8 },
+          ],
+        },
+      },
+    ];
+
+    await transport.sendMessages({
+      messages: withImage,
+      abortSignal: undefined,
+    } as never);
+
+    expect(api.sendMessage).toHaveBeenCalledWith(
+      's-1',
+      { text: '', attachmentIds: ['att-1'], page },
+      undefined,
+    );
+  });
+
   it('sends the decision of the body to its own route and clears it', async () => {
     const { api, transport, onDecisionTaken } = setup();
     api.decide.mockResolvedValue(

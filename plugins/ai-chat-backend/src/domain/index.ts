@@ -31,6 +31,7 @@ export {
   AttachmentNotFound,
   AttachmentTooLarge,
   ChatDomainError,
+  EmptyMessage,
   ImagesNotSupported,
   InsertLimitReached,
   InvalidAttachment,

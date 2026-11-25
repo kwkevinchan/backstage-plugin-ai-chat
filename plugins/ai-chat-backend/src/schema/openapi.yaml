@@ -767,7 +767,7 @@ paths:
       operationId: sendMessage
       tags: [Runs]
       summary: Send a message, start a run and stream it.
-      description: 409 while a run of the session has not ended (also one that waits for an approval), 503 while the backend shuts down. A message that is refused is not stored. A client that goes away does not stop the run.
+      description: 409 while a run of the session has not ended (also one that waits for an approval), 503 while the backend shuts down. A message that is refused is not stored. A client that goes away does not stop the run. Empty text is accepted when attachmentIds has at least one image; a message with no text and no image is 400.
       requestBody:
         required: true
         content:
@@ -777,8 +777,9 @@ paths:
               properties:
                 text:
                   type: string
-                  minLength: 1
+                  minLength: 0
                   maxLength: 8000
+                  description: Empty when the message is only images. A message with no text and no image is refused.
                 attachmentIds:
                   type: array
                   items:
@@ -830,7 +831,7 @@ paths:
       operationId: insertMessage
       tags: [Runs]
       summary: Add a message to the run that is running.
-      description: 'The message is written to the log as an item with `delivery: inserted`, and the model reads it in its next call; no run starts and no stream opens. The answer is the item. Two outcomes only: the message is written, or the answer is 409. 409 `RunNotRunning` when the run waits for an approval, has ended, is not a run of this session, or has no live lease; 409 `InsertLimitReached` when the run has taken as many inserted messages as the configuration allows (`aiChat.input.insert.maxPerRun`). With images: 400 `TooManyImageBytes` when the images of the messages of the run, with this one, are over `aiChat.input.images.maxBytesPerInput`; nothing is written then. The model reads a message that comes in before the run ends; a run that is about to end reads it first.'
+      description: 'The message is written to the log as an item with `delivery: inserted`, and the model reads it in its next call; no run starts and no stream opens. The answer is the item. Two outcomes only: the message is written, or the answer is 409. 409 `RunNotRunning` when the run waits for an approval, has ended, is not a run of this session, or has no live lease; 409 `InsertLimitReached` when the run has taken as many inserted messages as the configuration allows (`aiChat.input.insert.maxPerRun`). With images: 400 `TooManyImageBytes` when the images of the messages of the run, with this one, are over `aiChat.input.images.maxBytesPerInput`; nothing is written then. The model reads a message that comes in before the run ends; a run that is about to end reads it first. Empty text is accepted when attachmentIds has at least one image; a message with no text and no image is 400.'
       requestBody:
         required: true
         content:
@@ -840,8 +841,9 @@ paths:
               properties:
                 text:
                   type: string
-                  minLength: 1
+                  minLength: 0
                   maxLength: 8000
+                  description: Empty when the message is only images. A message with no text and no image is refused.
                 attachmentIds:
                   type: array
                   items:
@@ -888,7 +890,7 @@ paths:
       operationId: queueMessage
       tags: [Queue]
       summary: Queue a message for when the run ends.
-      description: 'When the run ends the normal way (the model answered, no limit stopped it) and the credentials of the user last for another run, the first message of the queue starts a new run. 409 `NoActiveRun` when the session has no run that has not ended (send the message instead); 409 `QueueFull` at `aiChat.input.queue.maxMessages` messages.'
+      description: 'When the run ends the normal way (the model answered, no limit stopped it) and the credentials of the user last for another run, the first message of the queue starts a new run. 409 `NoActiveRun` when the session has no run that has not ended (send the message instead); 409 `QueueFull` at `aiChat.input.queue.maxMessages` messages. Empty text is accepted when attachmentIds has at least one image; a message with no text and no image is 400.'
       requestBody:
         required: true
         content:
@@ -898,8 +900,9 @@ paths:
               properties:
                 text:
                   type: string
-                  minLength: 1
+                  minLength: 0
                   maxLength: 8000
+                  description: Empty when the message is only images. A message with no text and no image is refused.
                 attachmentIds:
                   type: array
                   items:
@@ -986,7 +989,7 @@ paths:
       operationId: updateQueuedMessage
       tags: [Queue]
       summary: Change a queued message.
-      description: Only the fields in the body change; `page` as `null` removes the page. 404 `QueuedMessageNotFound` when the message was deleted or sent.
+      description: Only the fields in the body change; `page` as `null` removes the page. 404 `QueuedMessageNotFound` when the message was deleted or sent. 400 when the message would have no text and no image after the change.
       requestBody:
         required: true
         content:

@@ -155,6 +155,38 @@ describe('OpenAiCompatibleModelClient: images (IN-05, IN-07)', () => {
     expect(decoded.equals(IMAGES['image/png'])).toBe(true);
   });
 
+  it('sends a message that has images and no text as image parts only', async () => {
+    const store = new MemoryStore({
+      a: { type: 'image/png', bytes: IMAGES['image/png'] },
+    });
+    const { client, requests } = setup(true, store);
+    const input: ModelInput = {
+      system: 'sys',
+      tools: [],
+      messages: [
+        {
+          role: 'user',
+          content: '',
+          images: [
+            { attachmentId: 'a', mediaType: 'image/png', name: 'a.png' },
+          ],
+        },
+      ],
+    };
+
+    await collect(client.stream(input, opts));
+
+    expect(requests[0].messages[1]).toEqual({
+      role: 'user',
+      content: [
+        {
+          type: 'image_url',
+          image_url: { url: dataUrlOf('image/png', IMAGES['image/png']) },
+        },
+      ],
+    });
+  });
+
   it('reads the images from the session of the call and no other', async () => {
     const store = new MemoryStore({
       a: { type: 'image/png', bytes: IMAGES['image/png'] },

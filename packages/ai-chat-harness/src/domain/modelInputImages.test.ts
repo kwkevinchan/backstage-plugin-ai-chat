@@ -84,6 +84,18 @@ describe('buildModelInput: images (IN-05, IN-06, IN-07)', () => {
     ]);
   });
 
+  it('gives a message that has images and no text only its images', () => {
+    const { messages } = build([withImages('', ref('a'))]);
+
+    expect(messages).toEqual([
+      {
+        role: 'user',
+        content: '',
+        images: [{ attachmentId: 'a', mediaType: 'image/png', name: 'a.png' }],
+      },
+    ]);
+  });
+
   it('gives a message with no image no images field', () => {
     const { messages } = build([user('plain'), withImages('empty')]);
 
