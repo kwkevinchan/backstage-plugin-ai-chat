@@ -22,10 +22,12 @@ import {
 } from '../../domain';
 import { abandonRun } from '../abandonRun';
 import { buildRunRequest, type RunSettings } from '../buildRunRequest';
+import type { ActivityNotifier } from '../notifyActivity';
 import type { RunHandle, RunSupervisor } from '../RunSupervisor';
 import type {
   AgentCatalog,
   AuditLog,
+  Logger,
   QueuedMessageRepository,
   RunRepository,
   SessionRepository,
@@ -48,6 +50,8 @@ export class StartNextQueued {
       audit: AuditLog;
       clock: Clock;
       settings: RunSettings;
+      notify?: ActivityNotifier;
+      logger?: Logger;
     },
   ) {}
 
@@ -113,7 +117,10 @@ export class StartNextQueued {
         throw error;
       }
     } catch (error) {
-      await abandonRun(runs, run);
+      await abandonRun(runs, run, {
+        notify: this.deps.notify,
+        logger: this.deps.logger,
+      });
       throw error;
     }
   }

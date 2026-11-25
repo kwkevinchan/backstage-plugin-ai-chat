@@ -310,26 +310,42 @@ describe('two backends on one database', () => {
     });
   });
 
-  describe('GET /sessions/:id/stream on the backend that does not run the loop (P1 limit)', () => {
-    it('answers 204 there, and sends the run on the backend that runs it', async () => {
+  describe('GET /sessions/:id/stream on the backend that does not run the loop', () => {
+    it('streams a run that another backend is running, without text fragments', async () => {
       const a = backend([waitForAbort]);
       const b = backend([]);
-      const baseA = await listen(app(a));
       const baseB = await listen(app(b));
       const { session, handle } = await startRun(a);
 
       const onB = await fetch(`${baseB}/sessions/${session.id}/stream`, {
         headers: { Authorization: JANE },
       });
-      expect(onB.status).toBe(204);
+      expect(onB.status).toBe(200);
+      const row = await world.runRow(handle.runId);
+      await world.items.append(
+        session.id,
+        [{ kind: 'agent_message', text: 'Finished later', readUpToSeq: 1 }],
+        { runId: handle.runId, leaseOwner: row.lease_owner },
+      );
 
-      const onA = await fetch(`${baseA}/sessions/${session.id}/stream`, {
-        headers: { Authorization: JANE },
-      });
-      expect(onA.status).toBe(200);
-      await onA.body!.cancel();
+      const reader = onB.body!.getReader();
+      const decoder = new TextDecoder();
+      let raw = '';
+      while (!raw.includes('Finished later')) {
+        const { done, value } = await reader.read();
+        if (done) throw new Error('the stream ended before the new item');
+        raw += decoder.decode(value, { stream: true });
+      }
+      await reader.cancel();
+      const deltas = [...raw.matchAll(/"type":"text-delta"/g)];
+      expect(deltas).toHaveLength(1);
+      expect(raw).toContain('"delta":"Finished later"');
+      expect(raw).toContain('"type":"text-start"');
+      expect(raw).toContain('"type":"text-end"');
+      expect([...raw.matchAll(/"type":"start-step"/g)]).toHaveLength(1);
+      expect(raw).not.toContain('"type":"finish-step"');
       expect((await world.runRow(handle.runId)).status).toBe('running');
-    });
+    }, 20000);
   });
 
   describe('inserted messages and the queue across backends (PI-03)', () => {

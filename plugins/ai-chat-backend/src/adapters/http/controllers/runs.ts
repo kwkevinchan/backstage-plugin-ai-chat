@@ -198,17 +198,26 @@ export class RunsController {
       runId: followed.run.id,
       typing: false,
     });
+    const head = presenter.replay(
+      followed.run.status,
+      followed.items,
+      followed.upToSeq,
+      followed.inserted,
+    );
+    if (followed.resumeText) {
+      head.push(
+        ...presenter.resumeDraft(
+          followed.resumeText.draftId,
+          followed.resumeText.text,
+        ),
+      );
+    }
     await sendUiMessageStream(
       res,
       {
         events: followed.events,
         presenter,
-        head: presenter.replay(
-          followed.run.status,
-          followed.items,
-          followed.upToSeq,
-          followed.inserted,
-        ),
+        head,
       },
       this.logger,
       this.keepAliveMs,

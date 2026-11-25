@@ -14,19 +14,22 @@
  * limitations under the License.
  */
 
-import type { RunRepository } from './ports';
+import { notifyActivity, type ActivityNotifier } from './notifyActivity';
+import type { Logger, RunRepository } from './ports';
 import type { LeasedRun } from '../domain';
 
 /** The run did not start the loop: end it, so the session is free again. */
 export async function abandonRun(
   runs: RunRepository,
   run: LeasedRun,
+  notifier?: { notify?: ActivityNotifier; logger?: Logger },
 ): Promise<void> {
   try {
     await runs.transition(run.id, 'failed', {
       leaseOwner: run.fence.leaseOwner,
       endReason: 'not_started',
     });
+    notifyActivity(notifier?.notify, notifier?.logger, run.sessionId, 'idle');
   } catch {
     // The lease expiry (ExpireStaleRuns) ends it.
   }

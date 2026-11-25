@@ -15,25 +15,51 @@
  */
 
 import type { Principal, Session } from '../../domain';
-import type { SessionRepository } from '../ports';
+import type { RunRepository, SessionRepository } from '../ports';
+
+/**
+ * A session in the list. `activity` is set when a run of it has not ended.
+ * It comes from that run, not from a column of its own.
+ */
+export type ListedSession = Session & {
+  activity?: 'running' | 'waiting_approval';
+};
 
 /**
  * The sessions of the signed-in user. Pinned ones come first, then the most
  * recently updated. `query` matches the title (SE-03).
  */
 export class ListSessions {
-  constructor(private readonly deps: { sessions: SessionRepository }) {}
+  constructor(
+    private readonly deps: {
+      sessions: SessionRepository;
+      runs: RunRepository;
+    },
+  ) {}
 
-  execute(input: {
+  async execute(input: {
     principal: Principal;
     includeArchived?: boolean;
     limit?: number;
     query?: string;
-  }): Promise<Session[]> {
-    return this.deps.sessions.listByOwner(input.principal.userRef, {
-      includeArchived: input.includeArchived,
-      limit: input.limit,
-      query: input.query,
+  }): Promise<ListedSession[]> {
+    const sessions = await this.deps.sessions.listByOwner(
+      input.principal.userRef,
+      {
+        includeArchived: input.includeArchived,
+        limit: input.limit,
+        query: input.query,
+      },
+    );
+    const active = await this.deps.runs.findActiveForSessions(
+      sessions.map(session => session.id),
+    );
+    const bySession = new Map(active.map(run => [run.sessionId, run]));
+    return sessions.map(session => {
+      const status = bySession.get(session.id)?.status;
+      return status === 'running' || status === 'waiting_approval'
+        ? { ...session, activity: status }
+        : session;
     });
   }
 }

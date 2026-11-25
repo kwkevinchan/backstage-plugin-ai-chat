@@ -28,7 +28,10 @@ import type { SessionView } from '../../../application';
 import type { QueuedMessage, Run, Session, Toolset } from '../../../domain';
 
 /** The fields of a session that the owner gets, and no others. */
-export function toChatSession(session: Session): ChatSession {
+export function toChatSession(
+  session: Session,
+  activity?: ChatSession['activity'],
+): ChatSession {
   return {
     id: session.id,
     ownerRef: session.ownerRef,
@@ -40,6 +43,7 @@ export function toChatSession(session: Session): ChatSession {
     ...(session.archivedAt !== undefined && { archivedAt: session.archivedAt }),
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
+    ...(activity && { activity }),
   };
 }
 

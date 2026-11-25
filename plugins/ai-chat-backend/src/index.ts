@@ -21,6 +21,7 @@
  */
 
 export { aiChatPlugin as default } from './plugin';
+export { aiChatSignalsModule } from './signals';
 export {
   aiChatSessionConditions,
   createAiChatConditionalDecision,

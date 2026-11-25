@@ -48,7 +48,7 @@ import {
   type ImageSettings,
   type RunHandle,
 } from '../../application';
-import type { AuditEvent, AuditLog } from '../../application/ports';
+import type { AuditEvent, AuditLog, Notifier } from '../../application/ports';
 import { DEFAULT_IMAGE_LIMITS, type Principal, type Run } from '../../domain';
 import { createHost } from '../../host';
 import { createMigratedDb } from '../../__testUtils__';
@@ -238,6 +238,8 @@ export async function createWorld(
     script: ScriptedStep[],
     extra: {
       items?: (inner: ItemLog) => ItemLog;
+      model?: ModelClient;
+      notifier?: Notifier;
       heartbeatMs?: number;
       /**
        * Runs around every `transition` of this backend: `call()` makes the
@@ -289,11 +291,12 @@ export async function createWorld(
           (await sessions.get(ctx.sessionId)).enabledToolsets,
         maxOutputChars: 20000,
       }),
-      model: modelForHost,
+      model: extra.model ?? modelForHost,
       audit,
       clock,
       ids,
       logger,
+      ...(extra.notifier && { notifier: extra.notifier }),
       settings: {
         limits,
         budget: { tokenBudget: 100000, keepRecentSteps: 6 },

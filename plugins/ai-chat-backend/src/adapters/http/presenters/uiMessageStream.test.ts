@@ -918,6 +918,42 @@ describe('UiMessageStreamPresenter', () => {
       ).toEqual(['finish-step']);
     });
 
+    it('continues an open draft from the text it was given, and does not send that text again', async () => {
+      const presenter = new UiMessageStreamPresenter({
+        runId: RUN,
+        typing: false,
+      });
+      const head = [
+        ...presenter.replay(
+          'running',
+          [{ ...base(1), kind: 'user_message', text: 'hi' }] as Item[],
+          1,
+        ),
+        ...presenter.resumeDraft('d1', 'Hel'),
+      ];
+      const live: HarnessEvent[] = [
+        { type: 'item.delta', draftId: 'd1', text: 'lo' },
+        completed(agentMessage(2, 'Hello'), 'd1'),
+        { type: 'run.ended', outcome: { status: 'completed' } },
+      ];
+      const chunks = [
+        ...head,
+        ...live.flatMap(event => presenter.present(event)),
+        ...presenter.close(),
+      ];
+      expect(chunks.filter(chunk => chunk.type === 'text-start')).toEqual([
+        { type: 'text-start', id: 'd1' },
+      ]);
+      expect(chunks.filter(chunk => chunk.type === 'text-delta')).toEqual([
+        { type: 'text-delta', id: 'd1', delta: 'Hel' },
+        { type: 'text-delta', id: 'd1', delta: 'lo' },
+      ]);
+      const message = await readMessage(await throughSdk(chunks));
+      expect(message.parts.filter(part => part.type === 'text')).toEqual([
+        { type: 'text', text: 'Hello', state: 'done' },
+      ]);
+    });
+
     it('skips the events of items the log had when it was read, also those left out by afterSeq', () => {
       const presenter = new UiMessageStreamPresenter({
         runId: RUN,

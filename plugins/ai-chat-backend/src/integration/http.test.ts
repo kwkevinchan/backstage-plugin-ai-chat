@@ -1119,6 +1119,74 @@ describe('the HTTP routes', () => {
           .map(c => (c as any).data.seq),
       ).toEqual([4]);
     });
+
+    it('resumes mid-text streaming through supervisor, FollowSession and controller with one text part and no duplicate', async () => {
+      let markPaused!: () => void;
+      const paused = new Promise<void>(resolve => {
+        markPaused = resolve;
+      });
+      let releaseRest!: () => void;
+      const rest = new Promise<void>(resolve => {
+        releaseRest = resolve;
+      });
+
+      const b = backend([], {
+        model: {
+          capabilities: { parallelToolCalls: false, images: false },
+          async *stream() {
+            yield say('Hel');
+            markPaused();
+            await rest;
+            yield say('lo');
+          },
+        },
+      });
+      const base = await listen(b.app);
+      const id = await newSession(b);
+
+      const abort = new AbortController();
+      const first = await fetch(`${base}/sessions/${id}/runs`, {
+        method: 'POST',
+        headers: { Authorization: JANE, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'go' }),
+        signal: abort.signal,
+      });
+      await paused;
+      const firstReader = first.body!.getReader();
+      let firstText = '';
+      while (!firstText.includes('Hel')) {
+        const { done, value } = await firstReader.read();
+        if (done) break;
+        firstText += new TextDecoder().decode(value);
+      }
+      abort.abort();
+
+      const second = await fetch(`${base}/sessions/${id}/stream`, {
+        headers: { Authorization: JANE },
+      });
+      expect(second.status).toBe(200);
+      const secondReader = second.body!.getReader();
+      const decoder = new TextDecoder();
+      let secondText = '';
+      while (!secondText.includes('Hel')) {
+        const { done, value } = await secondReader.read();
+        if (done) break;
+        secondText += decoder.decode(value, { stream: true });
+      }
+      releaseRest();
+      for (;;) {
+        const { done, value } = await secondReader.read();
+        if (done) break;
+        secondText += decoder.decode(value, { stream: true });
+      }
+
+      const chunks = await parseSse(secondText);
+      const message = await readMessage(chunks);
+      expect(message.parts.filter(p => p.type === 'text')).toEqual([
+        { type: 'text', text: 'Hello', state: 'done' },
+      ]);
+      expect(chunks.filter(c => c.type === 'text-delta')).toHaveLength(2);
+    });
   });
 
   describe('the stream on the wire', () => {

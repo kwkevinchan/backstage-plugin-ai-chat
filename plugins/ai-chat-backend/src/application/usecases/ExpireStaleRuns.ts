@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { notifyActivity, type ActivityNotifier } from '../notifyActivity';
 import type { Logger, RunRepository } from '../ports';
 
 /**
@@ -21,7 +22,13 @@ import type { Logger, RunRepository } from '../ports';
  * ran them stopped. The session can start a new run then.
  */
 export class ExpireStaleRuns {
-  constructor(private readonly deps: { runs: RunRepository; logger: Logger }) {}
+  constructor(
+    private readonly deps: {
+      runs: RunRepository;
+      logger: Logger;
+      notify?: ActivityNotifier;
+    },
+  ) {}
 
   /** Returns the ids of the runs that were marked. */
   async execute(): Promise<string[]> {
@@ -31,6 +38,36 @@ export class ExpireStaleRuns {
         `Marked ${ids.length} run(s) expired: the lease was not renewed`,
         { runIds: ids },
       );
+      if (this.deps.notify) {
+        const notify = this.deps.notify;
+        void Promise.allSettled(ids.map(id => this.deps.runs.get(id))).then(
+          results => {
+            const seen = new Set<string>();
+            for (const result of results) {
+              if (result.status === 'fulfilled') {
+                if (seen.has(result.value.sessionId)) continue;
+                seen.add(result.value.sessionId);
+                notifyActivity(
+                  notify,
+                  this.deps.logger,
+                  result.value.sessionId,
+                  'idle',
+                );
+              } else {
+                this.deps.logger.warn(
+                  'Could not notify the activity of a session',
+                  {
+                    error:
+                      result.reason instanceof Error
+                        ? result.reason.message
+                        : String(result.reason),
+                  },
+                );
+              }
+            }
+          },
+        );
+      }
     }
     return ids;
   }

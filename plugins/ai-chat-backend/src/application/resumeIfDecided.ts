@@ -23,8 +23,9 @@ import {
   type Session,
 } from '../domain';
 import { buildRunRequest, type RunSettings } from './buildRunRequest';
+import { notifyActivity, type ActivityNotifier } from './notifyActivity';
 import type { RunHandle, RunSupervisor } from './RunSupervisor';
-import type { AgentCatalog, RunRepository } from './ports';
+import type { AgentCatalog, Logger, RunRepository } from './ports';
 
 /**
  * Carries a run on when it waits for an approval and every call that needs one
@@ -44,6 +45,8 @@ export async function resumeIfDecided(
     agents: AgentCatalog;
     clock: Clock;
     settings: RunSettings;
+    notify?: ActivityNotifier;
+    logger?: Logger;
   },
   input: {
     session: Session;
@@ -66,7 +69,10 @@ export async function resumeIfDecided(
       { agents, clock, settings },
       { session, run: leased, principal, page },
     );
-    return supervisor.launch(leased, request);
+    const initialSeq = log
+      .filter(item => item.runId === run.id)
+      .reduce((max, item) => Math.max(max, item.seq), 0);
+    return supervisor.launch(leased, request, { initialSeq });
   } catch (error) {
     try {
       if (error instanceof ShuttingDown) {
@@ -79,6 +85,7 @@ export async function resumeIfDecided(
           leaseOwner: leased.fence.leaseOwner,
           endReason: 'not_started',
         });
+        notifyActivity(deps.notify, deps.logger, session.id, 'idle');
       }
     } catch {
       // The lease expiry (ExpireStaleRuns) ends it.

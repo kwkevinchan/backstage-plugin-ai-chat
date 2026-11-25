@@ -18,6 +18,7 @@ import type { Clock, ItemLog } from '@kwkevinchan/ai-chat-harness';
 import { assertOwner, ShuttingDown, type Principal } from '../../domain';
 import { abandonRun } from '../abandonRun';
 import { buildRunRequest, type RunSettings } from '../buildRunRequest';
+import type { ActivityNotifier } from '../notifyActivity';
 import type { RunHandle, RunSupervisor } from '../RunSupervisor';
 import {
   bindAttachments,
@@ -27,6 +28,7 @@ import {
 import type {
   AgentCatalog,
   AttachmentStore,
+  Logger,
   RunRepository,
   SessionRepository,
 } from '../ports';
@@ -47,6 +49,8 @@ export class SendMessage {
       settings: RunSettings;
       attachments: AttachmentStore;
       images: ImageSettings;
+      notify?: ActivityNotifier;
+      logger?: Logger;
     },
   ) {}
 
@@ -98,7 +102,10 @@ export class SendMessage {
       );
       return supervisor.launch(run, request);
     } catch (error) {
-      await abandonRun(runs, run);
+      await abandonRun(runs, run, {
+        notify: this.deps.notify,
+        logger: this.deps.logger,
+      });
       throw error;
     }
   }
