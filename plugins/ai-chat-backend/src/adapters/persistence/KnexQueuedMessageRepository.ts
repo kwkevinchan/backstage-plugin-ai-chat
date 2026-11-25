@@ -17,22 +17,29 @@
 import type {
   Clock,
   IdGenerator,
+  Item,
   ItemDraft,
   PageContext,
+  RunStatus,
 } from '@kwkevinchan/ai-chat-harness';
 import type { Knex } from 'knex';
 import type { QueuedMessageRepository } from '../../application/ports';
 import {
   type AttachmentMeta,
+  DEFAULT_IMAGE_LIMITS,
+  DEFAULT_INSERT_MAX_PER_RUN,
   NoActiveRun,
   QueueChanged,
   QueuedMessageNotFound,
   QueueFull,
+  RunNotRunning,
   SessionNotFound,
   type LeasedRun,
   type QueuedMessage,
 } from '../../domain';
 import {
+  checkImageBytes,
+  checkInsertLimit,
   leased,
   lockAttachments,
   markAttachmentsUsed,
@@ -299,6 +306,88 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
       }
       throw error;
     }
+  }
+
+  async insert(
+    sessionId: string,
+    id: string,
+    runId: string,
+    opts: { maxInsertsPerRun?: number; maxImageBytesPerInput?: number } = {},
+  ): Promise<Item> {
+    const maxInsertsPerRun =
+      opts.maxInsertsPerRun ?? DEFAULT_INSERT_MAX_PER_RUN;
+    const maxImageBytesPerInput =
+      opts.maxImageBytesPerInput ?? DEFAULT_IMAGE_LIMITS.maxBytesPerInput;
+    return this.knex.transaction(async trx => {
+      // Lock order: runs (FOR SHARE), sessions (FOR NO KEY UPDATE),
+      // queued_messages, attachments (FOR UPDATE), items, attachments.
+      const run = await trx('runs').where({ id: runId }).forShare().first<{
+        session_id: string;
+        status: RunStatus;
+        lease_expires_at: string | null;
+      }>('session_id', 'status', 'lease_expires_at');
+      if (
+        !run ||
+        run.session_id !== sessionId ||
+        run.status !== 'running' ||
+        run.lease_expires_at === null ||
+        run.lease_expires_at < this.clock.now().toISOString()
+      ) {
+        throw new RunNotRunning(runId);
+      }
+      await this.lockSession(trx, sessionId);
+      const row = await trx<QueuedRow>('queued_messages')
+        .where({ id, session_id: sessionId })
+        .first();
+      if (!row) throw new QueuedMessageNotFound(id);
+      const deleted = await trx('queued_messages')
+        .where({ id, session_id: sessionId })
+        .delete();
+      if (deleted !== 1) throw new QueuedMessageNotFound(id);
+
+      const metas = await lockAttachments(trx, sessionId, idsOf(row), {
+        ignoreMissing: true,
+      });
+      const attachments = metas.map(meta => ({
+        id: meta.id,
+        mediaType: meta.mediaType,
+        name: meta.name,
+        size: meta.size,
+      }));
+      await checkInsertLimit(trx, sessionId, runId, maxInsertsPerRun);
+      await checkImageBytes(
+        trx,
+        sessionId,
+        runId,
+        attachments,
+        maxImageBytesPerInput,
+      );
+      const draft: ItemDraft = {
+        kind: 'user_message',
+        text: row.text,
+        ...(attachments.length > 0 && { attachments }),
+        ...(row.page !== null && {
+          page: JSON.parse(row.page) as PageContext,
+        }),
+        delivery: 'inserted',
+      };
+      const firstSeq = await reserveSeq(trx, sessionId, 1);
+      const [written] = await writeItems(trx, this.clock, {
+        sessionId,
+        runId,
+        firstSeq,
+        drafts: [draft],
+        keys: [undefined],
+      });
+      await markAttachmentsUsed(
+        trx,
+        sessionId,
+        metas.map(meta => meta.id),
+        firstSeq,
+      );
+      await syncReservations(trx, sessionId);
+      return written;
+    });
   }
 
   private async lockSession(

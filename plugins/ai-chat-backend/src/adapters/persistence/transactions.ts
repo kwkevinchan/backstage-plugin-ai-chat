@@ -16,6 +16,7 @@
 
 import {
   DuplicateItem,
+  type AttachmentRef,
   type Clock,
   type IdGenerator,
   type Item,
@@ -24,6 +25,8 @@ import {
 } from '@kwkevinchan/ai-chat-harness';
 import type { Knex } from 'knex';
 import {
+  InsertLimitReached,
+  TooManyImageBytes,
   UnknownAttachment,
   type AttachmentMeta,
   type LeasedRun,
@@ -312,6 +315,50 @@ export async function syncReservations(
         .where({ id: row.id })
         .update({ reserved_by: wanted });
     }
+  }
+}
+
+/** The first message of the run does not count: the run may take `maxInsertsPerRun` more. */
+export async function checkInsertLimit(
+  trx: Knex.Transaction,
+  sessionId: string,
+  runId: string,
+  maxInsertsPerRun: number,
+): Promise<void> {
+  const [{ n }] = await trx('items')
+    .where({ session_id: sessionId, run_id: runId, kind: 'user_message' })
+    .count({ n: '*' });
+  // PostgreSQL gives a count as text, SQLite as a number.
+  if (Number(n) - 1 >= maxInsertsPerRun) {
+    throw new InsertLimitReached(runId, maxInsertsPerRun);
+  }
+}
+
+/** The images of the user messages of the run, with `attachments`, are within the limit. */
+export async function checkImageBytes(
+  trx: Knex.Transaction,
+  sessionId: string,
+  runId: string,
+  attachments: readonly AttachmentRef[] | undefined,
+  maxImageBytesPerInput: number,
+): Promise<void> {
+  if (!attachments?.length) return;
+  const rows = await trx('items')
+    .where({ session_id: sessionId, run_id: runId, kind: 'user_message' })
+    .select<{ payload: string }[]>('payload');
+  const bytesOf = (refs?: readonly { size: number }[]) =>
+    (refs ?? []).reduce((sum, ref) => sum + ref.size, 0);
+  const total = rows.reduce(
+    (sum, row) =>
+      sum +
+      bytesOf(
+        (JSON.parse(row.payload) as { attachments?: { size: number }[] })
+          .attachments,
+      ),
+    bytesOf(attachments),
+  );
+  if (total > maxImageBytesPerInput) {
+    throw new TooManyImageBytes(runId, maxImageBytesPerInput);
   }
 }
 

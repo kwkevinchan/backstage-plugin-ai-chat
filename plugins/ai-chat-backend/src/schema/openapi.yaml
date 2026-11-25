@@ -1042,6 +1042,42 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /sessions/{id}/queue/{queuedId}/insert:
+    parameters:
+      - $ref: '#/components/parameters/sessionId'
+      - $ref: '#/components/parameters/queuedId'
+    post:
+      operationId: insertQueuedMessage
+      tags: [Queue]
+      summary: Move a queued message into a running run as an inserted message.
+      description: 'In one transaction: removes the queued message, writes it to the log as a `user_message` with `delivery: inserted`, and marks its images as used. Two outcomes only: the message is inserted, or the queue is unchanged and an error is returned. 409 `RunNotRunning` when the run waits for an approval, has ended, is another run, or has no live lease; 409 `InsertLimitReached` when the run has reached `aiChat.input.insert.maxPerRun`; 400 `TooManyImageBytes` when the images exceed `aiChat.input.images.maxBytesPerInput`; 404 `QueuedMessageNotFound` when the queued message was already changed, removed, or sent. Remaining queued messages keep their order, and queue pause state is unchanged.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                runId:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
+              required: [runId]
+      responses:
+        '201':
+          description: The inserted item that was written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserMessageItem'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
   /sessions/{id}/tool-calls/{callId}/decision:
     parameters:
       - $ref: '#/components/parameters/sessionId'

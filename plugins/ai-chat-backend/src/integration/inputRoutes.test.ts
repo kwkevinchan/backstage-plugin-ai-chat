@@ -451,6 +451,115 @@ describe('the routes of the inserted messages and the queue', () => {
       ).expect(204);
     });
 
+    it('POST /queue/:queuedId/insert: turns a queued message into an insert (201) and refuses invalid states (400/404/409) without changing the queue', async () => {
+      const b = backend([waitForAbort]);
+      const { id, runId, pending } = await blocked(b);
+
+      const q1 = await as(JANE, request(b.app).post(`/sessions/${id}/queue`))
+        .send({ text: 'first' })
+        .expect(201);
+      const q2 = await as(JANE, request(b.app).post(`/sessions/${id}/queue`))
+        .send({ text: 'send now', page: { path: '/docs' } })
+        .expect(201);
+      const q3 = await as(JANE, request(b.app).post(`/sessions/${id}/queue`))
+        .send({ text: 'third' })
+        .expect(201);
+
+      // Missing runId -> 400
+      await as(
+        JANE,
+        request(b.app).post(`/sessions/${id}/queue/${q2.body.id}/insert`),
+      )
+        .send({})
+        .expect(400);
+
+      // Non-owner -> 404
+      await as(
+        MALLORY,
+        request(b.app).post(`/sessions/${id}/queue/${q2.body.id}/insert`),
+      )
+        .send({ runId })
+        .expect(404);
+
+      // Wrong runId -> 409 RunNotRunning, queue unchanged
+      expect(
+        (
+          await as(
+            JANE,
+            request(b.app).post(`/sessions/${id}/queue/${q2.body.id}/insert`),
+          )
+            .send({ runId: 'other-run' })
+            .expect(409)
+        ).body.error.name,
+      ).toBe('RunNotRunning');
+
+      // Valid insert -> 201
+      const inserted = await as(
+        JANE,
+        request(b.app).post(`/sessions/${id}/queue/${q2.body.id}/insert`),
+      )
+        .send({ runId })
+        .expect(201);
+      expect(inserted.body).toMatchObject({
+        kind: 'user_message',
+        runId,
+        text: 'send now',
+        delivery: 'inserted',
+        page: { path: '/docs' },
+      });
+
+      // Remaining queue order & paused state unchanged
+      const after = await as(
+        JANE,
+        request(b.app).get(`/sessions/${id}/queue`),
+      ).expect(200);
+      expect(after.body.paused).toBe(false);
+      expect(
+        after.body.items.map((m: any) => [m.id, m.position, m.text]),
+      ).toEqual([
+        [q1.body.id, 1, 'first'],
+        [q3.body.id, 3, 'third'],
+      ]);
+
+      // Already moved -> 404 QueuedMessageNotFound
+      expect(
+        (
+          await as(
+            JANE,
+            request(b.app).post(`/sessions/${id}/queue/${q2.body.id}/insert`),
+          )
+            .send({ runId })
+            .expect(404)
+        ).body.error.name,
+      ).toBe('QueuedMessageNotFound');
+
+      // End run -> paused becomes true; inserting q1 against ended run returns 409 and keeps paused & queue unchanged
+      await as(
+        JANE,
+        request(b.app).post(`/sessions/${id}/runs/${runId}/cancel`),
+      ).expect(202);
+      await pending;
+      expect(
+        (
+          await as(
+            JANE,
+            request(b.app).post(`/sessions/${id}/queue/${q1.body.id}/insert`),
+          )
+            .send({ runId })
+            .expect(409)
+        ).body.error.name,
+      ).toBe('RunNotRunning');
+      const pausedQueue = await as(
+        JANE,
+        request(b.app).get(`/sessions/${id}/queue`),
+      ).expect(200);
+      expect(pausedQueue.body.paused).toBe(true);
+      expect(pausedQueue.body.items.map((m: any) => m.id)).toEqual([
+        q1.body.id,
+        q3.body.id,
+      ]);
+    });
+
     it('sends data-queue before data-run at the end of a run, with the id of the run the queue started; the SDK reads it back', async () => {
       const b = backend([[writeCall], [say('done')], [say('next answer')]]);
       const id = await newSession(b);

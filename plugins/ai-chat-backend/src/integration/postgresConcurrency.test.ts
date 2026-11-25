@@ -30,6 +30,7 @@ import {
   InsertLimitReached,
   NoActiveRun,
   QueueFull,
+  QueuedMessageNotFound,
   RunNotRunning,
   TooManyImageBytes,
   SessionNotFound,
@@ -656,6 +657,134 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
             r.reason instanceof TooManyPendingAttachments,
         ),
       ).toBe(true);
+    });
+  });
+
+  describe('insertQueuedMessage and startNext at the same time (IN-20)', () => {
+    it(`turning a queued message into an insert vs endRun + startNext, ${ROUNDS} rounds: exactly one sends it, no deadlock`, async () => {
+      const rounds: {
+        insertFirst: boolean;
+        insertRefused: boolean;
+        ended: boolean;
+        startedQueuedId: string | undefined;
+        sentCount: number;
+        sentDelivery: string | undefined;
+        sentRunId: string | undefined;
+        originalRunId: string;
+        startedRunId: string | undefined;
+        remainingIds: string[];
+        q1Id: string;
+        q2Id: string;
+      }[] = [];
+      for (let round = 0; round < ROUNDS; round++) {
+        const { sessionId, run } = await runningRun(db);
+        const q1 = await db.queue.add(
+          sessionId,
+          { text: `q1-${round}` },
+          { max: 5 },
+        );
+        const q2 = await db.queue.add(
+          sessionId,
+          { text: `q2-${round}` },
+          { max: 5 },
+        );
+
+        const [ins, endAndNext] = await Promise.allSettled([
+          jitter().then(() => db.queue.insert(sessionId, q1.id, run.id)),
+          jitter().then(async () => {
+            try {
+              await db.runs.transition(run.id, 'completed', {
+                leaseOwner: run.fence.leaseOwner,
+                requireAllRead: true,
+              });
+            } catch (err) {
+              if (err instanceof UnreadMessages) {
+                return { ended: false as const, started: undefined };
+              }
+              throw err;
+            }
+            const started = await db.queue.startNext(sessionId);
+            return { ended: true as const, started };
+          }),
+        ]);
+
+        expect(endAndNext.status).toBe('fulfilled');
+        const side = (endAndNext as PromiseFulfilledResult<any>).value;
+        const log = await db.items.read(sessionId);
+        const sent = log.filter(
+          i => i.kind === 'user_message' && i.text === `q1-${round}`,
+        );
+        const remaining = await db.queue.list(sessionId);
+        rounds.push({
+          insertFirst: ins.status === 'fulfilled',
+          insertRefused:
+            ins.status === 'rejected' && ins.reason instanceof RunNotRunning,
+          ended: side.ended,
+          startedQueuedId: side.started?.message.id,
+          sentCount: sent.length,
+          sentDelivery: (sent[0] as any)?.delivery,
+          sentRunId: sent[0]?.runId,
+          originalRunId: run.id,
+          startedRunId: side.started?.run.id,
+          remainingIds: remaining.map(m => m.id),
+          q1Id: q1.id,
+          q2Id: q2.id,
+        });
+      }
+      expect(rounds).toHaveLength(ROUNDS);
+      expect(
+        rounds.every(
+          r => r.sentCount === 1 && r.remainingIds.join(',') === r.q2Id,
+        ),
+      ).toBe(true);
+      expect(
+        rounds
+          .filter(r => r.insertFirst)
+          .every(
+            r =>
+              !r.ended &&
+              r.sentDelivery === 'inserted' &&
+              r.sentRunId === r.originalRunId,
+          ),
+      ).toBe(true);
+      expect(
+        rounds
+          .filter(r => !r.insertFirst)
+          .every(
+            r =>
+              r.insertRefused &&
+              r.ended &&
+              r.startedQueuedId === r.q1Id &&
+              r.sentDelivery === 'queued' &&
+              r.sentRunId === r.startedRunId,
+          ),
+      ).toBe(true);
+    });
+
+    it('two concurrent queue.insert calls for the same queuedId, 20 rounds: one wins, the other gets QueuedMessageNotFound', async () => {
+      for (let round = 0; round < 20; round++) {
+        const { sessionId, run } = await runningRun(db);
+        const q = await db.queue.add(
+          sessionId,
+          { text: `dup-${round}` },
+          { max: 5 },
+        );
+        const results = await Promise.allSettled([
+          jitter().then(() => db.queue.insert(sessionId, q.id, run.id)),
+          jitter().then(() => db.queue.insert(sessionId, q.id, run.id)),
+        ]);
+        const ok = results.filter(r => r.status === 'fulfilled');
+        const fail = results.filter(r => r.status === 'rejected');
+        expect(ok).toHaveLength(1);
+        expect(fail).toHaveLength(1);
+        expect((fail[0] as PromiseRejectedResult).reason).toBeInstanceOf(
+          QueuedMessageNotFound,
+        );
+        const sent = (await db.items.read(sessionId)).filter(
+          i => i.kind === 'user_message' && i.text === `dup-${round}`,
+        );
+        expect(sent).toHaveLength(1);
+      }
     });
   });
 

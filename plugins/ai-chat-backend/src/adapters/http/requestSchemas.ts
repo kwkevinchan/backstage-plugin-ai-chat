@@ -150,6 +150,10 @@ export const reorderQueueBody = z.object({
   ids: z.array(id).max(100),
 });
 
+export const insertQueuedMessageBody = z.object({
+  runId: id,
+});
+
 export const decisionBody = z.object({
   approved: z.boolean(),
   page: page.optional(),

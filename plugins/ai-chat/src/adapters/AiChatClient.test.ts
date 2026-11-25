@@ -233,6 +233,25 @@ describe('AiChatClient', () => {
     });
   });
 
+  it('turns a queued message into an insert with POST /queue/:queuedId/insert', async () => {
+    const item = {
+      kind: 'user_message',
+      seq: 3,
+      runId: 'r1',
+      text: 'send now',
+      delivery: 'inserted',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+    const { client, fetch } = setup(json(item, 201));
+    expect(
+      await client.insertQueuedMessage('s', 'q/1', { runId: 'r1' }),
+    ).toEqual(item);
+    expect(urls(fetch)).toEqual([
+      ['POST', 'http://backend/api/ai-chat/sessions/s/queue/q%2F1/insert'],
+    ]);
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ runId: 'r1' });
+  });
+
   it('continues the queue: the stream of the new run, or nothing (204)', async () => {
     const stream = setup(
       () =>

@@ -145,6 +145,7 @@ export function mockApi(
     queueMessage: jest.fn(),
     updateQueuedMessage: jest.fn(),
     deleteQueuedMessage: jest.fn().mockResolvedValue(undefined),
+    insertQueuedMessage: jest.fn(),
     reorderQueue: jest.fn(),
     resumeQueue: jest.fn().mockResolvedValue(undefined),
     getInputConfig: jest.fn().mockResolvedValue({

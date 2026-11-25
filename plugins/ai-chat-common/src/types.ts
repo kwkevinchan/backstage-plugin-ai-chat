@@ -334,6 +334,11 @@ export interface ReorderQueueRequest {
   ids: string[];
 }
 
+/** The body of `POST /sessions/:id/queue/:queuedId/insert`. @public */
+export interface InsertQueuedMessageRequest {
+  runId: string;
+}
+
 /** The body of `POST /sessions/:id/tool-calls/:callId/decision`. @public */
 export interface DecideToolCallRequest {
   approved: boolean;

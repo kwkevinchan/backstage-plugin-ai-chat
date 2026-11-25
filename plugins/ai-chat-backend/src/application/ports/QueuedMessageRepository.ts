@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { PageContext } from '@kwkevinchan/ai-chat-harness';
+import type { Item, PageContext } from '@kwkevinchan/ai-chat-harness';
 import type { LeasedRun, QueuedMessage } from '../../domain';
 
 /**
@@ -72,4 +72,19 @@ export interface QueuedMessageRepository {
   startNext(
     sessionId: string,
   ): Promise<{ run: LeasedRun; message: QueuedMessage } | undefined>;
+
+  /**
+   * One transaction: verifies `runId` belongs to the session, is `running`,
+   * and has an unexpired lease (else `RunNotRunning`), removes `id` from the
+   * queue (else `QueuedMessageNotFound`), checks insert limits, writes the
+   * `user_message` with `delivery: 'inserted'`, and marks its attachments
+   * used (keeping reservations for any other queued message that still lists
+   * them). Remaining queued messages keep their order.
+   */
+  insert(
+    sessionId: string,
+    id: string,
+    runId: string,
+    opts?: { maxInsertsPerRun?: number; maxImageBytesPerInput?: number },
+  ): Promise<Item>;
 }
