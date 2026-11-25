@@ -247,4 +247,47 @@ describe('AiChatClient', () => {
     const nothing = setup(() => new Response(null, { status: 204 }));
     expect(await nothing.client.resumeQueue('s')).toBeUndefined();
   });
+
+  it('reads the input config, uploads an image and reads its bytes', async () => {
+    const config = setup(
+      json({
+        images: { enabled: true },
+        insertMaxPerRun: 5,
+        queueMaxMessages: 5,
+      }),
+    );
+    expect(await config.client.getInputConfig()).toMatchObject({
+      images: { enabled: true },
+    });
+    expect(urls(config.fetch)).toEqual([
+      ['GET', 'http://backend/api/ai-chat/input-config'],
+    ]);
+
+    const progress: number[] = [];
+    const upload = setup(json({ id: 'att-1', name: 'dot.png' }));
+    const body = new Blob([new Uint8Array(4)], { type: 'image/png' });
+    await upload.client.uploadAttachment('s/1', body, 'dot.png', loaded =>
+      progress.push(loaded),
+    );
+    expect(urls(upload.fetch)).toEqual([
+      [
+        'POST',
+        'http://backend/api/ai-chat/sessions/s%2F1/attachments?name=dot.png',
+      ],
+    ]);
+    expect(upload.fetch.mock.calls[0][1].headers).toEqual({
+      'Content-Type': 'image/png',
+    });
+    expect(upload.fetch.mock.calls[0][1].body).toBe(body);
+    expect(progress).toEqual([0, 4]);
+
+    const bytes = new Blob([new Uint8Array(4)], { type: 'image/png' });
+    const read = setup(new Response(bytes));
+    expect(await read.client.readAttachment('s/1', 'att/1')).toBeInstanceOf(
+      Blob,
+    );
+    expect(urls(read.fetch)).toEqual([
+      ['GET', 'http://backend/api/ai-chat/sessions/s%2F1/attachments/att%2F1'],
+    ]);
+  });
 });

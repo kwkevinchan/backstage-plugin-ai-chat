@@ -15,7 +15,10 @@
  */
 
 import type { UIMessage } from 'ai';
-import type { ChatDataParts } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type {
+  ChatAttachment,
+  ChatDataParts,
+} from '@kwkevinchan/backstage-plugin-ai-chat-common';
 
 /**
  * What the screen adds to an inserted message that the run ended without
@@ -34,8 +37,22 @@ export type ChatUiDataParts = {
   [K in keyof ChatDataParts]: ChatDataParts[K];
 } & { unread: ChatUnreadData };
 
+/** Images of a user message, kept on the message so the screen can draw them. */
+export interface ChatMessageMetadata {
+  attachments?: ChatAttachment[];
+}
+
+/**
+ * What the input box sends: the text, and the images that have been uploaded.
+ * The text may be empty when there is at least one image.
+ */
+export interface OutgoingMessage {
+  text: string;
+  attachments?: ChatAttachment[];
+}
+
 /** A message of the screen: a message of the AI SDK with the data parts of the chat. */
-export type ChatUiMessage = UIMessage<unknown, ChatUiDataParts>;
+export type ChatUiMessage = UIMessage<ChatMessageMetadata, ChatUiDataParts>;
 
 /** The part of a message that shows a tool call. */
 export type ToolPart = Extract<

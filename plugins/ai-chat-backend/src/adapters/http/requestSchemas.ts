@@ -94,26 +94,43 @@ const attachmentIds = z
   .max(100)
   .refine(ids => new Set(ids).size === ids.length, 'must not repeat an id');
 
+/**
+ * The text of a message. Empty text is allowed: a message with no text is
+ * accepted when it has at least one image. Changing a queued message still
+ * requires text (`nonEmptyMessageText`).
+ */
 const messageText = z
   .string()
   .trim()
-  .min(1)
   .max(MAX_MESSAGE_LENGTH)
   .refine(noNul, NUL_MESSAGE);
 
-export const sendMessageBody = z.object({
-  text: messageText,
-  attachmentIds: attachmentIds.optional(),
-  page: page.optional(),
-});
+const nonEmptyMessageText = messageText.min(1);
 
-export const insertMessageBody = sendMessageBody;
+/**
+ * A message to send, insert or queue. Text, or at least one image: a message
+ * with neither is refused.
+ */
+const messageBody = z
+  .object({
+    text: messageText,
+    attachmentIds: attachmentIds.optional(),
+    page: page.optional(),
+  })
+  .refine(
+    body => body.text.length > 0 || (body.attachmentIds?.length ?? 0) > 0,
+    { message: 'must have text or at least one image', path: ['text'] },
+  );
 
-export const queueMessageBody = sendMessageBody;
+export const sendMessageBody = messageBody;
+
+export const insertMessageBody = messageBody;
+
+export const queueMessageBody = messageBody;
 
 export const updateQueuedMessageBody = z
   .object({
-    text: messageText.optional(),
+    text: nonEmptyMessageText.optional(),
     attachmentIds: attachmentIds.optional(),
     page: page.nullable().optional(),
   })
