@@ -123,13 +123,6 @@ const ALLOWED = /^Allowed( by .+ at .+)?\.$/;
 const card = (page: Page, title = 'Restart a service') =>
   page.getByRole('region', { name: `Approval: ${title}` });
 
-/** The first toolset switch. The list has its own checkbox, so this stays in the panel. */
-const firstToolset = (page: Page) =>
-  page
-    .locator('details', { hasText: /^Toolsets \(/ })
-    .locator('label', { has: page.getByRole('checkbox') })
-    .first();
-
 test('reload keeps the stored result, and the session has its own URL', async ({
   page,
 }) => {
@@ -151,15 +144,12 @@ test('reload keeps the stored result, and the session has its own URL', async ({
   await expect(page.getByText('Here is the result of the action')).toHaveCount(
     1,
   );
-  // The list uses the same words as a title, and earlier tests leave their
-  // own sessions in the list. The stored message is the one copy outside it.
+  // Auto-title repeats these words in the list. Count the stored message
+  // as the one copy outside the conversation list.
   const list = page.getByRole('navigation', { name: 'Conversations' });
-  await expect(list.locator('[aria-current="true"]')).toHaveText(
-    'list services',
-  );
-  const titled = await list.getByText('list services', { exact: true }).count();
+  const inList = await list.getByText('list services', { exact: true }).count();
   await expect(page.getByText('list services', { exact: true })).toHaveCount(
-    titled + 1,
+    inList + 1,
   );
   await shot('08-after-reload');
 
@@ -370,7 +360,9 @@ test('switching off a toolset takes its tools away from the session', async ({
   ).toBeVisible();
 
   await page.getByText(/^Toolsets \(/).click();
-  const toolset = firstToolset(page);
+  const toolset = page
+    .locator('label', { has: page.getByRole('checkbox') })
+    .first();
   const updated = page.waitForResponse(
     response =>
       response.request().method() === 'PATCH' && response.status() === 200,
@@ -385,5 +377,10 @@ test('switching off a toolset takes its tools away from the session', async ({
 
   await page.reload();
   await page.getByText(/^Toolsets \(/).click();
-  await expect(firstToolset(page).getByRole('checkbox')).not.toBeChecked();
+  await expect(
+    page
+      .locator('label', { has: page.getByRole('checkbox') })
+      .first()
+      .getByRole('checkbox'),
+  ).not.toBeChecked();
 });
