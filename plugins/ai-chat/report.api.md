@@ -101,6 +101,9 @@ export const aiChatApiRef: ApiRef<AiChatApi>;
 export const AiChatPage: () => JSX.Element;
 
 // @public
+export function AiChatPanel(): JSX.Element | null;
+
+// @public
 export const aiChatPlugin: BackstagePlugin<
   {
     root: RouteRef<undefined>;

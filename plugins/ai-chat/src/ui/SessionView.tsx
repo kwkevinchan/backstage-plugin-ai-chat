@@ -16,6 +16,7 @@
 
 import { useCallback, useState } from 'react';
 import type {
+  ChatPageContext,
   ChatSessionDetail,
   ChatToolset,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
@@ -37,13 +38,19 @@ export interface SessionViewProps {
   toolsets: ChatToolset[];
   /** The message to send when the session opens, for a session just created. */
   firstMessage?: string;
+  /**
+   * The page of each message. The panel passes the launch and the path at
+   * send time. Omitted, the route is used.
+   */
+  page?: ChatPageContext;
   onChanged?(): void;
 }
 
 /** One session: its messages, the toolsets, the input box. Keyed by the session. */
 export function SessionView(props: SessionViewProps) {
   const { api, detail, toolsets } = props;
-  const page = usePageContext();
+  const routePage = usePageContext();
+  const page = props.page ?? routePage;
   const chat = useSessionChat({
     api,
     detail,

@@ -42,7 +42,8 @@
       "@kwkevinchan/backstage-plugin-ai-chat",
       "@kwkevinchan/backstage-plugin-ai-chat-backend",
       "@kwkevinchan/backstage-plugin-ai-chat-common",
-      "@kwkevinchan/backstage-plugin-ai-chat-node"
+      "@kwkevinchan/backstage-plugin-ai-chat-node",
+      "@kwkevinchan/backstage-plugin-ai-chat-react"
     ]
   },
   "sideEffects": false,

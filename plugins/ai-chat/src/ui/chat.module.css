@@ -448,3 +448,75 @@
   display: flex;
   gap: var(--bui-space-1);
 }
+
+/* Side panel. It stays mounted across pages; a closed conversation is hidden, not removed. */
+.panel-tab {
+  position: fixed;
+  top: 40%;
+  right: 0;
+  z-index: 1100;
+  margin: 0;
+  padding: var(--bui-space-3) var(--bui-space-2);
+  border: 1px solid var(--bui-border-1);
+  border-right: 0;
+  border-radius: var(--bui-radius-2) 0 0 var(--bui-radius-2);
+  background: var(--bui-bg);
+  color: var(--bui-fg-primary);
+  font: inherit;
+  writing-mode: vertical-rl;
+  cursor: pointer;
+}
+
+.panel-frame {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 100vw);
+  height: 100vh;
+  box-sizing: border-box;
+  background: var(--bui-bg);
+  color: var(--bui-fg-primary);
+  border-left: 1px solid var(--bui-border-1);
+}
+
+.panel-frame[hidden] {
+  display: none !important;
+}
+
+.panel-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bui-space-2);
+  padding: var(--bui-space-2) var(--bui-space-3);
+  border-bottom: 1px solid var(--bui-border-1);
+  font-weight: var(--bui-font-weight-bold);
+}
+
+.panel-bar button {
+  margin: 0;
+  padding: var(--bui-space-1) var(--bui-space-2);
+  border: 1px solid var(--bui-border-1);
+  border-radius: var(--bui-radius-2);
+  background: var(--bui-bg);
+  color: var(--bui-fg-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.panel-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.panel-body .chat-main {
+  flex: 1;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}

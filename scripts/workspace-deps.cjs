@@ -19,13 +19,16 @@
  * `yarn.config.cjs` asks this for every workspace dependency. A returned
  * string is the constraint error; `undefined` allows the edge.
  *
- * The three directions added for the extension point are `ai-chat-node` to
+ * The backend directions added for the extension point are `ai-chat-node` to
  * the harness, the backend plugin to `ai-chat-node`, and a backend module of
- * this plugin to `ai-chat-node`. Nothing else may use those packages.
+ * this plugin to `ai-chat-node`. On the frontend, `ai-chat` depends on
+ * `ai-chat-react`, `ai-chat-react` may depend on `ai-chat-common`, and another
+ * frontend package depends only on `ai-chat-react`.
  */
 
 const BACKEND_CORE = '@kwkevinchan/backstage-plugin-ai-chat-backend';
 const FRONTEND_CORE = '@kwkevinchan/backstage-plugin-ai-chat';
+const AI_CHAT_REACT = '@kwkevinchan/backstage-plugin-ai-chat-react';
 const HARNESS = '@kwkevinchan/ai-chat-harness';
 const COMMON = '@kwkevinchan/backstage-plugin-ai-chat-common';
 const NODE_LIB = '@kwkevinchan/backstage-plugin-ai-chat-node';
@@ -53,12 +56,18 @@ function workspaceDependencyError(edge) {
   ) {
     return undefined;
   }
-  if (from === FRONTEND_CORE && to === COMMON) return undefined;
+  if (from === FRONTEND_CORE && (to === COMMON || to === AI_CHAT_REACT)) {
+    return undefined;
+  }
+  if (from === AI_CHAT_REACT && to === COMMON) return undefined;
   if (from === NODE_LIB && to === HARNESS) return undefined;
   if (aiChatModule && to === NODE_LIB) return undefined;
 
   if (from === NODE_LIB) {
     return `${NODE_LIB} may only depend on ${HARNESS} of this repository, not ${to}`;
+  }
+  if (from === AI_CHAT_REACT) {
+    return `${AI_CHAT_REACT} may only depend on ${COMMON} of this repository, not ${to}`;
   }
   if (aiChatModule) {
     return `${from} may only depend on ${NODE_LIB} of this repository, not ${to}`;
@@ -66,7 +75,7 @@ function workspaceDependencyError(edge) {
   if (CORE.has(from)) {
     return `${from} must not depend on other packages of this repository (${to})`;
   }
-  const core = backendRole ? BACKEND_CORE : FRONTEND_CORE;
+  const core = backendRole ? BACKEND_CORE : AI_CHAT_REACT;
   if (to !== core) {
     return `${from} may only depend on ${core} of this repository, not ${to}`;
   }
@@ -76,6 +85,7 @@ function workspaceDependencyError(edge) {
 module.exports = {
   BACKEND_CORE,
   FRONTEND_CORE,
+  AI_CHAT_REACT,
   HARNESS,
   COMMON,
   NODE_LIB,

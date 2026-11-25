@@ -36,6 +36,18 @@ import {
   Link,
 } from '@backstage/core-components';
 import MenuIcon from '@material-ui/icons/Menu';
+import { AiChatLauncher } from '@kwkevinchan/backstage-plugin-ai-chat-react';
+
+const useLauncherStyles = makeStyles({
+  launcher: {
+    padding: '8px 16px',
+    '& button': {
+      width: '100%',
+      textAlign: 'left',
+      cursor: 'pointer',
+    },
+  },
+});
 
 const useSidebarLogoStyles = makeStyles({
   root: {
@@ -65,24 +77,36 @@ const SidebarLogo = () => {
   );
 };
 
-export const Root = ({ children }: PropsWithChildren<{}>) => (
-  <SidebarPage>
-    <Sidebar>
-      <SidebarLogo />
-      <SidebarGroup label="Menu" icon={<MenuIcon />}>
-        <SidebarItem icon={HomeIcon} to="catalog" text="Home" />
-        <SidebarItem icon={ChatIcon} to="ai-chat" text="AI chat" />
-      </SidebarGroup>
-      <SidebarSpace />
-      <SidebarDivider />
-      <SidebarGroup
-        label="Settings"
-        icon={<UserSettingsSignInAvatar />}
-        to="/settings"
-      >
-        <SidebarSettings />
-      </SidebarGroup>
-    </Sidebar>
-    {children}
-  </SidebarPage>
-);
+export const Root = ({ children }: PropsWithChildren<{}>) => {
+  const classes = useLauncherStyles();
+  return (
+    <SidebarPage>
+      <Sidebar>
+        <SidebarLogo />
+        <SidebarGroup label="Menu" icon={<MenuIcon />}>
+          <SidebarItem icon={HomeIcon} to="catalog" text="Home" />
+          <SidebarItem icon={ChatIcon} to="ai-chat" text="AI chat" />
+          {/* The same button another plugin renders to open the panel. */}
+          <div className={classes.launcher}>
+            <AiChatLauncher
+              prompt="where is this component?"
+              entityRef="component:default/example.com"
+            >
+              Ask about example.com
+            </AiChatLauncher>
+          </div>
+        </SidebarGroup>
+        <SidebarSpace />
+        <SidebarDivider />
+        <SidebarGroup
+          label="Settings"
+          icon={<UserSettingsSignInAvatar />}
+          to="/settings"
+        >
+          <SidebarSettings />
+        </SidebarGroup>
+      </Sidebar>
+      {children}
+    </SidebarPage>
+  );
+};
