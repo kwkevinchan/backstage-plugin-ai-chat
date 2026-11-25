@@ -39,6 +39,7 @@ import {
   ListSessions,
   ListSessionTools,
   ListToolsets,
+  NameSession,
   PurgeExpiredSessions,
   PurgeUnusedAttachments,
   QueueMessage,
@@ -149,12 +150,20 @@ export function createHost(ports: HostPorts) {
   // The supervisor calls `afterRun` for the queue, and the queue starts runs
   // on the supervisor: the function is set once both exist.
   const afterRun: { current?: AfterRun } = {};
+  const nameSession = new NameSession({
+    sessions,
+    runs,
+    items,
+    model: ports.model,
+    logger,
+  });
   const supervisor = new RunSupervisor({
     advance,
     runs,
     logger,
     heartbeatMs: ports.heartbeatMs,
     afterRun: info => afterRun.current!(info),
+    nameSession: info => nameSession.execute(info),
   });
   const startNext = new StartNextQueued({
     sessions,

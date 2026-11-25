@@ -28,6 +28,7 @@ import {
 } from '@backstage/backend-test-utils';
 import knex from 'knex';
 import request from 'supertest';
+import { TITLE_PROMPT_MARK } from './application';
 import {
   parseSse,
   readMessage,
@@ -68,11 +69,28 @@ describe('aiChatPlugin', () => {
 
   async function startBackend(respond?: Parameters<typeof startLlmServer>[0]) {
     answers = [];
+    // A title call is not one of the scripted answers. It gets a fixed title
+    // so the next step of the conversation still gets the answer it expects.
+    let scripted = 0;
     llm = await startLlmServer(
       respond ??
-        ((_body, index) => ({
-          body: answers[Math.min(index, answers.length - 1)],
-        })),
+        (body => {
+          const system = body.messages?.find(
+            (message: { role?: string }) => message.role === 'system',
+          );
+          const content = system?.content;
+          if (
+            typeof content === 'string' &&
+            content.startsWith(TITLE_PROMPT_MARK)
+          ) {
+            return { body: text('Generated title') };
+          }
+          const index = scripted;
+          scripted += 1;
+          return {
+            body: answers[Math.min(index, answers.length - 1)],
+          };
+        }),
     );
     actions = new FakeActions([
       { id: 'demo:list-things', readOnly: true, run: () => ({ things: [1] }) },

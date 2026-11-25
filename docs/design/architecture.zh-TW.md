@@ -547,8 +547,8 @@ plugins/ai-chat-backend/
       errors.ts                        SessionNotFound、RunNotFound、RunAlreadyActive（P1-05）；NotSessionOwner、ToolCallNotFound、ToolCallNotWaiting、RunNotWaiting、AgentNotFound、UnknownToolset、ShuttingDown（P1-08）
     application/                       第 2 圈
       ports/
-        SessionRepository.ts           create、get、listByOwner、update、delete
-        RunRepository.ts               start、acquireLease、transition、requestCancel、expireStale。也實作核心的 RunControl（heartbeat、recordUsage）
+        SessionRepository.ts           create、get、listByOwner（搜尋、釘選在前）、update、setTitleIfAbsent、delete
+        RunRepository.ts               start、acquireLease、transition、requestCancel、expireStale、hasOtherNormalEnd。也實作核心的 RunControl（heartbeat、recordUsage）
         ShareRepository.ts             P2
         AccessControl.ts               P2：能不能讀這段 Session、能不能用這個 Toolset。P1 只檢查擁有者（domain 的 assertOwner）
         AuditLog.ts                    begin() 回傳 AuditSpan（success、fail）
@@ -559,8 +559,9 @@ plugins/ai-chat-backend/
       usecases/
         CreateSession.ts
         GetSession.ts                  回傳 Session 和檢視者看得到的 Item
-        ListSessions.ts
+        ListSessions.ts                自己的 Session：釘選在前，`q` 比對標題
         UpdateSession.ts               改名、釘選、封存、開關 Toolset
+        NameSession.ts                 第一輪正常結束後寫標題（SE-04）；title 已有就不寫
         DeleteSession.ts
         SendMessage.ts
         DecideApproval.ts
@@ -734,6 +735,8 @@ export class SendMessage {
 - **`DeleteSession`**：有進行中的 Run 就丟 `RunAlreadyActive`（鎖的順序見規劃的 P1-08）。檢查和刪除之間仍有一個很短的空隙：這時新開的 Run 會在刪除時被連帶刪掉，它的迴圈下一次寫入得到 `LeaseLost` 而結束。
 - **`CreateSession`**：一定把 Toolset 存進 `enabled_toolsets`：沒給就用 `default: true` 的組，也可能是空陣列；不認得的 id 丟 `UnknownToolset`。`UpdateSession` 同樣檢查。
 - **`ExpireStaleRuns`**：`plugin.ts` 每 30 秒排一次。
+- **`ListSessions`**：自己的 Session。釘選的在前，然後 `updated_at` 新的在前，再以 `id`。`query` 比對存下的 `title`（不分 ASCII 大小寫的子字串，`%` 和 `_` 是字面字）；沒有標題的對不上。預設不含已封存。
+- **`NameSession`**（SE-04）：第一輪正常結束（`isNormalEnd`）且 `title` 仍空時，用同一個 `ModelClient` 產生一行標題，只在 `title` 仍空時寫入。失敗只記 log。
 - **`PurgeExpiredSessions`**（SE-05）：`plugin.ts` 每小時排一次（`ai-chat-purge-expired-sessions`，timeout 5 分鐘，跟清沒用到的附件一樣）。期限是 `aiChat.retention.days`：沒設定是 90，`0` 不刪任何 Session，負數或不是整數則 backend 啟動失敗。到期看 `sessions.updated_at` 是否**早於**「現在減 `days` 個整天（每個 24 小時）」；剛好在界線上的留下。`updated_at` 在建立、修改 Session（改名、釘選、封存、開關 Toolset）和寫入 Item 時更新；只排隊或只上傳附件不更新，所以不會因此延後刪除。進行中的 Run（`runs.active_session_id` 還在，也就是 `running` 或 `waiting_approval`）不刪，和 `DeleteSession` 拒絕刪除一樣；Run 結束後，下一次才刪。釘選和封存沒有例外。刪除沿用外鍵的連帶刪除（runs、items、queued messages、attachments）。稽核在 Backstage auditor，不在這些表裡，這項不讀也不寫它。PostgreSQL 上每個 Session 一個 transaction：先依 `id` 對它的 runs 取 `FOR UPDATE SKIP LOCKED`，確認沒有進行中的 Run，再對 session 列取 `FOR UPDATE SKIP LOCKED`（並且 `updated_at` 仍早於期限），然後刪除。別的 transaction 已經鎖住的 run 或 session 直接跳過，不等，所以兩台同時跑不會刪到同一段，也不會和寫入互等而死結。鎖的順序仍是先 runs 再 session（第 13.8 節）。SQLite 沒有列鎖，交易一個接一個。排程用 Backstage scheduler 的預設 global scope（同一時間只有一台執行這項工作）；列鎖是兩次執行重疊時的第二層。
 
 ### 5.4 `RunSupervisor`
@@ -745,6 +748,7 @@ export class SendMessage {
 - **訂閱**：每個 Run 可以有多個訂閱者（`subscribe(runId)` 從現在起收事件，`FollowSession` 在 P2 用它）。訂閱者斷線不影響 Run（H-07、A-06）。
 - **續租**：核心每一輪呼叫一次 `heartbeat`；執行不是唯讀的工具之前也會呼叫，讓停止要求在兩個寫入工具之間生效。模型呼叫很久時，另外有計時器每 10 秒續租一次；續租得到 `LeaseLost` 或停止要求時中止迴圈。其他錯誤（資料庫暫時很慢）只記 warn，不中止：一次失敗不代表租約丟了，下一次續租或核心自己的 `heartbeat` 會再試。租約長度 30 秒。
 - **結束**：依照 `RunOutcome` 用 `transition(runId, to, { leaseOwner })` 更新 Run 的狀態（`completed` 的 `end_reason` 是 `endReason`，`failed` 是 `error`，使用者取消是 `user`），清掉 `active_session_id`。先更新狀態，再把 `run.ended` 交給訂閱者：收到串流結束的用戶端馬上送決定時，Run 已經是 `waiting_approval`。`transition` 得到 `LeaseLost` 或 `InvalidRunTransition`（Run 已被別人結束或接手）就略過。`failed` 的 `cause` 和 `summary.failed` 的 `cause` 只記 log，交給訂閱者的事件是拿掉 `cause` 的副本。寫成 `waiting_approval` 之後如果回傳的 Run 帶著 `cancelRequested`（停止要求在迴圈最後一次 `heartbeat` 之後才存進來），再 `transition` 成 `cancelled`（`end_reason` 是 `user`），Run 不會卡在等核准。其餘事件（`summary.started`、`context.trimmed` 等）只交給訂閱者，不影響 Run 的狀態。
+- **自動標題**（SE-04）：狀態寫入、佇列的 `afterRun` 處理完之後，先把 `run.ended` 交給訂閱者並結束訂閱，再若這段 Session 沒有標題、而且沒有更早的正常結束，用同一台的 `ModelClient` 產生一行標題。這一步仍在迴圈裡，關機仍會等到它結束。失敗只記 log，不改 Run 的狀態。使用者已經改名的不蓋掉。
 - **port 丟例外**：核心的 port 丟例外（例如 `LeaseLost`）時迴圈沒有 `run.ended`。supervisor 自己處理：`LeaseLost` 表示租約已在別人手上，Run 的狀態不動；其他例外用 `leaseOwner` 把 Run 標成 `failed`（`end_reason` 是 `error`）並記 log。兩種情形都給訂閱者一個 `run.ended`（`failed`，固定文字 `The run stopped.`，沒有 `cause`）。
 - **已用時間**：等核准的時間不算。核心每次呼叫只算這次呼叫內經過的時間，加上 request 帶入的 `usage.elapsedSeconds`；宿主接手時帶入存在 Run 裡的用量（`acquireLease` 回傳的 Run），不用現在時間減 `started_at`。
 - **關機**（H-11）：`shutdown(graceMs = 20 秒)` 先停止接新的 Run（`launch` 丟 `ShuttingDown`，`SendMessage` 在 `start` 之前就檢查），等進行中的 Run 最多 `graceMs`。沒跑完的，只對 Map 裡的 Run 中止迴圈並呼叫 `transition(runId, 'expired', { leaseOwner: fence.leaseOwner })`；得到 `LeaseLost` 表示已被別台接手，略過。不用沒帶 `leaseOwner` 的 `transition` 結束 Run：那會結束別台接手的 Run。
@@ -1148,6 +1152,8 @@ plugins/ai-chat/src/
 前端用 `@ai-sdk/react` 的 `useChat`，加我們的 `ChatTransport`。型別、路徑、`messageIdOfRun` 來自 `ai-chat-common`，前端沒有自己的一份。
 
 **網址（SE-01）**。頁面掛在 `<path>/*` 底下：`<path>` 是新對話，`<path>/<sessionId>` 是那一段 Session，直接打開網址會載入它。第一則訊息先 `POST /sessions`，再導向新 Session 的網址（訊息放在 location state），該頁載入之後送出它，並把 state 清掉。
+
+**列表（SE-03、SE-04）**。後端的 `GET /sessions?q=`、`PATCH`（改名、釘選、封存）和自動標題已可用；`AiChatClient` 也帶了對應的方法。目前的側邊列表仍只列出最近的 Session。搜尋、釘選、封存與「顯示已封存」的畫面在後續的前端工作。自動標題寫在 `run.ended` 送出、串流結束之後，仍在迴圈裡，所以稍後再讀列表才看得到標題。
 
 **一個 Session 一個 `useChat`**。`SessionView` 以 Session id 當 key，載入 `GET /sessions/:id` 之後才建立；`useChat` 的 `messages` 是 `itemsToMessages` 還原的結果。
 

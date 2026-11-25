@@ -160,6 +160,12 @@ export const resumeBody = z.object({ page: page.optional() });
 export const listQuery = z.object({
   includeArchived: z.enum(['true', 'false']).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
+  q: z
+    .string()
+    .trim()
+    .max(MAX_TITLE_LENGTH)
+    .refine(noNul, NUL_MESSAGE)
+    .optional(),
 });
 
 export const afterSeqQuery = z.object({

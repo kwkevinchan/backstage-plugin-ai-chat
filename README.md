@@ -54,7 +54,9 @@ as an append-only log of items, so a closed tab does not lose the answer, and
 it has limits: at most `aiChat.maxTurns` model calls, at most
 `aiChat.maxToolCallsPerRun` tool calls, and at most `aiChat.runTimeoutSeconds`
 of work (the time spent waiting for an approval does not count). A session has
-one run at a time.
+one run at a time. A session can be searched by title, pinned, renamed or
+archived, and after its first round ends normally it gets a short title. A
+title you set is kept.
 
 ## Install
 
@@ -552,8 +554,8 @@ Retrieval over TechDocs, an entity tab or sidebar widget, file uploads,
 several model providers at once, MCP servers outside Backstage, sharing a
 conversation, applying an agent's skills, hooks, planning or model (those
 fields can be set, and a module can register them; the loop does not use them
-yet), and the list of sessions with search, pin, archive and automatic titles
-(until then every session in the list is called "New conversation").
+yet), and a session list that can search, pin or archive (the page still lists
+recent sessions; a title is stored after the first round ends normally).
 
 Limits of this version:
 

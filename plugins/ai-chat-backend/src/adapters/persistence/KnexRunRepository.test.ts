@@ -402,6 +402,25 @@ describe('KnexRunRepository', () => {
     });
   });
 
+  describe('hasOtherNormalEnd', () => {
+    it('is true only for another run that completed with no end reason', async () => {
+      const failed = await p.runs.start(sessionId);
+      await p.runs.transition(failed.id, 'failed', { endReason: 'error' });
+      expect(await p.runs.hasOtherNormalEnd(sessionId, 'later')).toBe(false);
+
+      const normal = await p.runs.start(sessionId);
+      await p.runs.transition(normal.id, 'completed');
+      expect(await p.runs.hasOtherNormalEnd(sessionId, normal.id)).toBe(false);
+      expect(await p.runs.hasOtherNormalEnd(sessionId, 'later')).toBe(true);
+
+      const limited = await p.runs.start(sessionId);
+      await p.runs.transition(limited.id, 'completed', {
+        endReason: 'max_steps',
+      });
+      expect(await p.runs.hasOtherNormalEnd(sessionId, limited.id)).toBe(true);
+    });
+  });
+
   describe('requestCancel', () => {
     it('is false for a run that has ended', async () => {
       const run = await p.runs.start(sessionId);

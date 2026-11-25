@@ -77,6 +77,15 @@ export type { NewShare, Share, ShareScope, ShareScopeInput } from './share';
 export { assertOwner, isSessionOwner } from './session';
 export type { NewSession, Session, SessionPatch } from './session';
 export {
+  GENERATED_TITLE_MAX_CHARS,
+  TITLE_SOURCE_MAX_CHARS,
+  conversationForTitle,
+  normalizeSearchQuery,
+  searchLikePattern,
+  shouldAutoTitle,
+  titleFromModelAnswer,
+} from './sessionList';
+export {
   NOT_SHARED_OUTPUT,
   effectiveShare,
   visibleItems,
