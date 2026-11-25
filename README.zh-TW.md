@@ -99,7 +99,7 @@ aiChat:
   context:
     tokenBudget: 100000 # 送給模型的內容的 token 預算（估計值）；預設 100000
     keepRecentSteps: 6 # 最近幾步一律保留；預設 6
-  maxToolOutputChars: 20000 # 工具輸出存下並送給模型的字元上限；預設 20000，最小 100
+  maxToolOutputChars: 20000 # 工具輸出（含 load_skill 回傳的 Skill 全文）存下並送給模型的字元上限；預設 20000，最小 100
   input: # Run 進行中使用者可以加的訊息
     insert:
       maxPerRun: 5 # 一次 Run 最多插入幾則，最大 20；預設 5

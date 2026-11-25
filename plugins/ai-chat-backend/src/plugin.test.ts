@@ -975,4 +975,95 @@ describe('aiChatPlugin', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('cuts the text of a skill to maxToolOutputChars and says how much was cut', async () => {
+    const longSkill = createBackendModule({
+      pluginId: 'ai-chat',
+      moduleId: 'long-skill',
+      register(env) {
+        env.registerInit({
+          deps: { harness: aiChatHarnessExtensionPoint },
+          async init({ harness }) {
+            harness.addSkill({
+              id: 'long-skill',
+              description: 'A very long procedure.',
+              load: () => 'x'.repeat(500),
+            });
+          },
+        });
+      },
+    });
+    answers = [call('load_skill', { id: 'long-skill' }), text('Done.')];
+    let scripted = 0;
+    llm = await startLlmServer(body => {
+      const system = body.messages?.find(
+        (m: { role?: string }) => m.role === 'system',
+      )?.content;
+      if (typeof system === 'string' && system.startsWith(TITLE_PROMPT_MARK)) {
+        return { body: text('Long skill title') };
+      }
+      const index = scripted;
+      scripted += 1;
+      return { body: answers[Math.min(index, answers.length - 1)] };
+    });
+    const db = await createDb();
+    try {
+      const { server } = await startTestBackend({
+        features: [
+          aiChatPlugin,
+          longSkill,
+          mockServices.rootConfig.factory({
+            data: {
+              aiChat: {
+                llm: { baseUrl: llm.url, model: 'test-model' },
+                maxToolOutputChars: 100,
+              },
+            },
+          }),
+          mockServices.database.factory({ knex: db }),
+          mockServices.auditor.mock().factory,
+          mockServices.httpAuth.factory({
+            defaultCredentials: mockCredentials.none(),
+          }),
+          createServiceFactory({
+            service: actionsServiceRef,
+            deps: {},
+            factory: () => new FakeActions([]),
+          }),
+        ],
+      });
+      const created = await request(server)
+        .post('/api/ai-chat/sessions')
+        .set('Authorization', alice)
+        .send({})
+        .expect(201);
+      const runRes = await request(server)
+        .post(`/api/ai-chat/sessions/${created.body.id}/runs`)
+        .set('Authorization', alice)
+        .send({ text: 'Load the long skill' })
+        .expect(200);
+
+      const uiMessage = await readMessage(await parseSse(runRes.text));
+      const part = uiMessage.parts.find(
+        (p: { type: string }) => p.type === 'tool-load_skill',
+      ) as { output: { content: string } } | undefined;
+      const content = part?.output.content ?? '';
+      expect(content.length).toBeLessThanOrEqual(100);
+      expect(content).toMatch(
+        /^x+\n\n\[Skill cut: \d+ of 500 characters left out\.\]$/,
+      );
+      const kept = content.indexOf('\n');
+      expect(content).toContain(`[Skill cut: ${500 - kept} of 500`);
+      // The title is written after the run ended; the database must outlive it.
+      const deadline = Date.now() + 5000;
+      for (;;) {
+        const row = await db('sessions').where({ id: created.body.id }).first();
+        if (row?.title === 'Long skill title') break;
+        if (Date.now() > deadline) throw new Error('No title was written');
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+    } finally {
+      await db.destroy();
+    }
+  });
 });

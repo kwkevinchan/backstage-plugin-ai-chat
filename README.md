@@ -234,7 +234,7 @@ aiChat:
   context:
     tokenBudget: 100000 # estimated tokens of the model input; default 100000
     keepRecentSteps: 6 # newest steps that are never shortened; default 6
-  maxToolOutputChars: 20000 # output stored and sent to the model; default 20000, at least 100
+  maxToolOutputChars: 20000 # output stored and sent to the model, also of load_skill; default 20000, at least 100
   # What the user may add while a run goes on
   input:
     insert:
@@ -317,7 +317,7 @@ exactly `days` ago is kept.
 | `input.images.maxBytesPerInput`     | Most image bytes sent to the model in one call and across one run (`20971520` / 20 MB by default). Must be at least `maxPerMessage * maxBytes`.                                                                                                                                                                             |
 | `input.images.maxPendingPerSession` | Most uploaded images in one session not yet in any message (`12` by default). Unused images are deleted after 24 hours.                                                                                                                                                                                                     |
 | `input.images.tokensPerImage`       | Estimated tokens one image uses in `context.tokenBudget` (`1600` by default). Set it for the model you use.                                                                                                                                                                                                                 |
-| `maxToolOutputChars`                | The output of an action is cut here, and the cut is stated.                                                                                                                                                                                                                                                                 |
+| `maxToolOutputChars`                | The output of an action, and the text `load_skill` returns, is cut here, and the cut is stated.                                                                                                                                                                                                                             |
 | `sharing.live.enabled`              | Whether a share may keep updating. Default true. Creating or changing a share is not in this version, so this is only checked and kept.                                                                                                                                                                                     |
 | `sharing.live.defaultHours`         | Hours a live share lasts when nobody picks a life. Default 24. A positive integer, at most `maxHours`.                                                                                                                                                                                                                      |
 | `sharing.live.maxHours`             | Longest life of a live share, in hours. Default 72. A positive integer, at least `defaultHours`.                                                                                                                                                                                                                            |

@@ -32,6 +32,7 @@ import { createRouter } from './adapters/http';
 import { inputConfigOf } from './adapters/http/controllers/attachments';
 import { OpenAiCompatibleClient } from './adapters/model/OpenAiCompatibleClient';
 import { OpenAiCompatibleModelClient } from './adapters/model/OpenAiCompatibleModelClient';
+import { limitSkillContent } from './adapters/skills/limitSkillContent';
 import {
   loadSkillsFromDirectories,
   mergeSkills,
@@ -122,7 +123,10 @@ export const aiChatPlugin = createBackendPlugin({
           aiChat.skills.directories,
           logger,
         );
-        const skills = mergeSkills(directorySkills, harnessExtensions.skills());
+        const skills = mergeSkills(
+          directorySkills,
+          harnessExtensions.skills(),
+        ).map(skill => limitSkillContent(skill, aiChat.maxToolOutputChars));
         const knownSkills = new Set(skills.map(skill => skill.id));
         // Reads and checks the toolsets, the policy and the agents, and warns
         // about the deprecated include and exclude lists.

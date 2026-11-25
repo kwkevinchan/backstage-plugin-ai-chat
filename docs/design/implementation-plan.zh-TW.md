@@ -783,6 +783,7 @@ flowchart LR
   - `SKILL.md` 解析對齊公開 Agent Skills 規格：檔頭強制含 `---` YAML frontmatter（先去掉 UTF-8 BOM 並正規化 CRLF），要求 `name` 與目錄名稱一致且符合擴充 ID 規則、`description` 將空白壓縮為單行（上限 1024 字元）、本文去空白後不得為空、檔案上限 256 KiB；額外 metadata 欄位放寬允許，隱藏目錄與沒有 `SKILL.md` 的子目錄略過不報錯。
   - 延遲載入與錯誤遮罩：`loadSkillsFromDirectories` 啟動只驗證中繼資料與目錄存在性，每次 `load_skill` 依 `ctx.signal` 現場讀檔並抽取本文，讀檔失敗時僅由後端 logger 記警告並回傳安全訊息 `Could not load skill <id>.`。
   - `load_skill` 的工具輸出結構為 `{ id, description, content }`，並以 `builtin:load_skill:v1` 作為 `schemaHash`。
+  - `load_skill` 不經過 tool gateway，所以宿主在 `plugin.ts` 把每個 Skill 的 `load` 包一層：回傳的文字超過 `aiChat.maxToolOutputChars` 就截斷，結尾寫明截掉幾個字元。
   - 系統提示說工具輸出不可信。Skill 清單後面多一句例外：`load_skill` 回傳的是這個 Backstage 管理者寫的做法，照管理者的指示對待；它不核准任何動作，也不改哪些工具要核准。
 
 ### P3-05 Hooks

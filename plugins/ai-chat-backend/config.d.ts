@@ -261,9 +261,10 @@ export interface Config {
       };
     };
     /**
-     * Most characters of the output of an action that are stored and sent to
-     * the model; the rest is cut. At least 100 (a smaller value stops the
-     * backend at startup). Defaults to 20000.
+     * Most characters of the output of an action, and of the text
+     * `load_skill` returns, that are stored and sent to the model; the rest is
+     * cut. At least 100 (a smaller value stops the backend at startup).
+     * Defaults to 20000.
      */
     maxToolOutputChars?: number;
     /**
