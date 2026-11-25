@@ -36,7 +36,7 @@ import { describeError } from '../adapters/describeError';
 import { usePageContext } from '../application/usePageContext';
 import { useSessionList } from '../application/useSessionList';
 import { useToolsets } from '../application/useToolsets';
-import { Composer } from './Composer';
+import { DraftComposer } from './Composer';
 import { SessionView } from './SessionView';
 import { cx } from './styles';
 import { ToolsetPanel } from './ToolsetPanel';
@@ -169,7 +169,7 @@ function NewSession({ api, basePath, toolsets, onChanged }: Basics) {
           </div>
         )}
       </div>
-      <Composer onSend={send} disabled={false} />
+      <DraftComposer onSend={send} disabled={false} />
     </div>
   );
 }

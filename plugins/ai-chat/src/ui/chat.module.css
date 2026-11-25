@@ -232,6 +232,23 @@
   padding: 0;
   background: transparent;
 }
+.chat-markdown table {
+  display: block;
+  max-width: 100%;
+  margin: var(--bui-space-2) 0;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.chat-markdown th,
+.chat-markdown td {
+  padding: var(--bui-space-1) var(--bui-space-2);
+  border: 1px solid var(--bui-border-2);
+  text-align: left;
+}
+.chat-markdown th {
+  background: var(--bui-bg-neutral-3);
+  font-weight: var(--bui-font-weight-bold);
+}
 .chat-markdown a,
 .chat-code a {
   color: var(--bui-fg-info);

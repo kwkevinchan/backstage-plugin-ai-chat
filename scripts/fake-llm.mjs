@@ -52,6 +52,16 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const STORY = Array.from({ length: 60 }, (_, i) => `word${i + 1}`).join(' ');
 
+const TABLE = [
+  'The services and their restarts:',
+  '',
+  '| Service | Status | Restarts |',
+  '| --- | --- | ---: |',
+  '| payments | running | 0 |',
+  '| search | running | 0 |',
+  '| billing | running | 0 |',
+].join('\n');
+
 /**
  * A message of the user may start with one line that says where the user is
  * ("The user is on the page of ..."), then an empty line, then the text.
@@ -177,6 +187,7 @@ export function scriptedReply(body) {
   const restart = /^restart\s+([\w-]+)/i.exec(text);
   if (restart) return call('restart-service', { name: restart[1] });
   if (/^story/i.test(text)) return { text: STORY };
+  if (/^table/i.test(text)) return { text: TABLE };
   const hold = /^hold(?:\s+(\d+))?/i.exec(text);
   if (hold) {
     const seconds = Number(hold[1] ?? 5);

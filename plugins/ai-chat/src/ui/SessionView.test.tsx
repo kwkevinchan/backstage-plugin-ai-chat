@@ -438,3 +438,70 @@ describe('a message that the run did not read', () => {
     expect(unreadButtons()).toHaveLength(0);
   });
 });
+
+describe('the thread', () => {
+  it('shows a table of the answer, and no image of it', async () => {
+    const api = mockApi();
+    await open(
+      api,
+      detail({
+        items: items(
+          user('table'),
+          answer(
+            '| Service | Restarts |\n| --- | --- |\n| payments | 1 |\n\n![x](https://example.test/x.png)',
+          ),
+        ),
+      }),
+    );
+    const table = await screen.findByRole('table');
+    expect(within(table).getByRole('cell', { name: 'payments' })).toBeVisible();
+    expect(document.querySelector('img')).toBeNull();
+  });
+
+  it('decides a call from its card: the decision goes to the backend with the call id', async () => {
+    const api = mockApi();
+    api.decide.mockResolvedValue(answerStream());
+    await open(api, waiting());
+    const card = await screen.findByRole('region', {
+      name: 'Approval: Restart service',
+    });
+    await userEvent.click(within(card).getByRole('button', { name: 'Allow' }));
+    await waitFor(() => expect(api.decide).toHaveBeenCalledTimes(1));
+    expect(api.decide.mock.calls[0].slice(0, 3)).toEqual([
+      's-1',
+      'c1',
+      expect.objectContaining({ approved: true }),
+    ]);
+  });
+
+  it('stops a run that waits for a decision', async () => {
+    const api = mockApi();
+    await open(api, waiting());
+    await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    await waitFor(() =>
+      expect(api.cancelRun).toHaveBeenCalledWith('s-1', 'r-1'),
+    );
+  });
+
+  it('shows no empty message while the answer has not started', async () => {
+    const api = mockApi();
+    await open(api, running());
+    expect(
+      document.querySelectorAll('[class*="chat-message-assistant"]'),
+    ).toHaveLength(0);
+    expect(screen.getByText('start the work')).toBeInTheDocument();
+  });
+
+  it('has a disabled Send while the box is empty, and sends with it when no run goes on', async () => {
+    const api = mockApi();
+    api.sendMessage.mockResolvedValue(answerStream());
+    const box = await open(api, detail());
+    const send = screen.getByRole('button', { name: 'Send' });
+    expect(send).toBeDisabled();
+    await userEvent.type(box, 'hello');
+    expect(send).toBeEnabled();
+    await userEvent.click(send);
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(box).toHaveValue('');
+  });
+});

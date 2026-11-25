@@ -384,3 +384,38 @@ test('switching off a toolset takes its tools away from the session', async ({
       .getByRole('checkbox'),
   ).not.toBeChecked();
 });
+
+test('the conversation follows the answer to its end, and shows a table', async ({
+  page,
+}) => {
+  const shot = watch(page);
+  await page.setViewportSize({ width: 1024, height: 700 });
+  await signIn(page);
+
+  const timeline = page.locator('[aria-live="polite"]');
+  const atEnd = () =>
+    timeline.evaluate(
+      element =>
+        element.scrollHeight - element.scrollTop - element.clientHeight < 4,
+    );
+  for (const text of ['story', 'story', 'story', 'story', 'story', 'story']) {
+    await say(page, text);
+    await expect(page.getByText('word60').last()).toBeVisible();
+  }
+  // The answers are longer than the view, and the view is at their end.
+  expect(
+    await timeline.evaluate(
+      element => element.scrollHeight > element.clientHeight,
+    ),
+  ).toBe(true);
+  await expect.poll(atEnd).toBe(true);
+
+  await say(page, 'table');
+  const table = page.getByRole('table');
+  await expect(table.getByRole('cell', { name: 'payments' })).toBeVisible();
+  await expect(
+    table.getByRole('columnheader', { name: 'Restarts' }),
+  ).toBeVisible();
+  await expect.poll(atEnd).toBe(true);
+  await shot('14-long-conversation-and-table');
+});

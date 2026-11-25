@@ -64,6 +64,8 @@
   },
   "dependencies": {
     "@ai-sdk/react": "4.0.170",
+    "@assistant-ui/react": "0.15.38",
+    "@assistant-ui/react-markdown": "0.14.26",
     "@backstage/core-compat-api": "backstage:^",
     "@backstage/core-components": "backstage:^",
     "@backstage/core-plugin-api": "backstage:^",
@@ -74,6 +76,7 @@
     "@kwkevinchan/backstage-plugin-ai-chat-react": "workspace:^",
     "@remixicon/react": ">=4.6.0 <4.9.0",
     "ai": "7.0.166",
+    "remark-gfm": "4.0.1",
     "zod": "^4.2.0"
   },
   "devDependencies": {

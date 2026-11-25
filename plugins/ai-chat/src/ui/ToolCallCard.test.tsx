@@ -16,13 +16,17 @@
 
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { toToolCall } from '../adapters/assistantUi/toThreadMessage';
+import { statusOfTool } from '../domain/toolView';
 import type { ToolPart } from '../domain/types';
 import {
   ApprovalCard,
   formatJson,
   hasInvisibleCharacters,
   needsCard,
+  statusOfCall,
   ToolCallRow,
+  type ToolCallProps,
 } from './ToolCallCard';
 
 const base = {
@@ -33,9 +37,15 @@ const base = {
 const part = (extra: object) => ({ ...base, ...extra } as unknown as ToolPart);
 const waiting = part({ state: 'approval-requested', approval: { id: 'c1' } });
 
+/** The props that the tool component gets for a part, through the adapter. */
+const callOf = (
+  p: ToolPart,
+  respondToApproval = jest.fn().mockResolvedValue(undefined),
+) => ({ ...toToolCall(p), respondToApproval } as unknown as ToolCallProps);
+
 describe('ApprovalCard', () => {
   it('shows the action, the status and the exact input', () => {
-    render(<ApprovalCard part={waiting} onDecide={jest.fn()} />);
+    render(<ApprovalCard call={callOf(waiting)} />);
     expect(screen.getByText('Restart service')).toBeInTheDocument();
     expect(screen.getByText('dev-actions:restart-service')).toBeInTheDocument();
     expect(screen.getByText('Waiting for approval')).toBeInTheDocument();
@@ -54,7 +64,7 @@ describe('ApprovalCard', () => {
       readOnly: false,
     };
     const { rerender } = render(
-      <ApprovalCard part={waiting} tool={tool} onDecide={jest.fn()} />,
+      <ApprovalCard call={callOf(waiting)} tool={tool} />,
     );
     expect(screen.getByText('Restart a service')).toBeInTheDocument();
     expect(
@@ -71,9 +81,8 @@ describe('ApprovalCard', () => {
 
     rerender(
       <ApprovalCard
-        part={waiting}
+        call={callOf(waiting)}
         tool={{ ...tool, readOnly: true }}
-        onDecide={jest.fn()}
       />,
     );
     expect(
@@ -82,7 +91,7 @@ describe('ApprovalCard', () => {
   });
 
   it('says nothing about why it asks when the tool is not known', () => {
-    render(<ApprovalCard part={waiting} onDecide={jest.fn()} />);
+    render(<ApprovalCard call={callOf(waiting)} />);
     expect(screen.queryByText(/changes something/)).toBeNull();
     expect(screen.queryByText(/policy of your administrator/)).toBeNull();
   });
@@ -90,13 +99,14 @@ describe('ApprovalCard', () => {
   it('shows who decided and when, when the log says', () => {
     render(
       <ApprovalCard
-        part={part({
-          state: 'output-available',
-          output: 1,
-          approval: { id: 'c1', approved: true },
-        })}
+        call={callOf(
+          part({
+            state: 'output-available',
+            output: 1,
+            approval: { id: 'c1', approved: true },
+          }),
+        )}
         decision={{ by: 'user:default/guest', at: '2026-01-01T10:00:00.000Z' }}
-        onDecide={jest.fn()}
       />,
     );
     expect(
@@ -108,19 +118,19 @@ describe('ApprovalCard', () => {
     ).toBeInTheDocument();
   });
 
-  it('calls the handler with the call id and the decision', async () => {
-    const onDecide = jest.fn();
-    render(<ApprovalCard part={waiting} onDecide={onDecide} />);
+  it('answers the approval through the props of the tool component', async () => {
+    const respond = jest.fn().mockResolvedValue(undefined);
+    render(<ApprovalCard call={callOf(waiting, respond)} />);
     await userEvent.click(screen.getByRole('button', { name: 'Allow' }));
     await userEvent.click(screen.getByRole('button', { name: 'Deny' }));
-    expect(onDecide.mock.calls).toEqual([
-      ['c1', true],
-      ['c1', false],
+    expect(respond.mock.calls).toEqual([
+      [{ approved: true }],
+      [{ approved: false }],
     ]);
   });
 
   it('disables the buttons while a decision is being sent', () => {
-    render(<ApprovalCard part={waiting} disabled onDecide={jest.fn()} />);
+    render(<ApprovalCard call={callOf(waiting)} disabled />);
     expect(screen.getByRole('button', { name: 'Allow' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Deny' })).toBeDisabled();
   });
@@ -128,12 +138,13 @@ describe('ApprovalCard', () => {
   it('shows what was decided, and no buttons, after the decision', () => {
     render(
       <ApprovalCard
-        part={part({
-          state: 'output-available',
-          output: { ok: true },
-          approval: { id: 'c1', approved: true },
-        })}
-        onDecide={jest.fn()}
+        call={callOf(
+          part({
+            state: 'output-available',
+            output: { ok: true },
+            approval: { id: 'c1', approved: true },
+          }),
+        )}
       />,
     );
     expect(screen.getByText('Done')).toBeInTheDocument();
@@ -144,11 +155,12 @@ describe('ApprovalCard', () => {
   it('says that a rejected call did not run', () => {
     render(
       <ApprovalCard
-        part={part({
-          state: 'output-denied',
-          approval: { id: 'c1', approved: false },
-        })}
-        onDecide={jest.fn()}
+        call={callOf(
+          part({
+            state: 'output-denied',
+            approval: { id: 'c1', approved: false },
+          }),
+        )}
       />,
     );
     expect(screen.getByText('Denied')).toBeInTheDocument();
@@ -158,11 +170,12 @@ describe('ApprovalCard', () => {
   it('shows a call that was allowed and has no result yet', () => {
     render(
       <ApprovalCard
-        part={part({
-          state: 'approval-responded',
-          approval: { id: 'c1', approved: true },
-        })}
-        onDecide={jest.fn()}
+        call={callOf(
+          part({
+            state: 'approval-responded',
+            approval: { id: 'c1', approved: true },
+          }),
+        )}
       />,
     );
     expect(
@@ -174,12 +187,13 @@ describe('ApprovalCard', () => {
   it('shows the result unknown, and the call that did not run, with a reason', () => {
     const { rerender } = render(
       <ApprovalCard
-        part={part({
-          state: 'output-error',
-          errorText: 'The result of the call is not known.',
-          approval: { id: 'c1', approved: true },
-        })}
-        onDecide={jest.fn()}
+        call={callOf(
+          part({
+            state: 'output-error',
+            errorText: 'The result of the call is not known.',
+            approval: { id: 'c1', approved: true },
+          }),
+        )}
       />,
     );
     expect(screen.getByText('Result unknown')).toBeInTheDocument();
@@ -189,11 +203,12 @@ describe('ApprovalCard', () => {
 
     rerender(
       <ApprovalCard
-        part={part({
-          state: 'output-error',
-          errorText: 'The call did not run.',
-        })}
-        onDecide={jest.fn()}
+        call={callOf(
+          part({
+            state: 'output-error',
+            errorText: 'The call did not run.',
+          }),
+        )}
       />,
     );
     expect(screen.getByText('Did not run')).toBeInTheDocument();
@@ -203,32 +218,63 @@ describe('ApprovalCard', () => {
   });
 });
 
+describe('statusOfCall', () => {
+  it.each([
+    ['input-streaming', {}],
+    ['input-available', {}],
+    ['approval-requested', { approval: { id: 'c1' } }],
+    ['approval-responded', { approval: { id: 'c1', approved: true } }],
+    ['approval-responded', { approval: { id: 'c1', approved: false } }],
+    ['output-available', { output: { ok: true } }],
+    [
+      'output-available',
+      { output: { ok: true }, approval: { id: 'c1', approved: true } },
+    ],
+    ['output-denied', { approval: { id: 'c1', approved: false } }],
+    ['output-error', { errorText: 'boom' }],
+    ['output-error', { errorText: 'The result of the call is not known.' }],
+    ['output-error', { errorText: 'The call did not run.' }],
+  ])(
+    'reads %s %j from the props as the domain reads the part',
+    (state, extra) => {
+      const p = part({ state, ...extra });
+      expect(statusOfCall(toToolCall(p))).toBe(statusOfTool(p));
+    },
+  );
+});
+
 describe('needsCard', () => {
   it('is true for a call that waited for a decision or got one', () => {
-    expect(needsCard(waiting)).toBe(true);
+    expect(needsCard(toToolCall(waiting))).toBe(true);
     expect(
       needsCard(
-        part({
-          state: 'output-denied',
-          approval: { id: 'c1', approved: false },
-        }),
+        toToolCall(
+          part({
+            state: 'output-denied',
+            approval: { id: 'c1', approved: false },
+          }),
+        ),
       ),
     ).toBe(true);
     expect(
       needsCard(
-        part({
-          state: 'output-available',
-          output: 1,
-          approval: { id: 'c1', approved: true },
-        }),
+        toToolCall(
+          part({
+            state: 'output-available',
+            output: 1,
+            approval: { id: 'c1', approved: true },
+          }),
+        ),
       ),
     ).toBe(true);
   });
   it('is false for a call that ran without asking', () => {
-    expect(needsCard(part({ state: 'output-available', output: 1 }))).toBe(
+    expect(
+      needsCard(toToolCall(part({ state: 'output-available', output: 1 }))),
+    ).toBe(false);
+    expect(needsCard(toToolCall(part({ state: 'input-available' })))).toBe(
       false,
     );
-    expect(needsCard(part({ state: 'input-available' }))).toBe(false);
   });
 });
 
@@ -240,7 +286,7 @@ describe('invisible characters in the input', () => {
   });
 
   it('are shown as escapes, with a warning line', () => {
-    render(<ApprovalCard part={tricky} onDecide={jest.fn()} />);
+    render(<ApprovalCard call={callOf(tricky)} />);
     expect(screen.getByRole('alert')).toHaveTextContent(
       'The input has invisible characters',
     );
@@ -255,12 +301,13 @@ describe('invisible characters in the input', () => {
   it('have no warning when the input is plain, also with a line break', () => {
     render(
       <ApprovalCard
-        part={part({
-          state: 'approval-requested',
-          approval: { id: 'c1' },
-          input: { text: 'a\nb' },
-        })}
-        onDecide={jest.fn()}
+        call={callOf(
+          part({
+            state: 'approval-requested',
+            approval: { id: 'c1' },
+            input: { text: 'a\nb' },
+          }),
+        )}
       />,
     );
     expect(screen.queryByRole('alert')).toBeNull();
@@ -300,7 +347,7 @@ describe('ToolCallRow', () => {
   });
 
   it('is a compact row with the input and output folded, and clickable links', () => {
-    const { container } = render(<ToolCallRow part={read} />);
+    const { container } = render(<ToolCallRow call={callOf(read)} />);
     expect(container.querySelector('details')).not.toHaveAttribute('open');
     expect(screen.getByText('List services')).toBeInTheDocument();
     expect(screen.getByText('Done')).toBeInTheDocument();
@@ -312,10 +359,12 @@ describe('ToolCallRow', () => {
   it('shows the error of a failed call', () => {
     render(
       <ToolCallRow
-        part={part({
-          state: 'output-error',
-          errorText: 'There is no tool named nope',
-        })}
+        call={callOf(
+          part({
+            state: 'output-error',
+            errorText: 'There is no tool named nope',
+          }),
+        )}
       />,
     );
     expect(screen.getByText('Failed')).toBeInTheDocument();
@@ -325,10 +374,12 @@ describe('ToolCallRow', () => {
   it('says that an output was cut', () => {
     render(
       <ToolCallRow
-        part={part({
-          state: 'output-available',
-          output: { truncated: true, originalLength: 5000, text: '{"a":' },
-        })}
+        call={callOf(
+          part({
+            state: 'output-available',
+            output: { truncated: true, originalLength: 5000, text: '{"a":' },
+          }),
+        )}
       />,
     );
     expect(

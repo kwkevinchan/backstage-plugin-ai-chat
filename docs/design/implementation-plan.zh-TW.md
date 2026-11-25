@@ -552,7 +552,7 @@ flowchart LR
 | 編號  | 工作項目                              | 大小 | 依賴                         | 驗收重點                                                                  | PR  | 狀態 |
 | ----- | ------------------------------------- | ---- | ---------------------------- | ------------------------------------------------------------------------- | --- | ---- |
 | PU-01 | 文件                                  | S    | 無                           | 規格 D-31、架構第 9 節、這一節的驗收清單。三份文件一致                    | #43 | 完成 |
-| PU-02 | 地基：runtime、訊息串、工具、Markdown | L    | PU-01                        | runtime、訊息轉換、訊息串、工具卡片和核准、Markdown、契約測試、瀏覽器 e2e |     |      |
+| PU-02 | 地基：runtime、訊息串、工具、Markdown | L    | PU-01                        | runtime、訊息轉換、訊息串、工具卡片和核准、Markdown、契約測試、瀏覽器 e2e | #55 | 完成 |
 | PU-03 | 排隊和插入                            | M    | PU-02、PU-07                 | `queueAdapter`、佇列區塊、暫停和未讀的小元件、契約測試                    |     |      |
 | PU-04 | 圖片附件                              | M    | PU-02、PI-06 的後端          | `attachmentAdapter`、草稿和訊息裡的縮圖                                   |     |      |
 | PU-05 | Session 列表                          | M    | PU-02、P2-01 和 P2-06 的後端 | `threadListAdapter`、搜尋、釘選、封存、即時狀態                           |     |      |
@@ -586,7 +586,7 @@ flowchart LR
 - **驗收**：
   - 契約測試：`toThreadMessage` 涵蓋文字、工具呼叫（輸入、結果、失敗、核准的每個狀態）、資料片段（`data-run`、`unread`、notice），以及串流到一半、等核准、核准後、拒絕、工具失敗、Run 失敗、未讀的插入訊息。
   - lint 規則或測試：只有 `adapters/assistantUi/` 和 `ui/` 可以 import `@assistant-ui/*`。
-  - S-02：`Markdown.test.tsx` 改成對新的元件跑。餵進 `<script>`、`![](外部網址)`、`[x](javascript:…)`、`<img onerror>`、`<iframe>`，確認畫面上沒有 `img`、`script`、`iframe`，連結沒有 `javascript:`。再加一個表格的案例確認 GFM 有效。這組測試之後不能刪、不能放寬。
+  - S-02：`ui/MarkdownText.test.tsx` 對新的元件跑。餵進 `<script>`、`![](外部網址)`、`[x](javascript:…)`、`<img onerror>`、`<iframe>`，確認畫面上沒有 `img`、`script`、`iframe`，連結沒有 `javascript:`。再加一個表格的案例確認 GFM 有效。這組測試之後不能刪、不能放寬。
   - `ui/` 的元件測試（`SessionView`、`ToolCallCard`）改寫。`application/` 的測試不應該要改；要改的話在 PR 說明寫原因。
   - 端對端（Playwright，在瀏覽器跑）：送出、串流、核准後接續、Stop、重新整理後接回、自動捲動。
   - 測試輸出沒有一堆 React `act()` 警告（assistant-ui 的 store 在測試外更新）。

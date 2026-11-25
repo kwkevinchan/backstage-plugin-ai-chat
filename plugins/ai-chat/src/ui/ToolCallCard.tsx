@@ -14,18 +14,52 @@
  * limitations under the License.
  */
 
+import { createContext, useContext } from 'react';
+import type { ToolCallMessagePartProps } from '@assistant-ui/react';
 import { Button } from '@backstage/ui';
 import type { ChatTool } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { DecisionInfo } from '../domain/itemsToMessages';
 import {
-  statusOfTool,
+  NOT_RUN,
+  RESULT_NOT_KNOWN,
   titleOfTool,
-  toolIdOf,
   type ToolStatus,
 } from '../domain/toolView';
-import type { ToolPart } from '../domain/types';
-import { LinkedText } from './Markdown';
+import { LinkedText } from './LinkedText';
 import { cx } from './styles';
+
+/** What a tool card reads of the call: the props of a tool component of assistant-ui. */
+export type ToolCallProps = Pick<
+  ToolCallMessagePartProps,
+  | 'toolCallId'
+  | 'toolName'
+  | 'args'
+  | 'result'
+  | 'isError'
+  | 'approval'
+  | 'respondToApproval'
+>;
+
+/**
+ * How the screen shows a call. A failed call carries its error text as the
+ * result, so a call whose result is not known and a call that did not run
+ * are told apart from a failure by that text.
+ */
+export function statusOfCall(
+  call: Pick<ToolCallProps, 'result' | 'isError' | 'approval'>,
+): ToolStatus {
+  if (call.isError) {
+    if (call.result === RESULT_NOT_KNOWN) return 'unknown';
+    if (call.result === NOT_RUN) return 'not_run';
+    return 'failed';
+  }
+  if (call.result !== undefined) return 'done';
+  if (call.approval) {
+    if (call.approval.approved === undefined) return 'waiting';
+    return call.approval.approved ? 'allowed' : 'rejected';
+  }
+  return 'running';
+}
 
 const STATUS: Record<
   ToolStatus,
@@ -106,19 +140,19 @@ function isCutOutput(
 }
 
 /** The input, and the output or the error, of a call. */
-export function ToolCallDetails({ part }: { part: ToolPart }) {
-  const output = part.state === 'output-available' ? part.output : undefined;
+export function ToolCallDetails({ call }: { call: ToolCallProps }) {
+  const output = call.isError ? undefined : call.result;
   return (
     <>
       <div>
         <div className={cx('chat-tool-label')}>Input</div>
-        <InvisibleWarning input={part.input} />
-        <pre className={cx('chat-code')}>{formatJson(part.input)}</pre>
+        <InvisibleWarning input={call.args} />
+        <pre className={cx('chat-code')}>{formatJson(call.args)}</pre>
       </div>
-      {part.state === 'output-error' && statusOfTool(part) === 'failed' && (
+      {statusOfCall(call) === 'failed' && (
         <div>
           <div className={cx('chat-tool-label')}>Error</div>
-          <pre className={cx('chat-code')}>{part.errorText}</pre>
+          <pre className={cx('chat-code')}>{String(call.result)}</pre>
         </div>
       )}
       {output !== undefined && (
@@ -141,46 +175,40 @@ export function ToolCallDetails({ part }: { part: ToolPart }) {
 
 /** A compact row of a call that needed no decision, with its details folded. */
 export function ToolCallRow({
-  part,
+  call,
   tool,
 }: {
-  part: ToolPart;
+  call: ToolCallProps;
   tool?: ChatTool;
 }) {
-  const toolId = toolIdOf(part);
+  const toolId = call.toolName;
   return (
     <details className={cx('chat-tool')}>
       <summary>
-        <StatusBadge status={statusOfTool(part)} />
+        <StatusBadge status={statusOfCall(call)} />
         <span>{tool?.title ?? titleOfTool(toolId)}</span>
         <span className={cx('chat-id')}>{toolId}</span>
       </summary>
       <div className={cx('chat-tool-body')}>
-        <ToolCallDetails part={part} />
+        <ToolCallDetails call={call} />
       </div>
     </details>
   );
 }
 
 /** Whether a call shows as a card: it waited for a decision, or got one. */
-export function needsCard(part: ToolPart): boolean {
-  return (
-    part.state === 'approval-requested' ||
-    part.state === 'approval-responded' ||
-    part.state === 'output-denied' ||
-    Boolean(part.approval)
-  );
+export function needsCard(call: Pick<ToolCallProps, 'approval'>): boolean {
+  return Boolean(call.approval);
 }
 
 export interface ApprovalCardProps {
-  part: ToolPart;
+  call: ToolCallProps;
   /** What the session knows of the tool: its title, what it does, whether it only reads. */
   tool?: ChatTool;
   /** Who decided the call and when, when the log says. */
   decision?: DecisionInfo;
   /** Set while a decision is being sent, or a response is under way. */
   disabled?: boolean;
-  onDecide(callId: string, approved: boolean): void;
 }
 
 const EXPLANATION: Partial<Record<ToolStatus, string>> = {
@@ -189,12 +217,12 @@ const EXPLANATION: Partial<Record<ToolStatus, string>> = {
 };
 
 function decisionText(
-  part: ToolPart,
+  call: ToolCallProps,
   status: ToolStatus,
   info?: DecisionInfo,
 ): string | undefined {
   if (status === 'waiting') return undefined;
-  const approved = part.approval?.approved;
+  const approved = call.approval?.approved;
   let decision: string | undefined;
   if (approved !== undefined) {
     const word = approved ? 'Allowed' : 'Denied';
@@ -219,12 +247,16 @@ function whyAsks(tool?: ChatTool): string | undefined {
  * the decision it shows what was decided.
  */
 export function ApprovalCard(props: ApprovalCardProps) {
-  const { part, disabled } = props;
-  const status = statusOfTool(part);
-  const toolId = toolIdOf(part);
+  const { call, disabled } = props;
+  const status = statusOfCall(call);
+  const toolId = call.toolName;
   const title = props.tool?.title ?? titleOfTool(toolId);
   const waiting = status === 'waiting';
-  const decision = decisionText(part, status, props.decision);
+  const decision = decisionText(call, status, props.decision);
+  // A decision that the runtime refuses (the call is decided already) leaves
+  // the card as the next state of the messages shows it.
+  const decide = (approved: boolean) =>
+    call.respondToApproval({ approved }).catch(() => undefined);
   return (
     <section
       className={cx('chat-approval', !waiting && 'chat-approval-decided')}
@@ -248,14 +280,14 @@ export function ApprovalCard(props: ApprovalCardProps) {
           <div className={cx('chat-tool-label')}>
             Input that will run, exactly as shown
           </div>
-          <InvisibleWarning input={part.input} />
-          <pre className={cx('chat-code')}>{formatJson(part.input)}</pre>
+          <InvisibleWarning input={call.args} />
+          <pre className={cx('chat-code')}>{formatJson(call.args)}</pre>
         </div>
       ) : (
         <details>
           <summary className={cx('chat-tool-label')}>Input and result</summary>
           <div className={cx('chat-tool-body')}>
-            <ToolCallDetails part={part} />
+            <ToolCallDetails call={call} />
           </div>
         </details>
       )}
@@ -264,14 +296,14 @@ export function ApprovalCard(props: ApprovalCardProps) {
           <Button
             variant="primary"
             isDisabled={disabled}
-            onPress={() => props.onDecide(part.toolCallId, true)}
+            onPress={() => decide(true)}
           >
             Allow
           </Button>
           <Button
             variant="secondary"
             isDisabled={disabled}
-            onPress={() => props.onDecide(part.toolCallId, false)}
+            onPress={() => decide(false)}
           >
             Deny
           </Button>
@@ -281,5 +313,38 @@ export function ApprovalCard(props: ApprovalCardProps) {
         <div className={cx('chat-approval-decision')}>{decision}</div>
       )}
     </section>
+  );
+}
+
+/** What the session knows around the calls: the tools, who decided, and whether a card can be used now. */
+export interface ToolCallView {
+  /** The tools of the session by id. */
+  tools?: Record<string, ChatTool>;
+  /** Who decided which call, and when, when the log says. */
+  decisions?: Record<string, DecisionInfo>;
+  /** Set while a decision is being sent, or a response is under way. */
+  disabled: boolean;
+}
+
+export const ToolCallViewContext = createContext<ToolCallView>({
+  disabled: false,
+});
+
+/**
+ * The tool component of the message parts: a card for a call that waited
+ * for a decision or got one, a compact row for the others.
+ */
+export function ToolCall(props: ToolCallMessagePartProps) {
+  const view = useContext(ToolCallViewContext);
+  const tool = view.tools?.[props.toolName];
+  return needsCard(props) ? (
+    <ApprovalCard
+      call={props}
+      tool={tool}
+      decision={view.decisions?.[props.toolCallId]}
+      disabled={view.disabled}
+    />
+  ) : (
+    <ToolCallRow call={props} tool={tool} />
   );
 }
