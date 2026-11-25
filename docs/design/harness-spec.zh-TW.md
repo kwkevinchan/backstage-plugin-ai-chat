@@ -492,7 +492,7 @@ interface Hooks {
 | 2026-11-24 | 1.1  | PI 審查後：複製帶走圖片（IN-19、SH-04、Q-17 改正）；暫停時直接送出的順序寫進 IN-15、IN-18；IN-12 說明只有一個重送按鈕，沒讀到的訊息不再送給模型；IN-06 加圖片位元組上限和 `maxBytesPerInput`；`images` 設定改放 `llm`；`readUpToSeq` 的定義                                                                                                                              |
 | 2026-11-25 | 1.2  | 新增 D-31：前端畫面用 assistant-ui 的無樣式 primitives，接法是 `useExternalStoreRuntime`，狀態留在 `useSessionChat`。D-19 理由補一句：這個決定讓前端可以換，這次換成 D-31。S-02 補 Markdown 元件禁用圖片、不渲染原始 HTML、連結協定由測試鎖住。第 8 節加 PU。第 12 節加 assistant-ui。                                                                                   |
 | 2026-11-25 | 1.2  | PI-07 文件與設定收尾（[pi-coverage.zh-TW.md](pi-coverage.zh-TW.md)）：標記 PI-01 到 PI-05 完成、PI-06 後端與 client 完成（畫面在 PU-04）、PI-07 端對端與用途說明頁在 PU-03/PU-04 之後。D-08、D-10 與 P-07 到 P-09 標記為不做（P4-01 不做）                                                                                                                               |
-| 2026-11-25 | 1.2  | X-05 完成（P3-05）：`aiChatHarnessExtensionPoint` 公開 `addHook`，迴圈依序呼叫 `beforeModelCall`、`beforeToolCall`、`afterToolCall`、`onRunEnd`，維持單調不放寬政策與 fail-closed 行為                                                                                                                                                                                   |
+| 2026-11-25 | 1.2  | X-05 完成（P3-05）：`aiChatHarnessExtensionPoint` 公開 `addHook`。迴圈依序呼叫 `beforeModelCall`、`beforeToolCall`、`afterToolCall`；宿主寫入 Run 的終態之後呼叫 `onRunEnd`，每個 Run 一次。政策只能調嚴，Hook 失敗時 fail closed                                                                                                                                        |
 
 ## 12. 對照的開源專案
 

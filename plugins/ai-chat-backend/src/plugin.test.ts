@@ -612,7 +612,7 @@ describe('aiChatPlugin', () => {
               };
             });
             harness.addHook('onRunEnd', summary => {
-              events.push(`onRunEnd:${summary.outcome.status}`);
+              events.push(`onRunEnd:${summary.status}`);
               resolveOnRunEnd();
             });
           },
@@ -703,6 +703,14 @@ describe('aiChatPlugin', () => {
         'beforeModelCall:step=2',
         'onRunEnd:completed',
       ]);
+      // The title is written after the run ended; the database must outlive it.
+      const deadline = Date.now() + 5000;
+      for (;;) {
+        const row = await db('sessions').where({ id: created.body.id }).first();
+        if (row?.title === 'Hooked title') break;
+        if (Date.now() > deadline) throw new Error('No title was written');
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
     } finally {
       await db.destroy();
     }

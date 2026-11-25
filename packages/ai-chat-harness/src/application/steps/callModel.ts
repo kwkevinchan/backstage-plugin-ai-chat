@@ -37,9 +37,9 @@ import type { AdvanceRunDeps, AdvanceRunRequest } from '../types';
 import {
   runBeforeModelCall,
   runBeforeToolCall,
-  stepContextOf,
   toolCallFromParts,
 } from './hooks';
+import { stepContextOf } from './stepContext';
 import { summarize } from './summarize';
 
 /** What one model call left: how many calls the model asked for, or an end. */

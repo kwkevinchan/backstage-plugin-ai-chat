@@ -22,7 +22,10 @@ import type {
   HookName,
   HookRegistry,
   Hooks,
+  ToolResult,
 } from '@kwkevinchan/ai-chat-harness';
+import type { Logger } from '../../application/ports';
+import { limitToolResult } from './ActionsToolGateway';
 import { readExtensionAgent } from './agentShape';
 
 const HOOK_NAMES: readonly HookName[] = [
@@ -90,7 +93,56 @@ export class AiChatHarnessRegistry implements AiChatHarnessExtensionPoint {
     );
   }
 
-  extensions(): Extensions {
-    return { hooks: this.hooks() };
+  /**
+   * The hooks as the loop and the host call them. Each hook logs what it
+   * throws, with its name, and throws it again: the loop decides what a
+   * failure means. When a module changes tool results, the changed output is
+   * cut to `maxToolOutputChars` after the last `afterToolCall` hook, as the
+   * tool gateway cuts the output of a tool.
+   */
+  extensions(opts: { logger: Logger; maxToolOutputChars: number }): Extensions {
+    const { logger, maxToolOutputChars } = opts;
+    const afterToolCall = this.hookLists.afterToolCall.map(hook =>
+      logged('afterToolCall', hook, logger),
+    );
+    if (afterToolCall.length > 0) {
+      afterToolCall.push((_call, result: ToolResult) =>
+        limitToolResult(result, maxToolOutputChars),
+      );
+    }
+    return {
+      hooks: {
+        beforeModelCall: this.hookLists.beforeModelCall.map(hook =>
+          logged('beforeModelCall', hook, logger),
+        ),
+        beforeToolCall: this.hookLists.beforeToolCall.map(hook =>
+          logged('beforeToolCall', hook, logger),
+        ),
+        afterToolCall,
+        onRunEnd: this.hookLists.onRunEnd.map(hook =>
+          logged('onRunEnd', hook, logger),
+        ),
+      },
+    };
   }
+}
+
+function logged<K extends HookName>(
+  name: K,
+  hook: Hooks[K],
+  logger: Logger,
+): Hooks[K] {
+  const call = hook as (...args: unknown[]) => unknown;
+  const wrapped = async (...args: unknown[]) => {
+    try {
+      return await call(...args);
+    } catch (error) {
+      logger.warn(`An AI chat ${name} hook failed`, {
+        hook: name,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  };
+  return wrapped as unknown as Hooks[K];
 }

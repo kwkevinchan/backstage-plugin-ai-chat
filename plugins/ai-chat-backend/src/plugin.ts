@@ -198,7 +198,10 @@ export const aiChatPlugin = createBackendPlugin({
             },
           },
           retentionDays: aiChat.retentionDays,
-          extensions: harnessExtensions.extensions(),
+          extensions: harnessExtensions.extensions({
+            logger,
+            maxToolOutputChars: aiChat.maxToolOutputChars,
+          }),
           notifier,
         });
         lifecycle.addShutdownHook(() => host.supervisor.shutdown());

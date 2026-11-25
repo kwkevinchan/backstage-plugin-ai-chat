@@ -63,7 +63,6 @@ export type AgentMessageBody = {
 export interface AiChatHarnessExtensionPoint {
   // (undocumented)
   addAgent(agent: AgentDefinition): void;
-  // (undocumented)
   addHook<K extends HookName>(name: K, hook: Hooks[K]): void;
 }
 
@@ -264,19 +263,15 @@ export type HookRegistry = {
 
 // @public
 export interface Hooks {
-  // (undocumented)
   afterToolCall(
     call: ToolCall,
     result: ToolResult,
   ): ToolResult | Promise<ToolResult>;
-  // (undocumented)
   beforeModelCall(ctx: StepContext): void | Promise<void>;
-  // (undocumented)
   beforeToolCall(
     call: ToolCall,
     ctx: StepContext,
   ): BeforeToolCallDecision | Promise<BeforeToolCallDecision>;
-  // (undocumented)
   onRunEnd(run: RunSummary): void | Promise<void>;
 }
 
@@ -568,18 +563,13 @@ export type RunStatus =
 
 // @public
 export interface RunSummary {
-  // (undocumented)
   readonly agentId: string;
-  // (undocumented)
-  readonly outcome: RunOutcome;
-  // (undocumented)
-  readonly principal: unknown;
-  // (undocumented)
+  readonly endReason?: string;
   readonly runId: string;
-  // (undocumented)
   readonly sessionId: string;
-  // (undocumented)
+  readonly status: 'completed' | 'failed' | 'cancelled' | 'expired';
   readonly usage: RunUsage;
+  readonly userRef: string;
 }
 
 // @public
@@ -591,9 +581,8 @@ export type RunUsage = {
 
 // @public
 export interface StepContext extends CallContext {
-  // (undocumented)
   agentId: string;
-  // (undocumented)
+  principal: unknown;
   signal: AbortSignal;
   step: number;
 }
@@ -623,17 +612,11 @@ export type SummaryPlan = {
 
 // @public
 export interface ToolCall {
-  // (undocumented)
   readonly callId: string;
-  // (undocumented)
   readonly input: JsonObject;
-  // (undocumented)
   readonly position: number;
-  // (undocumented)
   readonly readOnly: boolean;
-  // (undocumented)
   readonly step: number;
-  // (undocumented)
   readonly toolId: string;
 }
 

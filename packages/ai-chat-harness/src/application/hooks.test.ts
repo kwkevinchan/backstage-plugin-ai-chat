@@ -14,12 +14,7 @@
  * limitations under the License.
  */
 
-import type {
-  Extensions,
-  RunSummary,
-  StepContext,
-  ToolCall,
-} from './ports/extensions';
+import type { Extensions, StepContext, ToolCall } from './ports/extensions';
 import { kit } from '../testing/fixture';
 import type { FakeTool } from '../testing/FakeToolGateway';
 import { callTool, say } from '../testing/ScriptedModel';
@@ -28,6 +23,7 @@ function fakeTool(
   id: string,
   readOnly: boolean,
   execute?: FakeTool['execute'],
+  extra: { egress?: boolean } = {},
 ): FakeTool {
   return {
     descriptor: {
@@ -36,9 +32,15 @@ function fakeTool(
       inputSchema: { type: 'object' },
       schemaHash: `hash-${id}`,
       readOnly,
+      ...extra,
     },
     execute,
   };
+}
+
+/** A promise that never settles, as a hook that hangs gives. */
+function never<T>(): Promise<T> {
+  return new Promise<T>(() => undefined);
 }
 
 const readTool = fakeTool('catalog:read', true, call => ({
@@ -52,10 +54,9 @@ const writeTool = fakeTool('catalog:write', false, call => ({
 }));
 
 describe('AdvanceRun: hooks (X-05)', () => {
-  it('runs beforeModelCall in registration order with StepContext, skips summarize, and runs onRunEnd once at terminal end', async () => {
+  it('runs beforeModelCall in registration order with StepContext and skips summarize', async () => {
     const trace: string[] = [];
     const seenCtx: StepContext[] = [];
-    const summaries: RunSummary[] = [];
 
     const extensions: Extensions = {
       hooks: {
@@ -66,15 +67,6 @@ describe('AdvanceRun: hooks (X-05)', () => {
           },
           async ctx => {
             trace.push(`before-2:step=${ctx.step}`);
-          },
-        ],
-        onRunEnd: [
-          summary => {
-            trace.push(`end-1:${summary.outcome.status}`);
-            summaries.push(summary);
-          },
-          summary => {
-            trace.push(`end-2:${summary.outcome.status}`);
           },
         ],
       },
@@ -125,23 +117,52 @@ describe('AdvanceRun: hooks (X-05)', () => {
       'before-2:step=1',
       'before-1:step=2',
       'before-2:step=2',
-      'end-1:completed',
-      'end-2:completed',
     ]);
-    expect(summaries).toHaveLength(1);
-    expect(summaries[0]).toMatchObject({
-      sessionId: 'session-1',
-      runId: 'run-1',
-      agentId: 'default',
-      principal: { user: 'user:a' },
-      outcome: { status: 'completed' },
-      usage: { stepsUsed: 2, toolCallsUsed: 1 },
-    });
   });
 
-  it('fails closed when beforeModelCall throws: skips model call, fails run, and fires onRunEnd', async () => {
+  it('gives each hook call its own copy of the principal', async () => {
+    const seen: unknown[] = [];
+    const h = await kit({
+      tools: [readTool],
+      log: [{ kind: 'user_message', text: 'Check' }],
+      script: [[callTool('m1', 'catalog:read', {})], [say('Done.')]],
+      extensions: {
+        hooks: {
+          beforeModelCall: [
+            ctx => {
+              seen.push(ctx.principal);
+              (ctx.principal as { user: string }).user = 'user:changed';
+            },
+            ctx => {
+              seen.push(ctx.principal);
+            },
+          ],
+          beforeToolCall: [
+            (_call, ctx) => {
+              seen.push(ctx.principal);
+              return { action: 'continue' };
+            },
+          ],
+        },
+      },
+    });
+
+    const request = h.request();
+    expect((await h.execute()).outcome).toEqual({ status: 'completed' });
+    // Step 1: two model hooks and one tool hook; step 2: two model hooks.
+    expect(seen).toHaveLength(5);
+    expect(seen.slice(1)).toEqual([
+      { user: 'user:a' },
+      { user: 'user:a' },
+      { user: 'user:changed' },
+      { user: 'user:a' },
+    ]);
+    expect(seen[1]).not.toBe(seen[0]);
+    expect(request.ctx.principal).toEqual({ user: 'user:a' });
+  });
+
+  it('fails closed when beforeModelCall throws: skips model call and fails run', async () => {
     const model = jest.fn();
-    const summaries: RunSummary[] = [];
 
     const h = await kit({
       log: [{ kind: 'user_message', text: 'Hi' }],
@@ -158,11 +179,6 @@ describe('AdvanceRun: hooks (X-05)', () => {
               throw new Error('rate quota exhausted');
             },
           ],
-          onRunEnd: [
-            summary => {
-              summaries.push(summary);
-            },
-          ],
         },
       },
     });
@@ -177,12 +193,9 @@ describe('AdvanceRun: hooks (X-05)', () => {
       'rate quota exhausted',
     );
     expect(events.some(e => e.type === 'step.started')).toBe(false);
-    expect(summaries).toHaveLength(1);
-    expect(summaries[0].outcome.status).toBe('failed');
   });
 
-  it('never relaxes ask policy: beforeToolCall returning continue keeps approval requirement and onRunEnd does not fire on wait', async () => {
-    const summaries: RunSummary[] = [];
+  it('never relaxes ask policy: beforeToolCall returning continue keeps approval requirement', async () => {
     const h = await kit({
       tools: [writeTool],
       log: [{ kind: 'user_message', text: 'Write thing' }],
@@ -193,18 +206,12 @@ describe('AdvanceRun: hooks (X-05)', () => {
       extensions: {
         hooks: {
           beforeToolCall: [() => ({ action: 'continue' })],
-          onRunEnd: [
-            summary => {
-              summaries.push(summary);
-            },
-          ],
         },
       },
     });
 
     const first = await h.execute();
     expect(first.outcome.status).toBe('waiting_approval');
-    expect(summaries).toHaveLength(0);
 
     const pending = (first.outcome as { pending: ToolCall[] }).pending;
     await h.append({
@@ -216,8 +223,247 @@ describe('AdvanceRun: hooks (X-05)', () => {
 
     const second = await h.execute();
     expect(second.outcome).toEqual({ status: 'completed' });
-    expect(summaries).toHaveLength(1);
-    expect(summaries[0].outcome).toEqual({ status: 'completed' });
+  });
+
+  it('keeps the approval of a read-only tool the administrator sets to ask, and of an egress tool, when the hook says continue', async () => {
+    const executed: string[] = [];
+    const askedRead = fakeTool('catalog:read', true, () => {
+      executed.push('read');
+      return { status: 'ok' };
+    });
+    const egressRead = fakeTool(
+      'web:fetch',
+      true,
+      () => {
+        executed.push('fetch');
+        return { status: 'ok' };
+      },
+      { egress: true },
+    );
+    const h = await kit({
+      tools: [askedRead, egressRead],
+      policy: { byTool: { 'catalog:read': 'ask' } },
+      log: [{ kind: 'user_message', text: 'Read' }],
+      script: [
+        [callTool('m1', 'catalog:read', {}), callTool('m2', 'web:fetch', {})],
+        [say('Done.')],
+      ],
+      extensions: {
+        hooks: { beforeToolCall: [() => ({ action: 'continue' })] },
+      },
+    });
+
+    const first = await h.execute();
+    expect(first.outcome.status).toBe('waiting_approval');
+    const pending = (first.outcome as { pending: ToolCall[] }).pending;
+    expect(pending.map(call => call.toolId)).toEqual([
+      'catalog:read',
+      'web:fetch',
+    ]);
+    const calls = (await h.read()).filter(i => i.kind === 'tool_call');
+    expect(calls.map(call => call.policy)).toEqual(['ask', 'ask']);
+    expect(executed).toEqual([]);
+  });
+
+  it.each<[string, unknown]>([
+    ['undefined', undefined],
+    ['null', null],
+    ['an unknown action', { action: 'allow' }],
+    ['a string', 'continue'],
+  ])(
+    'denies the call when beforeToolCall returns %s',
+    async (_name, decision) => {
+      const executed: string[] = [];
+      const tool = fakeTool('catalog:read', true, () => {
+        executed.push('read');
+        return { status: 'ok' };
+      });
+      const h = await kit({
+        tools: [tool],
+        log: [{ kind: 'user_message', text: 'Read' }],
+        script: [[callTool('m1', 'catalog:read', {})], [say('Done.')]],
+        extensions: {
+          hooks: { beforeToolCall: [() => decision as never] },
+        },
+      });
+
+      expect((await h.execute()).outcome).toEqual({ status: 'completed' });
+      expect(executed).toEqual([]);
+      const result = (await h.read()).find(i => i.kind === 'tool_result');
+      expect(result).toMatchObject({
+        status: 'denied',
+        message: 'Denied by hook.',
+      });
+    },
+  );
+
+  it('uses the fixed reason when a deny has no reason', async () => {
+    const h = await kit({
+      tools: [readTool],
+      log: [{ kind: 'user_message', text: 'Read' }],
+      script: [[callTool('m1', 'catalog:read', {})], [say('Done.')]],
+      extensions: {
+        hooks: {
+          beforeToolCall: [() => ({ action: 'deny', reason: ' ' })],
+        },
+      },
+    });
+
+    await h.execute();
+    const result = (await h.read()).find(i => i.kind === 'tool_result');
+    expect(result).toMatchObject({
+      status: 'denied',
+      message: 'Denied by hook.',
+    });
+  });
+
+  it('ends the run cancelled when it stops while beforeModelCall hangs', async () => {
+    const model = jest.fn();
+    let called!: () => void;
+    const started = new Promise<void>(resolve => {
+      called = resolve;
+    });
+    const h = await kit({
+      log: [{ kind: 'user_message', text: 'Hi' }],
+      script: [
+        () => {
+          model();
+          return [say('should not happen')];
+        },
+      ],
+      extensions: {
+        hooks: {
+          beforeModelCall: [
+            () => {
+              called();
+              return never();
+            },
+          ],
+        },
+      },
+    });
+
+    const running = h.execute();
+    await started;
+    h.controller.abort();
+    expect((await running).outcome).toEqual({ status: 'cancelled' });
+    expect(model).not.toHaveBeenCalled();
+  });
+
+  it('ends the run cancelled when it stops while beforeToolCall hangs, and runs nothing', async () => {
+    let called!: () => void;
+    const started = new Promise<void>(resolve => {
+      called = resolve;
+    });
+    const executed: string[] = [];
+    const tool = fakeTool('catalog:read', true, () => {
+      executed.push('read');
+      return { status: 'ok' };
+    });
+    const h = await kit({
+      tools: [tool],
+      log: [{ kind: 'user_message', text: 'Read' }],
+      script: [[callTool('m1', 'catalog:read', {})], [say('Done.')]],
+      extensions: {
+        hooks: {
+          beforeToolCall: [
+            () => {
+              called();
+              return never();
+            },
+          ],
+        },
+      },
+    });
+
+    const running = h.execute();
+    await started;
+    h.controller.abort();
+    expect((await running).outcome).toEqual({ status: 'cancelled' });
+    expect(executed).toEqual([]);
+    expect((await h.kinds()).includes('tool_call')).toBe(false);
+  });
+
+  it('stores an error result when the run stops while afterToolCall runs, after the tool ran', async () => {
+    let called!: () => void;
+    const started = new Promise<void>(resolve => {
+      called = resolve;
+    });
+    let release!: () => void;
+    const late = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const h = await kit({
+      tools: [writeTool],
+      log: [{ kind: 'user_message', text: 'Write' }],
+      script: [[callTool('m1', 'catalog:write', { id: 'x' })], [say('Done.')]],
+      extensions: {
+        hooks: {
+          afterToolCall: [
+            async (_call, result) => {
+              called();
+              await late;
+              return result;
+            },
+          ],
+        },
+      },
+    });
+
+    const first = await h.execute();
+    const pending = (first.outcome as { pending: ToolCall[] }).pending;
+    await h.append({
+      kind: 'approval',
+      callId: pending[0].callId,
+      decision: 'allow',
+      decidedBy: 'user:a',
+    });
+    const running = h.execute();
+    await started;
+    h.controller.abort();
+    const { outcome } = await running;
+    release();
+    expect(outcome).toEqual({ status: 'cancelled' });
+    expect(h.tools.executed).toHaveLength(1);
+    const results = (await h.read()).filter(i => i.kind === 'tool_result');
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      status: 'error',
+      message: 'A hook failed after the tool call.',
+    });
+    expect((results[0] as { output?: unknown }).output).toBeUndefined();
+  });
+
+  it('stores an error result when the run stops while afterToolCall hangs', async () => {
+    let called!: () => void;
+    const started = new Promise<void>(resolve => {
+      called = resolve;
+    });
+    const h = await kit({
+      tools: [readTool],
+      log: [{ kind: 'user_message', text: 'Read' }],
+      script: [[callTool('m1', 'catalog:read', {})], [say('Done.')]],
+      extensions: {
+        hooks: {
+          afterToolCall: [
+            () => {
+              called();
+              return never();
+            },
+          ],
+        },
+      },
+    });
+
+    const running = h.execute();
+    await started;
+    h.controller.abort();
+    expect((await running).outcome).toEqual({ status: 'cancelled' });
+    const result = (await h.read()).find(i => i.kind === 'tool_result');
+    expect(result).toMatchObject({
+      status: 'error',
+      message: 'A hook failed after the tool call.',
+    });
   });
 
   it('tightens allow to ask, prevents relaxing ask back to allow, and denies on deny or exception without halting the run', async () => {
@@ -370,6 +616,9 @@ describe('AdvanceRun: hooks (X-05)', () => {
       output: { token: '[REDACTED]', audited: true },
     });
     expect((streamedResult as { item: unknown }).item).toEqual(storedResult);
+    // The hook changed its copy of the call: the stored call stays as it was.
+    const storedCalls = storedLog.filter(i => i.kind === 'tool_call');
+    expect(storedCalls.map(call => call.input)).toEqual([{}, {}]);
 
     // Fail closed if afterToolCall throws or returns an invalid result: raw secret must not leak.
     const h2 = await kit({
@@ -400,28 +649,41 @@ describe('AdvanceRun: hooks (X-05)', () => {
     expect((failedStored as { output?: unknown }).output).toBeUndefined();
   });
 
-  it('isolates errors across multiple onRunEnd hooks without changing completed outcome', async () => {
-    const called: string[] = [];
-    const h = await kit({
-      log: [{ kind: 'user_message', text: 'Hello' }],
-      script: [[say('World')]],
-      extensions: {
-        hooks: {
-          onRunEnd: [
-            () => {
-              called.push('first');
-              throw new Error('metrics sink down');
-            },
-            summary => {
-              called.push(`second:${summary.outcome.status}`);
-            },
-          ],
+  it.each<[string, unknown]>([
+    ['undefined', undefined],
+    [
+      'an unknown status',
+      { status: 'done', output: { token: 'secret-value' } },
+    ],
+    [
+      'a truncated flag that is not a boolean',
+      { status: 'ok', truncated: 'yes' },
+    ],
+    ['a message that is not a string', { status: 'ok', message: 42 }],
+    ['an array', [{ status: 'ok' }]],
+  ])(
+    'stores an error result when afterToolCall returns %s',
+    async (_name, returned) => {
+      const secretTool = fakeTool('catalog:secret', true, () => ({
+        status: 'ok',
+        output: { token: 'secret-value' },
+      }));
+      const h = await kit({
+        tools: [secretTool],
+        log: [{ kind: 'user_message', text: 'Run' }],
+        script: [[callTool('m1', 'catalog:secret', {})], [say('Done')]],
+        extensions: {
+          hooks: { afterToolCall: [() => returned as never] },
         },
-      },
-    });
+      });
 
-    const { outcome } = await h.execute();
-    expect(outcome).toEqual({ status: 'completed' });
-    expect(called).toEqual(['first', 'second:completed']);
-  });
+      expect((await h.execute()).outcome).toEqual({ status: 'completed' });
+      const stored = (await h.read()).find(i => i.kind === 'tool_result');
+      expect(stored).toMatchObject({
+        status: 'error',
+        message: 'A hook failed after the tool call.',
+      });
+      expect((stored as { output?: unknown }).output).toBeUndefined();
+    },
+  );
 });

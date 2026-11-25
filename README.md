@@ -374,8 +374,12 @@ A backend module can register agents and lifecycle hooks through
 An agent a module registers receives the same built-in prompt rules as a
 configured agent. An id that both the configuration and a module define stops
 the backend. `addHook` registers `beforeModelCall`, `beforeToolCall`,
-`afterToolCall`, and `onRunEnd` hooks on the loop; `beforeToolCall` can tighten
-policy to `ask` or `deny` and never relaxes `ask` to `continue`.
+`afterToolCall`, and `onRunEnd` hooks. `beforeToolCall` can tighten the
+policy to `ask` or `deny` and never relaxes `ask` to `continue`. A hook that
+throws fails closed: `beforeModelCall` fails the run, `beforeToolCall` denies
+the call, `afterToolCall` turns the result into an error without the output,
+and `onRunEnd` is only logged. `onRunEnd` runs once after the run ended,
+with the stored status, and the run does not wait for it.
 
 `plugins/ai-chat-backend-module-example` in this repository is a private
 example of such a module, to copy from. It registers the agent `guide`. It is

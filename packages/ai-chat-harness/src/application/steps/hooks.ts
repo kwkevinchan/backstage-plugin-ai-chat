@@ -17,12 +17,11 @@
 import type { JsonObject, ToolCallItem } from '../../domain';
 import type {
   Extensions,
-  RunSummary,
   StepContext,
   ToolCall,
   ToolResult,
 } from '../ports/extensions';
-import type { AdvanceRunRequest } from '../types';
+import { copyStepContext } from './stepContext';
 
 const HOOK_DENY_REASON = 'Denied by hook.';
 const AFTER_HOOK_ERROR_MESSAGE = 'A hook failed after the tool call.';
@@ -30,21 +29,6 @@ const VALID_RESULT_STATUSES = new Set(['ok', 'error', 'timeout']);
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
-}
-
-export function stepContextOf(
-  req: AdvanceRunRequest,
-  step: number,
-): StepContext {
-  return {
-    sessionId: req.ctx.sessionId,
-    runId: req.ctx.runId,
-    principal: req.ctx.principal,
-    ...(req.ctx.page ? { page: { ...req.ctx.page } } : {}),
-    agentId: req.agent.id,
-    step,
-    signal: req.signal,
-  };
 }
 
 export function toolCallFromParts(parts: {
@@ -113,6 +97,44 @@ function isValidToolResult(value: unknown): value is ToolResult {
   return true;
 }
 
+type Settled<T> =
+  | { aborted: true }
+  | { aborted: false; ok: true; value: T }
+  | { aborted: false; ok: false; error: unknown };
+
+/**
+ * Calls the hook and waits for it, or for the signal, whichever comes first.
+ * A hook that never answers must not keep the run (and its lease) going after
+ * a stop or a timeout. The hook itself may still finish; what it returns then
+ * is ignored.
+ */
+function settle<T>(
+  call: () => T | Promise<T>,
+  signal: AbortSignal,
+): Promise<Settled<T>> {
+  if (signal.aborted) return Promise.resolve({ aborted: true });
+  return new Promise<Settled<T>>(resolve => {
+    const onAbort = () => resolve({ aborted: true });
+    signal.addEventListener('abort', onAbort, { once: true });
+    new Promise<T>(inner => inner(call()))
+      .then(
+        value =>
+          resolve(
+            signal.aborted
+              ? { aborted: true }
+              : { aborted: false, ok: true, value },
+          ),
+        error =>
+          resolve(
+            signal.aborted
+              ? { aborted: true }
+              : { aborted: false, ok: false, error },
+          ),
+      )
+      .finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
 /**
  * Runs `beforeModelCall` hooks sequentially before a model step (X-05).
  * Failing closed stops the step before the model is called.
@@ -123,20 +145,9 @@ export async function runBeforeModelCall(
 ): Promise<{ ok: true } | { ok: false; aborted?: true; error?: unknown }> {
   const list = extensions.hooks?.beforeModelCall ?? [];
   for (const hook of list) {
-    if (ctx.signal.aborted) {
-      return { ok: false, aborted: true };
-    }
-    try {
-      await hook(ctx);
-      if (ctx.signal.aborted) {
-        return { ok: false, aborted: true };
-      }
-    } catch (error) {
-      if (ctx.signal.aborted) {
-        return { ok: false, aborted: true };
-      }
-      return { ok: false, error };
-    }
+    const settled = await settle(() => hook(copyStepContext(ctx)), ctx.signal);
+    if (settled.aborted) return { ok: false, aborted: true };
+    if (!settled.ok) return { ok: false, error: settled.error };
   }
   return { ok: true };
 }
@@ -158,34 +169,32 @@ export async function runBeforeToolCall(
   let effective: 'allow' | 'ask' = initialPolicy;
   const list = extensions.hooks?.beforeToolCall ?? [];
   for (const hook of list) {
-    if (ctx.signal.aborted) {
-      return { aborted: true };
+    const settled = await settle(
+      () => hook(toolCallFromParts(call), copyStepContext(ctx)),
+      ctx.signal,
+    );
+    if (settled.aborted) return { aborted: true };
+    if (!settled.ok) return { action: 'deny', reason: HOOK_DENY_REASON };
+    const decision: unknown = settled.value;
+    if (!decision || typeof decision !== 'object') {
+      return { action: 'deny', reason: HOOK_DENY_REASON };
     }
-    try {
-      const decision = await hook(toolCallFromParts(call), ctx);
-      if (ctx.signal.aborted) {
-        return { aborted: true };
-      }
-      if (!decision || typeof decision !== 'object') {
-        return { action: 'deny', reason: HOOK_DENY_REASON };
-      }
-      if (decision.action === 'deny') {
-        const reason =
-          typeof decision.reason === 'string' &&
-          decision.reason.trim().length > 0
-            ? decision.reason
-            : HOOK_DENY_REASON;
-        return { action: 'deny', reason };
-      }
-      if (decision.action === 'ask') {
-        effective = 'ask';
-      } else if (decision.action !== 'continue') {
-        return { action: 'deny', reason: HOOK_DENY_REASON };
-      }
-    } catch {
-      if (ctx.signal.aborted) {
-        return { aborted: true };
-      }
+    const { action, reason } = decision as {
+      action?: unknown;
+      reason?: unknown;
+    };
+    if (action === 'deny') {
+      return {
+        action: 'deny',
+        reason:
+          typeof reason === 'string' && reason.trim().length > 0
+            ? reason
+            : HOOK_DENY_REASON,
+      };
+    }
+    if (action === 'ask') {
+      effective = 'ask';
+    } else if (action !== 'continue') {
       return { action: 'deny', reason: HOOK_DENY_REASON };
     }
   }
@@ -194,57 +203,29 @@ export async function runBeforeToolCall(
 
 /**
  * Pipelines `afterToolCall` hooks sequentially after a tool executed (X-05).
- * Any exception or malformed result fails closed without keeping prior output.
+ * Any exception or malformed result fails closed without keeping prior
+ * output. The tool has run by now, so a stop while a hook runs gives an error
+ * result too: the call keeps a result, and the output no hook let through is
+ * not stored.
  */
 export async function runAfterToolCall(
   extensions: Extensions,
   call: ToolCallItem,
   initial: ToolResult,
   signal: AbortSignal,
-): Promise<ToolResult | undefined> {
-  let current = cloneToolResult(initial);
+): Promise<ToolResult> {
   const list = extensions.hooks?.afterToolCall ?? [];
+  let current = cloneToolResult(initial);
   for (const hook of list) {
-    if (signal.aborted) {
-      return undefined;
-    }
-    try {
-      const next = await hook(toolCallFromItem(call), cloneToolResult(current));
-      if (signal.aborted) {
-        return undefined;
-      }
-      if (!isValidToolResult(next)) {
-        return { status: 'error', message: AFTER_HOOK_ERROR_MESSAGE };
-      }
-      current = cloneToolResult(next);
-    } catch {
-      if (signal.aborted) {
-        return undefined;
-      }
+    const input = current;
+    const settled = await settle(
+      () => hook(toolCallFromItem(call), cloneToolResult(input)),
+      signal,
+    );
+    if (settled.aborted || !settled.ok || !isValidToolResult(settled.value)) {
       return { status: 'error', message: AFTER_HOOK_ERROR_MESSAGE };
     }
+    current = cloneToolResult(settled.value);
   }
   return current;
-}
-
-/**
- * Runs `onRunEnd` hooks sequentially after a terminal run outcome (X-05).
- * Failures are isolated per hook so later hooks still execute.
- */
-export async function runOnRunEnd(
-  extensions: Extensions,
-  summary: RunSummary,
-): Promise<void> {
-  const list = extensions.hooks?.onRunEnd ?? [];
-  for (const hook of list) {
-    try {
-      await hook({
-        ...summary,
-        outcome: { ...summary.outcome },
-        usage: { ...summary.usage },
-      });
-    } catch {
-      // Errors in `onRunEnd` are isolated from later hooks and run state.
-    }
-  }
 }

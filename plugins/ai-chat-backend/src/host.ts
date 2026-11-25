@@ -55,6 +55,7 @@ import {
   UpdateSession,
   UploadAttachment,
   createAfterRun,
+  createRunEnded,
   type AfterRun,
   type ImageSettings,
   type RunSettings,
@@ -114,8 +115,9 @@ export type HostPorts = {
    */
   notifier?: Notifier;
   /**
-   * Registrations from backend modules. The loop receives them and does not
-   * call them yet. Omitted means nothing was registered.
+   * Registrations from backend modules. The loop calls the hooks before and
+   * after the steps; the supervisor and `CancelRun` call `onRunEnd`. Omitted
+   * means nothing was registered.
    */
   extensions?: Extensions;
   /**
@@ -180,10 +182,15 @@ export function createHost(ports: HostPorts) {
     model: ports.model,
     logger,
   });
+  const runEnded = createRunEnded({
+    hooks: ports.extensions?.hooks?.onRunEnd ?? [],
+    logger,
+  });
   const supervisor = new RunSupervisor({
     advance,
     runs,
     logger,
+    runEnded,
     heartbeatMs: ports.heartbeatMs,
     afterRun: info => afterRun.current!(info),
     notify,
@@ -261,7 +268,14 @@ export function createHost(ports: HostPorts) {
         notify,
         logger,
       }),
-      cancelRun: new CancelRun({ sessions, runs, supervisor, notify, logger }),
+      cancelRun: new CancelRun({
+        sessions,
+        runs,
+        supervisor,
+        notify,
+        logger,
+        runEnded,
+      }),
       insertMessage: new InsertMessage({
         sessions,
         items,

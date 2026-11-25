@@ -14,9 +14,19 @@
  * limitations under the License.
  */
 
-import { callTool, say } from '@kwkevinchan/ai-chat-harness/testing';
-import type { Extensions, RunSummary } from '@kwkevinchan/ai-chat-harness';
-import { createWorld, drain, jane } from './__testUtils__';
+import { mockServices } from '@backstage/backend-test-utils';
+import {
+  callTool,
+  say,
+  waitForAbort,
+} from '@kwkevinchan/ai-chat-harness/testing';
+import type {
+  Extensions,
+  ItemLog,
+  RunSummary,
+} from '@kwkevinchan/ai-chat-harness';
+import { AiChatHarnessRegistry } from '../adapters/backstage/AiChatHarnessRegistry';
+import { createWorld, drain, jane, until } from './__testUtils__';
 
 type World = Awaited<ReturnType<typeof createWorld>>;
 
@@ -141,13 +151,17 @@ describe('harness hooks through host and supervisor (X-05)', () => {
       storedResults,
     );
 
-    expect(runEnds).toHaveLength(1);
-    expect(runEnds[0]).toMatchObject({
+    await until(() => runEnds.length === 1);
+    expect(runEnds[0]).toEqual({
       sessionId: session.id,
       runId: firstHandle.runId,
       agentId: 'default',
-      outcome: { status: 'completed' },
+      userRef: jane.userRef,
+      status: 'completed',
+      usage: expect.objectContaining({ stepsUsed: 2, toolCallsUsed: 2 }),
     });
+    // The summary has the user, not the credentials of the user.
+    expect(JSON.stringify(runEnds[0])).not.toContain('credentials');
   });
 
   it('denies a call when beforeToolCall throws and does not fire onRunEnd prematurely during UnreadMessages retry', async () => {
@@ -215,7 +229,325 @@ describe('harness hooks through host and supervisor (X-05)', () => {
     expect(JSON.stringify(results[0])).not.toContain('sensitive');
     expect(inserted).toBe(true);
     // Retried once for UnreadMessages, so onRunEnd fires ONLY once at the true terminal end.
+    await until(() => runEnds.length === 1);
+    await settleHooks();
     expect(runEnds).toHaveLength(1);
-    expect(runEnds[0].outcome).toEqual({ status: 'completed' });
+    expect(runEnds[0].status).toBe('completed');
+  });
+
+  describe('onRunEnd: once, with the status the host stored', () => {
+    const writeCall = callTool('m1', 'demo:write', { name: 'x' });
+
+    function recorder() {
+      const ends: RunSummary[] = [];
+      const extensions: Extensions = {
+        hooks: { onRunEnd: [summary => void ends.push(summary)] },
+      };
+      return { ends, extensions };
+    }
+
+    it('fires cancelled when the user stops a run that waits for an approval', async () => {
+      const { ends, extensions } = recorder();
+      const a = backend([[writeCall]], { extensions });
+      const session = await world.newSession();
+      const handle = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'go',
+      });
+      await drain(handle);
+      await settleHooks();
+      // Waiting for an approval is no end.
+      expect(ends).toHaveLength(0);
+
+      await a.useCases.cancelRun.execute({
+        principal: jane,
+        sessionId: session.id,
+        runId: handle.runId,
+      });
+      await until(() => ends.length === 1);
+      await settleHooks();
+      expect(ends).toEqual([
+        expect.objectContaining({
+          runId: handle.runId,
+          userRef: jane.userRef,
+          status: 'cancelled',
+          endReason: 'user',
+        }),
+      ]);
+    });
+
+    it.each<['before' | 'after']>([['before'], ['after']])(
+      'fires once when another backend stores the stop %s the wait for an approval is written',
+      async when => {
+        const { ends, extensions } = recorder();
+        const session = await world.newSession();
+        const b = backend([], { extensions });
+        let done = false;
+        const a = backend([[writeCall]], {
+          extensions,
+          aroundTransition: async ({ runId, to }, call) => {
+            if (to !== 'waiting_approval' || done) return call();
+            done = true;
+            const stop = () =>
+              b.useCases.cancelRun.execute({
+                principal: jane,
+                sessionId: session.id,
+                runId,
+              });
+            if (when === 'before') await stop();
+            const result = await call();
+            if (when === 'after') await stop();
+            return result;
+          },
+        });
+        const handle = await a.useCases.sendMessage.execute({
+          principal: jane,
+          sessionId: session.id,
+          text: 'go',
+        });
+        await handle.done;
+        expect((await world.runRow(handle.runId)).status).toBe('cancelled');
+        await until(() => ends.length >= 1);
+        await settleHooks();
+        expect(ends).toHaveLength(1);
+        expect(ends[0]).toMatchObject({
+          status: 'cancelled',
+          endReason: 'user',
+        });
+      },
+    );
+
+    it('fires cancelled when the user stops a running run', async () => {
+      const { ends, extensions } = recorder();
+      const a = backend([waitForAbort], { extensions });
+      const session = await world.newSession();
+      const handle = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'long',
+      });
+      await until(() => a.model.inputs.length === 1);
+      await a.useCases.cancelRun.execute({
+        principal: jane,
+        sessionId: session.id,
+        runId: handle.runId,
+      });
+      await handle.done;
+      await until(() => ends.length === 1);
+      expect(ends[0]).toMatchObject({ status: 'cancelled', endReason: 'user' });
+    });
+
+    it('fires completed with the limit as the end reason', async () => {
+      const limited = await createWorld({ limits: { maxSteps: 1 } });
+      try {
+        const { ends, extensions } = recorder();
+        const a = limited.backend(
+          [[callTool('m1', 'demo:read', { name: 'r' })], [say('never')]],
+          { extensions },
+        );
+        open.push(a.supervisor);
+        const session = await limited.newSession();
+        const handle = await a.useCases.sendMessage.execute({
+          principal: jane,
+          sessionId: session.id,
+          text: 'go',
+        });
+        await drain(handle);
+        await until(() => ends.length === 1);
+        expect(ends[0]).toMatchObject({
+          status: 'completed',
+          endReason: 'max_steps',
+        });
+        await a.supervisor.shutdown(0);
+      } finally {
+        await limited.cleanup();
+      }
+    });
+
+    it('fires failed when a port throws', async () => {
+      const { ends, extensions } = recorder();
+      const a = backend([[say('hi')]], {
+        extensions,
+        items: (inner: ItemLog): ItemLog => ({
+          read: (...args) => inner.read(...args),
+          append: async (sessionId, drafts, fence) => {
+            if (drafts.some(d => d.kind === 'agent_message')) {
+              throw new Error('database is down');
+            }
+            return inner.append(sessionId, drafts, fence);
+          },
+        }),
+      });
+      const session = await world.newSession();
+      const handle = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'go',
+      });
+      await drain(handle);
+      await until(() => ends.length === 1);
+      await settleHooks();
+      expect(ends).toHaveLength(1);
+      expect(ends[0]).toMatchObject({ status: 'failed', endReason: 'error' });
+    });
+
+    it('fires expired, not cancelled, when the shutdown ends the run', async () => {
+      const { ends, extensions } = recorder();
+      const a = backend([waitForAbort], { extensions });
+      const session = await world.newSession();
+      const handle = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'long',
+      });
+      await until(() => a.model.inputs.length === 1);
+      await a.supervisor.shutdown(30);
+      await handle.done;
+      expect((await world.runRow(handle.runId)).status).toBe('expired');
+      await until(() => ends.length === 1);
+      await settleHooks();
+      expect(ends).toHaveLength(1);
+      expect(ends[0]).toMatchObject({
+        status: 'expired',
+        endReason: 'shutdown',
+      });
+    });
+
+    it('does not fire on a backend that lost the lease', async () => {
+      const { ends, extensions } = recorder();
+      const a = backend([waitForAbort], { extensions });
+      const b = backend([[say('x')]], { extensions });
+      const session = await world.newSession();
+      const handle = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'go',
+      });
+      await until(() => a.model.inputs.length === 1);
+      world.clock.advance(31);
+      await b.runs.acquireLease(handle.runId);
+      a.supervisor.cancel(handle.runId);
+      await handle.done;
+      await settleHooks();
+      expect(ends).toHaveLength(0);
+    });
+
+    it('ends the run while an onRunEnd hook hangs, and the next run starts', async () => {
+      const calls: string[] = [];
+      const a = backend([[say('one')], [say('two')]], {
+        extensions: {
+          hooks: {
+            onRunEnd: [
+              summary => {
+                calls.push(summary.status);
+                return new Promise<void>(() => undefined);
+              },
+            ],
+          },
+        },
+      });
+      const session = await world.newSession();
+      const first = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'go',
+      });
+      await drain(first);
+      expect((await world.runRow(first.runId)).status).toBe('completed');
+      const second = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'again',
+      });
+      await drain(second);
+      await until(() => calls.length === 2);
+    });
+  });
+
+  describe('a hook that does not answer', () => {
+    it('lets a stop end the run, and the lease is no longer renewed', async () => {
+      let called = false;
+      const a = backend(
+        [[callTool('m1', 'demo:read', { name: 'r' })], [say('never')]],
+        {
+          heartbeatMs: 10,
+          extensions: {
+            hooks: {
+              beforeToolCall: [
+                () => {
+                  called = true;
+                  return new Promise(() => undefined);
+                },
+              ],
+            },
+          },
+        },
+      );
+      const heartbeat = jest.spyOn(a.runs, 'heartbeat');
+      const session = await world.newSession();
+      const handle = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'go',
+      });
+      await until(() => called);
+      await a.useCases.cancelRun.execute({
+        principal: jane,
+        sessionId: session.id,
+        runId: handle.runId,
+      });
+      await handle.done;
+      const row = await world.runRow(handle.runId);
+      expect(row.status).toBe('cancelled');
+      expect(row.active_session_id).toBeNull();
+      expect(world.actions.count('demo:read')).toBe(0);
+
+      const renewals = heartbeat.mock.calls.length;
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(heartbeat.mock.calls.length).toBe(renewals);
+    });
+  });
+
+  describe('the hooks of the registry', () => {
+    it('cuts output that afterToolCall made longer than maxToolOutputChars', async () => {
+      const registry = new AiChatHarnessRegistry();
+      registry.addHook('afterToolCall', (_call, result) => ({
+        ...result,
+        output: { padding: 'x'.repeat(500) },
+      }));
+      const a = backend(
+        [[callTool('m1', 'demo:read', { name: 'r' })], [say('Done.')]],
+        {
+          extensions: registry.extensions({
+            logger: mockServices.logger.mock(),
+            maxToolOutputChars: 100,
+          }),
+        },
+      );
+      const session = await world.newSession();
+      const handle = await a.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'go',
+      });
+      const events = await drain(handle);
+      const stored = (await world.items.read(session.id)).find(
+        i => i.kind === 'tool_result',
+      );
+      expect(stored).toMatchObject({ status: 'ok', truncated: true });
+      expect(
+        JSON.stringify((stored as { output?: unknown }).output).length,
+      ).toBeLessThanOrEqual(100);
+      const streamed = events.find(
+        e => e.type === 'item.completed' && e.item.kind === 'tool_result',
+      );
+      expect((streamed as { item: unknown }).item).toEqual(stored);
+    });
   });
 });
+
+/** Gives hooks that run in the background the time to run. */
+function settleHooks(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, 20));
+}

@@ -48,6 +48,8 @@ type Batch = { calls: ToolCallItem[]; concurrent: boolean };
  * - A failure of the tool, or no answer from it, is an `error` result; it does
  *   not end the run. When the signal aborts, the call is left as it is and
  *   nothing is written for it.
+ * - The `afterToolCall` hooks may change the result before it is written. The
+ *   tool has run by then, so a stop while they run writes an `error` result.
  * - Before each call that is not read-only the loop asks `heartbeat`. When the
  *   user asked to stop, this returns `'cancelled'` and the call does not start.
  * - A decision that is neither `allow` nor `deny` throws.
@@ -112,7 +114,6 @@ export async function* executeTools(
           raw,
           req.signal,
         );
-        if (!output) return undefined;
         yield* write(resultOf(call, output));
       } else if (decision === 'deny') {
         yield* write({

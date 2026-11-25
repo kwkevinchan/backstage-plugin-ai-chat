@@ -22,6 +22,8 @@ export { createAfterRun } from './afterRun';
 export { buildRunRequest } from './buildRunRequest';
 export type { RunSettings } from './buildRunRequest';
 export type { AfterRun, HostEvent, QueueState } from './hostEvents';
+export { createRunEnded, RUN_END_HOOK_TIMEOUT_MS } from './runEnded';
+export type { RunEnded } from './runEnded';
 export { RunSupervisor } from './RunSupervisor';
 export type {
   LaunchRequest,
