@@ -207,12 +207,12 @@ export interface Config {
      * agent's `systemPrompt`, or plus the installation `systemPrompt` when the
      * agent omits it. The two extra texts are not combined.
      *
-     * `toolsets`, `skills`, `model`, `limits` and `planning` are recorded.
-     * Configured and module-registered `skills` are loaded via `load_skill`
-     * (omitting `skills` on an agent offers all registered skills; an empty
-     * list offers none). The loop still uses the limits of the installation and
-     * its one model client, and does not filter tools by the agent's toolsets,
-     * require a plan, or call another model client yet. A value that is not
+     * `skills` chooses which configured and module-registered skills the
+     * agent offers through `load_skill` (omitting it offers all registered
+     * skills; an empty list offers none). `toolsets`, `model`, `limits` and
+     * `planning` are recorded. The loop still uses the limits of the
+     * installation and its one model client, and does not filter tools by the
+     * agent's toolsets, require a plan, or call another model client yet. A value that is not
      * valid stops the backend at startup.
      *
      * A backend module can register further agents and skills through
@@ -261,8 +261,8 @@ export interface Config {
       };
     };
     /**
-     * Most characters of the output of an action, and of the text
-     * `load_skill` returns, that are stored and sent to the model; the rest is
+     * Most characters of the output of an action, and of the output of
+     * `load_skill`, that are stored and sent to the model; the rest is
      * cut. At least 100 (a smaller value stops the backend at startup).
      * Defaults to 20000.
      */

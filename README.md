@@ -317,7 +317,7 @@ exactly `days` ago is kept.
 | `input.images.maxBytesPerInput`     | Most image bytes sent to the model in one call and across one run (`20971520` / 20 MB by default). Must be at least `maxPerMessage * maxBytes`.                                                                                                                                                                             |
 | `input.images.maxPendingPerSession` | Most uploaded images in one session not yet in any message (`12` by default). Unused images are deleted after 24 hours.                                                                                                                                                                                                     |
 | `input.images.tokensPerImage`       | Estimated tokens one image uses in `context.tokenBudget` (`1600` by default). Set it for the model you use.                                                                                                                                                                                                                 |
-| `maxToolOutputChars`                | The output of an action, and the text `load_skill` returns, is cut here, and the cut is stated.                                                                                                                                                                                                                             |
+| `maxToolOutputChars`                | The output of an action, and the output of `load_skill`, is cut here, and the cut is stated.                                                                                                                                                                                                                                |
 | `sharing.live.enabled`              | Whether a share may keep updating. Default true. Creating or changing a share is not in this version, so this is only checked and kept.                                                                                                                                                                                     |
 | `sharing.live.defaultHours`         | Hours a live share lasts when nobody picks a life. Default 24. A positive integer, at most `maxHours`.                                                                                                                                                                                                                      |
 | `sharing.live.maxHours`             | Longest life of a live share, in hours. Default 72. A positive integer, at least `defaultHours`.                                                                                                                                                                                                                            |
@@ -363,8 +363,10 @@ The system prompt of a configured agent is the built-in rules plus that
 agent's `systemPrompt`. When the agent omits `systemPrompt`, the installation
 `aiChat.systemPrompt` is used instead. The two extra texts are not combined.
 `toolsets` names toolsets from `aiChat.toolsets` (or `default`, when no
-toolsets are configured). `skills`, `model`, `limits` and `planning: required`
-are recorded on the agent. A wrong value stops the backend at startup.
+toolsets are configured). `skills` chooses the skills the agent offers (see
+below); an id that no skill has stops the backend. `model`, `limits` and
+`planning: required` are recorded on the agent. A wrong value stops the
+backend at startup.
 
 The loop still uses the limits of the installation and its one model client.
 It does not filter tools by the agent's toolsets, require a
