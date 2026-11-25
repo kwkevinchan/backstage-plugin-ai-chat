@@ -40,6 +40,7 @@ export type { FollowHandle } from './usecases/FollowSession';
 export { GetSession } from './usecases/GetSession';
 export type { SessionView } from './usecases/GetSession';
 export { InsertMessage } from './usecases/InsertMessage';
+export { InsertQueuedMessage } from './usecases/InsertQueuedMessage';
 export { ListQueue, queueViewOf } from './usecases/ListQueue';
 export type { QueueView } from './usecases/ListQueue';
 export { ListSessions } from './usecases/ListSessions';

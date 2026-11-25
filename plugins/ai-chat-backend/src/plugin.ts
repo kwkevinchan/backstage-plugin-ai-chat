@@ -173,6 +173,7 @@ export const aiChatPlugin = createBackendPlugin({
           ids,
           logger,
           queueMaxMessages: aiChat.input.queueMaxMessages,
+          insertMaxPerRun: aiChat.input.insertMaxPerRun,
           images: { ...aiChat.input.images, enabled: aiChat.llm.images },
           settings: {
             limits: {

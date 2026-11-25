@@ -28,6 +28,7 @@ import type {
   CreateChatSessionRequest,
   DecideToolCallRequest,
   InsertChatMessageRequest,
+  InsertQueuedMessageRequest,
   QueueChatMessageRequest,
   ReorderQueueRequest,
   ResumeChatRunRequest,
@@ -106,6 +107,16 @@ export interface AiChatApi {
     request: UpdateQueuedMessageRequest,
   ): Promise<ChatQueuedMessage>;
   deleteQueuedMessage(id: string, queuedId: string): Promise<void>;
+  /**
+   * Moves a queued message into a running run as an inserted message.
+   * Resolves with the stored item; 409 when the run is not `running` or the
+   * insert limit is reached, 404 when the queued message no longer exists.
+   */
+  insertQueuedMessage(
+    id: string,
+    queuedId: string,
+    request: InsertQueuedMessageRequest,
+  ): Promise<ChatItem>;
   /** Puts the queue in the order of `ids`, which must be every id of the queue (409 otherwise). */
   reorderQueue(id: string, request: ReorderQueueRequest): Promise<ChatQueue>;
   /**

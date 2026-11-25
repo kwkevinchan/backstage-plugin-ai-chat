@@ -30,6 +30,7 @@ import {
   type CreateChatSessionRequest,
   type DecideToolCallRequest,
   type InsertChatMessageRequest,
+  type InsertQueuedMessageRequest,
   type QueueChatMessageRequest,
   type ReorderQueueRequest,
   type ResumeChatRunRequest,
@@ -196,6 +197,18 @@ export class AiChatClient implements AiChatApi {
     await this.request(chatPaths.queuedMessage(id, queuedId), {
       method: 'DELETE',
     });
+  }
+
+  async insertQueuedMessage(
+    id: string,
+    queuedId: string,
+    request: InsertQueuedMessageRequest,
+  ) {
+    const response = await this.post(
+      chatPaths.insertQueuedMessage(id, queuedId),
+      request,
+    );
+    return (await response.json()) as ChatItem;
   }
 
   async reorderQueue(id: string, request: ReorderQueueRequest) {

@@ -440,4 +440,76 @@ describe('two backends on one database', () => {
       ).toHaveLength(1);
     });
   });
+
+  describe('turning a queued message into an insert across backends (IN-20)', () => {
+    it('lets B turn a queued message into an insert while A runs the loop, and A reads it', async () => {
+      let moved = false;
+      const b = backend([]);
+      const a: Backend = backend(
+        [[readCall], [say('got insert')], [say('got queued')]],
+        {
+          items: inner => ({
+            read: (...args) => inner.read(...args),
+            append: async (sessionId, drafts, fence) => {
+              if (!moved && drafts.some(d => d.kind === 'tool_call')) {
+                moved = true;
+                const qNow = await b.useCases.queueMessage.execute({
+                  principal: janeFresh,
+                  sessionId,
+                  text: 'send me now',
+                });
+                await b.useCases.queueMessage.execute({
+                  principal: janeFresh,
+                  sessionId,
+                  text: 'stay queued',
+                });
+                await b.useCases.insertQueuedMessage.execute({
+                  principal: janeFresh,
+                  sessionId,
+                  queuedId: qNow.id,
+                  runId: fence.runId,
+                });
+              }
+              return inner.append(sessionId, drafts, fence);
+            },
+          }),
+        },
+      );
+      const session = await world.newSession();
+      const handle = await a.useCases.sendMessage.execute({
+        principal: janeFresh,
+        sessionId: session.id,
+        text: 'start',
+      });
+      for await (const _event of handle.events) {
+        // Reads to the end.
+      }
+      await handle.done;
+      await until(
+        async () =>
+          (
+            await world
+              .knex('runs')
+              .where({ session_id: session.id })
+              .whereNotNull('active_session_id')
+          ).length === 0,
+      );
+
+      expect(
+        a.model.inputs[1].messages
+          .filter(m => m.role === 'user')
+          .map(m => m.content),
+      ).toEqual(['start', 'send me now']);
+      const items = await world.items.read(session.id);
+      expect(
+        items
+          .filter(i => i.kind === 'user_message')
+          .map(i => [(i as any).text, (i as any).delivery]),
+      ).toEqual([
+        ['start', undefined],
+        ['send me now', 'inserted'],
+        ['stay queued', 'queued'],
+      ]);
+    });
+  });
 });

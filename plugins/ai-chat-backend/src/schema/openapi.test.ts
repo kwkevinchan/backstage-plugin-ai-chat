@@ -108,6 +108,7 @@ describe('the OpenAPI spec', () => {
       chatPaths.queueOrder('{id}'),
       chatPaths.queueResume('{id}'),
       chatPaths.queuedMessage('{id}', '{queuedId}'),
+      chatPaths.insertQueuedMessage('{id}', '{queuedId}'),
       chatPaths.decision('{id}', '{callId}'),
       chatPaths.resume('{id}'),
       chatPaths.stream('{id}'),

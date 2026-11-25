@@ -15,7 +15,7 @@
  */
 
 import { IMAGES } from '../../__testUtils__/images';
-import { UnknownAttachment } from '../../domain';
+import { TooManyImageBytes, UnknownAttachment } from '../../domain';
 import { NEW_SESSION, createPersistence } from './__testUtils__';
 
 describe('KnexQueuedMessageRepository: the images of a queued message (IN-13, IN-04)', () => {
@@ -182,6 +182,56 @@ describe('KnexQueuedMessageRepository: the images of a queued message (IN-13, IN
       expect(await row(a.id)).toEqual({
         used_seq: null,
         reserved_by: second.id,
+      });
+    });
+  });
+
+  describe('insert (IN-20)', () => {
+    it('writes the inserted item with its images, marks used_seq, and keeps hold if another queued message shares an image', async () => {
+      const a = await upload(sessionId, 'a.png');
+      const b = await upload(sessionId, 'b.png');
+      const first = await add('now', a.id, b.id);
+      const second = await add('later', b.id);
+      const active = (await p.runs.findActive(sessionId))!;
+
+      const item = await p.queue.insert(sessionId, first.id, active.id);
+
+      expect(item).toMatchObject({
+        kind: 'user_message',
+        text: 'now',
+        delivery: 'inserted',
+        attachments: [
+          { id: a.id, mediaType: 'image/png', name: 'a.png', size: a.size },
+          { id: b.id, mediaType: 'image/png', name: 'b.png', size: b.size },
+        ],
+      });
+      expect(await row(a.id)).toEqual({
+        used_seq: item.seq,
+        reserved_by: null,
+      });
+      expect(await row(b.id)).toEqual({
+        used_seq: item.seq,
+        reserved_by: second.id,
+      });
+    });
+
+    it('refuses with TooManyImageBytes and leaves queue and attachments unchanged', async () => {
+      const a = await upload(sessionId, 'a.png');
+      const queued = await add('heavy', a.id);
+      const active = (await p.runs.findActive(sessionId))!;
+
+      await expect(
+        p.queue.insert(sessionId, queued.id, active.id, {
+          maxImageBytesPerInput: a.size - 1,
+        }),
+      ).rejects.toBeInstanceOf(TooManyImageBytes);
+
+      expect((await p.queue.list(sessionId)).map(m => m.id)).toEqual([
+        queued.id,
+      ]);
+      expect(await row(a.id)).toEqual({
+        used_seq: null,
+        reserved_by: queued.id,
       });
     });
   });

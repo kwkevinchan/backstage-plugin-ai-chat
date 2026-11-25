@@ -35,6 +35,7 @@ import {
   FollowSession,
   GetSession,
   InsertMessage,
+  InsertQueuedMessage,
   ListQueue,
   ListSessions,
   ListSessionTools,
@@ -71,6 +72,7 @@ import type {
 } from './application/ports';
 import {
   DEFAULT_IMAGE_LIMITS,
+  DEFAULT_INSERT_MAX_PER_RUN,
   DEFAULT_QUEUE_MAX_MESSAGES,
   DEFAULT_RETENTION_DAYS,
 } from './domain';
@@ -94,6 +96,8 @@ export type HostPorts = {
   settings: RunSettings;
   /** `aiChat.input.queue.maxMessages`; 5 by default. */
   queueMaxMessages?: number;
+  /** `aiChat.input.insert.maxPerRun`; 5 by default. */
+  insertMaxPerRun?: number;
   /**
    * The limits on images and whether the model reads them
    * (`aiChat.input.images`, `aiChat.llm.images`). Images are off, with the
@@ -235,6 +239,12 @@ export function createHost(ports: HostPorts) {
         items,
         attachments,
         images,
+      }),
+      insertQueuedMessage: new InsertQueuedMessage({
+        sessions,
+        queue,
+        maxInsertsPerRun: ports.insertMaxPerRun ?? DEFAULT_INSERT_MAX_PER_RUN,
+        maxImageBytesPerInput: images.maxBytesPerInput,
       }),
       queueMessage: new QueueMessage({
         sessions,

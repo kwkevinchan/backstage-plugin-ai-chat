@@ -196,6 +196,8 @@ export async function createWorld(
     limits?: Partial<Limits>;
     /** The limits on images, and whether the model reads them (it does by default). */
     images?: Partial<ImageSettings>;
+    /** `aiChat.input.insert.maxPerRun`; 5 by default. */
+    insertMaxPerRun?: number;
   } = {},
 ) {
   const knex = await createMigratedDb();
@@ -207,6 +209,7 @@ export async function createWorld(
     ...options.images,
   };
   const items = new KnexItemLog(knex, clock, {
+    maxInsertsPerRun: options.insertMaxPerRun,
     maxImageBytesPerInput: images.maxBytesPerInput,
   });
   const attachments = new KnexAttachmentStore(knex, clock, ids);
@@ -280,6 +283,7 @@ export async function createWorld(
       shares: new KnexShareRepository(knex, clock, ids),
       access: new OwnerOrShareAccessControl(),
       images,
+      insertMaxPerRun: options.insertMaxPerRun,
       agents: catalog,
       tools: new ActionsToolGateway({
         actions,
