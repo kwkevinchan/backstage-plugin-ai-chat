@@ -727,6 +727,7 @@ flowchart LR
 - **P3-05**：在擴充點加上 `addHook`。Hook 回傳 `continue` 時，`ask` 的工具仍然要核准。Hook 丟例外時，這個工具呼叫被拒絕，Run 繼續。
 - **P3-06**：搜尋結果只有使用者有權限看的文件。先確認 Backstage 有沒有官方的 search action，有就直接用。
 - **P3-07**：在擴充點加上 `addModelClient`。逐項驗收見下方 P3-07。四個唯讀工具同時執行，其中一個逾時，其他三個的結果照原本順序交回。
+- **P3-09**：每一步、每個工具呼叫、每個 Run 各有一筆結構化 log 和 OpenTelemetry 的 metric，只有數字、id 和固定的分類詞，沒有對話內容。沒有安裝 OpenTelemetry SDK 時不出錯。逐項驗收見下方 P3-09。
 
 ### P3-01 `ai-chat-node`、擴充點、設定檔裡的 Agent
 
@@ -1062,6 +1063,81 @@ flowchart LR
   - 每人同時的 Run 數包含 `waiting_approval`（H-03 的「進行中」）。兩台後端的計數用資料庫：PostgreSQL 在建立 Run 的 transaction 開頭先取這個使用者的 advisory lock（`pg_advisory_xact_lock`），再數、再新增；SQLite 只有一條連線，transaction 本來就一個接一個。這個鎖在任何列鎖之前取，其他 transaction 不取它，所以不會跟第 13.8 節的鎖順序形成循環。
   - 限流用固定的一分鐘格子：`model_call_windows` 的 `(model_id, window_start)` 一列一個計數，`INSERT … ON CONFLICT DO UPDATE … WHERE calls < 上限 RETURNING`，一句話決定拿到沒有。格子邊界前後最多可能有兩倍的量。拿不到就等到下一格（加一點隨機延遲）再試。限流算所有呼叫這個模型的地方：每一步、摘要、自動標題。舊的格子在之後的呼叫裡刪除。
   - 依 Agent 的模型決定能不能附加圖片不在這一項：上傳和送出的檢查仍看 `aiChat.llm.images`。Agent 的模型不讀圖片時，迴圈照 IN-05 把圖片換成一行說明，不會送出。
+
+### P3-09 觀測
+
+- **範圍**：
+  - 核心（`packages/ai-chat-harness`）：
+    - `ModelChunk` 加 `{ type: 'usage'; inputTokens; outputTokens }`：模型回報的 token 用量。迴圈不把它寫進紀錄，也不送成事件。
+    - 新 port `application/ports/RunObserver.ts`：`modelCall(record)`、`toolCall(record)`，型別 `ModelCallRecord`、`ToolCallRecord`、`ModelInputSize`、`ContextProviderRecord`。`AdvanceRunDeps.observer` 可以不給。`AdvanceRunRequest.modelId` 是宿主給的模型 id，核心只把它放進紀錄。
+    - `domain/modelInput.ts`：新增 `modelInputOf(items, agent, extra, budget)`，一次算出送給模型的內容、省略了哪些部分，和上下文的組成（`ModelInputSize`）。`callModel` 改用它。
+    - `callModel`、`summarize`、`executeTools` 在寫入結果的地方交出紀錄；`runContextProviders` 回報每個 provider 的狀態和長度。
+  - 宿主（`plugins/ai-chat-backend`）：
+    - 新 port `application/ports/Metrics.ts`（counter、histogram），adapter `adapters/backstage/BackstageMetrics.ts` 包 `metricsServiceRef`（`@backstage/backend-plugin-api/alpha`）。`plugin.ts` 依賴它。
+    - `application/RunTelemetry.ts` 實作 `RunObserver`，並記 Run 的結束、限流等待和自動標題的模型呼叫：寫 log、記 metric。
+    - `createRunEnded` 在 Run 寫入終態時交給 `RunTelemetry`，沒有 `onRunEnd` Hook 時也一樣。`HostModelClient` 記限流等待。`NameSession` 記自動標題的模型呼叫。`buildRunRequest` 給 `modelId`。
+    - `OpenAiCompatibleClient`：串流的請求帶 `stream_options: { include_usage: true }`，讀回答裡的 `usage`。設定 `aiChat.llm.reportUsage`、`aiChat.models.<id>.reportUsage`（預設 `true`）；`false` 時不帶這個欄位。
+    - 模型呼叫失敗的 log（`A run failed`、`A summary could not be made`、`Could not name the session`）只記錯誤的 `name` 和 HTTP 狀態碼，不記錯誤的訊息：模型伺服器的錯誤訊息可能帶回使用者的內容。
+  - 文件：規格 O-01；架構文件的 port、adapter 和觀測一節；backend README（中英）列出 log、metric 和屬性。
+  - 不做：trace（span）；把 token 用量存進資料庫、`RunUsage` 或 `RunSummary`；稽核（O-02）的改動；擴充點上的 observer；畫面和用量頁面；送出訊息被每人 Run 數擋下的計數。
+- **依賴**：P3-02（provider 的狀態）、P3-05（`createRunEnded`）、P3-07（`HostModelClient`、`modelId`）。
+- **紀錄的內容**：
+  - 模型呼叫（每一步、每次摘要、每次自動標題各一筆）：`sessionId`、`runId`、`agentId`、`modelId`、`purpose`（`step`、`summary`、`title`）、`step`、`durationMs`、`outcome`（`ok`、`empty`、`failed`、`cancelled`、`timeout`）、`errorStatus`、`inputTokens`、`outputTokens`、`toolCallsRequested`、`context`、`providers`。
+  - `context`（`ModelInputSize`）：`estimatedTokens`、`budgetTokens`、`parts`（`system`、`context`、`tools`、`summary`、`history`、`images`，估計的 token）、`messages`、`images`、`tools`（個數）、`summarized`、`trimmed`。
+  - `providers`：每個 provider 一筆 `{ id, status, chars }`，`status` 是 `ok`、`cut`、`empty`、`failed`、`timeout`、`left_out`。
+  - 工具呼叫（每個寫入的 `tool_result` 一筆）：`sessionId`、`runId`、`agentId`、`step`、`position`、`callId`、`toolId`、`readOnly`、`status`、`reason`（`denied` 時：`policy`、`run_limit`、`step_limit`、`hook`、`user`、`earlier_write_timed_out`）、`durationMs`（執行過的才有）、`truncated`。
+  - Run（每個 Run 一筆）：`sessionId`、`runId`、`agentId`、`status`、`endReason`、`stepsUsed`、`toolCallsUsed`、`elapsedSeconds`。
+  - 限流等待：`modelId`、等待的時間、`outcome`（`acquired`、`cancelled`）。
+- **log**（`info`，訊息是固定文字，資料在 meta）：`Model call`、`Tool call`、`Run ended`。
+- **metric**：
+
+  | 名稱                               | 類型      | 單位       | 屬性                                   |
+  | ---------------------------------- | --------- | ---------- | -------------------------------------- |
+  | `ai_chat.model.duration`           | histogram | `s`        | `agent`、`model`、`purpose`、`outcome` |
+  | `ai_chat.model.tokens`             | histogram | `{token}`  | `agent`、`model`、`purpose`、`type`    |
+  | `ai_chat.context.tokens`           | histogram | `{token}`  | `agent`、`part`                        |
+  | `ai_chat.context_provider.results` | counter   | `{result}` | `agent`、`provider`、`status`          |
+  | `ai_chat.tool.calls`               | counter   | `{call}`   | `agent`、`tool`、`status`、`reason`    |
+  | `ai_chat.tool.duration`            | histogram | `s`        | `agent`、`tool`、`status`              |
+  | `ai_chat.model.rate_limit.wait`    | histogram | `s`        | `model`、`outcome`                     |
+  | `ai_chat.run.duration`             | histogram | `s`        | `agent`、`status`、`end_reason`        |
+  | `ai_chat.run.steps`                | histogram | `{step}`   | `agent`、`status`                      |
+  | `ai_chat.run.tool_calls`           | histogram | `{call}`   | `agent`、`status`                      |
+
+- **驗收**：
+  - Token 用量：
+    - 模型回報 `usage` 時，紀錄、`Model call` 的 log 和 `ai_chat.model.tokens`（`type` 是 `input`、`output`）都是回報的數字。回報兩次時用最後一次。不是非負整數的值不算。沒有回報時紀錄沒有這兩個欄位，也不記 `ai_chat.model.tokens`。
+    - `usage` 不產生 Item 和事件，回答不變。
+    - `OpenAiCompatibleClient` 串流的請求有 `stream_options: { include_usage: true }`，讀得到最後一個 chunk（`choices` 是空的）的 `usage`，也讀得到不是串流的回答的 `usage`。`reportUsage: false` 時請求沒有 `stream_options`。`reportUsage` 不是布林時丟 `InputError`。
+  - 延遲和逾時：
+    - 模型呼叫的 `durationMs` 用 `Clock` 量，從呼叫模型到串流結束，包含限流的等待。
+    - 工具的 `durationMs` 只算工具本身，不含 `beforeToolCall`、`afterToolCall` 和等核准的時間。
+    - 工具逾時：`status` 是 `timeout`，有 `durationMs`。Run 的截止時間在模型呼叫時到：`outcome` 是 `timeout`。使用者停止：`outcome` 是 `cancelled`。
+    - 有 `requestsPerMinute` 的模型等到下一分鐘：`ai_chat.model.rate_limit.wait` 記等待的秒數，`outcome` 是 `acquired`；等待時 Run 被停止是 `cancelled`。沒有 `requestsPerMinute` 的模型不記。
+  - 工具的結果：
+    - `ok`、`error`、`timeout`、`invalid`、`denied`（政策、Run 的上限、每步上限、Hook、使用者拒絕、前一個寫入逾時）、`unknown` 各有一筆紀錄，`status` 和 `reason` 正確，`ai_chat.tool.calls` 加 1。`ai_chat.tool.duration` 只記執行過的（`ok`、`error`、`timeout`）。
+    - `afterToolCall` 改過的結果：紀錄是存下的狀態，`durationMs` 仍是工具本身的時間。
+    - 同時執行的唯讀呼叫：紀錄的順序和 `tool_result` 寫入的順序相同。
+  - 上下文：
+    - `estimatedTokens` 是 `parts` 的合計，`budgetTokens` 是 `tokenBudget`。有 Skill 清單、provider、圖片、摘要、省略的舊步驟時，對應的欄位有值。
+    - 摘要的模型呼叫有一筆 `purpose: 'summary'`；失敗是 `failed`，沒有文字是 `empty`，Run 照常。
+    - provider 的 `ok`、`cut`、`empty`、`failed`、`timeout`、`left_out` 各出現在 `providers`，`chars` 是放進系統提示的長度；`ai_chat.context_provider.results` 照 `status` 加 1。
+  - 錯誤：模型呼叫失敗時 `outcome` 是 `failed`；錯誤有 100 到 599 的整數 `status` 時 `errorStatus` 是它。沒有回答是 `empty`。`beforeModelCall` 丟例外時沒有模型呼叫的紀錄。
+  - Run：每個 Run 寫入終態時記一筆 `Run ended` 和三個 Run 的 metric，觸發的地方和 `onRunEnd` 相同，沒有註冊 Hook 時也記。等核准不記。`onRunEnd` 收到的 `RunSummary` 不變。
+  - 不能出現的內容：同一段字串放進使用者訊息、頁面、Session 標題、系統提示、Skill 內容、provider 的輸出、模型的回答和呼叫參數、工具的輸出和錯誤訊息、Hook 的拒絕理由、`afterToolCall` 的輸出、模型伺服器的錯誤訊息、使用者的 token：這段字串不在任何 log 的 meta 和訊息裡，也不在 metric 的名稱、選項、值和屬性裡。metric 的屬性只有上表的鍵，沒有 `sessionId`、`runId`、`callId` 和使用者。
+  - 沒有 exporter：沒有給 `observer` 時，迴圈的紀錄、事件和結果不變。observer 丟例外時也不變。`RunTelemetry` 的 metric 丟例外時 Run 照常，只記一次警告。沒有安裝 OpenTelemetry SDK（Backstage 預設的 `metricsServiceFactory`）時，對話、工具和核准照常，觀測沒有警告。
+- **規格沒寫、實作選定的地方**：
+  - 不做 trace：Backstage 的 `TracingService` 只有 `startActiveSpan(name, fn)`，span 在 `fn` 結束時結束。迴圈是 `AsyncGenerator`，一步之內要交出事件，Run 又會因為等核准分成幾次呼叫，甚至換一台後端，做不成一個 span。`fn` 丟例外時，預設的實作把錯誤訊息寫進 span，模型伺服器的錯誤訊息會外流。
+  - 用 port，不用事件：事件交給訂閱者和串流（A-03），觀測不是給畫面的。
+  - 用 Backstage 的 `metricsServiceRef`，不直接用 `@opentelemetry/api`，和 Backstage 的 scheduler 一樣。meter 的名稱是 Backstage 給的 `backstage-plugin-ai-chat`。沒有安裝 OpenTelemetry SDK 時，OpenTelemetry API 給的 meter 什麼都不做。log 不依賴 exporter，照常寫。
+  - metric 的名稱用 `ai_chat.` 開頭，單位照 OpenTelemetry 的寫法（`s`、`{token}`）。不用 OpenTelemetry GenAI 的名稱：那份規範還在 Development 狀態，而且要的是模型伺服器的模型名稱，模組的 client 給不出來。histogram 給 bucket 的建議值：秒是 0.01 到 600，token 是 1 到 1048576。
+  - metric 的屬性不放 `sessionId`、`runId`、`callId`、使用者：數量沒有上限，使用者也是個人資料。log 有 `sessionId`、`runId`、`callId`，沒有使用者；要知道是誰，用 `runId` 對稽核紀錄。
+  - 紀錄跟著寫入的 Item：工具的紀錄在 `tool_result` 寫入時交出，Run 被停止時沒有結果的呼叫沒有紀錄。換一台後端接手也不重複。
+  - `durationMs` 的範圍：模型呼叫包含 `HostModelClient` 的限流等待（等待另外記）；工具只算工具本身。核心內建的 `update_plan` 不經過工具，沒有 `durationMs`。
+  - `errorStatus` 由核心從錯誤的 `status` 讀出，錯誤本身不交給 observer。
+  - Run 的截止時間：迴圈用 `TimeoutError` 中止 signal，用它分辨截止時間（`timeout`）和停止（`cancelled`）。
+  - `reportUsage` 預設 `true`：大多數 OpenAI 相容的伺服器接受 `stream_options`。不接受的伺服器，管理員設成 `false`。
+  - Token 用量只記在每次模型呼叫。每個 Run 的合計用 metric 或 log 加總，不存進資料庫。
 
 ### P4：擴大
 
