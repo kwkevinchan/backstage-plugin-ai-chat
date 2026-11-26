@@ -57,7 +57,9 @@ export function factsOf(entity: Entity): EntityFacts {
  * user, so the permission policy of the catalog decides what the user reads.
  */
 export class CatalogEntityReader implements EntityReader {
-  constructor(private readonly catalog: Pick<CatalogService, 'getEntityByRef'>) {}
+  constructor(
+    private readonly catalog: Pick<CatalogService, 'getEntityByRef'>,
+  ) {}
 
   async read(
     entityRef: string,

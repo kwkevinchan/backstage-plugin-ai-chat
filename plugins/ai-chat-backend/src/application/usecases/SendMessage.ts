@@ -109,7 +109,8 @@ export class SendMessage {
       const request = await buildRunRequest(
         { agents, models, clock, settings },
         {
-          session: bound === undefined ? session : { ...session, entityRef: bound },
+          session:
+            bound === undefined ? session : { ...session, entityRef: bound },
           run,
           principal: input.principal,
           page: input.page,
@@ -161,10 +162,13 @@ export class SendMessage {
       if (await sessions.bindEntityIfUnbound(session.id, ref)) return ref;
       return (await sessions.get(session.id)).entityRef;
     } catch (error) {
-      logger?.warn('AI chat could not bind the session to the entity of the page', {
-        sessionId: session.id,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      logger?.warn(
+        'AI chat could not bind the session to the entity of the page',
+        {
+          sessionId: session.id,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
       return undefined;
     }
   }

@@ -24,5 +24,8 @@ export interface EntityReader {
    * user cannot read it; the catalog does not tell these apart. Throws when
    * the catalog cannot be reached.
    */
-  read(entityRef: string, principal: Principal): Promise<EntityFacts | undefined>;
+  read(
+    entityRef: string,
+    principal: Principal,
+  ): Promise<EntityFacts | undefined>;
 }

@@ -24,11 +24,7 @@ import { kit } from '../testing/fixture';
 import type { FakeTool } from '../testing/FakeToolGateway';
 import { callTool, say } from '../testing/ScriptedModel';
 import { planContextProvider } from './plan';
-import type {
-  ContextProvider,
-  Skill,
-  StepContext,
-} from './ports/extensions';
+import type { ContextProvider, Skill, StepContext } from './ports/extensions';
 import {
   CONTEXT_NOTICE,
   CONTEXT_PROVIDER_MAX_CHARS,
@@ -228,9 +224,7 @@ describe('AdvanceRun: context providers (X-03)', () => {
       const third = system.slice(system.indexOf('Context from "third":'));
       const cutLine = third.match(/\[cut: (\d+) more characters\]/);
       expect(cutLine).not.toBeNull();
-      expect(size - Number(cutLine![1])).toBe(
-        left - `\n${cutLine![0]}`.length,
-      );
+      expect(size - Number(cutLine![1])).toBe(left - `\n${cutLine![0]}`.length);
       expect(system).not.toContain('Context from "fourth":');
       expect(system).not.toContain('dddd');
       expect(system.trimEnd().endsWith('[context left out: "fourth"]')).toBe(
@@ -282,7 +276,7 @@ describe('AdvanceRun: context providers (X-03)', () => {
     it.each([
       ['throws', () => Promise.reject(new Error('secret http://internal'))],
       ['returns a number', () => 42 as unknown as string],
-      ['returns an object', () => ({ text: 'x' }) as unknown as string],
+      ['returns an object', () => ({ text: 'x' } as unknown as string)],
       ['returns null', () => null as unknown as string],
     ])(
       'when it %s, the step goes on and says the context is not available',

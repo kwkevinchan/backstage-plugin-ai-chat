@@ -16,6 +16,7 @@
 
 import { mockServices } from '@backstage/backend-test-utils';
 import type {
+  ContextProvider,
   RunSummary,
   StepContext,
   ToolCall,
@@ -326,7 +327,7 @@ describe('AiChatHarnessRegistry', () => {
   });
 
   describe('context providers (X-03)', () => {
-    const provider = (id: string, text = `text of ${id}`) => ({
+    const provider = (id: string, text = `text of ${id}`): ContextProvider => ({
       id,
       provide: () => text,
     });
@@ -351,14 +352,46 @@ describe('AiChatHarnessRegistry', () => {
     });
 
     it.each([
-      ['a repeated id', [provider('docs-site'), provider('docs-site')], 'context provider docs-site is already registered'],
-      ['the id of the built-in user', [provider('user')], 'context provider user: the id is taken by a built-in provider'],
-      ['the id of the built-in entity', [provider('entity')], 'context provider entity: the id is taken'],
-      ['the id of the built-in plan', [provider('plan')], 'context provider plan: the id is taken'],
-      ['an id of the wrong form', [provider('1-docs')], 'context provider 1-docs: the id must start with a letter'],
-      ['an id that is not a string', [{ id: 7, provide: () => '' }], 'context provider: id must be a string'],
-      ['a provide that is not a function', [{ id: 'docs', provide: 'x' }], 'context provider docs: provide must be a function'],
-      ['a value that is not an object', [null], 'context provider must be an object'],
+      [
+        'a repeated id',
+        [provider('docs-site'), provider('docs-site')],
+        'context provider docs-site is already registered',
+      ],
+      [
+        'the id of the built-in user',
+        [provider('user')],
+        'context provider user: the id is taken by a built-in provider',
+      ],
+      [
+        'the id of the built-in entity',
+        [provider('entity')],
+        'context provider entity: the id is taken',
+      ],
+      [
+        'the id of the built-in plan',
+        [provider('plan')],
+        'context provider plan: the id is taken',
+      ],
+      [
+        'an id of the wrong form',
+        [provider('1-docs')],
+        'context provider 1-docs: the id must start with a letter',
+      ],
+      [
+        'an id that is not a string',
+        [{ id: 7, provide: (): string => '' }],
+        'context provider: id must be a string',
+      ],
+      [
+        'a provide that is not a function',
+        [{ id: 'docs', provide: 'x' }],
+        'context provider docs: provide must be a function',
+      ],
+      [
+        'a value that is not an object',
+        [null],
+        'context provider must be an object',
+      ],
     ])('refuses %s with an InputError', (_name, values, message) => {
       const registry = new AiChatHarnessRegistry();
       const add = () => {
@@ -397,7 +430,11 @@ describe('AiChatHarnessRegistry', () => {
       );
       expect(warn.warn).toHaveBeenCalledWith(
         'An AI chat context provider failed',
-        { contextProvider: 'oncall', runId: 'r', error: 'pager service is down' },
+        {
+          contextProvider: 'oncall',
+          runId: 'r',
+          error: 'pager service is down',
+        },
       );
     });
   });

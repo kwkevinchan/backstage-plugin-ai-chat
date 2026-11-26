@@ -56,10 +56,10 @@ export interface AiChatApi {
     queuedId: string,
     request: InsertQueuedMessageRequest,
   ): Promise<ChatItem>;
-  // (undocumented)
   listSessions(options?: {
     query?: string;
     includeArchived?: boolean;
+    entityRef?: string;
   }): Promise<ChatSession[]>;
   listSessionTools(id: string): Promise<ChatTool[]>;
   // (undocumented)

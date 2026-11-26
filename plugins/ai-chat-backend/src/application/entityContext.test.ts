@@ -15,12 +15,48 @@
  */
 
 import type { StepContext } from '@kwkevinchan/ai-chat-harness';
-import { FakeEntityReader, jane } from '../integration/__testUtils__';
+import type { EntityFacts, Principal } from '../domain';
+import type { EntityReader } from './ports';
 import {
   entityContextProvider,
   readableEntityRef,
   userContextProvider,
 } from './entityContext';
+
+const jane: Principal = {
+  userRef: 'user:default/jane',
+  ownershipRefs: ['user:default/jane'],
+  credentials: { user: 'jane' },
+};
+
+/** Entities by ref, each readable by everyone or by `readers` only. */
+class FakeEntityReader implements EntityReader {
+  failing = false;
+  readonly reads: { entityRef: string; principal: Principal }[] = [];
+
+  constructor(
+    private readonly entities: {
+      ref: string;
+      facts?: Partial<EntityFacts>;
+      readers?: string[];
+    }[] = [],
+  ) {}
+
+  async read(entityRef: string, principal: Principal) {
+    this.reads.push({ entityRef, principal });
+    if (this.failing) throw new Error('the catalog is down');
+    const found = this.entities.find(entity => entity.ref === entityRef);
+    if (
+      !found ||
+      (found.readers && !found.readers.includes(principal.userRef))
+    ) {
+      return undefined;
+    }
+    const [kind, rest] = entityRef.split(':');
+    const [namespace, name] = rest.split('/');
+    return { kind, namespace, name, ...found.facts };
+  }
+}
 
 const ctx = (extra: Partial<StepContext> = {}): StepContext => ({
   sessionId: 's',
@@ -38,7 +74,11 @@ describe('the built-in context provider user (X-03)', () => {
       ctx({
         principal: {
           ...jane,
-          ownershipRefs: [jane.userRef, 'group:default/team-a', 'group:default/"x"'],
+          ownershipRefs: [
+            jane.userRef,
+            'group:default/team-a',
+            'group:default/"x"',
+          ],
         },
       }),
     );
@@ -65,7 +105,9 @@ describe('the built-in context provider user (X-03)', () => {
   });
 
   it('gives nothing for a principal without a user ref', () => {
-    expect(userContextProvider().provide(ctx({ principal: {} }))).toBeUndefined();
+    expect(
+      userContextProvider().provide(ctx({ principal: {} })),
+    ).toBeUndefined();
   });
 });
 
@@ -141,7 +183,9 @@ describe('the built-in context provider entity (X-03)', () => {
 
   it('gives nothing when the session is bound to no entity', async () => {
     const entities = catalog();
-    expect(await entityContextProvider(entities).provide(ctx())).toBeUndefined();
+    expect(
+      await entityContextProvider(entities).provide(ctx()),
+    ).toBeUndefined();
     expect(entities.reads).toEqual([]);
   });
 

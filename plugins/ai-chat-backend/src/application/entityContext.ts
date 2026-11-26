@@ -93,9 +93,7 @@ function factsJson(facts: EntityFacts): string {
  * user who lost the right to read it gets nothing of it. An entity that does
  * not exist and one the user cannot read give the same sentence.
  */
-export function entityContextProvider(
-  entities: EntityReader,
-): ContextProvider {
+export function entityContextProvider(entities: EntityReader): ContextProvider {
   return {
     id: 'entity',
     async provide(ctx) {

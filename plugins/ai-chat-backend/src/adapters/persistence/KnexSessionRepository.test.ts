@@ -191,14 +191,20 @@ describe('KnexSessionRepository', () => {
     const created = await p.sessions.create(NEW_SESSION);
     p.clock.advance(60);
     expect(
-      await p.sessions.bindEntityIfUnbound(created.id, 'component:default/shop'),
+      await p.sessions.bindEntityIfUnbound(
+        created.id,
+        'component:default/shop',
+      ),
     ).toBe(true);
     expect(await p.sessions.get(created.id)).toMatchObject({
       entityRef: 'component:default/shop',
       updatedAt: '2026-01-01T00:01:00.000Z',
     });
     expect(
-      await p.sessions.bindEntityIfUnbound(created.id, 'component:default/other'),
+      await p.sessions.bindEntityIfUnbound(
+        created.id,
+        'component:default/other',
+      ),
     ).toBe(false);
     expect((await p.sessions.get(created.id)).entityRef).toBe(
       'component:default/shop',
@@ -244,8 +250,12 @@ describe('KnexSessionRepository', () => {
       shop.id,
     ]);
     expect(
-      (await ids({ entityRef: 'component:default/shop', includeArchived: true }))
-        .sort(),
+      (
+        await ids({
+          entityRef: 'component:default/shop',
+          includeArchived: true,
+        })
+      ).sort(),
     ).toEqual([shop.id, archived.id].sort());
     expect(
       await ids({

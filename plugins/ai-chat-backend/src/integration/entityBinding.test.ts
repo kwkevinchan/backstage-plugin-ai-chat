@@ -151,9 +151,11 @@ describe('sessions bound to an entity', () => {
       expect(hidden.body.error.name).toBe('InputError');
       expect(await listed(b, {})).toEqual([]);
       // The one who can read it can bind to it.
-      await create(b, { entityRef: 'component:default/secret' }, MALLORY).expect(
-        201,
-      );
+      await create(
+        b,
+        { entityRef: 'component:default/secret' },
+        MALLORY,
+      ).expect(201);
     });
 
     it('refuses a ref without a kind, without asking the catalog', async () => {
@@ -323,11 +325,12 @@ describe('sessions bound to an entity', () => {
       'refuses the entityRef %j with 400',
       async entityRef => {
         const b = backend();
-        await request(b.app)
+        const res = await request(b.app)
           .get('/sessions')
           .query({ entityRef })
-          .set('Authorization', JANE)
-          .expect(400);
+          .set('Authorization', JANE);
+        expect(res.status).toBe(400);
+        expect(res.body.error.message).toContain('entityRef');
       },
     );
   });

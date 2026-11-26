@@ -7,6 +7,7 @@ import { AgentDefinition } from '@kwkevinchan/ai-chat-harness';
 import { AgentLimits } from '@kwkevinchan/ai-chat-harness';
 import { AiChatHarnessExtensionPoint } from '@kwkevinchan/ai-chat-harness';
 import { BeforeToolCallDecision } from '@kwkevinchan/ai-chat-harness';
+import { ContextProvider } from '@kwkevinchan/ai-chat-harness';
 import { ExtensionPoint } from '@backstage/backend-plugin-api';
 import { HookName } from '@kwkevinchan/ai-chat-harness';
 import { Hooks } from '@kwkevinchan/ai-chat-harness';
@@ -36,6 +37,8 @@ export { AiChatHarnessExtensionPoint };
 export const aiChatHarnessExtensionPoint: ExtensionPoint<AiChatHarnessExtensionPoint>;
 
 export { BeforeToolCallDecision };
+
+export { ContextProvider };
 
 export { HookName };
 

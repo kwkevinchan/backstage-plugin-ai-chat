@@ -205,6 +205,7 @@ export interface Skill {
 export interface ContextProvider {
   /** Names the text in the context; unique among the providers. */
   id: string;
+  /** The text for the context of the step of `ctx`, or `undefined` for none. */
   provide(ctx: StepContext): string | undefined | Promise<string | undefined>;
 }
 

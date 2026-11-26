@@ -31,7 +31,9 @@ describe('CatalogEntityReader', () => {
           title: 'Shop',
           description: 'Sells things.',
           tags: ['java'],
-          annotations: { 'backstage.io/source-location': 'url:https://git.internal/shop' },
+          annotations: {
+            'backstage.io/source-location': 'url:https://git.internal/shop',
+          },
           links: [{ url: 'https://internal.example.com' }],
         },
         spec: {
@@ -79,13 +81,21 @@ describe('CatalogEntityReader', () => {
     });
     expect(
       await new CatalogEntityReader(catalog).read('group:default/team-a', jane),
-    ).toEqual({ kind: 'Group', namespace: 'default', name: 'team-a', type: 'team' });
+    ).toEqual({
+      kind: 'Group',
+      namespace: 'default',
+      name: 'team-a',
+      type: 'team',
+    });
   });
 
   it('gives nothing for an entity the catalog does not give', async () => {
     const catalog = catalogServiceMock({ entities: [] });
     expect(
-      await new CatalogEntityReader(catalog).read('component:default/gone', jane),
+      await new CatalogEntityReader(catalog).read(
+        'component:default/gone',
+        jane,
+      ),
     ).toBeUndefined();
   });
 });
