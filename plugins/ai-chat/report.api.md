@@ -11,10 +11,12 @@ import type { ChatQueue } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ChatQueuedMessage } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ChatSession } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ChatSessionDetail } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { ChatShare } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ChatTool } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ChatToolset } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ChatUploadedAttachment } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { CreateChatSessionRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { CreateChatShareRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { DecideToolCallRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { InsertChatMessageRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { InsertQueuedMessageRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
@@ -24,6 +26,7 @@ import type { ResumeChatRunRequest } from '@kwkevinchan/backstage-plugin-ai-chat
 import { RouteRef } from '@backstage/core-plugin-api';
 import type { SendChatMessageRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { UpdateChatSessionRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { UpdateChatShareRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { UpdateQueuedMessageRequest } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 
 // @public
@@ -31,6 +34,7 @@ export interface AiChatApi {
   cancelRun(id: string, runId: string): Promise<void>;
   // (undocumented)
   createSession(request?: CreateChatSessionRequest): Promise<ChatSession>;
+  createShare(id: string, request: CreateChatShareRequest): Promise<ChatShare>;
   decide(
     id: string,
     callId: string,
@@ -62,6 +66,7 @@ export interface AiChatApi {
     entityRef?: string;
   }): Promise<ChatSession[]>;
   listSessionTools(id: string): Promise<ChatTool[]>;
+  listShares(id: string): Promise<ChatShare[]>;
   // (undocumented)
   listToolsets(): Promise<ChatToolset[]>;
   queueMessage(
@@ -76,6 +81,7 @@ export interface AiChatApi {
     signal?: AbortSignal,
   ): Promise<Response | undefined>;
   resumeQueue(id: string, signal?: AbortSignal): Promise<Response | undefined>;
+  revokeShare(id: string, shareId: string): Promise<void>;
   sendMessage(
     id: string,
     request: SendChatMessageRequest,
@@ -92,6 +98,11 @@ export interface AiChatApi {
     id: string,
     request: UpdateChatSessionRequest,
   ): Promise<ChatSession>;
+  updateShare(
+    id: string,
+    shareId: string,
+    request: UpdateChatShareRequest,
+  ): Promise<ChatShare>;
   uploadAttachment(
     sessionId: string,
     body: Blob,

@@ -382,10 +382,12 @@ describe('sharing a session', () => {
       const id = await newSession(b);
       groups.set('cara', ['group:default/team']);
       await share(b, id, { subjectRef: 'group:default/team' }).expect(201);
-      await as('cara', request(b.app).get(`/sessions/${id}`)).expect(200);
-      await as('mallory', request(b.app).get(`/sessions/${id}`)).expect(404);
+      const statusFor = async (user: string) =>
+        (await as(user, request(b.app).get(`/sessions/${id}`))).status;
+      expect(await statusFor('cara')).toBe(200);
+      expect(await statusFor('mallory')).toBe(404);
       groups.delete('cara');
-      await as('cara', request(b.app).get(`/sessions/${id}`)).expect(404);
+      expect(await statusFor('cara')).toBe(404);
     });
 
     it('a cancelled share stops every read at once, and cannot be changed (section 5)', async () => {
@@ -708,16 +710,18 @@ describe('sharing a session', () => {
       world.clock.advance(25 * HOUR);
       const after = await upload(b, id, 'image/gif');
       await send(b, id, 'second', { attachmentIds: [after] });
-      await as(
-        'bob',
-        request(b.app).get(`/sessions/${id}/attachments/${before}`),
-      ).expect(200);
-      await as(
-        'bob',
-        request(b.app).get(`/sessions/${id}/attachments/${after}`),
-      ).expect(404);
+      const statusOf = async (image: string) =>
+        (
+          await as(
+            'bob',
+            request(b.app).get(`/sessions/${id}/attachments/${image}`),
+          )
+        ).status;
+      expect(await statusOf(before)).toBe(200);
+      expect(await statusOf(after)).toBe(404);
     });
   });
+
   describe('following the run (section 5, SH-09)', () => {
     /**
      * A model whose second call waits for `release`. A title call is

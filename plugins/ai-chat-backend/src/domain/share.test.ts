@@ -303,8 +303,8 @@ describe('updatedShareScope', () => {
       { outputsUpToSeq: 0 },
     ],
     ['changes nothing for an empty change', live, {}, live],
-  ])('%s', (_name, share, change, scope) => {
-    expect(updatedShareScope(share, change, 9)).toEqual(scope);
+  ])('%s', (_name, current, change, scope) => {
+    expect(updatedShareScope(current, change, 9)).toEqual(scope);
   });
 
   it('refuses a refresh of a live share and later output on a snapshot', () => {
