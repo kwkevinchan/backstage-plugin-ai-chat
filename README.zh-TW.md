@@ -66,6 +66,13 @@ aiChat:
     apiKey: ${AI_CHAT_API_KEY}
     model: gpt-4o-mini
     images: false # 模型能讀圖片；預設 false。圖片會送到模型伺服器，見下方說明
+    parallelToolCalls: false # 請伺服器允許一次多個工具呼叫；預設 false
+    requestsPerMinute: 60 # 選填；所有後端合計每分鐘的呼叫數
+  models: # 選填；Agent 用 `model` 指定的其他模型，欄位和 llm 相同。llm 就是 default
+    small:
+      baseUrl: https://llm.example.com/v1
+      apiKey: ${AI_CHAT_SMALL_API_KEY}
+      model: some-small-model
   toolsets: # 工具分組
     catalog:
       title: Catalog
@@ -96,6 +103,10 @@ aiChat:
   maxTurns: 10 # 一次 Run 的模型呼叫數；預設 10
   maxToolCallsPerRun: 30 # 一次 Run 的工具呼叫數；預設 30
   runTimeoutSeconds: 300 # 一次 Run 的工作時間（不含等核准）；預設 300，最大 600
+  maxToolCallsPerStep: 8 # 模型一次回答的工具呼叫數，超過的被拒絕；預設 8
+  readConcurrency: 4 # 同時執行的唯讀呼叫數；不是唯讀的一次一個，仍要核准；預設 4
+  toolTimeoutSeconds: 60 # 一個工具呼叫的時間，超過時結果是逾時、Run 繼續，但 action 可能還在執行；寫入的逾時後，這一步後面的寫入不執行；預設 60，最大 600
+  runsPerUser: 3 # 一個使用者同時進行的 Run 數（含等核准），超過回 429；預設 3
   context:
     tokenBudget: 100000 # 送給模型的內容的 token 預算（估計值）；預設 100000
     keepRecentSteps: 6 # 最近幾步一律保留；預設 6
@@ -152,14 +163,16 @@ backend:
   `aiChat.systemPrompt`，兩段額外說明不疊加。`toolsets` 必須是已經定義的工具組。
   Agent 的 `skills` 已經生效：決定這個 Agent 能用哪些已註冊的 Skill（沒填就是全部，`[]` 就是沒有），
   填了不存在的 Skill id 時後端無法啟動。`planning: required` 已經生效：這個 Agent 每個 Run 的第一步只拿得到
-  `update_plan`，先寫計畫再做事。`toolsets`、`model`、`limits` 只記在
-  Agent 上，這一版還不執行：迴圈仍用全站的上限和唯一的模型，不依 Agent 的 `toolsets` 過濾工具。
+  `update_plan`，先寫計畫再做事。`model` 決定這個 Agent 的 Run 和自動標題用哪個模型：`default`（`aiChat.llm`）、
+  `aiChat.models` 的 id，或 module 加的 model client；不存在的 id 讓後端無法啟動。`toolsets`、`limits`
+  只記在 Agent 上，這一版還不執行：迴圈仍用全站的上限，不依 Agent 的 `toolsets` 過濾工具。
 - **計畫**：每個 Agent 都有唯讀的內建工具 `update_plan`（預設 `allow`，`policy` 設成 `update_plan: deny` 就關掉）。
   每次呼叫取代整份計畫（最多 20 項，狀態是 `pending`、`in_progress`、`completed`），目前的計畫每一步都放進上下文，畫面把每次更新顯示成清單。
   `aiChat.skills.directories` 可載入子目錄內的 `SKILL.md`（上下文只含 id 與一句說明，由唯讀內建工具 `load_skill` 延遲載入全文；相對路徑以後端的工作目錄為基準；符號連結會跟過去，但子目錄或 `SKILL.md` 解析後在設定的目錄外面時，後端無法啟動）。值不對會讓後端無法啟動。
-- 別的 backend module 透過 `@kwkevinchan/backstage-plugin-ai-chat-node` 註冊 Agent、Hook 與 Skill（`addAgent`、`addHook`、`addSkill`），不必
+- 別的 backend module 透過 `@kwkevinchan/backstage-plugin-ai-chat-node` 註冊 Agent、Hook、Skill 與 model client（`addAgent`、`addHook`、`addSkill`、`addModelClient`），不必
   import 宿主。模組註冊的 Agent 也套同一套內建規則。設定檔和 module 用了同一個 id 時，後端無法啟動。
   `addHook` 支援 `beforeModelCall`、`beforeToolCall`、`afterToolCall` 與 `onRunEnd`。`beforeToolCall` 只能調嚴（`ask`／`deny`），不能放寬。
+  `addModelClient` 只新增模型，用了設定檔的 id 時後端無法啟動；client 用 `opts.readImage` 讀圖片的位元組；`requestsPerMinute` 的限流只套在設定檔的模型。
   Hook 丟例外時：`beforeModelCall` 讓 Run 失敗；`beforeToolCall` 讓這個工具呼叫被拒絕，Run 繼續；
   `afterToolCall` 讓這個工具結果變成錯誤，不保留原始輸出，Run 繼續；`onRunEnd` 只記 log，不影響 Run。
   這個庫的 `plugins/ai-chat-backend-module-example` 是可以照抄的範例（Agent id 是 `guide`、Skill id 是 `getting-started`），
@@ -206,7 +219,7 @@ aiChat:
   `mailto` 的網址做成連結，所以上面的系統提示請模型寫成完整的網址。`search.collators.techdocs.locationTemplate` 保留預設：
   它套用在整個搜尋索引，TechDocs 閱讀頁的搜尋框會把 `location` 當成 app 裡的路徑去換頁。
 - 這個 action 的 input schema 有遞迴的 `$ref`（在 `filters`）。不接受工具 schema 裡有 `$ref` 的模型伺服器會拒絕請求。
-- 搜尋失敗時，模型收到 `Request failed with <狀態碼> <狀態文字>`，不含搜尋引擎的錯誤內容。搜尋不回應時，Run 到 `runTimeoutSeconds` 結束。
+- 搜尋失敗時，模型收到 `Request failed with <狀態碼> <狀態文字>`，不含搜尋引擎的錯誤內容。搜尋不回應時，過了 `toolTimeoutSeconds` 結果是逾時；`runTimeoutSeconds` 先到就結束 Run。
 - 輸出算在 `maxToolOutputChars` 裡。action 預設回傳 10 筆（`pageLimit`）；輸出被裁掉時，最後幾筆結果和它們的連結會不見，所以像上面一樣請模型少拿幾筆。
 
 ## 核准的規則

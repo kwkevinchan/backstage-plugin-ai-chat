@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { abortableSleep } from '../sleep';
 import type {
   Item,
   ItemLog,
@@ -332,21 +333,4 @@ function outcomeOfStoredRun(run: Run, log: readonly Item[]): RunOutcome {
     default:
       return { status: 'failed', message: 'The run stopped.' };
   }
-}
-
-function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise(resolve => {
-    if (signal.aborted) {
-      resolve();
-      return;
-    }
-    const pending: { timer?: ReturnType<typeof setTimeout> } = {};
-    const finish = () => {
-      clearTimeout(pending.timer);
-      signal.removeEventListener('abort', finish);
-      resolve();
-    };
-    pending.timer = setTimeout(finish, ms);
-    signal.addEventListener('abort', finish, { once: true });
-  });
 }

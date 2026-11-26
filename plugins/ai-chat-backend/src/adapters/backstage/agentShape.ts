@@ -177,6 +177,20 @@ export function assertKnownSkills(
   }
 }
 
+/**
+ * The model an agent names must be a model of the installation: `default`,
+ * a key of `aiChat.models`, or a client a module added (X-09).
+ */
+export function assertKnownModel(
+  model: string | undefined,
+  known: ReadonlySet<string>,
+  path: string,
+): void {
+  if (model !== undefined && !known.has(model)) {
+    throw new InputError(`${path}.model: unknown model ${model}`);
+  }
+}
+
 function readString(value: unknown, path: string): string {
   if (typeof value !== 'string') {
     throw new InputError(`${path} must be a string`);

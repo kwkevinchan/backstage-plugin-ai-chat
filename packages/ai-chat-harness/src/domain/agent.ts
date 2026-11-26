@@ -40,8 +40,9 @@ export type AgentLimits = {
 
 /**
  * One agent (X-01). The loop applies `systemPrompt`, `skills` (which skills
- * `load_skill` offers) and `planning`. `toolsets`, `model` and `limits` are
- * recorded here; applying them is later work (P3-02 to P3-07).
+ * `load_skill` offers) and `planning`; the host chooses the model client of
+ * the run by `model` (X-09). `toolsets` and `limits` are recorded here;
+ * applying them is later work.
  *
  * @public
  */
@@ -53,7 +54,7 @@ export type AgentDefinition = {
   toolsets?: readonly string[];
   /** Skill ids. The text of a skill is loaded later (P3-04). */
   skills?: readonly string[];
-  /** Id of a model. The client for it is chosen later (P3-07). */
+  /** Id of a model; `default` when absent. The host gives its client to the run. */
   model?: string;
   limits?: AgentLimits;
   planning?: PlanningMode;
@@ -77,4 +78,18 @@ export type Limits = {
   maxToolCallsPerRun: number;
   /** Seconds of working time, shorter than the lifetime of the user token. */
   runTimeoutSeconds: number;
+  /**
+   * Tool calls the model may request in one step (P-05). `callModel` writes
+   * a call beyond it with a `denied` result (message "tool call limit per
+   * step"); it still counts toward `maxToolCallsPerRun`.
+   */
+  maxToolCallsPerStep: number;
+  /** Read-only calls of one step that run at the same time (P-01). */
+  readConcurrency: number;
+  /**
+   * Seconds one tool call may take (P-02). A call that takes longer gets a
+   * `timeout` result and the run goes on. The deadline of the run
+   * (`runTimeoutSeconds`) still ends the run, also during a call.
+   */
+  toolTimeoutSeconds: number;
 };

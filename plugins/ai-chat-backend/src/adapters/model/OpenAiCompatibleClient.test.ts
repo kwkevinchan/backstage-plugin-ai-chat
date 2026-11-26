@@ -72,6 +72,30 @@ describe('OpenAiCompatibleClient', () => {
     });
   });
 
+  it('sends parallel_tool_calls only with tools, when the model declares it (X-09)', async () => {
+    server = await startLlmServer(() => ({
+      body: sseBody([chunk({ content: 'x' })]),
+    }));
+    const tools = [
+      {
+        type: 'function' as const,
+        function: { name: 'a', description: 'd', parameters: {} },
+      },
+    ];
+    await client().complete({ messages: [], tools, parallelToolCalls: true });
+    await client().complete({
+      messages: [],
+      tools: [],
+      parallelToolCalls: true,
+    });
+    await client().complete({ messages: [], tools, parallelToolCalls: false });
+    expect(server.requests.map(r => r.body.parallel_tool_calls)).toEqual([
+      true,
+      undefined,
+      undefined,
+    ]);
+  });
+
   it('sends no key and no tools when there are none', async () => {
     server = await startLlmServer(() => ({
       body: sseBody([chunk({ content: 'x' })]),

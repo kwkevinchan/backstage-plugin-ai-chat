@@ -56,6 +56,9 @@ const defaultLimits: Limits = {
   maxSteps: 10,
   maxToolCallsPerRun: 30,
   runTimeoutSeconds: 300,
+  maxToolCallsPerStep: 8,
+  readConcurrency: 4,
+  toolTimeoutSeconds: 60,
 };
 
 async function setupSkillsHarness(options: {
@@ -88,7 +91,6 @@ async function setupSkillsHarness(options: {
       : emptyExtensions();
   const loop = new AdvanceRun({
     items,
-    model,
     tools,
     run,
     clock,
@@ -105,6 +107,7 @@ async function setupSkillsHarness(options: {
   ): Promise<{ events: HarnessEvent[]; outcome: RunOutcome }> => {
     const req: AdvanceRunRequest = {
       agent: options.agent ?? defaultAgent,
+      model,
       limits: { ...defaultLimits, ...options.limits },
       budget: { tokenBudget: 24000, keepRecentSteps: 6 },
       policy: options.policy ?? {},

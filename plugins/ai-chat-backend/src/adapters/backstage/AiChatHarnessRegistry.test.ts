@@ -283,4 +283,45 @@ describe('AiChatHarnessRegistry', () => {
       }),
     ).toThrow(/load must be a function/);
   });
+
+  describe('addModelClient (X-09)', () => {
+    const client = {
+      capabilities: { parallelToolCalls: false, images: true },
+      async *stream() {
+        yield { type: 'text' as const, text: 'x' };
+      },
+    };
+
+    it('keeps the clients by id', () => {
+      const registry = new AiChatHarnessRegistry();
+      registry.addModelClient('echo', client);
+      expect([...registry.modelClients()]).toEqual([['echo', client]]);
+    });
+
+    it('refuses an id twice, an id of the wrong form, and a client of the wrong shape', () => {
+      const registry = new AiChatHarnessRegistry();
+      registry.addModelClient('echo', client);
+      expect(() => registry.addModelClient('echo', client)).toThrow(
+        'model client echo is already registered',
+      );
+      expect(() => registry.addModelClient('bad id', client)).toThrow(
+        'model client bad id: the id must start with a letter',
+      );
+      expect(() =>
+        registry.addModelClient('a', {
+          capabilities: client.capabilities,
+        } as never),
+      ).toThrow('model client a must have a stream function');
+      expect(() =>
+        registry.addModelClient('b', { stream: client.stream } as never),
+      ).toThrow('model client b must have a stream function');
+      expect(() =>
+        registry.addModelClient('c', {
+          stream: client.stream,
+          capabilities: { parallelToolCalls: false },
+        } as never),
+      ).toThrow('model client c must have a stream function');
+      expect([...registry.modelClients().keys()]).toEqual(['echo']);
+    });
+  });
 });

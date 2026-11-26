@@ -17,6 +17,7 @@
 export { assertSingleSqliteConnection } from './sqliteConnection';
 export { KnexAttachmentStore } from './KnexAttachmentStore';
 export { KnexItemLog } from './KnexItemLog';
+export { KnexModelCallLimiter } from './KnexModelCallLimiter';
 export { KnexQueuedMessageRepository } from './KnexQueuedMessageRepository';
 export { KnexRunRepository } from './KnexRunRepository';
 export { KnexSessionRepository } from './KnexSessionRepository';

@@ -86,6 +86,19 @@ export class RunNotWaiting extends ChatDomainError {
   }
 }
 
+/**
+ * The user has `aiChat.runsPerUser` runs going on (`running` or
+ * `waiting_approval`) in their sessions, and no other run may start (P-05).
+ */
+export class TooManyActiveRuns extends ChatDomainError {
+  constructor(limit: number) {
+    super(
+      'TOO_MANY_ACTIVE_RUNS',
+      `You have ${limit} runs going on. Wait for one to end, or stop one.`,
+    );
+  }
+}
+
 /** There is no agent with this id. */
 export class AgentNotFound extends ChatDomainError {
   constructor(agentId: string) {

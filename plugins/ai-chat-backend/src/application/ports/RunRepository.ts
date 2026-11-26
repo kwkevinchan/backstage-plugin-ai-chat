@@ -29,6 +29,9 @@ export interface RunRepository extends RunControl {
    * Makes a run in `running` that this backend holds the lease of. Throws
    * `RunAlreadyActive` when the session has a run that has not ended (H-03):
    * of any number of calls at the same time for one session, one succeeds.
+   * Throws `TooManyActiveRuns` when the owner of the session has
+   * `runsPerUser` runs going on in other sessions (P-05), also on other
+   * backends.
    */
   start(sessionId: string, opts?: { parentRunId?: string }): Promise<LeasedRun>;
 

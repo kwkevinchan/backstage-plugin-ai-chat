@@ -15,6 +15,7 @@
  */
 
 import { mockServices } from '@backstage/backend-test-utils';
+import type { JsonObject } from '@backstage/types';
 import {
   decidePolicy,
   type AgentDefinition,
@@ -420,6 +421,38 @@ describe('ConfigAgentCatalog', () => {
       expect((await catalog.agent('guide')).skills).toEqual([
         'getting-started',
       ]);
+    });
+  });
+
+  describe('the model of an agent (X-09)', () => {
+    const knownModels = new Set(['default', 'small', 'echo']);
+    const catalogWith = (
+      agents: JsonObject,
+      registered: { id: string; systemPrompt: string; model?: string }[] = [],
+    ) =>
+      new ConfigAgentCatalog(
+        mockServices.rootConfig({ data: { aiChat: { agents } } }),
+        mockServices.logger.mock(),
+        registered,
+        undefined,
+        knownModels,
+      );
+
+    it('keeps a model of the installation on a configured and a registered agent', async () => {
+      const catalog = catalogWith({ sre: { model: 'small' } }, [
+        { id: 'guide', systemPrompt: 'x', model: 'echo' },
+      ]);
+      expect((await catalog.agent('sre')).model).toBe('small');
+      expect((await catalog.agent('guide')).model).toBe('echo');
+    });
+
+    it('does not start with a model that the installation does not have', () => {
+      expect(() => catalogWith({ sre: { model: 'missing' } })).toThrow(
+        'aiChat.agents.sre.model: unknown model missing',
+      );
+      expect(() =>
+        catalogWith({}, [{ id: 'guide', systemPrompt: 'x', model: 'gone' }]),
+      ).toThrow('agent guide.model: unknown model gone');
     });
   });
 });

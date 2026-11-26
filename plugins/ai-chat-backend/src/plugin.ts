@@ -20,6 +20,8 @@ import {
   resolvePackagePath,
 } from '@backstage/backend-plugin-api';
 import { actionsServiceRef } from '@backstage/backend-plugin-api/alpha';
+import { InputError } from '@backstage/errors';
+import type { ModelClient } from '@kwkevinchan/ai-chat-harness';
 import { aiChatHarnessExtensionPoint } from '@kwkevinchan/backstage-plugin-ai-chat-node';
 import { ActionsToolGateway } from './adapters/backstage/ActionsToolGateway';
 import { AiChatHarnessRegistry } from './adapters/backstage/AiChatHarnessRegistry';
@@ -41,13 +43,15 @@ import {
   assertSingleSqliteConnection,
   KnexAttachmentStore,
   KnexItemLog,
+  KnexModelCallLimiter,
   KnexQueuedMessageRepository,
   KnexRunRepository,
   KnexSessionRepository,
   KnexShareRepository,
 } from './adapters/persistence';
 import { SystemClock, UuidGenerator } from './adapters/system';
-import { readAiChatConfig } from './config';
+import { readAiChatConfig, type ModelSettings } from './config';
+import { DEFAULT_MODEL_ID } from './application';
 import { DelegatingNotifier } from './application/ports';
 import { createHost } from './host';
 import { aiChatSignalsExtensionPoint } from './signals';
@@ -128,6 +132,23 @@ export const aiChatPlugin = createBackendPlugin({
           harnessExtensions.skills(),
         ).map(skill => limitSkillContent(skill, aiChat.maxToolOutputChars));
         const knownSkills = new Set(skills.map(skill => skill.id));
+        const configuredModels = new Map<string, ModelSettings>([
+          [DEFAULT_MODEL_ID, aiChat.llm],
+          ...aiChat.models,
+        ]);
+        const moduleModels = harnessExtensions.modelClients();
+        for (const id of moduleModels.keys()) {
+          // A module adds models; it never replaces one of the configuration.
+          if (configuredModels.has(id)) {
+            throw new InputError(
+              `model client ${id} is already defined in the configuration`,
+            );
+          }
+        }
+        const knownModels = new Set([
+          ...configuredModels.keys(),
+          ...moduleModels.keys(),
+        ]);
         // Reads and checks the toolsets, the policy and the agents, and warns
         // about the deprecated include and exclude lists.
         const catalog = new ConfigAgentCatalog(
@@ -135,13 +156,14 @@ export const aiChatPlugin = createBackendPlugin({
           logger,
           harnessExtensions.agents(),
           knownSkills,
+          knownModels,
         );
         logger.info(
           `AI chat extensions: ${
             harnessExtensions.agents().length
           } agent(s), ${harnessExtensions.hookCount()} hook(s), ${
             skills.length
-          } skill(s)`,
+          } skill(s), ${moduleModels.size} model client(s)`,
         );
         const toolsets = await catalog.toolsets();
         logger.info(
@@ -173,11 +195,31 @@ export const aiChatPlugin = createBackendPlugin({
           sessions,
           shares,
         });
+        const clientOf = (settings: ModelSettings): ModelClient =>
+          new OpenAiCompatibleModelClient(
+            new OpenAiCompatibleClient(settings),
+            {
+              attachments,
+              images: settings.images,
+              parallelToolCalls: settings.parallelToolCalls,
+              logger,
+            },
+          );
+        const requestsPerMinute = new Map<string, number>();
+        for (const [id, settings] of configuredModels) {
+          if (settings.requestsPerMinute !== undefined) {
+            requestsPerMinute.set(id, settings.requestsPerMinute);
+          }
+        }
         const host = createHost({
           items,
           sessions,
-          runs: new KnexRunRepository(db, clock, ids),
-          queue: new KnexQueuedMessageRepository(db, clock, ids),
+          runs: new KnexRunRepository(db, clock, ids, {
+            runsPerUser: aiChat.runsPerUser,
+          }),
+          queue: new KnexQueuedMessageRepository(db, clock, ids, {
+            runsPerUser: aiChat.runsPerUser,
+          }),
           shares,
           access: new PermissionAccessControl({ permissions, authorizer }),
           attachments,
@@ -191,10 +233,17 @@ export const aiChatPlugin = createBackendPlugin({
               (await sessions.get(ctx.sessionId)).enabledToolsets,
             maxOutputChars: aiChat.maxToolOutputChars,
           }),
-          model: new OpenAiCompatibleModelClient(
-            new OpenAiCompatibleClient(aiChat.llm),
-            { attachments, images: aiChat.llm.images, logger },
-          ),
+          model: clientOf(aiChat.llm),
+          models: new Map([
+            ...[...aiChat.models].map(
+              ([id, settings]) => [id, clientOf(settings)] as const,
+            ),
+            ...moduleModels,
+          ]),
+          rateLimits: {
+            limiter: new KnexModelCallLimiter(db),
+            requestsPerMinute,
+          },
           audit: new AuditorAuditLog(auditor),
           clock,
           ids,
@@ -207,6 +256,9 @@ export const aiChatPlugin = createBackendPlugin({
               maxSteps: aiChat.maxTurns,
               maxToolCallsPerRun: aiChat.maxToolCallsPerRun,
               runTimeoutSeconds: aiChat.runTimeoutSeconds,
+              maxToolCallsPerStep: aiChat.maxToolCallsPerStep,
+              readConcurrency: aiChat.readConcurrency,
+              toolTimeoutSeconds: aiChat.toolTimeoutSeconds,
             },
             budget: {
               ...aiChat.context,

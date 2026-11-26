@@ -116,6 +116,9 @@ export const limits: Limits = {
   maxSteps: 10,
   maxToolCallsPerRun: 30,
   runTimeoutSeconds: 300,
+  maxToolCallsPerStep: 8,
+  readConcurrency: 4,
+  toolTimeoutSeconds: 60,
 };
 
 export const usage = (partial: Partial<RunUsage> = {}): RunUsage => ({

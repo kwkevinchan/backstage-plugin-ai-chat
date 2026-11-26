@@ -46,6 +46,7 @@ export {
   RunNotWaiting,
   SessionNotFound,
   ShuttingDown,
+  TooManyActiveRuns,
   TooManyAttachments,
   TooManyImageBytes,
   TooManyPendingAttachments,

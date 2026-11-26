@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { JsonValue, ModelInput } from '../../domain';
+import type { JsonValue, ModelImage, ModelInput } from '../../domain';
 
 /**
  * One piece of the answer of the model.
@@ -38,11 +38,43 @@ export type ModelChunk =
     };
 
 /**
+ * The bytes of an image of a message, as `ModelStreamOptions.readImage`
+ * gives them.
+ *
+ * @public
+ */
+export type ModelImageData = {
+  /** For example `image/png`. */
+  mediaType: string;
+  bytes: Uint8Array;
+};
+
+/**
+ * What a model call gets besides its input.
+ *
+ * @public
+ */
+export type ModelStreamOptions = {
+  /** Aborts when the run stops or reaches its deadline. */
+  signal: AbortSignal;
+  /** The session of the call. */
+  sessionId: string;
+  /**
+   * Reads an image of the input of this call, from the attachments of the
+   * session. `undefined` when the image is not there any more (it was
+   * deleted). The host gives it; the backend plugin gives it to every model
+   * client. The core never calls it.
+   */
+  readImage?: (image: ModelImage) => Promise<ModelImageData | undefined>;
+};
+
+/**
  * Calls the model. The adapter maps tool ids to the names the API accepts,
  * turns `input` into the argument string, and maps the ids of the calls in
  * the answer back (a `tool_call` chunk carries the id the model gave). The
  * images of a message carry no bytes (`ModelImage`): the adapter reads them
- * from the attachments of `opts.sessionId`, so the core does no I/O.
+ * with `opts.readImage`, or from the attachments of `opts.sessionId`, so the
+ * core does no I/O (X-09).
  *
  * @public
  */
@@ -53,11 +85,14 @@ export interface ModelClient {
    */
   stream(
     input: ModelInput,
-    opts: { signal: AbortSignal; sessionId: string },
+    opts: ModelStreamOptions,
   ): AsyncIterable<ModelChunk>;
   /**
-   * What the model can do. `images`: it reads the images of a message (IN-05).
-   * When it is `false`, the loop never gives it an image.
+   * What the model can do (X-09). `images`: it reads the images of a message
+   * (IN-05); when it is `false`, the loop never gives it an image.
+   * `parallelToolCalls`: it may ask for more than one tool in one answer. The
+   * loop runs the read-only calls of a step at the same time either way
+   * (D-09); an adapter may ask the server for parallel calls with it.
    */
   readonly capabilities: { parallelToolCalls: boolean; images: boolean };
 }

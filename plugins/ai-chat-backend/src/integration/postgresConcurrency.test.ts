@@ -20,6 +20,7 @@ import {
 } from '@kwkevinchan/ai-chat-harness/testing';
 import type { Knex } from 'knex';
 import { KnexAttachmentStore } from '../adapters/persistence/KnexAttachmentStore';
+import { KnexModelCallLimiter } from '../adapters/persistence/KnexModelCallLimiter';
 import { KnexItemLog } from '../adapters/persistence/KnexItemLog';
 import { KnexQueuedMessageRepository } from '../adapters/persistence/KnexQueuedMessageRepository';
 import { KnexRunRepository } from '../adapters/persistence/KnexRunRepository';
@@ -32,6 +33,7 @@ import {
   QueueFull,
   QueuedMessageNotFound,
   RunNotRunning,
+  TooManyActiveRuns,
   TooManyImageBytes,
   SessionNotFound,
   TooManyPendingAttachments,
@@ -195,9 +197,12 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
       `r${Math.random().toString(36).slice(2, 8)}`,
     );
     db.sessions = new KnexSessionRepository(db.knex, clock, ids);
-    db.runs = new KnexRunRepository(db.knex, clock, ids);
+    // The tests share one owner and leave runs going on; the limit of runs per
+    // user has its own test below.
+    const unlimited = { runsPerUser: Number.MAX_SAFE_INTEGER };
+    db.runs = new KnexRunRepository(db.knex, clock, ids, unlimited);
     db.items = new KnexItemLog(db.knex, clock, { maxInsertsPerRun: 1000 });
-    db.queue = new KnexQueuedMessageRepository(db.knex, clock, ids);
+    db.queue = new KnexQueuedMessageRepository(db.knex, clock, ids, unlimited);
     db.clock = clock;
     db.attachments = new KnexAttachmentStore(db.knex, clock, ids);
     db.insertMessage = new InsertMessage({
@@ -916,6 +921,78 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
 
       expect(deleted).toBe(0);
       await expect(db.sessions.get(session.id)).resolves.toBeDefined();
+    });
+  });
+
+  describe('runs per user and the rate limit of a model (P-05, P-06)', () => {
+    it('four starts of one user at the same time, in four sessions, 20 rounds: exactly runsPerUser of them start', async () => {
+      const clock = new FakeClock();
+      const ids = new SequentialIdGenerator(
+        `u${Math.random().toString(36).slice(2, 8)}`,
+      );
+      const runs = new KnexRunRepository(db.knex, clock, ids, {
+        runsPerUser: 2,
+      });
+      const queue = new KnexQueuedMessageRepository(db.knex, clock, ids, {
+        runsPerUser: 2,
+      });
+      for (let round = 0; round < 20; round++) {
+        const ownerRef = `user:default/${ids.next()}`;
+        const sessions = await Promise.all(
+          [0, 1, 2, 3].map(() =>
+            db.sessions.create({ ownerRef, agentId: 'default' }),
+          ),
+        );
+        // Two sessions start from their queue, two from a message.
+        for (const session of sessions.slice(2)) {
+          const before = await db.runs.start(session.id);
+          await db.queue.add(session.id, { text: 'queued' }, { max: 5 });
+          await db.runs.transition(before.id, 'completed');
+        }
+        const results = await Promise.allSettled(
+          sessions.map((session, i) =>
+            jitter().then(
+              (): Promise<unknown> =>
+                i < 2 ? runs.start(session.id) : queue.startNext(session.id),
+            ),
+          ),
+        );
+        const started = results.filter(
+          result => result.status === 'fulfilled' && result.value,
+        );
+        const refused = results.filter(
+          result =>
+            result.status === 'rejected' &&
+            result.reason instanceof TooManyActiveRuns,
+        );
+        expect(started).toHaveLength(2);
+        expect(refused).toHaveLength(2);
+        const [{ count }] = await db
+          .knex('runs')
+          .join('sessions', 'sessions.id', 'runs.session_id')
+          .where('sessions.owner_ref', ownerRef)
+          .where('runs.status', 'running')
+          .count({ count: '*' });
+        expect(Number(count)).toBe(2);
+      }
+    });
+
+    it('twenty calls of one model at the same time, 10 rounds: exactly requestsPerMinute of them get a turn', async () => {
+      const limiter = new KnexModelCallLimiter(db.knex);
+      const now = new Date('2026-01-01T00:00:30.000Z');
+      for (let round = 0; round < 10; round++) {
+        const modelId = `m${Math.random().toString(36).slice(2, 8)}`;
+        const turns = await Promise.all(
+          Array.from({ length: 20 }, () =>
+            jitter().then(() => limiter.tryAcquire(modelId, 5, now)),
+          ),
+        );
+        expect(turns.filter(turn => turn.acquired)).toHaveLength(5);
+        expect(turns.find(turn => !turn.acquired)).toEqual({
+          acquired: false,
+          retryAt: new Date('2026-01-01T00:01:00.000Z'),
+        });
+      }
     });
   });
 });

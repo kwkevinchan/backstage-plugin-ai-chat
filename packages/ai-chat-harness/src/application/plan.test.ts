@@ -459,3 +459,72 @@ describe('AdvanceRun: planning: required (X-07)', () => {
     expect(t.model.inputs[0].system).not.toContain('writes a plan');
   });
 });
+
+describe('update_plan with other read-only calls of a step (P3-07)', () => {
+  const slowRead: FakeTool = {
+    descriptor: tool({ id: 'catalog:get-entity', readOnly: true }),
+    execute: async () => {
+      await new Promise(resolve => setTimeout(resolve, 20));
+      return { status: 'ok', output: { name: 'service-a' } };
+    },
+  };
+  const other = {
+    items: [{ text: 'Roll back', status: 'pending' }],
+  };
+
+  it('writes each plan_update with its result at the place of the call, and the later plan is the last', async () => {
+    const t = await kit({
+      tools: [slowRead],
+      script: [
+        [
+          callTool('m1', 'catalog:get-entity', {}),
+          callTool('m2', UPDATE_PLAN_TOOL_ID, twoSteps),
+          callTool('m3', UPDATE_PLAN_TOOL_ID, other),
+        ],
+        [say('done')],
+      ],
+    });
+
+    await t.execute();
+
+    const log = await t.read();
+    const calls = log.filter(i => i.kind === 'tool_call');
+    const after = log.slice(log.indexOf(calls[calls.length - 1]) + 1);
+    expect(
+      after
+        .filter(i => i.kind === 'tool_result' || i.kind === 'plan_update')
+        .map(i =>
+          i.kind === 'tool_result' ? `result:${i.callId}` : 'plan_update',
+        ),
+    ).toEqual([
+      `result:${calls[0].callId}`,
+      'plan_update',
+      `result:${calls[1].callId}`,
+      'plan_update',
+      `result:${calls[2].callId}`,
+    ]);
+    expect(await readCurrentPlan(t.items, sessionId)).toEqual(other);
+  });
+
+  it('counts update_plan toward maxToolCallsPerStep', async () => {
+    const t = await kit({
+      tools: [readTool],
+      limits: { maxToolCallsPerStep: 1 },
+      script: [
+        [
+          callTool('m1', UPDATE_PLAN_TOOL_ID, twoSteps),
+          callTool('m2', 'catalog:get-entity', {}),
+        ],
+        [say('done')],
+      ],
+    });
+
+    await t.execute();
+
+    const results = (await t.read()).filter(i => i.kind === 'tool_result');
+    expect(
+      results.map(r => (r.kind === 'tool_result' ? r.message : undefined)),
+    ).toContain('tool call limit per step');
+    expect(t.tools.executed).toHaveLength(0);
+  });
+});

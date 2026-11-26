@@ -61,6 +61,11 @@ export interface LlmResult {
 export interface LlmRequest {
   messages: LlmMessage[];
   tools: LlmTool[];
+  /**
+   * Sends `parallel_tool_calls: true` with the tools. Not sent otherwise, for
+   * servers that do not know the field.
+   */
+  parallelToolCalls?: boolean;
   signal?: AbortSignal;
   /** Called with each piece of text as it arrives. */
   onText?: (text: string) => void;
@@ -128,6 +133,9 @@ export class OpenAiCompatibleClient implements LlmClient {
           model: this.config.model,
           messages: request.messages,
           ...(request.tools.length > 0 ? { tools: request.tools } : {}),
+          ...(request.tools.length > 0 && request.parallelToolCalls
+            ? { parallel_tool_calls: true }
+            : {}),
           stream: true,
         }),
       });

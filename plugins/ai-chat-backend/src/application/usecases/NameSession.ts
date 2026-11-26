@@ -21,13 +21,20 @@ import type {
   RunOutcome,
 } from '@kwkevinchan/ai-chat-harness';
 import {
+  AgentNotFound,
   conversationForTitle,
   isNormalEnd,
   shouldAutoTitle,
   titleFromModelAnswer,
   type Run,
 } from '../../domain';
-import type { Logger, RunRepository, SessionRepository } from '../ports';
+import type { ModelCatalog } from '../models';
+import type {
+  AgentCatalog,
+  Logger,
+  RunRepository,
+  SessionRepository,
+} from '../ports';
 
 /**
  * The start of the system prompt that asks for a title. The dev model server
@@ -54,7 +61,8 @@ export class NameSession {
       sessions: Pick<SessionRepository, 'get' | 'setTitleIfAbsent'>;
       runs: Pick<RunRepository, 'hasOtherNormalEnd'>;
       items: Pick<ItemLog, 'read'>;
-      model: ModelClient;
+      agents: Pick<AgentCatalog, 'agent'>;
+      models: Pick<ModelCatalog, 'forAgent'>;
       logger: Logger;
       timeoutMs?: number;
     },
@@ -68,7 +76,7 @@ export class NameSession {
     signal?: AbortSignal;
   }): Promise<void> {
     if (!isNormalEnd(input.outcome)) return;
-    const { sessions, runs, items, model, logger } = this.deps;
+    const { sessions, runs, items, agents, models, logger } = this.deps;
     const session = await sessions.get(input.run.sessionId);
     const earlierNormalEnd = await runs.hasOtherNormalEnd(
       session.id,
@@ -88,6 +96,15 @@ export class NameSession {
       input.run.id,
     );
     if (source === undefined) return;
+    // The title is made by the model of the agent, which the conversation was
+    // already sent to. An agent that is gone has no model to send it to.
+    let model: ModelClient;
+    try {
+      model = models.forAgent(await agents.agent(session.agentId));
+    } catch (error) {
+      if (error instanceof AgentNotFound) return;
+      throw error;
+    }
 
     const modelInput: ModelInput = {
       system: TITLE_SYSTEM_PROMPT,

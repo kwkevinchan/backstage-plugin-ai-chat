@@ -17,7 +17,11 @@
 export interface Config {
   /** Configuration of the unofficial AI chat plugin. */
   aiChat?: {
-    /** The language model: any server with an OpenAI-compatible Chat Completions API. */
+    /**
+     * The language model: any server with an OpenAI-compatible Chat
+     * Completions API. It is the model `default`, which an agent uses when it
+     * names no `model`.
+     */
     llm: {
       /**
        * Base URL of the API, without the trailing `/chat/completions`, for
@@ -41,6 +45,47 @@ export interface Config {
        * Defaults to false: the chat then takes no image.
        */
       images?: boolean;
+      /**
+       * Whether the model may ask for more than one tool in one answer. When
+       * true, each request with tools has `parallel_tool_calls: true`. The
+       * read-only calls of one answer run at the same time either way.
+       * Defaults to false: the request does not have the field.
+       */
+      parallelToolCalls?: boolean;
+      /**
+       * Most calls of this model per minute, counted over all backends that
+       * share the database: every step, summary and title. A call over the
+       * limit waits for the next minute. Set it at or below the rate limit of
+       * the model server or gateway. No limit when not set.
+       */
+      requestsPerMinute?: number;
+    };
+    /**
+     * More models, by id, that agents can name with `model`. Each one has the
+     * fields of `llm`. The id `default` is `llm` and cannot be used here; a
+     * module that adds a model client with one of these ids stops the
+     * backend.
+     */
+    models?: {
+      [modelId: string]: {
+        /** Base URL of the API, without the trailing `/chat/completions`. */
+        baseUrl: string;
+        /**
+         * Sent as `Authorization: Bearer <apiKey>`.
+         * @visibility secret
+         */
+        apiKey?: string;
+        /** Model name sent with each request. */
+        model: string;
+        /** Seconds to wait for one answer. Defaults to 120. */
+        timeoutSeconds?: number;
+        /** Whether the model reads images. Defaults to false. */
+        images?: boolean;
+        /** As `llm.parallelToolCalls`. Defaults to false. */
+        parallelToolCalls?: boolean;
+        /** As `llm.requestsPerMinute`. No limit when not set. */
+        requestsPerMinute?: number;
+      };
     };
     /**
      * Most model calls in one run. A run is one message of the user and the
@@ -52,6 +97,31 @@ export interface Config {
      * of the user, with the approvals that follow it. Defaults to 30.
      */
     maxToolCallsPerRun?: number;
+    /**
+     * Most tool calls the model may request in one answer. The calls beyond it
+     * are refused and still count toward `maxToolCallsPerRun`. Defaults to 8.
+     */
+    maxToolCallsPerStep?: number;
+    /**
+     * Read-only tool calls of one answer that run at the same time. A call
+     * that is not read-only always runs alone. Defaults to 4.
+     */
+    readConcurrency?: number;
+    /**
+     * Seconds one tool call may take. A call that takes longer gets a timeout
+     * result, and the model gets it in the next step; the run goes on. The
+     * action may still be running then: the later read-only calls do not wait
+     * for it, and the later calls of that answer that are not read-only do
+     * not run. The run still ends at `runTimeoutSeconds`, also while a call
+     * runs. At most 600. Defaults to 60.
+     */
+    toolTimeoutSeconds?: number;
+    /**
+     * Runs that one user may have going on at the same time, over all
+     * sessions and backends, counting runs that wait for an approval. A
+     * message beyond it is refused with 429. Defaults to 3.
+     */
+    runsPerUser?: number;
     /**
      * Seconds a run may work, not counting the time it waits for an approval.
      * The tools run with the token of the user, and a run also stops before
@@ -210,11 +280,11 @@ export interface Config {
      * `skills` chooses which configured and module-registered skills the
      * agent offers through `load_skill` (omitting it offers all registered
      * skills; an empty list offers none). `planning: required` gives the
-     * agent only `update_plan` in the first step of every run. `toolsets`,
-     * `model` and `limits` are recorded. The loop still uses the limits of the
-     * installation and its one model client, and does not filter tools by the
-     * agent's toolsets or call another model client yet. A value that is not
-     * valid stops the backend at startup.
+     * agent only `update_plan` in the first step of every run. `model`
+     * chooses the model of the agent's runs and titles. `toolsets` and
+     * `limits` are recorded. The loop still uses the limits of the
+     * installation, and does not filter tools by the agent's toolsets yet. A
+     * value that is not valid stops the backend at startup.
      *
      * A backend module can register further agents and skills through
      * `@kwkevinchan/backstage-plugin-ai-chat-node`. An id that both this block
@@ -239,7 +309,10 @@ export interface Config {
          * registered skills; set `[]` to disable skills for this agent.
          */
         skills?: string[];
-        /** Id of a model. The client for it is not selected yet. */
+        /**
+         * Id of a model: `default` (`llm`), a key of `models`, or a model
+         * client a module added. Defaults to `default`.
+         */
         model?: string;
         /**
          * `required`: the first step of every run of this agent offers only

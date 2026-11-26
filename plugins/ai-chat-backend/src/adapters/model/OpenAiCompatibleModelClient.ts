@@ -20,6 +20,7 @@ import type {
   ModelClient,
   ModelInput,
   ModelMessage,
+  ModelStreamOptions,
   ToolDescriptor,
 } from '@kwkevinchan/ai-chat-harness';
 import type { JSONSchema7 } from 'json-schema';
@@ -60,23 +61,29 @@ export class OpenAiCompatibleModelClient implements ModelClient {
   readonly capabilities: ModelClient['capabilities'];
 
   /**
-   * @param deps.images - `aiChat.llm.images`: the model reads images. The
-   *   loop never gives an image to a model that does not.
+   * @param deps.images - `images` of the model: it reads images. The loop
+   *   never gives an image to a model that does not.
+   * @param deps.parallelToolCalls - `parallelToolCalls` of the model: the
+   *   requests with tools ask for parallel calls.
    */
   constructor(
     private readonly llm: LlmClient,
     private readonly deps: {
       attachments: AttachmentStore;
       images: boolean;
+      parallelToolCalls?: boolean;
       logger: Logger;
     },
   ) {
-    this.capabilities = { parallelToolCalls: false, images: deps.images };
+    this.capabilities = {
+      parallelToolCalls: deps.parallelToolCalls ?? false,
+      images: deps.images,
+    };
   }
 
   async *stream(
     input: ModelInput,
-    opts: { signal: AbortSignal; sessionId: string },
+    opts: ModelStreamOptions,
   ): AsyncIterable<ModelChunk> {
     const names = toolNames(input);
     const messages = await this.toLlmMessages(input, names, opts.sessionId);
@@ -91,6 +98,7 @@ export class OpenAiCompatibleModelClient implements ModelClient {
       .complete({
         messages,
         tools: input.tools.map(tool => toLlmTool(tool, names)),
+        parallelToolCalls: this.capabilities.parallelToolCalls,
         signal: opts.signal,
         onText: text => {
           pending.push(text);

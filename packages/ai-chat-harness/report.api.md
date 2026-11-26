@@ -13,7 +13,6 @@ export class AdvanceRun {
 // @public
 export type AdvanceRunDeps = {
   items: ItemLog;
-  model: ModelClient;
   tools: ToolGateway;
   run: RunControl;
   clock: Clock;
@@ -24,6 +23,7 @@ export type AdvanceRunDeps = {
 // @public
 export type AdvanceRunRequest = {
   agent: AgentDefinition;
+  model: ModelClient;
   limits: Limits;
   budget: ContextBudget;
   policy: PolicySettings;
@@ -64,6 +64,7 @@ export interface AiChatHarnessExtensionPoint {
   // (undocumented)
   addAgent(agent: AgentDefinition): void;
   addHook<K extends HookName>(name: K, hook: Hooks[K]): void;
+  addModelClient(id: string, client: ModelClient): void;
   // (undocumented)
   addSkill(skill: Skill): void;
 }
@@ -363,6 +364,9 @@ export type Limits = {
   maxSteps: number;
   maxToolCallsPerRun: number;
   runTimeoutSeconds: number;
+  maxToolCallsPerStep: number;
+  readConcurrency: number;
+  toolTimeoutSeconds: number;
 };
 
 // @public
@@ -392,10 +396,7 @@ export interface ModelClient {
   };
   stream(
     input: ModelInput,
-    opts: {
-      signal: AbortSignal;
-      sessionId: string;
-    },
+    opts: ModelStreamOptions,
   ): AsyncIterable<ModelChunk>;
 }
 
@@ -404,6 +405,12 @@ export type ModelImage = {
   attachmentId: string;
   mediaType: string;
   name: string;
+};
+
+// @public
+export type ModelImageData = {
+  mediaType: string;
+  bytes: Uint8Array;
 };
 
 // @public (undocumented)
@@ -437,6 +444,13 @@ export type ModelMessage =
       callId: string;
       content: string;
     };
+
+// @public
+export type ModelStreamOptions = {
+  signal: AbortSignal;
+  sessionId: string;
+  readImage?: (image: ModelImage) => Promise<ModelImageData | undefined>;
+};
 
 // @public
 export type ModelToolCall = {

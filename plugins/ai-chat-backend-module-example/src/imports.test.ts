@@ -19,6 +19,7 @@ import { startTestBackend } from '@backstage/backend-test-utils';
 import {
   aiChatHarnessExtensionPoint,
   type AgentDefinition,
+  type ModelClient,
   type Skill,
 } from '@kwkevinchan/backstage-plugin-ai-chat-node';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -76,6 +77,7 @@ describe('the example module', () => {
   it('registers an agent and a skill for example.com', async () => {
     const agents: AgentDefinition[] = [];
     const skills: Skill[] = [];
+    const models = new Map<string, ModelClient>();
     const stub = createBackendPlugin({
       pluginId: 'ai-chat',
       register(env) {
@@ -86,6 +88,9 @@ describe('the example module', () => {
           addHook() {},
           addSkill(skill) {
             skills.push(skill);
+          },
+          addModelClient(id, client) {
+            models.set(id, client);
           },
         });
         // A plugin has to register an init, even when the module does the work.
@@ -107,5 +112,41 @@ describe('the example module', () => {
     expect(
       skills.some(skill => skill.description.includes('example.com')),
     ).toBe(true);
+
+    // The model client reads the bytes of an image with `readImage`.
+    const echo = models.get('example-echo')!;
+    const chunks: unknown[] = [];
+    for await (const chunk of echo.stream(
+      {
+        system: 'system',
+        tools: [],
+        messages: [
+          {
+            role: 'user',
+            content: 'hello',
+            images: [
+              { attachmentId: 'a1', mediaType: 'image/png', name: 'a.png' },
+              { attachmentId: 'gone', mediaType: 'image/png', name: 'b.png' },
+            ],
+          },
+        ],
+      },
+      {
+        signal: new AbortController().signal,
+        sessionId: 's1',
+        readImage: async image =>
+          image.attachmentId === 'a1'
+            ? { mediaType: 'image/png', bytes: new Uint8Array(3) }
+            : undefined,
+      },
+    )) {
+      chunks.push(chunk);
+    }
+    expect(chunks).toEqual([
+      {
+        type: 'text',
+        text: 'You wrote: hello\nImage 1: 3 bytes\nImage 2: not available',
+      },
+    ]);
   });
 });

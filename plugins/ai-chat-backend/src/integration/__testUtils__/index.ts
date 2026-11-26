@@ -52,7 +52,7 @@ import {
 } from '../../application';
 import type { AuditEvent, AuditLog, Notifier } from '../../application/ports';
 import { DEFAULT_IMAGE_LIMITS, type Principal, type Run } from '../../domain';
-import { createHost } from '../../host';
+import { createHost, type HostPorts } from '../../host';
 import { createMigratedDb } from '../../__testUtils__';
 
 // A host on a real database: sessions, runs and items in SQLite (PostgreSQL in
@@ -202,6 +202,8 @@ export async function createWorld(
     insertMaxPerRun?: number;
     agents?: JsonObject;
     policy?: JsonObject;
+    /** `aiChat.runsPerUser`; 3 by default. */
+    runsPerUser?: number;
   } = {},
 ) {
   const knex = await createMigratedDb();
@@ -222,6 +224,7 @@ export async function createWorld(
   const audit = new RecordingAuditLog();
   const queue = new KnexQueuedMessageRepository(knex, clock, ids, {
     leaseSeconds: options.leaseSeconds,
+    runsPerUser: options.runsPerUser,
   });
   const catalog = new ConfigAgentCatalog(
     mockServices.rootConfig({
@@ -239,6 +242,9 @@ export async function createWorld(
     maxSteps: 10,
     maxToolCallsPerRun: 30,
     runTimeoutSeconds: 300,
+    maxToolCallsPerStep: 8,
+    readConcurrency: 4,
+    toolTimeoutSeconds: 60,
     ...options.limits,
   };
 
@@ -248,6 +254,9 @@ export async function createWorld(
     extra: {
       items?: (inner: ItemLog) => ItemLog;
       model?: ModelClient;
+      /** The clients of the models besides `default`. */
+      models?: ReadonlyMap<string, ModelClient>;
+      rateLimits?: HostPorts['rateLimits'];
       notifier?: Notifier;
       extensions?: Extensions;
       heartbeatMs?: number;
@@ -267,6 +276,7 @@ export async function createWorld(
     const modelForHost = withTitleAnswers(model);
     const runs = new KnexRunRepository(knex, clock, ids, {
       leaseSeconds: options.leaseSeconds,
+      runsPerUser: options.runsPerUser,
     });
     const logger = mockServices.logger.mock();
     const hooked = extra.aroundTransition
@@ -303,6 +313,8 @@ export async function createWorld(
         maxOutputChars: 20000,
       }),
       model: extra.model ?? modelForHost,
+      ...(extra.models && { models: extra.models }),
+      ...(extra.rateLimits && { rateLimits: extra.rateLimits }),
       audit,
       clock,
       ids,

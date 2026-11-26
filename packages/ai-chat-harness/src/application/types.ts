@@ -32,7 +32,6 @@ import type { CallContext, ToolGateway } from './ports/ToolGateway';
 /** What `AdvanceRun` needs from outside. @public */
 export type AdvanceRunDeps = {
   items: ItemLog;
-  model: ModelClient;
   tools: ToolGateway;
   run: RunControl;
   clock: Clock;
@@ -47,6 +46,8 @@ export type AdvanceRunDeps = {
  */
 export type AdvanceRunRequest = {
   agent: AgentDefinition;
+  /** The client of the model of the agent (X-09). */
+  model: ModelClient;
   limits: Limits;
   budget: ContextBudget;
   /** The policy of the administrator; the loop decides every call with it. */

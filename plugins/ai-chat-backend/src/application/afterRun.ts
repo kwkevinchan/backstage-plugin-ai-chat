@@ -15,7 +15,13 @@
  */
 
 import type { RunOutcome } from '@kwkevinchan/ai-chat-harness';
-import { canAutoStart, isNormalEnd, type Principal, type Run } from '../domain';
+import {
+  canAutoStart,
+  isNormalEnd,
+  TooManyActiveRuns,
+  type Principal,
+  type Run,
+} from '../domain';
 import type { Clock } from '@kwkevinchan/ai-chat-harness';
 import type { AfterRun, QueueState } from './hostEvents';
 import type { Logger, QueuedMessageRepository } from './ports';
@@ -36,7 +42,9 @@ import type { StartNextQueued } from './usecases/StartNextQueued';
  * 6. The first message starts a run with the credentials of the run that
  *    ended. When the queue was emptied or the user started a run first,
  *    nothing starts.
- * 7. An error is logged and counts as a pause. The run that ended is not
+ * 7. The user has as many runs going on as `runsPerUser` allows: paused,
+ *    with no reason and nothing logged.
+ * 8. An error is logged and counts as a pause. The run that ended is not
  *    affected.
  */
 export function createAfterRun(deps: {
@@ -66,10 +74,18 @@ export function createAfterRun(deps: {
     if (!supervisor.accepting) {
       return { items, paused: true, pausedReason: 'shutting_down' };
     }
-    const started = await startNext.execute({
-      principal,
-      sessionId: run.sessionId,
-    });
+    let started: Awaited<ReturnType<typeof startNext.execute>>;
+    try {
+      started = await startNext.execute({
+        principal,
+        sessionId: run.sessionId,
+      });
+    } catch (error) {
+      // The user has as many runs as allowed in other sessions (P-05): the
+      // queue waits, and the user can continue it later.
+      if (error instanceof TooManyActiveRuns) return { items, paused: true };
+      throw error;
+    }
     if (!started)
       return { items: await queue.list(run.sessionId), paused: false };
     // Nobody reads the events of the new run here: the screen joins it with

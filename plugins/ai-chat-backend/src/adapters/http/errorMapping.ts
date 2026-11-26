@@ -46,6 +46,7 @@ import {
   TooManyPendingAttachments,
   ToolCallNotFound,
   ToolCallNotWaiting,
+  TooManyActiveRuns,
   UnknownAttachment,
   UnknownToolset,
   UnsupportedAttachmentType,
@@ -84,6 +85,8 @@ class NamedHttpError extends CustomErrorBase {
  *   by its id, is 404. A message with too many images, with images for a model
  *   that cannot read them, or with more image bytes than the run may have: 400.
  * - A toolset or an agent that the request names and does not exist: 400.
+ * - The user has as many runs going on as `aiChat.runsPerUser` allows: 429,
+ *   with `TooManyActiveRuns` in `error.name`.
  * - The backend is shutting down: 503.
  * - The run was taken over or ended by someone else in the meantime
  *   (`LeaseLost`, `InvalidRunTransition`): 409.
@@ -123,6 +126,9 @@ export function toHttpError(
     error instanceof QueueChanged
   ) {
     return new NamedHttpError(error.name, 409, error.message);
+  }
+  if (error instanceof TooManyActiveRuns) {
+    return new NamedHttpError(error.name, 429, error.message);
   }
   if (error instanceof QueuedMessageNotFound) {
     return new NamedHttpError(error.name, 404, error.message);

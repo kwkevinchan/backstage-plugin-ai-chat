@@ -21,6 +21,7 @@ export type { ImageSettings } from './attachments';
 export { createAfterRun } from './afterRun';
 export { buildRunRequest } from './buildRunRequest';
 export type { RunSettings } from './buildRunRequest';
+export { DEFAULT_MODEL_ID, HostModelClient, ModelCatalog } from './models';
 export type { AfterRun, HostEvent, QueueState } from './hostEvents';
 export { createRunEnded, RUN_END_HOOK_TIMEOUT_MS } from './runEnded';
 export type { RunEnded } from './runEnded';

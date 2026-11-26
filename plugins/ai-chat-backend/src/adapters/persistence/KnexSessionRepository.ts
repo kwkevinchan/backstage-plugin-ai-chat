@@ -16,6 +16,7 @@
 
 import type { Clock, IdGenerator } from '@kwkevinchan/ai-chat-harness';
 import type { Knex } from 'knex';
+import { isPostgres } from './postgres';
 import type { SessionRepository } from '../../application/ports';
 import {
   RunAlreadyActive,
@@ -318,11 +319,6 @@ async function lockRunsSkipLocked(
     held.push(row.id);
   }
   return held;
-}
-
-function isPostgres(knex: Knex | Knex.Transaction): boolean {
-  const client = String(knex.client.config.client);
-  return client === 'pg' || client === 'postgres' || client === 'postgresql';
 }
 
 function toSession(row: SessionRow): Session {

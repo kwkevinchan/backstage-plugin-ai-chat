@@ -194,6 +194,13 @@ aiChat:
     model: gpt-4o-mini
     timeoutSeconds: 120 # per model answer; default 120
     images: false # the model reads images; default false. See "Images"
+    parallelToolCalls: false # ask the server for parallel tool calls; default false
+    requestsPerMinute: 60 # optional; calls per minute over all backends
+  models: # optional; more models that an agent names with `model`
+    small:
+      baseUrl: https://llm.example.com/v1
+      apiKey: ${AI_CHAT_SMALL_API_KEY}
+      model: some-small-model
   systemPrompt: | # optional, added to the built-in rules
     You help the platform team of example.com.
   toolsets: # groups of actions; see "Toolsets and policy"
@@ -230,6 +237,10 @@ aiChat:
   maxTurns: 10 # model calls; default 10
   maxToolCallsPerRun: 30 # tool calls the model may ask for; default 30
   runTimeoutSeconds: 300 # work time without the wait for approvals; default 300, at most 600
+  maxToolCallsPerStep: 8 # tool calls in one answer of the model; default 8
+  readConcurrency: 4 # read-only calls that run at the same time; default 4
+  toolTimeoutSeconds: 60 # one tool call; default 60, at most 600
+  runsPerUser: 3 # runs one user may have going on; default 3
   # How much of a long session the model gets
   context:
     tokenBudget: 100000 # estimated tokens of the model input; default 100000
@@ -302,27 +313,33 @@ pin, an archive or a change of toolsets does count as a change, and so does a
 new message. Set `days` to `0` to keep every session. A session changed
 exactly `days` ago is kept.
 
-| Setting                             | Meaning                                                                                                                                                                                                                                                                                                                     |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `llm.images`                        | Whether the model reads images (`false` by default). When `true`, attached images are sent to the model server as part of the message and leave your organization when that server is outside it.                                                                                                                           |
-| `maxTurns`                          | Most model calls in one run.                                                                                                                                                                                                                                                                                                |
-| `maxToolCallsPerRun`                | Most tool calls the model may ask for in one run. A call beyond the limit is answered with "tool call limit" and does not run.                                                                                                                                                                                              |
-| `runTimeoutSeconds`                 | Most seconds of work in one run, at most 600. The tools run with the token of the user, so a run also ends before that token expires (the shortest life that Backstage allows is 10 minutes).                                                                                                                               |
-| `context.tokenBudget`               | Size of the model input in estimated tokens (one token is a quarter of an ASCII character or one other character). Set it well below the context window of the model.                                                                                                                                                       |
-| `context.keepRecentSteps`           | The newest steps that are never shortened or left out.                                                                                                                                                                                                                                                                      |
-| `input.insert.maxPerRun`            | Most messages the user may insert into one run that is going on (at most 20). The model reads an inserted message in its next call, and a run that is about to end reads it first. A run that stops without reading it (a limit, an error, Stop) leaves it marked as not read.                                              |
-| `input.queue.maxMessages`           | Most messages in the queue of one session. A queued message waits for the run to end; when the run ends the normal way (the model answered, no limit stopped it) and the credentials of the user last for another run, the first message starts a new run. After any other end the queue waits until the user continues it. |
-| `input.images.maxPerMessage`        | Most images in one message (`4` by default). Needs `llm.images: true`.                                                                                                                                                                                                                                                      |
-| `input.images.maxBytes`             | Largest image in bytes (`5242880` / 5 MB by default).                                                                                                                                                                                                                                                                       |
-| `input.images.maxBytesPerInput`     | Most image bytes sent to the model in one call and across one run (`20971520` / 20 MB by default). Must be at least `maxPerMessage * maxBytes`.                                                                                                                                                                             |
-| `input.images.maxPendingPerSession` | Most uploaded images in one session not yet in any message (`12` by default). Unused images are deleted after 24 hours.                                                                                                                                                                                                     |
-| `input.images.tokensPerImage`       | Estimated tokens one image uses in `context.tokenBudget` (`1600` by default). Set it for the model you use.                                                                                                                                                                                                                 |
-| `maxToolOutputChars`                | The output of an action, and the output of `load_skill`, is cut here, and the cut is stated.                                                                                                                                                                                                                                |
-| `sharing.live.enabled`              | Whether a share may keep updating. Default true. Creating or changing a share is not in this version, so this is only checked and kept.                                                                                                                                                                                     |
-| `sharing.live.defaultHours`         | Hours a live share lasts when nobody picks a life. Default 24. A positive integer, at most `maxHours`.                                                                                                                                                                                                                      |
-| `sharing.live.maxHours`             | Longest life of a live share, in hours. Default 72. A positive integer, at least `defaultHours`.                                                                                                                                                                                                                            |
-| `retention.days`                    | Days after the last change of a session before it is deleted, with its runs, messages, queued messages and images. Default 90. `0` keeps every session. A session with a run that has not ended is kept until the run ends. The audit log is kept.                                                                          |
-| `skills.directories`                | Directories read at startup; each subdirectory with a `SKILL.md` is a skill whose body `load_skill` reads when called. A relative path starts at the working directory. A missing directory, bad frontmatter, a link out of the directory, or a duplicate id stops the backend.                                             |
+| Setting                                                  | Meaning                                                                                                                                                                                                                                                                                                                                              |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `llm.images`                                             | Whether the model reads images (`false` by default). When `true`, attached images are sent to the model server as part of the message and leave your organization when that server is outside it.                                                                                                                                                    |
+| `maxTurns`                                               | Most model calls in one run.                                                                                                                                                                                                                                                                                                                         |
+| `maxToolCallsPerRun`                                     | Most tool calls the model may ask for in one run. A call beyond the limit is answered with "tool call limit" and does not run.                                                                                                                                                                                                                       |
+| `maxToolCallsPerStep`                                    | Most tool calls in one answer of the model. A call beyond it is answered with "tool call limit per step", does not run, and counts toward `maxToolCallsPerRun`.                                                                                                                                                                                      |
+| `readConcurrency`                                        | Read-only calls of one answer that run at the same time. A call that is not read-only runs alone, after the calls before it, and still needs an approval. The results reach the model in the order it asked for them. A read-only call does not wait for an earlier call that went over `toolTimeoutSeconds`.                                        |
+| `toolTimeoutSeconds`                                     | Most seconds of one tool call, at most 600. A call that takes longer gets a timeout result and the run goes on, but the action may still be running. After an action that is not read-only went over its time, the later actions of that answer that are not read-only do not run. `runTimeoutSeconds` still ends the whole run, also during a call. |
+| `runsPerUser`                                            | Runs one user may have going on at the same time (running or waiting for an approval), over all sessions and backends. A message beyond it is refused with 429, and a queue waits.                                                                                                                                                                   |
+| `llm.requestsPerMinute`, `models.<id>.requestsPerMinute` | Most calls of the model per minute, over all backends that share the database (steps, summaries and titles). A call over the limit waits for the next minute.                                                                                                                                                                                        |
+| `models`                                                 | More models by id, with the fields of `llm`. `llm` is the model `default`. An agent names one with `model`; a backend module can add a model with `addModelClient`.                                                                                                                                                                                  |
+| `runTimeoutSeconds`                                      | Most seconds of work in one run, at most 600. The tools run with the token of the user, so a run also ends before that token expires (the shortest life that Backstage allows is 10 minutes).                                                                                                                                                        |
+| `context.tokenBudget`                                    | Size of the model input in estimated tokens (one token is a quarter of an ASCII character or one other character). Set it well below the context window of the model.                                                                                                                                                                                |
+| `context.keepRecentSteps`                                | The newest steps that are never shortened or left out.                                                                                                                                                                                                                                                                                               |
+| `input.insert.maxPerRun`                                 | Most messages the user may insert into one run that is going on (at most 20). The model reads an inserted message in its next call, and a run that is about to end reads it first. A run that stops without reading it (a limit, an error, Stop) leaves it marked as not read.                                                                       |
+| `input.queue.maxMessages`                                | Most messages in the queue of one session. A queued message waits for the run to end; when the run ends the normal way (the model answered, no limit stopped it) and the credentials of the user last for another run, the first message starts a new run. After any other end the queue waits until the user continues it.                          |
+| `input.images.maxPerMessage`                             | Most images in one message (`4` by default). Needs `llm.images: true`.                                                                                                                                                                                                                                                                               |
+| `input.images.maxBytes`                                  | Largest image in bytes (`5242880` / 5 MB by default).                                                                                                                                                                                                                                                                                                |
+| `input.images.maxBytesPerInput`                          | Most image bytes sent to the model in one call and across one run (`20971520` / 20 MB by default). Must be at least `maxPerMessage * maxBytes`.                                                                                                                                                                                                      |
+| `input.images.maxPendingPerSession`                      | Most uploaded images in one session not yet in any message (`12` by default). Unused images are deleted after 24 hours.                                                                                                                                                                                                                              |
+| `input.images.tokensPerImage`                            | Estimated tokens one image uses in `context.tokenBudget` (`1600` by default). Set it for the model you use.                                                                                                                                                                                                                                          |
+| `maxToolOutputChars`                                     | The output of an action, and the output of `load_skill`, is cut here, and the cut is stated.                                                                                                                                                                                                                                                         |
+| `sharing.live.enabled`                                   | Whether a share may keep updating. Default true. Creating or changing a share is not in this version, so this is only checked and kept.                                                                                                                                                                                                              |
+| `sharing.live.defaultHours`                              | Hours a live share lasts when nobody picks a life. Default 24. A positive integer, at most `maxHours`.                                                                                                                                                                                                                                               |
+| `sharing.live.maxHours`                                  | Longest life of a live share, in hours. Default 72. A positive integer, at least `defaultHours`.                                                                                                                                                                                                                                                     |
+| `retention.days`                                         | Days after the last change of a session before it is deleted, with its runs, messages, queued messages and images. Default 90. `0` keeps every session. A session with a run that has not ended is kept until the run ends. The audit log is kept.                                                                                                   |
+| `skills.directories`                                     | Directories read at startup; each subdirectory with a `SKILL.md` is a skill whose body `load_skill` reads when called. A relative path starts at the working directory. A missing directory, bad frontmatter, a link out of the directory, or a duplicate id stops the backend.                                                                      |
 
 When the input is over `tokenBudget`, the old outputs of tools are shortened
 to one line first. If that is not enough, the old steps are replaced by a
@@ -366,8 +383,10 @@ agent's `systemPrompt`. When the agent omits `systemPrompt`, the installation
 toolsets are configured). `skills` chooses the skills the agent offers (see
 below); an id that no skill has stops the backend. `planning: required`
 gives the agent only the `update_plan` tool in the first step of every run, so
-it writes a plan before it does anything else. `model` and `limits` are
-recorded on the agent. A wrong value stops the backend at startup.
+it writes a plan before it does anything else. `model` chooses the model of the
+agent's runs and titles: `default` (`aiChat.llm`), a key of `aiChat.models`,
+or a model client a module added; an unknown id stops the backend. `limits`
+are recorded on the agent. A wrong value stops the backend at startup.
 
 Every agent has the read-only built-in `update_plan` tool (`allow` by default;
 `policy: { update_plan: deny }` turns it off). Each call replaces the whole plan
@@ -375,16 +394,16 @@ Every agent has the read-only built-in `update_plan` tool (`allow` by default;
 plan is in the context of every step, and the chat shows each update as a
 checklist.
 
-The loop still uses the limits of the installation and its one model client.
-It does not filter tools by the agent's toolsets, or call a model client other
-than that one. When skills
+The loop still uses the limits of the installation. It does not filter tools
+by the agent's toolsets. When skills
 are registered through `aiChat.skills.directories` (`SKILL.md`) or `addSkill`,
 the prompt lists only each allowed skill's `id` and short `description`; the
 full instructions are loaded on demand by the read-only built-in `load_skill`
 tool (`allow` by default; `agent.skills` restricts which skills that agent sees,
 and omitted means all registered skills).
 
-A backend module can register agents, lifecycle hooks and skills through
+A backend module can register agents, lifecycle hooks, skills and model
+clients (`addModelClient`) through
 `@kwkevinchan/backstage-plugin-ai-chat-node`. It depends only on that package.
 An agent a module registers receives the same built-in prompt rules as a
 configured agent. An id that both the configuration and a module define stops
@@ -394,11 +413,15 @@ policy to `ask` or `deny` and never relaxes `ask` to `continue`. A hook that
 throws fails closed: `beforeModelCall` fails the run, `beforeToolCall` denies
 the call, `afterToolCall` turns the result into an error without the output,
 and `onRunEnd` is only logged. `onRunEnd` runs once after the run ended,
-with the stored status, and the run does not wait for it.
+with the stored status, and the run does not wait for it. `addModelClient`
+adds a model only; an id of the configuration stops the backend. The client
+reads the bytes of an image with `opts.readImage`, and the rate limit of
+`requestsPerMinute` applies only to the models of the configuration.
 
 `plugins/ai-chat-backend-module-example` in this repository is a private
-example of such a module, to copy from. It registers the agent `guide` and the
-skill `getting-started`. It is
+example of such a module, to copy from. It registers the agent `guide`, the
+skill `getting-started` and the model client `example-echo`, which calls no
+server and which no agent uses. It is
 not a package to install. The example uses `guide`, so `aiChat.agents.guide`
 would also stop the backend.
 
@@ -464,8 +487,9 @@ aiChat:
   request.
 - An error of the search comes back to the model as
   `Request failed with <status> <text>`, without the error of the search
-  engine. A search that does not answer holds the run until
-  `runTimeoutSeconds`.
+  engine. A search that does not answer gets a timeout result after
+  `toolTimeoutSeconds`, or ends the run at `runTimeoutSeconds` if that comes
+  first.
 - The output counts against `maxToolOutputChars`. The action returns 10
   results by default (`pageLimit`); when the output is cut, the last results
   and their links are lost, so ask for fewer results, as above.

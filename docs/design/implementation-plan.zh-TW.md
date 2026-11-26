@@ -711,7 +711,7 @@ flowchart LR
 | P3-04 | Skills：讀 `SKILL.md`、`load_skill`                     | M    | X-04、D-22                         | #53 | 完成 |
 | P3-05 | Hooks                                                   | M    | X-05                               | #52 | 完成 |
 | P3-06 | TechDocs 搜尋的 action                                  | M    | X-08                               | #54 | 完成 |
-| P3-07 | 平行唯讀呼叫、每步上限、模型能力、限流                  | M    | P-01、P-02、P-03、P-05、P-06、X-09 |
+| P3-07 | 平行唯讀呼叫、每步上限、模型能力、限流                  | M    | P-01、P-02、P-03、P-05、P-06、X-09 | #57 | 完成 |
 | P3-08 | Toolset 的權限、輸出上限和遮蔽、寫入配額                | M    | T-08、T-09、T-10                   |
 | P3-09 | 觀測                                                    | S    | O-01                               |
 | P3-10 | 結果顯示元件                                            | M    | B-03                               |
@@ -726,12 +726,12 @@ flowchart LR
 - **P3-04**：在擴充點加上 `addSkill`。上下文裡只有 Skill 的名稱和說明。載入全文之後才出現內容。
 - **P3-05**：在擴充點加上 `addHook`。Hook 回傳 `continue` 時，`ask` 的工具仍然要核准。Hook 丟例外時，這個工具呼叫被拒絕，Run 繼續。
 - **P3-06**：搜尋結果只有使用者有權限看的文件。先確認 Backstage 有沒有官方的 search action，有就直接用。
-- **P3-07**：在擴充點加上 `setModelClient`。四個唯讀工具同時執行，其中一個逾時，其他三個的結果照原本順序交回。
+- **P3-07**：在擴充點加上 `addModelClient`。逐項驗收見下方 P3-07。四個唯讀工具同時執行，其中一個逾時，其他三個的結果照原本順序交回。
 
 ### P3-01 `ai-chat-node`、擴充點、設定檔裡的 Agent
 
 - **範圍**：
-  - 核心：`AgentDefinition` 補上設定檔要記下的欄位（Toolsets、Skills、模型、上限、規劃模式；既有的 `id`、`title`、`systemPrompt` 保留）。`application/ports/extensions.ts` 公開 `AiChatHarnessExtensionPoint` 的 `addAgent`，以及 `AgentDefinition`、`AgentLimits`、`PlanningMode`。`addContextProvider`、`addSkill`、`addHook`、`setModelClient` 和它們的型別在 P3-02、P3-04、P3-05、P3-07 才加，連同迴圈的呼叫和測試一起進來。
+  - 核心：`AgentDefinition` 補上設定檔要記下的欄位（Toolsets、Skills、模型、上限、規劃模式；既有的 `id`、`title`、`systemPrompt` 保留）。`application/ports/extensions.ts` 公開 `AiChatHarnessExtensionPoint` 的 `addAgent`，以及 `AgentDefinition`、`AgentLimits`、`PlanningMode`。`addContextProvider`、`addSkill`、`addHook`、`addModelClient` 和它們的型別在 P3-02、P3-04、P3-05、P3-07 才加，連同迴圈的呼叫和測試一起進來。
   - 新套件 `plugins/ai-chat-node`（`@kwkevinchan/backstage-plugin-ai-chat-node`，`node-library`）：重新匯出 `addAgent` 用到的型別，並定義 `aiChatHarnessExtensionPoint`。它只依賴 harness。不重新匯出迴圈內部的 `Extensions`。
   - 宿主：`ai-chat-backend` 依賴 `ai-chat-node`。`plugin.ts` 註冊擴充點，模組的 init 跑完才建 `ConfigAgentCatalog`。Catalog 讀取並檢查 `aiChat.agents`，並納入擴充點註冊的 Agent。值不對就丟 `InputError`，後端啟動失敗。沒有 `aiChat.agents`、擴充點也沒有註冊 Agent 時，只有內建的 `default`（內建系統提示加 `aiChat.systemPrompt`）。
   - 範例 module：`plugins/ai-chat-backend-module-example`。它是可以照抄的私有範例，不是要發佈的套件。它只示範 `addAgent`，原始碼只 import `ai-chat-node` 和 Backstage 的公開 API。示範 backend（`packages/backend`）掛上它，讓煙霧測試跑得起來。
@@ -798,7 +798,7 @@ flowchart LR
   - `planning: required` 的 Agent 而且 `update_plan` 被 `deny` 時，第一步不提供任何工具。模型硬要呼叫工具時，結果是 `invalid`，訊息是這一步沒有可用的工具。
   - 計畫的長度上限（20 項、每項 300 字元）讓上下文裡的計畫有上限。已經存下的計畫照原樣讀。
   - `update_plan` 的工具輸出是固定的 `Plan updated.`，計畫本身在 `plan_update` 和呼叫的參數裡。
-  - 先寫 `plan_update`，再跑 `afterToolCall`，再寫 `tool_result`。Hook 把結果改成失敗時，計畫仍是已更新：工具已經執行過，跟其他工具一樣。兩筆之間後端停掉時，下一次接手看到沒有結果的唯讀呼叫，會再執行一次，寫入同一份計畫。
+  - 先跑 `afterToolCall`，再把 `plan_update` 和 `tool_result` 在同一次寫入、照呼叫的位置寫進紀錄（P3-07 的平行唯讀呼叫照 `position` 寫入）。Hook 把結果改成失敗時，計畫仍是已更新：工具已經執行過，跟其他工具一樣。兩筆一起寫入，所以不會只有計畫沒有結果。同一步有兩個 `update_plan` 時，位置較後的那份是最後的計畫。`update_plan` 照算進 `maxToolCallsPerStep` 和 `maxToolCallsPerRun`。
   - 上下文裡的計畫寫明是模型自己寫的筆記，不是使用者或管理員的指示：參數可能受工具輸出影響（S-03）。
   - 目前的計畫用 `ItemLog.latestPlanUpdate` 另外讀，不放進摘要，`summary` 的內容不變。規格「計畫不另外存」照舊。
   - 在 P3-02 之前，計畫由迴圈直接放進上下文。P3-02 的內建 Context provider 改用 `readCurrentPlan`。
@@ -919,6 +919,75 @@ flowchart LR
   - 輸出上限照現有的裁切：裁的是整段 JSON，後面幾筆結果的 `location` 可能被裁掉。官方的 `pageLimit` 預設 10；README 的系統提示範例請模型用 `pageLimit` 5。
   - `term` 的長度沒有上限，空字串也可以：這是官方 schema 的規則，ai-chat 不另外限制。
   - 示範 backend（`packages/backend`）不裝 search 和 TechDocs：它沒有 TechDocs 的內容可以搜尋，煙霧測試也不用它。整合測試已經跑真的 search backend。
+
+### P3-07 平行唯讀呼叫、每步上限、模型能力、限流
+
+- **範圍**：
+  - 核心（`packages/ai-chat-harness`）：
+    - `Limits` 加三個欄位：`maxToolCallsPerStep`（一步最多幾個工具呼叫）、`readConcurrency`（同時執行的唯讀呼叫數）、`toolTimeoutSeconds`（每個工具呼叫的逾時）。
+    - `callModel`：一步裡超過 `maxToolCallsPerStep` 的呼叫，和超過 Run 剩餘額度的呼叫一樣，寫成 `denied`，訊息 `tool call limit per step`，不執行。兩個上限都超過時用 Run 的訊息 `tool call limit`。
+    - `executeTools`：一段連續的唯讀呼叫同時執行，最多 `readConcurrency` 個；不是唯讀的呼叫自己一批，前面的批次全部結束才開始（D-09）。結果照 `position` 寫入：一個呼叫和它前面的呼叫都有結果了，就寫入它（P-03）。
+    - 每個工具呼叫有自己的 `signal`：Run 的 `signal` 中止或 `toolTimeoutSeconds` 到了就中止。逾時的呼叫寫成 `timeout`，Run 繼續（P-02）。迴圈不等不理 `signal` 的工具。
+    - `ModelClient.stream` 的 `opts` 加 `readImage`：宿主給的函式，用 `ModelImage` 讀出圖片的型別和位元組（X-09）。核心不呼叫它，只把它交給模型轉接。
+    - `AdvanceRunRequest` 加 `model`：這個 Run 的 Agent 用的 `ModelClient`。`AdvanceRunDeps` 拿掉 `model`。
+    - `AiChatHarnessExtensionPoint` 加 `addModelClient(id, client)`。
+  - 擴充點（`plugins/ai-chat-node`）：重新匯出 `ModelClient`、`ModelChunk`、`ModelInput`、`ModelMessage`、`ModelImage`、`ModelImageData`、`ModelStreamOptions`、`ModelToolCall`、`ToolDescriptor`。
+  - 宿主（`plugins/ai-chat-backend`）：
+    - 設定：`aiChat.models.<id>` 和 `aiChat.llm` 同樣的欄位，加上 `parallelToolCalls`、`requestsPerMinute`。`aiChat.llm` 就是 id `default` 的模型，也可以寫這兩個欄位。新的上限：`aiChat.maxToolCallsPerStep`（預設 8）、`aiChat.readConcurrency`（預設 4）、`aiChat.toolTimeoutSeconds`（預設 60）、`aiChat.runsPerUser`（預設 3）。
+    - `AiChatHarnessRegistry.addModelClient`：檢查 id 的寫法和 client 的形狀。`ModelCatalog` 合併設定檔的模型和模組註冊的 client。
+    - `ConfigAgentCatalog`：Agent 的 `model` 要是已知的模型 id。
+    - `buildRunRequest` 依 Session 的 Agent 選 `ModelClient`；沒寫 `model` 的 Agent 用 `default`。自動標題（`NameSession`）用同一個 Agent 的模型。
+    - 每個 `ModelClient` 外面包一層 `HostModelClient`：給 `readImage`（讀這段 Session 的 `AttachmentStore`），有 `requestsPerMinute` 時先向限流器拿額度。
+    - 限流器：新表 `model_call_windows`（migration），`KnexModelCallLimiter` 每分鐘一格計數，所有後端共用（P-06）。
+    - 每人同時的 Run 數（P-05）：`KnexRunRepository.start` 和 `KnexQueuedMessageRepository.startNext` 在建立 Run 的 transaction 裡數這個使用者進行中的 Run。到上限丟 `TooManyActiveRuns`，HTTP 429。
+    - `OpenAiCompatibleModelClient`：`capabilities.parallelToolCalls` 來自設定。是 `true` 而且有提供工具時，請求帶 `parallel_tool_calls: true`。
+  - 範例 module：註冊一個 model client，示範 `addModelClient` 和 `readImage`。示範 backend 不讓任何 Agent 用它。
+  - 不做：畫面；Agent 的 `limits` 取代全站上限；依 Agent 的模型決定能不能附加圖片（見下）；模型伺服器回 429 時自動重試；模組 client 的限流。
+- **依賴**：P3-01（Agent 的 `model`、擴充點）。
+- **驗收**：
+  - 擴充點與模型：
+    - `addModelClient` 和 `ModelClient` 等型別由核心定義，`ai-chat-node` 重新匯出。範例 module 只 import `ai-chat-node`。
+    - 模組註冊的 id 和設定檔的模型（`default` 或 `aiChat.models` 的 id）相同、同一個 id 註冊兩次、id 寫法不對、client 沒有 `stream` 或 `capabilities`：丟 `InputError`，後端啟動失敗。
+    - `aiChat.models.default`、模型 id 寫法不對或超過 64 字元、`baseUrl` 不是 `http(s)://`、`requestsPerMinute` 不是正整數：丟 `InputError`。
+    - Agent 的 `model` 不是已知的模型 id：丟 `InputError`。
+    - Agent 指定 `model` 時，這個 Agent 的 Run 呼叫那個 client，其他 Agent 呼叫 `default`。自動標題也用 Agent 的模型。
+    - 迴圈照 Run 的 client 的 `capabilities.images` 決定給不給圖片：`images: false` 的模型拿到的是一行說明，不是圖片（IN-05）。
+    - 模組的 client 收到 `readImage`。用 `ModelImage` 呼叫它，得到上傳的位元組和型別。圖片已刪除時得到 `undefined`。
+    - `parallelToolCalls: true` 的模型，請求帶 `parallel_tool_calls: true`；`false` 或沒寫時不帶這個欄位。
+  - 平行和順序：
+    - 四個唯讀工具同時執行，其中一個逾時：四個工具在任何一個結束前都已開始；逾時的那個寫成 `timeout`；其他三個的結果和逾時的結果照模型原本的順序寫入紀錄，`item.completed` 的順序也一樣。模型下一步收到四個結果。
+    - 同時執行的數量不超過 `readConcurrency`：六個唯讀呼叫、`readConcurrency` 是 2 時，同時最多兩個。
+    - 後面的呼叫先結束時，它的結果等前面的寫入後才寫入。
+    - 唯讀、寫入、唯讀的一步：寫入的呼叫照舊要核准；它在前面的唯讀呼叫結束後才開始，在後面的唯讀呼叫開始前結束；寫入前仍有 `heartbeat` 和 `tool_started`。
+    - 要核准的唯讀呼叫（`ask` 或 `egress`）和其他唯讀呼叫在同一批：決定 `allow` 的照常同時執行，`deny` 的寫入 `denied`。
+    - `afterToolCall` 對同時執行的每個呼叫各執行一次，改過的結果照順序寫入。`beforeToolCall` 照舊在分類時依序執行。
+    - 輸出超過 `maxToolOutputChars` 時，同時執行的每個結果照舊被裁切（宿主的整合測試）。
+  - 停止和逾時：
+    - 使用者停止時：已結束的呼叫結果照順序寫入（H-06），還沒結束的不寫，不再開始新的呼叫，Run 是 `cancelled`。
+    - Run 的 `runTimeoutSeconds` 先到：一樣只寫已結束的結果，Run 是 `completed`、`endReason` 是 `timeout`。
+    - 一批結束時（包含因為例外離開），還在跑的呼叫的 `signal` 都會中止。
+    - 不是唯讀的工具逾時：寫成 `timeout`，訊息說它可能已經做了變更；不重新執行。這一步後面的寫入呼叫不開始，寫成 `denied`，訊息說前一個改動逾時、可能還在執行；後面的唯讀呼叫照常執行。
+  - 上限：
+    - 一步有十個呼叫、`maxToolCallsPerStep` 是 8：前八個照常處理，後兩個 `denied`（`tool call limit per step`），十個都算進 `toolCallsUsed`。
+    - 每人同時的 Run：同一個使用者已有 `runsPerUser` 個進行中（`running` 或 `waiting_approval`）的 Run 時，送出訊息回 429（`TooManyActiveRuns`），不寫訊息、不建立 Run；別的使用者不受影響；一個 Run 結束後又可以送出。
+    - 排隊的訊息遇到上限時不送出，佇列暫停，不記錯誤；使用者按「繼續」回 429。佇列是空的時候按「繼續」照舊回 204，不檢查上限。
+    - 兩台後端共用上限：兩台各自送出，合計不超過 `runsPerUser`。PostgreSQL 上兩條連線同時建立 Run，成功的數量剛好是上限。
+  - 限流：
+    - `requestsPerMinute` 是 1 的模型：同一分鐘的第二次呼叫（不論來自哪一台後端）等到下一分鐘才送出；等的時候 Run 被停止，就不送出，Run 是 `cancelled`。
+    - PostgreSQL 上兩條連線同時要額度，拿到的數量剛好是上限。
+    - 沒有 `requestsPerMinute` 的模型不經過限流器。
+- **實作選定的地方**（規格第 6、7 節與 P-04、X-09 已同步）：
+  - 擴充點的方法叫 `addModelClient`（`add`，不是 `set`）：它和 `addAgent`、`addSkill` 一樣只新增，不覆蓋。設定檔的模型帶著管理員寫的金鑰和 `images`（資料會不會送出組織），模組不能換掉它；同一個 id 重複就啟動失敗。
+  - `aiChat.llm` 就是 id `default` 的模型。`aiChat.models` 只放其他模型，寫 `default` 算重複。模型 id 最多 64 字元，和 `model_call_windows.model_id` 的欄寬一樣。
+  - 模組怎麼拿到圖片的位元組：`ModelClient.stream` 的 `opts.readImage(image)`，回傳 `{ mediaType, bytes }`，圖片不在了回傳 `undefined`。宿主給每個 client 都包一層來提供它，只讀這段 Session 的附件。內建的 OpenAI 相容 client 照舊自己讀 `AttachmentStore`。
+  - 設定的上限沿用現有的平鋪寫法（`aiChat.maxToolCallsPerStep`、`aiChat.readConcurrency`、`aiChat.toolTimeoutSeconds`、`aiChat.runsPerUser`），和 `maxTurns`、`maxToolCallsPerRun` 一樣；規格第 6 節的範例已改成這個寫法。
+  - `toolTimeoutSeconds` 預設 60，範圍 1 到 600。它和 `runTimeoutSeconds` 的關係：每個呼叫的 `signal` 在兩者中較早的時間中止。工具逾時先到，這個呼叫是 `timeout`，Run 繼續；Run 的截止時間先到，Run 結束成 `completed`、`endReason: 'timeout'`，還沒結束的呼叫沒有結果（和 P3-06 一樣）。`toolTimeoutSeconds` 比 `runTimeoutSeconds` 長時，實際只有 Run 的截止時間有效。等核准的時間不算。
+  - 逾時的呼叫可能還在執行：Backstage 的 actions service 不收 `signal`，迴圈只是不再等它。之後的唯讀呼叫不等它。之後的寫入呼叫這一步不執行（D-09：寫的先後順序有意義），寫成 `denied`；看紀錄判斷，所以換一台後端接手也一樣。即時判斷看工具原本回傳的狀態，`afterToolCall` 把結果改掉也蓋不掉逾時；接手時看紀錄裡經過 `afterToolCall` 之後存下的狀態。
+  - 唯讀呼叫的 `afterToolCall` 在它的工具結束後就執行，所以同一批不同呼叫的 Hook 可能同時在跑。寫入的順序不受影響。
+  - `parallelToolCalls` 是模型宣告的能力：迴圈不管它都會同時執行唯讀呼叫（D-09）。它只決定請求帶不帶 `parallel_tool_calls: true`；不支援這個欄位的伺服器用預設的 `false`。
+  - 每人同時的 Run 數包含 `waiting_approval`（H-03 的「進行中」）。兩台後端的計數用資料庫：PostgreSQL 在建立 Run 的 transaction 開頭先取這個使用者的 advisory lock（`pg_advisory_xact_lock`），再數、再新增；SQLite 只有一條連線，transaction 本來就一個接一個。這個鎖在任何列鎖之前取，其他 transaction 不取它，所以不會跟第 13.8 節的鎖順序形成循環。
+  - 限流用固定的一分鐘格子：`model_call_windows` 的 `(model_id, window_start)` 一列一個計數，`INSERT … ON CONFLICT DO UPDATE … WHERE calls < 上限 RETURNING`，一句話決定拿到沒有。格子邊界前後最多可能有兩倍的量。拿不到就等到下一格（加一點隨機延遲）再試。限流算所有呼叫這個模型的地方：每一步、摘要、自動標題。舊的格子在之後的呼叫裡刪除。
+  - 依 Agent 的模型決定能不能附加圖片不在這一項：上傳和送出的檢查仍看 `aiChat.llm.images`。Agent 的模型不讀圖片時，迴圈照 IN-05 把圖片換成一行說明，不會送出。
 
 ### P4：擴大
 
@@ -1066,3 +1135,4 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-25 | 1.2  | P3-04 完成（X-04、D-22，#53）：加入 `aiChat.skills.directories`（`SKILL.md`）、擴充點加入 `addSkill`、內建 `load_skill` 工具（`readOnly: true`，預設 `allow`），依 Agent 過濾並在呼叫時才延遲載入全文                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 2026-11-25 | 1.2  | P3-06 完成（X-08，#54）：V-05 確認 Backstage 1.56.2 有官方的 `search:query`（`@backstage/plugin-search-backend` 2.1.8），直接用，不另外寫 action。新增整合測試（真的 search backend、actions registry 與 permission 過濾）和 README 的設定說明                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | 2026-11-26 | 1.2  | P3-03 完成（X-06、X-07、D-07，#56）：內建 `update_plan`（`readOnly: true`，預設 `allow`）、`planning: required` 的第一步只提供 `update_plan`、`readCurrentPlan` 和 `ItemLog.latestPlanUpdate`（摘要涵蓋舊的 `plan_update` 也讀得到）、畫面用 assistant-ui 的工具畫面把計畫顯示成清單。逐項驗收見 P3-03                                                                                                                                                                                                                                                                                                                                                                                               |
+| 2026-11-26 | 1.2  | P3-07 完成（P-01、P-02、P-03、P-05、P-06、X-09，#57）：唯讀呼叫同時執行（`readConcurrency`）、結果照順序寫入；每個工具呼叫的逾時（`toolTimeoutSeconds`），寫入逾時後這一步後面的寫入不執行；`maxToolCallsPerStep`、`runsPerUser`（429）；`aiChat.models` 與擴充點 `addModelClient`（只新增），模組用 `readImage` 讀圖片；`requestsPerMinute` 的限流由所有後端共用（`model_call_windows`）                                                                                                                                                                                                                                                                                                            |

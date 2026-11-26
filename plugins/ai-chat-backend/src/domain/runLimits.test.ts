@@ -16,7 +16,14 @@
 
 import { CREDENTIALS_MARGIN_SECONDS, runLimits } from './runLimits';
 
-const base = { maxSteps: 10, maxToolCallsPerRun: 30, runTimeoutSeconds: 300 };
+const base = {
+  maxSteps: 10,
+  maxToolCallsPerRun: 30,
+  runTimeoutSeconds: 300,
+  maxToolCallsPerStep: 8,
+  readConcurrency: 4,
+  toolTimeoutSeconds: 60,
+};
 const now = new Date('2026-01-01T00:00:00.000Z');
 const inSeconds = (s: number) =>
   new Date(now.getTime() + s * 1000).toISOString();

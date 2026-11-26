@@ -18,6 +18,7 @@ import { createBackendModule } from '@backstage/backend-plugin-api';
 import {
   aiChatHarnessExtensionPoint,
   type AgentDefinition,
+  type ModelClient,
   type Skill,
 } from '@kwkevinchan/backstage-plugin-ai-chat-node';
 
@@ -43,7 +44,39 @@ const gettingStartedSkill: Skill = {
 };
 
 /**
- * Registers one agent and one skill. The text mentions `example.com` only.
+ * A model client that calls no server: it answers with the last message of
+ * the user and the size of its images. A real client sends `input` to its
+ * model server. The images of a message carry no bytes; `opts.readImage`
+ * reads them from the attachments of the session.
+ */
+const echoModel: ModelClient = {
+  capabilities: { parallelToolCalls: false, images: true },
+  async *stream(input, opts) {
+    const last = [...input.messages]
+      .reverse()
+      .find(message => message.role === 'user');
+    if (!last || last.role !== 'user') {
+      yield { type: 'text', text: 'There is no message to answer.' };
+      return;
+    }
+    const sizes: string[] = [];
+    for (const image of last.images ?? []) {
+      const data = await opts.readImage?.(image);
+      sizes.push(data ? `${data.bytes.length} bytes` : 'not available');
+    }
+    yield {
+      type: 'text',
+      text: [
+        `You wrote: ${last.content}`,
+        ...sizes.map((size, i) => `Image ${i + 1}: ${size}`),
+      ].join('\n'),
+    };
+  },
+};
+
+/**
+ * Registers one agent, one skill and one model client (`example-echo`; no
+ * agent of this module uses it). The text mentions `example.com` only.
  * This package is a private example in the repository, to copy from, not to
  * install.
  *
@@ -58,6 +91,7 @@ export const aiChatExampleModule = createBackendModule({
       async init({ harness }) {
         harness.addAgent(guide);
         harness.addSkill(gettingStartedSkill);
+        harness.addModelClient('example-echo', echoModel);
       },
     });
   },

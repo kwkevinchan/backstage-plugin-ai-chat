@@ -56,6 +56,9 @@ import {
   UploadAttachment,
   createAfterRun,
   createRunEnded,
+  DEFAULT_MODEL_ID,
+  HostModelClient,
+  ModelCatalog,
   type AfterRun,
   type ImageSettings,
   type RunSettings,
@@ -67,6 +70,7 @@ import {
   type AttachmentStore,
   type AuditLog,
   type Logger,
+  type ModelCallLimiter,
   type Notifier,
   type QueuedMessageRepository,
   type RunRepository,
@@ -91,7 +95,23 @@ export type HostPorts = {
   shares: ShareRepository;
   access: AccessControl;
   tools: ToolGateway;
+  /** The client of the model `default` (`aiChat.llm`). */
   model: ModelClient;
+  /**
+   * The clients of the other models, by id: `aiChat.models` and the clients
+   * of modules (X-09). An agent names one with `model`.
+   */
+  models?: ReadonlyMap<string, ModelClient>;
+  /**
+   * The rate limit of the models that have one (`requestsPerMinute`, P-06),
+   * shared by the backends through `limiter`. `sleep` waits for the next
+   * minute; a timer by default.
+   */
+  rateLimits?: {
+    limiter: ModelCallLimiter;
+    requestsPerMinute: ReadonlyMap<string, number>;
+    sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+  };
   audit: AuditLog;
   clock: Clock;
   ids: IdGenerator;
@@ -152,9 +172,35 @@ export function createHost(ports: HostPorts) {
     enabled: false,
   };
   const extensions = ports.extensions ?? emptyExtensions();
+  if (ports.models?.has(DEFAULT_MODEL_ID)) {
+    throw new Error(`The model ${DEFAULT_MODEL_ID} is the one of \`model\``);
+  }
+  const rateLimits = ports.rateLimits;
+  const models = new ModelCatalog(
+    new Map(
+      [
+        [DEFAULT_MODEL_ID, ports.model] as const,
+        ...(ports.models ?? new Map<string, ModelClient>()),
+      ].map(([modelId, client]) => {
+        const perMinute = rateLimits?.requestsPerMinute.get(modelId);
+        return [
+          modelId,
+          new HostModelClient(client, {
+            modelId,
+            attachments,
+            clock,
+            ...(rateLimits &&
+              perMinute !== undefined && {
+                rate: { limiter: rateLimits.limiter, perMinute },
+              }),
+            ...(rateLimits?.sleep && { sleep: rateLimits.sleep }),
+          }),
+        ];
+      }),
+    ),
+  );
   const advance = new AdvanceRun({
     items,
-    model: ports.model,
     tools: new AuditedToolGateway(ports.tools, audit, logger),
     run: runs,
     clock,
@@ -180,7 +226,8 @@ export function createHost(ports: HostPorts) {
     sessions,
     runs,
     items,
-    model: ports.model,
+    agents,
+    models,
     logger,
   });
   const runEnded = createRunEnded({
@@ -203,6 +250,7 @@ export function createHost(ports: HostPorts) {
     queue,
     supervisor,
     agents,
+    models,
     audit,
     clock,
     settings,
@@ -239,6 +287,7 @@ export function createHost(ports: HostPorts) {
         items,
         supervisor,
         agents,
+        models,
         clock,
         settings,
         attachments,
@@ -252,6 +301,7 @@ export function createHost(ports: HostPorts) {
         items,
         supervisor,
         agents,
+        models,
         audit,
         clock,
         settings,
@@ -265,6 +315,7 @@ export function createHost(ports: HostPorts) {
         items,
         supervisor,
         agents,
+        models,
         clock,
         settings,
         notify,

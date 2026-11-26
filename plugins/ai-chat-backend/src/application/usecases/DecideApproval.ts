@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import type { ModelCatalog } from '../models';
 import {
   DuplicateItem,
   decisionOf,
@@ -71,6 +72,7 @@ export class DecideApproval {
       items: ItemLog;
       supervisor: RunSupervisor;
       agents: AgentCatalog;
+      models: ModelCatalog;
       audit: AuditLog;
       clock: Clock;
       settings: RunSettings;
