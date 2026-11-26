@@ -15,26 +15,31 @@
  */
 
 import { useState, type FormEvent } from 'react';
+import { Button } from '@backstage/ui';
 import type {
   ChatShare,
   ChatShareMode,
-  CreateChatShareRequest,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { AiChatApi } from '../api';
 import { describeError } from '../adapters/describeError';
 import { cx } from './styles';
 
+function formatTimestamp(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+}
+
 export interface ShareDialogProps {
   api: AiChatApi;
   sessionId: string;
   shares: ChatShare[];
-  onSharesChange(next: ChatShare[]): void;
+  onSharesChange(shares: ChatShare[]): void;
   onClose(): void;
 }
 
 /**
- * Dialog for the owner of a session to create, refresh, and stop shares
- * (SH-07, SH-08, SH-09, SH-10, SH-11).
+ * Panel for creating, refreshing, and revoking read-only shares of a session
+ * (SH-07, SH-10).
  */
 export function ShareDialog(props: ShareDialogProps) {
   const { api, sessionId, shares, onSharesChange, onClose } = props;
@@ -46,29 +51,29 @@ export function ShareDialog(props: ShareDialogProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 
-  const isGroupTarget = subjectRef.trim().toLowerCase().startsWith('group:');
+  const trimmedSubject = subjectRef.trim();
+  const isGroupTarget = trimmedSubject.toLowerCase().startsWith('group:');
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const target = subjectRef.trim();
-    if (!target) return;
+    if (!trimmedSubject) return;
     setBusy(true);
     setError(undefined);
     try {
-      const request: CreateChatShareRequest = {
-        subjectRef: target,
+      const parsedHours = hours.trim() ? Number(hours.trim()) : undefined;
+      const created = await api.createShare(sessionId, {
+        subjectRef: trimmedSubject,
         mode,
         includeToolOutputs,
-        ...(mode === 'live' && includeToolOutputs && includeLaterToolOutputs
-          ? { includeLaterToolOutputs: true }
-          : {}),
-        ...(mode === 'live' && hours.trim() !== ''
-          ? { hours: Number(hours) }
-          : {}),
-      };
-      const created = await api.createShare(sessionId, request);
+        ...(mode === 'live' && {
+          includeLaterToolOutputs,
+          ...(parsedHours !== undefined &&
+            !Number.isNaN(parsedHours) && { hours: parsedHours }),
+        }),
+      });
       onSharesChange([...shares, created]);
       setSubjectRef('');
+      setHours('');
     } catch (cause) {
       setError(describeError(cause));
     } finally {
@@ -107,15 +112,19 @@ export function ShareDialog(props: ShareDialogProps) {
   return (
     <div
       className={cx('share-dialog')}
-      role="dialog"
-      aria-modal="true"
+      role="region"
       aria-label="Share conversation"
     >
       <div className={cx('share-dialog-header')}>
         <h3>Share conversation</h3>
-        <button type="button" onClick={onClose} aria-label="Close share dialog">
+        <Button
+          variant="tertiary"
+          size="small"
+          onPress={onClose}
+          aria-label="Close share dialog"
+        >
           Close
-        </button>
+        </Button>
       </div>
 
       <div className={cx('share-disclosure')}>
@@ -139,7 +148,7 @@ export function ShareDialog(props: ShareDialogProps) {
       )}
 
       <form onSubmit={submit} className={cx('share-form')}>
-        <label>
+        <label className={cx('share-form-field')}>
           Recipient
           <input
             type="text"
@@ -150,7 +159,7 @@ export function ShareDialog(props: ShareDialogProps) {
           />
         </label>
 
-        <label>
+        <label className={cx('share-form-field')}>
           Mode
           <select
             value={mode}
@@ -162,7 +171,7 @@ export function ShareDialog(props: ShareDialogProps) {
           </select>
         </label>
 
-        <label>
+        <label className={cx('share-form-checkbox')}>
           <input
             type="checkbox"
             checked={includeToolOutputs}
@@ -177,7 +186,7 @@ export function ShareDialog(props: ShareDialogProps) {
 
         {mode === 'live' && (
           <>
-            <label>
+            <label className={cx('share-form-checkbox')}>
               <input
                 type="checkbox"
                 checked={includeLaterToolOutputs}
@@ -186,7 +195,7 @@ export function ShareDialog(props: ShareDialogProps) {
               />
               Include later tool outputs
             </label>
-            <label>
+            <label className={cx('share-form-field')}>
               Expires in (hours)
               <input
                 type="number"
@@ -201,9 +210,16 @@ export function ShareDialog(props: ShareDialogProps) {
           </>
         )}
 
-        <button type="submit" disabled={busy || !subjectRef.trim()}>
-          Create share
-        </button>
+        <div>
+          <Button
+            type="submit"
+            variant="primary"
+            size="small"
+            isDisabled={busy || !subjectRef.trim()}
+          >
+            Create share
+          </Button>
+        </div>
       </form>
 
       {shares.length > 0 && (
@@ -214,26 +230,30 @@ export function ShareDialog(props: ShareDialogProps) {
                 {share.subjectRef} ({share.mode}
                 {share.expired ? ', expired' : ''}
                 {share.expiresAt && !share.expired
-                  ? `, expires ${share.expiresAt}`
+                  ? `, expires ${formatTimestamp(share.expiresAt)}`
                   : ''}
                 )
               </span>
-              {share.mode === 'snapshot' && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => refresh(share.id)}
+              <span className={cx('share-list-actions')}>
+                {share.mode === 'snapshot' && (
+                  <Button
+                    variant="secondary"
+                    size="small"
+                    isDisabled={busy}
+                    onPress={() => refresh(share.id)}
+                  >
+                    Refresh
+                  </Button>
+                )}
+                <Button
+                  variant="secondary"
+                  size="small"
+                  isDisabled={busy}
+                  onPress={() => revoke(share.id)}
                 >
-                  Refresh
-                </button>
-              )}
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => revoke(share.id)}
-              >
-                Stop sharing
-              </button>
+                  Stop sharing
+                </Button>
+              </span>
             </li>
           ))}
         </ul>

@@ -17,6 +17,7 @@
 import type {
   AttachmentRef,
   Clock,
+  IdGenerator,
   Item,
   ItemBody,
   ItemLog,
@@ -62,6 +63,7 @@ export class ForkSession {
       entities: EntityReader;
       audit: AuditLog;
       clock: Clock;
+      ids: IdGenerator;
     },
   ) {}
 
@@ -111,14 +113,6 @@ export class ForkSession {
             input.principal,
           );
 
-    const forked = await this.deps.sessions.create({
-      ownerRef: input.principal.userRef,
-      agentId: source.agentId,
-      ...(source.title !== undefined && { title: source.title }),
-      ...(entityRef !== undefined && { entityRef }),
-      enabledToolsets,
-    });
-
     const sourceAttachmentIds = [
       ...new Set(
         kept.flatMap(item =>
@@ -129,26 +123,57 @@ export class ForkSession {
       ),
     ];
 
-    const copiedAttachments =
-      sourceAttachmentIds.length > 0
-        ? await this.deps.attachments.copy({
-            fromSessionId: source.id,
-            toSessionId: forked.id,
-            ownerRef: input.principal.userRef,
-            ids: sourceAttachmentIds,
-          })
-        : new Map();
+    // Map source sequence numbers to the new 1..N sequence numbers so inserted
+    // messages preserve whether the model had read them.
+    const seqMap = new Map<number, number>();
+    kept.forEach((item, index) => {
+      seqMap.set(item.seq, index + 1);
+    });
+    const remapReadUpToSeq = (
+      oldSeq: number | undefined,
+    ): number | undefined => {
+      if (oldSeq === undefined) return undefined;
+      const direct = seqMap.get(oldSeq);
+      if (direct !== undefined) return direct;
+      let latest: number | undefined;
+      for (const [sourceSeq, mappedSeq] of seqMap.entries()) {
+        if (sourceSeq <= oldSeq) latest = mappedSeq;
+      }
+      return latest ?? 0;
+    };
 
+    const forkedId = this.deps.ids.next();
     const span = await this.deps.audit.begin({
       eventId: 'session-fork',
       actorRef: input.principal.userRef,
       sourceSessionId: source.id,
-      sessionId: forked.id,
+      sessionId: forkedId,
       copiedItems: kept.length,
-      copiedAttachments: copiedAttachments.size,
+      copiedAttachments: sourceAttachmentIds.length,
     });
 
+    let created = false;
     try {
+      const forked = await this.deps.sessions.create({
+        id: forkedId,
+        ownerRef: input.principal.userRef,
+        agentId: source.agentId,
+        ...(source.title !== undefined && { title: source.title }),
+        ...(entityRef !== undefined && { entityRef }),
+        enabledToolsets,
+      });
+      created = true;
+
+      const copiedAttachments =
+        sourceAttachmentIds.length > 0
+          ? await this.deps.attachments.copy({
+              fromSessionId: source.id,
+              toSessionId: forked.id,
+              ownerRef: input.principal.userRef,
+              ids: sourceAttachmentIds,
+            })
+          : new Map();
+
       const bodies: ItemBody[] = kept.map(item => {
         if (item.kind === 'user_message') {
           const attachments: AttachmentRef[] = [];
@@ -172,9 +197,11 @@ export class ForkSession {
           };
         }
         if (item.kind === 'agent_message') {
+          const readUpToSeq = remapReadUpToSeq(item.readUpToSeq);
           return {
             kind: 'agent_message',
             text: item.text,
+            ...(readUpToSeq !== undefined && { readUpToSeq }),
           };
         }
         return {
@@ -183,12 +210,15 @@ export class ForkSession {
         };
       });
 
-      if (bodies.length > 0 && this.deps.sessions.seedItems) {
+      if (bodies.length > 0) {
         await this.deps.sessions.seedItems(forked.id, bodies);
       }
       await span.success();
       return forked;
     } catch (error) {
+      if (created) {
+        await this.deps.sessions.delete(forkedId).catch(() => {});
+      }
       await span.fail(error instanceof Error ? error.message : 'fork failed');
       throw error;
     }

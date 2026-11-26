@@ -27,7 +27,7 @@ export interface SessionRepository {
    * assigning consecutive sequence numbers starting at 1 and marking any
    * referenced attachments as used.
    */
-  seedItems?(sessionId: string, drafts: ItemDraft[]): Promise<Item[]>;
+  seedItems(sessionId: string, drafts: ItemDraft[]): Promise<Item[]>;
 
   /** Throws `SessionNotFound` when there is none. */
   get(sessionId: string): Promise<Session>;

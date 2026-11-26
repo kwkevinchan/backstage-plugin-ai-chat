@@ -72,7 +72,7 @@ export class KnexSessionRepository implements SessionRepository {
   async create(input: NewSession): Promise<Session> {
     const now = this.clock.now().toISOString();
     const row = {
-      id: this.ids.next(),
+      id: input.id ?? this.ids.next(),
       owner_ref: input.ownerRef,
       agent_id: input.agentId,
       title: input.title ?? null,

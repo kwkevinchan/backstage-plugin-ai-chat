@@ -283,8 +283,8 @@ describe('forking a shared session and shared view metadata (P2-05)', () => {
     ).toHaveLength(0);
   });
 
-  it('reports shared mode metadata on GET /sessions/:id for sharees and omits it for owners (SH-12)', async () => {
-    const b = await start([[say('hello')]]);
+  it('reports shared mode metadata on GET /sessions/:id and advances snapshotAt on refresh (SH-12)', async () => {
+    const b = await start([[say('hello')], [say('later reply')]]);
     const id = await newSession(b);
     await send(b, id, 'hi');
 
@@ -293,17 +293,45 @@ describe('forking a shared session and shared view metadata (P2-05)', () => {
       await as('jane', request(b.app).get(`/sessions/${id}`)).expect(200)
     ).body;
     expect(ownerDetail.shared).toBeUndefined();
+    const firstLastCreatedAt =
+      ownerDetail.items[ownerDetail.items.length - 1].createdAt;
 
-    // Snapshot sharee sees mode: 'snapshot' with snapshotAt.
-    await as('jane', request(b.app).post(`/sessions/${id}/shares`))
-      .send({ subjectRef: 'user:default/bob', mode: 'snapshot' })
-      .expect(201);
+    // Snapshot sharee sees mode: 'snapshot' with snapshotAt = last visible item createdAt.
+    const snapShare = (
+      await as('jane', request(b.app).post(`/sessions/${id}/shares`))
+        .send({ subjectRef: 'user:default/bob', mode: 'snapshot' })
+        .expect(201)
+    ).body;
     const snapDetail = (
       await as('bob', request(b.app).get(`/sessions/${id}`)).expect(200)
     ).body;
     expect(snapDetail.shared).toEqual({
       mode: 'snapshot',
-      snapshotAt: expect.any(String),
+      snapshotAt: firstLastCreatedAt,
+    });
+
+    // Advance clock, send another message, and refresh snapshot: snapshotAt moves forward.
+    world.clock.advance(5 * HOUR * 1000);
+    await send(b, id, 'second turn');
+    await as(
+      'jane',
+      request(b.app).patch(`/sessions/${id}/shares/${snapShare.id}`),
+    )
+      .send({ refresh: true })
+      .expect(200);
+    const refreshedOwner = (
+      await as('jane', request(b.app).get(`/sessions/${id}`)).expect(200)
+    ).body;
+    const secondLastCreatedAt =
+      refreshedOwner.items[refreshedOwner.items.length - 1].createdAt;
+    expect(secondLastCreatedAt > firstLastCreatedAt).toBe(true);
+
+    const refreshedSnap = (
+      await as('bob', request(b.app).get(`/sessions/${id}`)).expect(200)
+    ).body;
+    expect(refreshedSnap.shared).toEqual({
+      mode: 'snapshot',
+      snapshotAt: secondLastCreatedAt,
     });
 
     // Live sharee sees mode: 'live' with expiresAt; once expired, becomes mode: 'snapshot'.
@@ -326,7 +354,72 @@ describe('forking a shared session and shared view metadata (P2-05)', () => {
     ).body;
     expect(expiredDetail.shared).toEqual({
       mode: 'snapshot',
-      snapshotAt: liveShare.expiresAt,
+      snapshotAt: secondLastCreatedAt,
     });
+  });
+
+  it('returns 404 and writes no session-fork audit after a share is revoked (SH-06)', async () => {
+    const b = await start([[say('hi')]]);
+    const id = await newSession(b);
+    await send(b, id, 'hello');
+
+    const share = (
+      await as('jane', request(b.app).post(`/sessions/${id}/shares`))
+        .send({ subjectRef: 'user:default/bob', mode: 'snapshot' })
+        .expect(201)
+    ).body;
+    await as(
+      'jane',
+      request(b.app).delete(`/sessions/${id}/shares/${share.id}`),
+    ).expect(204);
+
+    await as('bob', request(b.app).post(`/sessions/${id}/fork`)).expect(404);
+    expect(
+      world.audit.events.filter(e => e.eventId === 'session-fork'),
+    ).toHaveLength(0);
+  });
+
+  it('returns 404 when access.canReadSession denies even the owner on fork (SH-05)', async () => {
+    const b = await start([[say('hi')]], {
+      access: {
+        canReadSession: async () => false,
+        usableToolsets: async ({ toolsetIds }) => [...toolsetIds],
+      },
+    });
+    const id = await newSession(b);
+    await send(b, id, 'hello');
+
+    await as('jane', request(b.app).post(`/sessions/${id}/fork`)).expect(404);
+    expect(
+      world.audit.events.filter(e => e.eventId === 'session-fork'),
+    ).toHaveLength(0);
+  });
+
+  it('excludes messages sent after a live share expired when the recipient forks (SH-04, SH-06)', async () => {
+    const b = await start([[say('before expiry')], [say('after expiry')]]);
+    const id = await newSession(b);
+    await send(b, id, 'first question');
+
+    await as('jane', request(b.app).post(`/sessions/${id}/shares`))
+      .send({ subjectRef: 'user:default/bob', mode: 'live', hours: 1 })
+      .expect(201);
+
+    // Expire the live share, then owner sends a new turn.
+    world.clock.advance(2 * HOUR * 1000);
+    await send(b, id, 'secret after expiry');
+
+    const forked = (
+      await as('bob', request(b.app).post(`/sessions/${id}/fork`)).expect(201)
+    ).body;
+    const forkedDetail = (
+      await as('bob', request(b.app).get(`/sessions/${forked.id}`)).expect(200)
+    ).body;
+    const texts = forkedDetail.items
+      .filter((i: { text?: string }) => typeof i.text === 'string')
+      .map((i: { text: string }) => i.text);
+    expect(texts).toContain('first question');
+    expect(texts).toContain('before expiry');
+    expect(texts).not.toContain('secret after expiry');
+    expect(texts).not.toContain('after expiry');
   });
 });

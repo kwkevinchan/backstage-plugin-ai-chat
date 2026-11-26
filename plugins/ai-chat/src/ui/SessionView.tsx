@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AssistantRuntimeProvider, ThreadPrimitive } from '@assistant-ui/react';
 import { useApiHolder } from '@backstage/core-plugin-api';
+import { Button } from '@backstage/ui';
 import { aiChatToolResultsApiRef } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import type {
   ChatAttachment,
@@ -45,6 +46,11 @@ import { ToolsetPanel } from './ToolsetPanel';
 
 /** The limit of the queue until the input config has answered (the default of the backend). */
 const DEFAULT_QUEUE_MAX = 5;
+
+function formatShareTime(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+}
 
 export interface SessionViewProps {
   api: AiChatApi;
@@ -221,13 +227,14 @@ export function SessionView(props: SessionViewProps) {
               {activeLiveShares.map(share => (
                 <span key={share.id} className={cx('share-live-recipient')}>
                   <span>{share.subjectRef}</span>
-                  <button
-                    type="button"
-                    onClick={() => stopLiveShare(share.id)}
+                  <Button
+                    variant="tertiary"
+                    size="small"
+                    onPress={() => stopLiveShare(share.id)}
                     aria-label={`Stop live sharing with ${share.subjectRef}`}
                   >
                     Stop
-                  </button>
+                  </Button>
                 </span>
               ))}
             </div>
@@ -241,15 +248,24 @@ export function SessionView(props: SessionViewProps) {
               <span>
                 {shared.mode === 'snapshot'
                   ? `Shared snapshot${
-                      shared.snapshotAt ? ` (${shared.snapshotAt})` : ''
+                      shared.snapshotAt
+                        ? ` (${formatShareTime(shared.snapshotAt)})`
+                        : ''
                     } — read-only`
                   : `Shared live conversation${
-                      shared.expiresAt ? ` (expires ${shared.expiresAt})` : ''
+                      shared.expiresAt
+                        ? ` (expires ${formatShareTime(shared.expiresAt)})`
+                        : ''
                     } — read-only`}
               </span>
-              <button type="button" disabled={forking} onClick={fork}>
+              <Button
+                variant="secondary"
+                size="small"
+                isDisabled={forking}
+                onPress={fork}
+              >
                 {forking ? 'Copying…' : 'Copy to my sessions'}
-              </button>
+              </Button>
             </div>
           )}
           {!shared && (
@@ -260,13 +276,13 @@ export function SessionView(props: SessionViewProps) {
                 disabled={running}
                 onChange={changeToolsets}
               />
-              <button
-                type="button"
-                className={cx('share-trigger')}
-                onClick={() => setShareOpen(open => !open)}
+              <Button
+                variant="secondary"
+                size="small"
+                onPress={() => setShareOpen(open => !open)}
               >
                 Share
-              </button>
+              </Button>
             </div>
           )}
           {!shared && shareOpen && (

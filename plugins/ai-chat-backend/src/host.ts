@@ -436,6 +436,7 @@ export function createHost(ports: HostPorts) {
         entities,
         audit,
         clock,
+        ids: ports.ids,
       }),
       listToolsets: new ListToolsets({ agents, access }),
       listSessionTools: new ListSessionTools({

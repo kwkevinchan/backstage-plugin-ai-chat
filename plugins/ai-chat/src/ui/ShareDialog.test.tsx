@@ -64,7 +64,7 @@ describe('SessionView sharing UI and fork (P2-05)', () => {
     );
 
     await userEvent.click(screen.getByRole('button', { name: 'Share' }));
-    const dialog = screen.getByRole('dialog', { name: 'Share conversation' });
+    const dialog = screen.getByRole('region', { name: 'Share conversation' });
     expect(dialog).toHaveTextContent(
       'Recipients will see tool outputs retrieved with your permissions.',
     );
@@ -171,7 +171,9 @@ describe('SessionView sharing UI and fork (P2-05)', () => {
 
     const banner = screen.getByRole('status', { name: 'Shared conversation' });
     expect(banner).toHaveTextContent('Shared snapshot');
-    expect(banner).toHaveTextContent('2026-01-01T10:00:00.000Z');
+    expect(banner).toHaveTextContent(
+      new Date('2026-01-01T10:00:00.000Z').toLocaleString(),
+    );
     expect(screen.queryByLabelText('Message')).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Share' }),
@@ -203,7 +205,9 @@ describe('SessionView sharing UI and fork (P2-05)', () => {
 
     const banner = screen.getByRole('status', { name: 'Shared conversation' });
     expect(banner).toHaveTextContent('Shared live conversation');
-    expect(banner).toHaveTextContent('2026-01-02T10:00:00.000Z');
+    expect(banner).toHaveTextContent(
+      new Date('2026-01-02T10:00:00.000Z').toLocaleString(),
+    );
     expect(screen.queryByLabelText('Message')).not.toBeInTheDocument();
   });
 });

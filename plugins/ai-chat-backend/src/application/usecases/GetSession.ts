@@ -211,21 +211,10 @@ export class GetSession {
               ...(expiresAt !== undefined && { expiresAt }),
             };
           })()
-        : (() => {
-            const timestamps = granted
-              .map(one =>
-                one.upToSeq === undefined
-                  ? one.expiresAt ?? one.createdAt
-                  : one.createdAt,
-              )
-              .sort();
-            const snapshotAt =
-              timestamps[timestamps.length - 1] ?? share.createdAt;
-            return {
-              mode: 'snapshot',
-              snapshotAt,
-            };
-          })();
+        : {
+            mode: 'snapshot',
+            snapshotAt: list[list.length - 1]?.createdAt ?? share.createdAt,
+          };
     return {
       session,
       ...(run && { run }),
