@@ -38,6 +38,7 @@ import {
   ShuttingDown,
   ToolCallNotFound,
   ToolCallNotWaiting,
+  TooManyActiveRuns,
   UnknownToolset,
 } from '../../domain';
 import { toHttpError } from './errorMapping';
@@ -70,6 +71,7 @@ describe('toHttpError', () => {
     [new QueueChanged('s1'), 'QueueChanged', 409],
     [new QueuedMessageNotFound('q1'), 'QueuedMessageNotFound', 404],
     [new EmptyMessage(), 'EmptyMessage', 400],
+    [new TooManyActiveRuns(3), 'TooManyActiveRuns', 429],
   ])(
     'keeps the name of %p in the answer, with the status %p',
     (error, name, status) => {

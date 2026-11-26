@@ -16,7 +16,12 @@
 
 import type { RunOutcome } from '@kwkevinchan/ai-chat-harness';
 import { FakeClock } from '@kwkevinchan/ai-chat-harness/testing';
-import type { Principal, QueuedMessage, Run } from '../domain';
+import {
+  TooManyActiveRuns,
+  type Principal,
+  type QueuedMessage,
+  type Run,
+} from '../domain';
 import { createAfterRun } from './afterRun';
 
 // The rules of IN-14 to IN-16 against fakes: which outcome and which
@@ -199,6 +204,18 @@ describe('afterRun', () => {
       principal: principalWith(ENOUGH),
     });
     expect(state).toEqual({ items: t.items, paused: false });
+  });
+
+  it('pauses the queue without a log when the user has as many runs as allowed (P-05)', async () => {
+    const t = setup();
+    t.startNext.execute.mockRejectedValue(new TooManyActiveRuns(3));
+    const state = await t.afterRun({
+      run,
+      outcome: { status: 'completed' },
+      principal: principalWith(ENOUGH),
+    });
+    expect(state).toEqual({ items: t.items, paused: true });
+    expect(t.logger.error).not.toHaveBeenCalled();
   });
 
   it('logs an error of the start and counts it as a pause', async () => {
