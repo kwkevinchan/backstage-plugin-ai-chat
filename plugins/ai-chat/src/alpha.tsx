@@ -16,8 +16,10 @@
 
 /**
  * Entry point for the new frontend system: the plugin (default export), with
- * the chat page on `/ai-chat`, the API of the chat backend, and the side
- * panel and its Utility API at the app root. The page's title and icon make
+ * the chat page on `/ai-chat`, the API of the chat backend, the side panel
+ * and its Utility API at the app root, and the result component API
+ * (`api:ai-chat/tool-results`), which collects the extensions of
+ * `AiChatToolResultBlueprint`. The page's title and icon make
  * the app list it in the sidebar. The panel stays mounted when the page
  * changes. The extensions are not exported by name; an app reaches them with
  * `getExtension()` and `withOverrides()` of the plugin.
@@ -33,16 +35,22 @@ import {
 import {
   ApiBlueprint,
   AppRootElementBlueprint,
+  createExtensionInput,
   createFrontendPlugin,
   discoveryApiRef,
   fetchApiRef,
   PageBlueprint,
 } from '@backstage/frontend-plugin-api';
-import { aiChatPanelApiRef } from '@kwkevinchan/backstage-plugin-ai-chat-react';
+import {
+  aiChatPanelApiRef,
+  aiChatToolResultsApiRef,
+} from '@kwkevinchan/backstage-plugin-ai-chat-react';
+import { AiChatToolResultBlueprint } from '@kwkevinchan/backstage-plugin-ai-chat-react/alpha';
 import { RiChat3Line } from '@remixicon/react';
 import { aiChatApiRef } from './api';
 import { AiChatClient } from './adapters/AiChatClient';
 import { createAiChatPanelStore } from './application/panelStore';
+import { createAiChatToolResultsApi } from './application/toolResultsApi';
 import { rootRouteRef } from './routes';
 import { AiChatPanel } from './ui/AiChatPanel';
 
@@ -64,6 +72,33 @@ const aiChatPanelApi = ApiBlueprint.make({
       deps: {},
       factory: () => createAiChatPanelStore(),
     }),
+});
+
+/**
+ * The result components of the plugins, in the order of the input: the first
+ * one for an action id is used.
+ */
+const aiChatToolResultsApi = ApiBlueprint.makeWithOverrides({
+  name: 'tool-results',
+  inputs: {
+    toolResults: createExtensionInput([
+      AiChatToolResultBlueprint.dataRefs.toolResult,
+    ]),
+  },
+  factory(originalFactory, { inputs }) {
+    return originalFactory(defineParams =>
+      defineParams({
+        api: aiChatToolResultsApiRef,
+        deps: {},
+        factory: () =>
+          createAiChatToolResultsApi(
+            inputs.toolResults.map(input =>
+              input.get(AiChatToolResultBlueprint.dataRefs.toolResult),
+            ),
+          ),
+      }),
+    );
+  },
 });
 
 /**
@@ -96,7 +131,13 @@ const aiChatPage = PageBlueprint.make({
  */
 export default createFrontendPlugin({
   pluginId: 'ai-chat',
-  extensions: [aiChatApi, aiChatPanelApi, aiChatPage, aiChatPanel],
+  extensions: [
+    aiChatApi,
+    aiChatPanelApi,
+    aiChatToolResultsApi,
+    aiChatPage,
+    aiChatPanel,
+  ],
   routes: convertLegacyRouteRefs({
     root: rootRouteRef,
   }),

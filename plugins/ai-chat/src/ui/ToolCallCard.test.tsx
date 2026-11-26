@@ -393,7 +393,7 @@ describe('ToolCallRow', () => {
         call={callOf(
           part({
             state: 'output-available',
-            output: { truncated: true, originalLength: 5000, text: '{"a":' },
+            output: { text: '{"a":', originalLength: 5000 },
           }),
         )}
       />,

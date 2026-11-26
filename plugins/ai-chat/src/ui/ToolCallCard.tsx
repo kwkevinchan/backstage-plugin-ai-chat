@@ -18,6 +18,7 @@ import { createContext, useContext } from 'react';
 import type { ToolCallMessagePartProps } from '@assistant-ui/react';
 import { Button } from '@backstage/ui';
 import type { ChatTool } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { AiChatToolResultsApi } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import type { DecisionInfo } from '../domain/itemsToMessages';
 import {
   NOT_RUN,
@@ -27,6 +28,7 @@ import {
 } from '../domain/toolView';
 import { LinkedText } from './LinkedText';
 import { cx } from './styles';
+import { ToolResult } from './ToolResult';
 
 /** What a tool card reads of the call: the props of a tool component of assistant-ui. */
 export type ToolCallProps = Pick<
@@ -128,14 +130,23 @@ function InvisibleWarning({ input }: { input: unknown }) {
   );
 }
 
+// The backend replaces an output over its limit with the first part of its
+// JSON and the full length; the stream does not carry the `truncated` flag of
+// the item, so the shape tells.
 function isCutOutput(
   output: unknown,
-): output is { truncated: true; originalLength: number; text: string } {
+): output is { text: string; originalLength: number } {
+  if (typeof output !== 'object' || output === null || Array.isArray(output)) {
+    return false;
+  }
+  const { text, originalLength } = output as {
+    text?: unknown;
+    originalLength?: unknown;
+  };
   return (
-    typeof output === 'object' &&
-    output !== null &&
-    (output as { truncated?: unknown }).truncated === true &&
-    typeof (output as { text?: unknown }).text === 'string'
+    Object.keys(output).length === 2 &&
+    typeof text === 'string' &&
+    typeof originalLength === 'number'
   );
 }
 
@@ -326,6 +337,8 @@ export interface ToolCallView {
   decisions?: Record<string, DecisionInfo>;
   /** Set while a decision is being sent, or a response is under way. */
   disabled: boolean;
+  /** The result components of the plugins. */
+  toolResults?: AiChatToolResultsApi;
 }
 
 export const ToolCallViewContext = createContext<ToolCallView>({
@@ -339,14 +352,24 @@ export const ToolCallViewContext = createContext<ToolCallView>({
 export function ToolCall(props: ToolCallMessagePartProps) {
   const view = useContext(ToolCallViewContext);
   const tool = view.tools?.[props.toolName];
-  return needsCard(props) ? (
-    <ApprovalCard
-      call={props}
-      tool={tool}
-      decision={view.decisions?.[props.toolCallId]}
-      disabled={view.disabled}
-    />
-  ) : (
-    <ToolCallRow call={props} tool={tool} />
+  return (
+    <>
+      {needsCard(props) ? (
+        <ApprovalCard
+          call={props}
+          tool={tool}
+          decision={view.decisions?.[props.toolCallId]}
+          disabled={view.disabled}
+        />
+      ) : (
+        <ToolCallRow call={props} tool={tool} />
+      )}
+      <ToolResult
+        call={props}
+        status={statusOfCall(props)}
+        title={tool?.title ?? titleOfTool(props.toolName)}
+        toolResults={view.toolResults}
+      />
+    </>
   );
 }

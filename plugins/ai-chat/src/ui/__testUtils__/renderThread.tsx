@@ -29,7 +29,8 @@ type Options = Partial<SessionRuntimeOptions> & {
   children?: ReactNode;
 };
 
-function Harness({
+/** The runtime and the message list, for a test that renders new messages. */
+export function ThreadHarness({
   messages,
   options,
 }: {
@@ -56,7 +57,7 @@ export function renderThread(
   messages: readonly ChatUiMessage[],
   options: Options = {},
 ): RenderResult {
-  return render(<Harness messages={messages} options={options} />);
+  return render(<ThreadHarness messages={messages} options={options} />);
 }
 
 /** An assistant message with one text part. */

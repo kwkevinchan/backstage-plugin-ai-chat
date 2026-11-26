@@ -18,7 +18,12 @@ import { Route, Routes, useLocation } from 'react-router-dom';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderInTestApp, TestApiProvider } from '@backstage/test-utils';
+import {
+  aiChatToolResultsApiRef,
+  type AiChatToolResultProps,
+} from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import { aiChatApiRef } from '../api';
+import { createAiChatToolResultsApi } from '../application/toolResultsApi';
 import {
   call,
   detail,
@@ -39,9 +44,13 @@ function Where() {
   );
 }
 
-function renderPage(api: ReturnType<typeof mockApi>, entry = '/ai-chat') {
+function renderPage(
+  api: ReturnType<typeof mockApi>,
+  entry = '/ai-chat',
+  more: Array<readonly [never, never]> = [],
+) {
   return renderInTestApp(
-    <TestApiProvider apis={[[aiChatApiRef, api]]}>
+    <TestApiProvider apis={[[aiChatApiRef, api], ...more]}>
       <Routes>
         <Route
           path="/ai-chat/*"
@@ -325,5 +334,34 @@ describe('ChatPageContent', () => {
     expect(api.sendMessage.mock.calls[0][1]).toMatchObject({
       text: 'restart payments',
     });
+  });
+
+  it('shows the result component that the app registered on aiChatToolResultsApiRef', async () => {
+    function Restarted(props: AiChatToolResultProps) {
+      const output = props.output as { status?: string } | undefined;
+      return <p>Service is {output?.status}</p>;
+    }
+    const api = mockApi({
+      getSession: jest.fn().mockResolvedValue(
+        detail({
+          items: items(user('restart payments'), call('c1'), {
+            kind: 'tool_result',
+            callId: 'c1',
+            status: 'ok',
+            output: { status: 'restarting' },
+          }),
+        }),
+      ),
+    });
+    const toolResults = createAiChatToolResultsApi([
+      { actionId: 'dev-actions:restart-service', component: Restarted },
+    ]);
+    await renderPage(api, '/ai-chat/s-1', [
+      [aiChatToolResultsApiRef, toolResults] as never,
+    ]);
+
+    expect(
+      await screen.findByRole('group', { name: 'Result: Restart service' }),
+    ).toHaveTextContent('Service is restarting');
   });
 });
