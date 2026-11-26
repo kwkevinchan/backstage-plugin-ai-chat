@@ -24,6 +24,7 @@ import {
   type RunStatus,
 } from '@kwkevinchan/ai-chat-harness';
 import type { Knex } from 'knex';
+import { isPostgres } from './postgres';
 import {
   InsertLimitReached,
   TooManyActiveRuns,
@@ -124,7 +125,7 @@ export async function insertRun(
     .where({ id: row.session_id })
     .first<{ owner_ref: string } | undefined>('owner_ref');
   if (session) {
-    if (String(trx.client.config.client ?? '') === 'pg') {
+    if (isPostgres(trx)) {
       await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
         `ai-chat:runs:${session.owner_ref}`,
       ]);

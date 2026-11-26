@@ -26,32 +26,13 @@ import type {
 } from '@kwkevinchan/ai-chat-harness';
 import { AttachmentNotFound } from '../domain';
 import type { AttachmentStore, ModelCallLimiter } from './ports';
+import { abortableSleep } from './sleep';
 
 /** The id of the model of `aiChat.llm`, which an agent without `model` uses. */
 export const DEFAULT_MODEL_ID = 'default';
 
 /** The most the wait for a minute is moved later, so backends do not all retry at once. */
 const RETRY_JITTER_MS = 250;
-
-/** Waits `ms`, or throws when the signal aborts first. */
-export function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) {
-      reject(signal.reason);
-      return;
-    }
-    let onAbort = () => {};
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    onAbort = () => {
-      clearTimeout(timer);
-      reject(signal.reason);
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
-}
 
 /**
  * The client of one model as the host gives it to the loop and to the titles
@@ -62,8 +43,8 @@ export function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
  *   module gets the bytes this way.
  * - With `perMinute`, every call first takes a turn from the limiter, shared
  *   by all backends. Without a turn it waits for the next minute and asks
- *   again; when the signal aborts while it waits, the call throws and the
- *   model is not called.
+ *   again; when the signal aborts while it waits, the call throws (the check
+ *   at the top of the loop) and the model is not called.
  */
 export class HostModelClient implements ModelClient {
   readonly capabilities: ModelClient['capabilities'];
@@ -130,10 +111,6 @@ export class ModelCatalog {
     if (!clients.has(DEFAULT_MODEL_ID)) {
       throw new Error(`There is no model ${DEFAULT_MODEL_ID}`);
     }
-  }
-
-  ids(): ReadonlySet<string> {
-    return new Set(this.clients.keys());
   }
 
   /** The client of the model of the agent; `default` when it names none. */

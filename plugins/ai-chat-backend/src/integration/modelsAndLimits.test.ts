@@ -335,6 +335,19 @@ describe('models, limits per step and per user, and rate limits (P3-07)', () => 
     });
   });
 
+  it('answers an empty queue with nothing to send, also at the limit', async () => {
+    world = await createWorld({ runsPerUser: 1 });
+    const host = backend([[writeCall]]);
+    await waitingRun(host);
+    const empty = await world.newSession();
+    await expect(
+      host.useCases.resumeQueue.execute({
+        principal: jane,
+        sessionId: empty.id,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   describe('the rate limit of a model (P-06)', () => {
     it('makes the second call of a minute wait for the next minute, also from another backend', async () => {
       world = await createWorld();

@@ -484,6 +484,60 @@ describe('executeTools: stops and deadlines with calls at the same time', () => 
   });
 });
 
+describe('executeTools: a change that goes over its time (D-09, P-02)', () => {
+  it('does not run the later changes of the step, and still runs the read-only calls after it', async () => {
+    const started: string[] = [];
+    const slow = tool('catalog:write', false, () => {
+      started.push('slow');
+      return never();
+    });
+    const next = tool('catalog:write2', false, async () => {
+      started.push('next');
+      return { status: 'ok', output: {} };
+    });
+    const read = tool('catalog:read', true, async () => {
+      started.push('read');
+      return { status: 'ok', output: {} };
+    });
+    const t = await kit({
+      tools: [slow, next, read],
+      limits: { toolTimeoutSeconds: 0.05 },
+      script: [
+        [
+          callTool('m1', 'catalog:write', {}),
+          callTool('m2', 'catalog:read', {}),
+          callTool('m3', 'catalog:write2', {}),
+        ],
+        [say('done')],
+      ],
+    });
+    await t.execute();
+    const [first, , third] = callsOf(await t.read());
+    for (const call of [first, third]) {
+      await t.append({
+        kind: 'approval',
+        callId: call.callId,
+        decision: 'allow',
+        decidedBy: 'user:a',
+      });
+    }
+
+    const { outcome } = await t.execute();
+
+    expect(outcome).toEqual({ status: 'completed' });
+    expect(started).toEqual(['slow', 'read']);
+    const results = resultsOf(await t.read());
+    expect(results.map(r => r.status)).toEqual(['timeout', 'ok', 'denied']);
+    expect(results[2].message).toBe(
+      'Not run: an earlier change of this step did not answer in time and may still be running.',
+    );
+    const items = await t.read();
+    expect(
+      items.filter(i => i.kind === 'tool_started').map(i => i.callId),
+    ).toEqual([first.callId]);
+  });
+});
+
 describe('callModel: tool calls per step (P-05)', () => {
   it('denies the calls beyond maxToolCallsPerStep and counts all of them', async () => {
     const read = tool('catalog:read', true, async () => ({

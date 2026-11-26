@@ -156,6 +156,5 @@ describe('ModelCatalog', () => {
     expect(() => catalog.forAgent({ model: 'gone' })).toThrow(
       'There is no model gone',
     );
-    expect([...catalog.ids()]).toEqual(['default', 'small']);
   });
 });

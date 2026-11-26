@@ -116,6 +116,13 @@ describe('readAiChatConfig', () => {
     expect(read({ models: { '1x': llm } })).toThrow(
       'aiChat.models.1x: the id must start with a letter',
     );
+    const long = `m${'x'.repeat(64)}`;
+    expect(read({ models: { [long]: llm } })).toThrow(
+      'has at most 64 characters',
+    );
+    expect(() =>
+      read({ models: { [`m${'x'.repeat(63)}`]: llm } })(),
+    ).not.toThrow();
     expect(read({ models: { small: { ...llm, baseUrl: 'ftp://x' } } })).toThrow(
       'aiChat.models.small.baseUrl must start with http:// or https://',
     );

@@ -255,6 +255,13 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
           },
           sessionId,
         );
+        // An empty queue has nothing to start, whatever the runs of the user:
+        // it answers `undefined` before the limit is counted. It takes no lock;
+        // the read under the lock of the session below decides.
+        const any = await trx('queued_messages')
+          .where({ session_id: sessionId })
+          .first('id');
+        if (!any) throw new NothingToStart();
         await insertRun(trx, row, this.runsPerUser);
         await this.lockSession(trx, sessionId);
         const first = await trx<QueuedRow>('queued_messages')

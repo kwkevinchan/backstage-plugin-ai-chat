@@ -116,6 +116,8 @@ const DEFAULT_TOOL_TIMEOUT_SECONDS = 60;
 const DEFAULT_RUNS_PER_USER = 3;
 /** The rule of the other ids of the plugin: agents, toolsets, skills. */
 const MODEL_ID = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/i;
+/** The width of `model_call_windows.model_id`. */
+const MAX_MODEL_ID_LENGTH = 64;
 /**
  * The shortest life that `auth.backstageTokenExpiration` allows for the token
  * of a user. A run works with the token of the request that started it or
@@ -272,9 +274,9 @@ function readModels(config: Config): Map<string, ModelSettings> {
   const block = config.getOptionalConfig('models');
   for (const id of block?.keys() ?? []) {
     const path = `aiChat.models.${id}`;
-    if (!MODEL_ID.test(id)) {
+    if (!MODEL_ID.test(id) || id.length > MAX_MODEL_ID_LENGTH) {
       throw new InputError(
-        `${path}: the id must start with a letter and may only have letters, digits, - and _ between them`,
+        `${path}: the id must start with a letter, may only have letters, digits, - and _ between them, and has at most ${MAX_MODEL_ID_LENGTH} characters`,
       );
     }
     if (id === DEFAULT_MODEL_ID) {

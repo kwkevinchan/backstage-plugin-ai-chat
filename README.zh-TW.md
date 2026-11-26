@@ -105,7 +105,7 @@ aiChat:
   runTimeoutSeconds: 300 # 一次 Run 的工作時間（不含等核准）；預設 300，最大 600
   maxToolCallsPerStep: 8 # 模型一次回答的工具呼叫數，超過的被拒絕；預設 8
   readConcurrency: 4 # 同時執行的唯讀呼叫數；不是唯讀的一次一個，仍要核准；預設 4
-  toolTimeoutSeconds: 60 # 一個工具呼叫的時間，超過時結果是逾時，Run 繼續；預設 60，最大 600
+  toolTimeoutSeconds: 60 # 一個工具呼叫的時間，超過時結果是逾時、Run 繼續，但 action 可能還在執行；寫入的逾時後，這一步後面的寫入不執行；預設 60，最大 600
   runsPerUser: 3 # 一個使用者同時進行的 Run 數（含等核准），超過回 429；預設 3
   context:
     tokenBudget: 100000 # 送給模型的內容的 token 預算（估計值）；預設 100000
@@ -162,12 +162,14 @@ backend:
   設定檔裡的 Agent，系統提示是內建規則再加上該 Agent 的 `systemPrompt`；沒寫就改用全站的
   `aiChat.systemPrompt`，兩段額外說明不疊加。`toolsets` 必須是已經定義的工具組。
   Agent 的 `skills` 已經生效：決定這個 Agent 能用哪些已註冊的 Skill（沒填就是全部，`[]` 就是沒有），
-  填了不存在的 Skill id 時後端無法啟動。`toolsets`、`model`、`limits`、`planning: required` 只記在
-  Agent 上，這一版還不執行：迴圈仍用全站的上限和唯一的模型，不依 Agent 的 `toolsets` 過濾工具，也不要求先寫計畫。
+  填了不存在的 Skill id 時後端無法啟動。`model` 決定這個 Agent 的 Run 和自動標題用哪個模型：`default`（`aiChat.llm`）、
+  `aiChat.models` 的 id，或 module 加的 model client；不存在的 id 讓後端無法啟動。`toolsets`、`limits`、`planning: required`
+  只記在 Agent 上，這一版還不執行：迴圈仍用全站的上限，不依 Agent 的 `toolsets` 過濾工具，也不要求先寫計畫。
   `aiChat.skills.directories` 可載入子目錄內的 `SKILL.md`（上下文只含 id 與一句說明，由唯讀內建工具 `load_skill` 延遲載入全文；相對路徑以後端的工作目錄為基準；符號連結會跟過去，但子目錄或 `SKILL.md` 解析後在設定的目錄外面時，後端無法啟動）。值不對會讓後端無法啟動。
-- 別的 backend module 透過 `@kwkevinchan/backstage-plugin-ai-chat-node` 註冊 Agent、Hook 與 Skill（`addAgent`、`addHook`、`addSkill`），不必
+- 別的 backend module 透過 `@kwkevinchan/backstage-plugin-ai-chat-node` 註冊 Agent、Hook、Skill 與 model client（`addAgent`、`addHook`、`addSkill`、`addModelClient`），不必
   import 宿主。模組註冊的 Agent 也套同一套內建規則。設定檔和 module 用了同一個 id 時，後端無法啟動。
   `addHook` 支援 `beforeModelCall`、`beforeToolCall`、`afterToolCall` 與 `onRunEnd`。`beforeToolCall` 只能調嚴（`ask`／`deny`），不能放寬。
+  `addModelClient` 只新增模型，用了設定檔的 id 時後端無法啟動；client 用 `opts.readImage` 讀圖片的位元組；`requestsPerMinute` 的限流只套在設定檔的模型。
   Hook 丟例外時：`beforeModelCall` 讓 Run 失敗；`beforeToolCall` 讓這個工具呼叫被拒絕，Run 繼續；
   `afterToolCall` 讓這個工具結果變成錯誤，不保留原始輸出，Run 繼續；`onRunEnd` 只記 log，不影響 Run。
   這個庫的 `plugins/ai-chat-backend-module-example` 是可以照抄的範例（Agent id 是 `guide`、Skill id 是 `getting-started`），

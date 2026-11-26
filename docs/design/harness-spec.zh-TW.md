@@ -137,31 +137,31 @@
 
 ### 4.3 擴充點（X）
 
-| 編號 | 需求                                                                                                                                    | 分期       |
-| ---- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| X-01 | Agent 定義：系統提示、Toolsets、Skills、模型、上限、規劃模式。放在設定檔                                                                | P3         |
-| X-02 | `aiChatHarnessExtensionPoint`：backend module 可以加 Context provider、Skill、Hook、Agent                                               | P3         |
-| X-03 | Context provider：每一步回傳一段要加進上下文的文字，有長度上限。內建：使用者身分、綁定的 entity、目前的計畫                             | P3         |
-| X-04 | Skill：格式是 `SKILL.md`。上下文只放名稱和一句說明。`load_skill` 載入全文，唯讀，`allow`                                                | P3（完成） |
-| X-05 | Hook 的時機：`beforeModelCall`、`beforeToolCall`、`afterToolCall`、`onRunEnd`。`beforeToolCall` 可以拒絕或把政策調嚴，不能調鬆          | P3（完成） |
-| X-06 | `update_plan`：模型寫入或更新計畫。計畫是一筆 Item，每一步放進上下文，畫面顯示成清單                                                    | P3         |
-| X-07 | Agent 的 `planning: required`：第一步只提供 `update_plan`                                                                               | P3         |
-| X-08 | TechDocs 搜尋和讀取做成 action，透過 Backstage Search，用使用者的身分。回答要附來源連結                                                 | P3（完成） |
-| X-09 | 模型轉接可以替換。每個模型可以宣告能力，例如是否支援平行工具呼叫、是否能讀圖片（圖片這一項在 PI，見 IN-05；目前的單一模型設定是 `llm`） | P3         |
+| 編號 | 需求                                                                                                                           | 分期       |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------ | ---------- |
+| X-01 | Agent 定義：系統提示、Toolsets、Skills、模型、上限、規劃模式。放在設定檔                                                       | P3         |
+| X-02 | `aiChatHarnessExtensionPoint`：backend module 可以加 Context provider、Skill、Hook、Agent                                      | P3         |
+| X-03 | Context provider：每一步回傳一段要加進上下文的文字，有長度上限。內建：使用者身分、綁定的 entity、目前的計畫                    | P3         |
+| X-04 | Skill：格式是 `SKILL.md`。上下文只放名稱和一句說明。`load_skill` 載入全文，唯讀，`allow`                                       | P3（完成） |
+| X-05 | Hook 的時機：`beforeModelCall`、`beforeToolCall`、`afterToolCall`、`onRunEnd`。`beforeToolCall` 可以拒絕或把政策調嚴，不能調鬆 | P3（完成） |
+| X-06 | `update_plan`：模型寫入或更新計畫。計畫是一筆 Item，每一步放進上下文，畫面顯示成清單                                           | P3         |
+| X-07 | Agent 的 `planning: required`：第一步只提供 `update_plan`                                                                      | P3         |
+| X-08 | TechDocs 搜尋和讀取做成 action，透過 Backstage Search，用使用者的身分。回答要附來源連結                                        | P3（完成） |
+| X-09 | 模型轉接可以替換。每個模型可以宣告能力，例如是否支援平行工具呼叫、是否能讀圖片（圖片這一項在 PI，見 IN-05）                    | P3         |
 
 ### 4.4 平行（P）
 
-| 編號 | 需求                                                                                | 分期                   |
-| ---- | ----------------------------------------------------------------------------------- | ---------------------- |
-| P-01 | 模型在一步裡要求多個工具時，唯讀的同時執行，同時數有上限（預設 4）                  | P3                     |
-| P-02 | 每個工具呼叫有逾時。失敗或逾時是一筆結果，不讓整步失敗                              | P3                     |
-| P-03 | 結果照模型原本的順序交回                                                            | P3                     |
-| P-04 | 同一步有多個要核准的呼叫時，每個各自決定。全部決定後，核准的照順序一個一個執行      | P1（完成；PR #1 已有） |
-| P-05 | 上限：每步的工具呼叫數（預設 8）、每個人同時進行的 Run 數（預設 3）                 | P3                     |
-| P-06 | 模型呼叫有全站共用的限流，配合 gateway 的速率限制                                   | P3                     |
-| P-07 | `delegate`：啟動最多 3 個子任務。每個有自己的上下文和上限，只有唯讀工具，不能再分派 | 不做                   |
-| P-08 | 子任務只把摘要和來源交回主對話。過程存起來，畫面可以點開看                          | 不做                   |
-| P-09 | 子任務的模型呼叫和工具呼叫算在主 Run 的上限裡                                       | 不做                   |
+| 編號 | 需求                                                                                                           | 分期                   |
+| ---- | -------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| P-01 | 模型在一步裡要求多個工具時，唯讀的同時執行，同時數有上限（預設 4）                                             | P3                     |
+| P-02 | 每個工具呼叫有逾時。失敗或逾時是一筆結果，不讓整步失敗                                                         | P3                     |
+| P-03 | 結果照模型原本的順序交回                                                                                       | P3                     |
+| P-04 | 同一步有多個要核准的呼叫時，每個各自決定。全部決定後，核准的寫入呼叫照順序一個一個執行；唯讀的照 D-09 同時執行 | P1（完成；PR #1 已有） |
+| P-05 | 上限：每步的工具呼叫數（預設 8）、每個人同時進行的 Run 數（預設 3）                                            | P3                     |
+| P-06 | 模型呼叫有全站共用的限流，配合 gateway 的速率限制                                                              | P3                     |
+| P-07 | `delegate`：啟動最多 3 個子任務。每個有自己的上下文和上限，只有唯讀工具，不能再分派                            | 不做                   |
+| P-08 | 子任務只把摘要和來源交回主對話。過程存起來，畫面可以點開看                                                     | 不做                   |
+| P-09 | 子任務的模型呼叫和工具呼叫算在主 Run 的上限裡                                                                  | 不做                   |
 
 ### 4.5 執行界線（S）
 
@@ -314,21 +314,25 @@ Item 的 `kind`：
 
 ```yaml
 aiChat:
-  llm:
-    images: true # 目前的單一模型能不能讀圖片，預設 false（IN-05）。`models` 區塊是 P3
-  models:
-    default:
-      baseUrl: https://llm.example.com/v1
-      apiKey: ${AI_CHAT_API_KEY}
-      model: some-model
-      parallelToolCalls: true
-  limits:
-    maxSteps: 10
-    maxToolCallsPerStep: 8
-    maxToolCallsPerRun: 30
-    runTimeoutSeconds: 300
-    readConcurrency: 4
-    runsPerUser: 3
+  llm: # 模型 default：沒寫 model 的 Agent 用它
+    baseUrl: https://llm.example.com/v1
+    apiKey: ${AI_CHAT_API_KEY}
+    model: some-model
+    images: true # 能不能讀圖片，預設 false（IN-05）
+    parallelToolCalls: true # 請伺服器允許一次多個工具呼叫，預設 false（X-09）
+    requestsPerMinute: 60 # 所有後端合計每分鐘的呼叫數，沒寫就不限（P-06）
+  models: # 其他模型，欄位和 llm 相同；Agent 用 model 指定。id 不能是 default
+    small:
+      baseUrl: https://small-llm.example.com/v1
+      apiKey: ${AI_CHAT_SMALL_API_KEY}
+      model: some-small-model
+  maxTurns: 10
+  maxToolCallsPerStep: 8
+  maxToolCallsPerRun: 30
+  runTimeoutSeconds: 300
+  readConcurrency: 4
+  toolTimeoutSeconds: 60
+  runsPerUser: 3
   context:
     tokenBudget: 24000
     keepRecentSteps: 6
@@ -376,7 +380,7 @@ aiChat:
     days: 90
 ```
 
-各區塊生效的分期：`llm`、`limits`、`context`、`toolsets`、`policy` 是 P1。`input` 和 `llm` 的 `images` 是 PI。`sharing`、`retention` 是 P2。`models`、`agents`、`skills` 是 P3。
+各區塊生效的分期：`llm`、`maxTurns`、`maxToolCallsPerRun`、`runTimeoutSeconds`、`context`、`toolsets`、`policy` 是 P1。`input` 和 `llm` 的 `images` 是 PI。`sharing`、`retention` 是 P2。`models`、`parallelToolCalls`、`requestsPerMinute`、`maxToolCallsPerStep`、`readConcurrency`、`toolTimeoutSeconds`、`runsPerUser`、`agents`、`skills` 是 P3。
 
 ## 7. 擴充點介面
 

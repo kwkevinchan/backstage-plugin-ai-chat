@@ -110,8 +110,10 @@ export interface Config {
     /**
      * Seconds one tool call may take. A call that takes longer gets a timeout
      * result, and the model gets it in the next step; the run goes on. The
-     * run still ends at `runTimeoutSeconds`, also while a call runs. At most
-     * 600. Defaults to 60.
+     * action may still be running then: the later read-only calls do not wait
+     * for it, and the later calls of that answer that are not read-only do
+     * not run. The run still ends at `runTimeoutSeconds`, also while a call
+     * runs. At most 600. Defaults to 60.
      */
     toolTimeoutSeconds?: number;
     /**

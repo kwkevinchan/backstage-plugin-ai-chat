@@ -897,7 +897,7 @@ flowchart LR
   - 擴充點與模型：
     - `addModelClient` 和 `ModelClient` 等型別由核心定義，`ai-chat-node` 重新匯出。範例 module 只 import `ai-chat-node`。
     - 模組註冊的 id 和設定檔的模型（`default` 或 `aiChat.models` 的 id）相同、同一個 id 註冊兩次、id 寫法不對、client 沒有 `stream` 或 `capabilities`：丟 `InputError`，後端啟動失敗。
-    - `aiChat.models.default`、模型 id 寫法不對、`baseUrl` 不是 `http(s)://`、`requestsPerMinute` 不是正整數：丟 `InputError`。
+    - `aiChat.models.default`、模型 id 寫法不對或超過 64 字元、`baseUrl` 不是 `http(s)://`、`requestsPerMinute` 不是正整數：丟 `InputError`。
     - Agent 的 `model` 不是已知的模型 id：丟 `InputError`。
     - Agent 指定 `model` 時，這個 Agent 的 Run 呼叫那個 client，其他 Agent 呼叫 `default`。自動標題也用 Agent 的模型。
     - 迴圈照 Run 的 client 的 `capabilities.images` 決定給不給圖片：`images: false` 的模型拿到的是一行說明，不是圖片（IN-05）。
@@ -915,22 +915,23 @@ flowchart LR
     - 使用者停止時：已結束的呼叫結果照順序寫入（H-06），還沒結束的不寫，不再開始新的呼叫，Run 是 `cancelled`。
     - Run 的 `runTimeoutSeconds` 先到：一樣只寫已結束的結果，Run 是 `completed`、`endReason` 是 `timeout`。
     - 一批結束時（包含因為例外離開），還在跑的呼叫的 `signal` 都會中止。
-    - 不是唯讀的工具逾時：寫成 `timeout`，訊息說它可能已經做了變更；不重新執行。
+    - 不是唯讀的工具逾時：寫成 `timeout`，訊息說它可能已經做了變更；不重新執行。這一步後面的寫入呼叫不開始，寫成 `denied`，訊息說前一個改動逾時、可能還在執行；後面的唯讀呼叫照常執行。
   - 上限：
     - 一步有十個呼叫、`maxToolCallsPerStep` 是 8：前八個照常處理，後兩個 `denied`（`tool call limit per step`），十個都算進 `toolCallsUsed`。
     - 每人同時的 Run：同一個使用者已有 `runsPerUser` 個進行中（`running` 或 `waiting_approval`）的 Run 時，送出訊息回 429（`TooManyActiveRuns`），不寫訊息、不建立 Run；別的使用者不受影響；一個 Run 結束後又可以送出。
-    - 排隊的訊息遇到上限時不送出，佇列暫停，不記錯誤；使用者按「繼續」回 429。
+    - 排隊的訊息遇到上限時不送出，佇列暫停，不記錯誤；使用者按「繼續」回 429。佇列是空的時候按「繼續」照舊回 204，不檢查上限。
     - 兩台後端共用上限：兩台各自送出，合計不超過 `runsPerUser`。PostgreSQL 上兩條連線同時建立 Run，成功的數量剛好是上限。
   - 限流：
     - `requestsPerMinute` 是 1 的模型：同一分鐘的第二次呼叫（不論來自哪一台後端）等到下一分鐘才送出；等的時候 Run 被停止，就不送出，Run 是 `cancelled`。
     - PostgreSQL 上兩條連線同時要額度，拿到的數量剛好是上限。
     - 沒有 `requestsPerMinute` 的模型不經過限流器。
-- **規格沒寫、實作選定的地方**：
+- **實作選定的地方**（規格第 6、7 節與 P-04、X-09 已同步）：
   - 擴充點的方法叫 `addModelClient`（`add`，不是 `set`）：它和 `addAgent`、`addSkill` 一樣只新增，不覆蓋。設定檔的模型帶著管理員寫的金鑰和 `images`（資料會不會送出組織），模組不能換掉它；同一個 id 重複就啟動失敗。
-  - `aiChat.llm` 就是 id `default` 的模型。`aiChat.models` 只放其他模型，寫 `default` 算重複。
+  - `aiChat.llm` 就是 id `default` 的模型。`aiChat.models` 只放其他模型，寫 `default` 算重複。模型 id 最多 64 字元，和 `model_call_windows.model_id` 的欄寬一樣。
   - 模組怎麼拿到圖片的位元組：`ModelClient.stream` 的 `opts.readImage(image)`，回傳 `{ mediaType, bytes }`，圖片不在了回傳 `undefined`。宿主給每個 client 都包一層來提供它，只讀這段 Session 的附件。內建的 OpenAI 相容 client 照舊自己讀 `AttachmentStore`。
-  - 設定的上限沿用現有的平鋪寫法（`aiChat.maxToolCallsPerStep`、`aiChat.readConcurrency`、`aiChat.toolTimeoutSeconds`、`aiChat.runsPerUser`），和 `maxTurns`、`maxToolCallsPerRun` 一樣，不是規格第 6 節的 `limits` 區塊。
+  - 設定的上限沿用現有的平鋪寫法（`aiChat.maxToolCallsPerStep`、`aiChat.readConcurrency`、`aiChat.toolTimeoutSeconds`、`aiChat.runsPerUser`），和 `maxTurns`、`maxToolCallsPerRun` 一樣；規格第 6 節的範例已改成這個寫法。
   - `toolTimeoutSeconds` 預設 60，範圍 1 到 600。它和 `runTimeoutSeconds` 的關係：每個呼叫的 `signal` 在兩者中較早的時間中止。工具逾時先到，這個呼叫是 `timeout`，Run 繼續；Run 的截止時間先到，Run 結束成 `completed`、`endReason: 'timeout'`，還沒結束的呼叫沒有結果（和 P3-06 一樣）。`toolTimeoutSeconds` 比 `runTimeoutSeconds` 長時，實際只有 Run 的截止時間有效。等核准的時間不算。
+  - 逾時的呼叫可能還在執行：Backstage 的 actions service 不收 `signal`，迴圈只是不再等它。之後的唯讀呼叫不等它。之後的寫入呼叫這一步不執行（D-09：寫的先後順序有意義），寫成 `denied`；看紀錄判斷，所以換一台後端接手也一樣。
   - 唯讀呼叫的 `afterToolCall` 在它的工具結束後就執行，所以同一批不同呼叫的 Hook 可能同時在跑。寫入的順序不受影響。
   - `parallelToolCalls` 是模型宣告的能力：迴圈不管它都會同時執行唯讀呼叫（D-09）。它只決定請求帶不帶 `parallel_tool_calls: true`；不支援這個欄位的伺服器用預設的 `false`。
   - 每人同時的 Run 數包含 `waiting_approval`（H-03 的「進行中」）。兩台後端的計數用資料庫：PostgreSQL 在建立 Run 的 transaction 開頭先取這個使用者的 advisory lock（`pg_advisory_xact_lock`），再數、再新增；SQLite 只有一條連線，transaction 本來就一個接一個。這個鎖在任何列鎖之前取，其他 transaction 不取它，所以不會跟第 13.8 節的鎖順序形成循環。

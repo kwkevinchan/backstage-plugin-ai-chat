@@ -45,9 +45,13 @@ type Batch = { calls: ToolCallItem[]; concurrent: boolean };
  * call had a result.
  */
 type Outcome =
-  | { kind: 'write'; draft: ItemDraft }
+  | { kind: 'write'; draft: ItemDraft; timedOut?: true }
   | { kind: 'skip' }
   | { kind: 'aborted' };
+
+/** The result of a change that does not run after an earlier one went over its time. */
+const AFTER_WRITE_TIMEOUT_MESSAGE =
+  'Not run: an earlier change of this step did not answer in time and may still be running.';
 
 /** The largest delay `setTimeout` takes. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
@@ -66,6 +70,10 @@ const MAX_TIMER_MS = 2 ** 31 - 1;
  * - The results are written in the order of `position`: a result is written
  *   once the calls before it have theirs, so a call that ends early waits for
  *   the ones before it.
+ * - A call that is not read-only and goes over its time may still be making
+ *   its change. The calls of the step that are not read-only and come after
+ *   it do not run: they get a `denied` result that says so. Read-only calls
+ *   run as usual and do not wait for it.
  * - A tool that is not read-only gets a `tool_started` item before it runs, so
  *   a backend that takes over after a crash never runs it twice.
  * - An interrupted call (started, no result) gets an `unknown` result. It does
@@ -119,6 +127,9 @@ export async function* executeTools(
     for (const item of written) yield { type: 'item.completed', item };
   }
 
+  // A change that went over its time may still run: the later changes of the
+  // step must not overtake it (D-09).
+  let writeTimedOut = writeTimedOutIn(items, action.calls);
   for (const batch of batchesOf(action.calls)) {
     if (req.signal.aborted) return undefined;
     if (batch.concurrent) {
@@ -128,6 +139,15 @@ export async function* executeTools(
     }
     const [call] = batch.calls;
     const decision = decisionFor(items, call);
+    if (decision === 'allow' && writeTimedOut) {
+      yield* write({
+        kind: 'tool_result',
+        callId: call.callId,
+        status: 'denied',
+        message: AFTER_WRITE_TIMEOUT_MESSAGE,
+      });
+      continue;
+    }
     if (decision === 'allow') {
       // The user may have asked to stop while an earlier call ran. Ask
       // before each call that is not read-only, so no more of them start.
@@ -139,9 +159,41 @@ export async function* executeTools(
     }
     const outcome = await settleCall(deps, req, call, decision);
     if (outcome.kind === 'aborted') return undefined;
-    if (outcome.kind === 'write') yield* write(outcome.draft);
+    if (outcome.kind === 'write') {
+      if (outcome.timedOut) writeTimedOut = true;
+      yield* write(outcome.draft);
+    }
   }
   return undefined;
+}
+
+/**
+ * Whether a call of the step of `calls` that is not read-only already has a
+ * `timeout` result in the log: a run that goes on after a takeover keeps the
+ * rule of one step.
+ */
+function writeTimedOutIn(
+  items: readonly Item[],
+  calls: readonly ToolCallItem[],
+): boolean {
+  const [first] = calls;
+  if (!first) return false;
+  const writes = new Set(
+    items.flatMap(item =>
+      item.kind === 'tool_call' &&
+      item.runId === first.runId &&
+      item.step === first.step &&
+      item.readOnly !== true
+        ? [item.callId]
+        : [],
+    ),
+  );
+  return items.some(
+    item =>
+      item.kind === 'tool_result' &&
+      item.status === 'timeout' &&
+      writes.has(item.callId),
+  );
 }
 
 /**
@@ -251,7 +303,11 @@ async function settleCall(
   const raw = await runInTime(deps, req, call);
   if (!raw) return { kind: 'aborted' };
   const output = await runAfterToolCall(deps.extensions, call, raw, req.signal);
-  return { kind: 'write', draft: resultOf(call, output) };
+  return {
+    kind: 'write',
+    draft: resultOf(call, output),
+    ...(raw.status === 'timeout' && { timedOut: true as const }),
+  };
 }
 
 /**
