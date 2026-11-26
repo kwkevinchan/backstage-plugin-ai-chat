@@ -386,6 +386,10 @@ of the chat, above the messages), only the ones that you define.
   use are not offered, the toolset is not listed, and a session cannot switch
   it on. Without the permission framework (`permission.enabled: false`, the
   default of Backstage) everyone may use every toolset.
+- **Before you upgrade** with the permission framework on and a default-deny
+  policy: allow `ai-chat.toolset.use` (or return CONDITIONAL). Otherwise the
+  chat has no tools after the upgrade, and a session made in that time stores
+  an empty list of toolsets; the user has to switch them on again.
 
 A permission policy narrows the toolsets with the `isToolset` condition:
 
@@ -399,9 +403,12 @@ import {
   createAiChatToolsetConditionalDecision,
 } from '@kwkevinchan/backstage-plugin-ai-chat-backend';
 
-// in handle(request, user) of your PermissionPolicy
+// in handle(request, user) of your PermissionPolicy. `user.info` is
+// deprecated; `this.userInfo` is `coreServices.userInfo`, which the module of
+// the policy passes to it.
 if (isResourcePermission(request.permission, 'ai-chat-toolset')) {
-  if (user?.info.ownershipEntityRefs.includes('group:default/sre')) {
+  const info = user && (await this.userInfo.getUserInfo(user.credentials));
+  if (info?.ownershipEntityRefs.includes('group:default/sre')) {
     return { result: AuthorizeResult.ALLOW };
   }
   return createAiChatToolsetConditionalDecision(

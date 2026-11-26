@@ -163,6 +163,8 @@ backend:
   對話也不能新開它。沒有開 permission framework 時（Backstage 預設 `permission.enabled: false`），每個人都能用全部的工具組。
   policy 用 `aiChatToolsetConditions.isToolset({ toolsetIds })` 和 `createAiChatToolsetConditionalDecision`
   （從 `@kwkevinchan/backstage-plugin-ai-chat-backend` 匯入）限定工具組，範例見英文 README。
+- **升級前**：有開 permission framework、policy 預設拒絕的安裝，要先允許 `ai-chat.toolset.use`（或回 CONDITIONAL），
+  不然升級後對話沒有任何工具；這段期間新建的對話存下的是空的工具組，之後要由使用者自己打開。
 - **輸出上限和遮蔽**：`toolOutput` 的 `redact` 列出的欄位，在任何深度都換成 `"[redacted]"`，先遮蔽再裁切；
   遮蔽掉的值不存、不串流、不送給模型。超過 100 層的輸出不保留，結果是錯誤。`maxOutputChars` 是比
   `maxToolOutputChars` 小的上限（至少 100）。樣式重疊時，上限取最小的，欄位全部都遮蔽。`update_plan`、
