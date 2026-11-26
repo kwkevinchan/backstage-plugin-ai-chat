@@ -151,8 +151,11 @@ backend:
   設定檔裡的 Agent，系統提示是內建規則再加上該 Agent 的 `systemPrompt`；沒寫就改用全站的
   `aiChat.systemPrompt`，兩段額外說明不疊加。`toolsets` 必須是已經定義的工具組。
   Agent 的 `skills` 已經生效：決定這個 Agent 能用哪些已註冊的 Skill（沒填就是全部，`[]` 就是沒有），
-  填了不存在的 Skill id 時後端無法啟動。`toolsets`、`model`、`limits`、`planning: required` 只記在
-  Agent 上，這一版還不執行：迴圈仍用全站的上限和唯一的模型，不依 Agent 的 `toolsets` 過濾工具，也不要求先寫計畫。
+  填了不存在的 Skill id 時後端無法啟動。`planning: required` 已經生效：這個 Agent 每個 Run 的第一步只拿得到
+  `update_plan`，先寫計畫再做事。`toolsets`、`model`、`limits` 只記在
+  Agent 上，這一版還不執行：迴圈仍用全站的上限和唯一的模型，不依 Agent 的 `toolsets` 過濾工具。
+- **計畫**：每個 Agent 都有唯讀的內建工具 `update_plan`（預設 `allow`，`policy` 設成 `update_plan: deny` 就關掉）。
+  每次呼叫取代整份計畫（最多 20 項，狀態是 `pending`、`in_progress`、`completed`），目前的計畫每一步都放進上下文，畫面把每次更新顯示成清單。
   `aiChat.skills.directories` 可載入子目錄內的 `SKILL.md`（上下文只含 id 與一句說明，由唯讀內建工具 `load_skill` 延遲載入全文；相對路徑以後端的工作目錄為基準；符號連結會跟過去，但子目錄或 `SKILL.md` 解析後在設定的目錄外面時，後端無法啟動）。值不對會讓後端無法啟動。
 - 別的 backend module 透過 `@kwkevinchan/backstage-plugin-ai-chat-node` 註冊 Agent、Hook 與 Skill（`addAgent`、`addHook`、`addSkill`），不必
   import 宿主。模組註冊的 Agent 也套同一套內建規則。設定檔和 module 用了同一個 id 時，後端無法啟動。

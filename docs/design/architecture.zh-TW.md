@@ -123,8 +123,9 @@ packages/ai-chat-harness/src/
       callModel.ts
       executeTools.ts
       summarize.ts             用模型產生摘要，寫成 summary Item
+      plan.ts                  內建 update_plan：描述、驗證、執行、上下文裡的計畫（X-06、X-07）
+    plan.ts                    readCurrentPlan()：目前的計畫，摘要涵蓋了也讀得到
     events.ts                  HarnessEvent、RunOutcome
-    （還沒有：builtins/（updatePlan、loadSkill 是 P3；原定的 delegate 不做）、extensions 的內容（P3））
   testing/                     另一個入口：ai-chat-harness/testing
     ScriptedModel.ts           照劇本回答的假模型
     InMemoryItemLog.ts
@@ -298,6 +299,8 @@ export interface ItemLog {
     sessionId: string,
     opts?: { afterSeq?: number; fromLatestSummary?: boolean },
   ): Promise<Item[]>;
+  /** 最後一筆 `plan_update`，不受摘要影響；沒有就是 undefined。它的計畫就是目前的計畫。 */
+  latestPlanUpdate(sessionId: string): Promise<PlanUpdateItem | undefined>;
   /**
    * 一次寫入多筆，序號連續（Session 的第一筆是 1）。
    * - `dedupeKeyOf` 和紀錄裡的 Item 相同，或同一批裡有兩筆相同，都丟 DuplicateItem，整批不寫入。
@@ -1135,7 +1138,7 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 
 重新整理後接回（A-07，`GET /sessions/:id/stream`）：重送的 `approval` Item 前面先補一個 `tool-approval-request`（`approvalId` 等於 `callId`），不然 SDK 找不到那個決定的 part 而丟錯；佇列裡屬於已重送的 Step 的 `step.started`、`step.ended` 略過，不多送空的 Step。Step 的編號取重送的 `tool_call` 的 `step` 和重送時開的 Step 數兩者的較大者，所以只有 `agent_message` 的 Step 也算已重送（`agent_message` 本身沒有 `step` 欄位）。先訂閱 Run 的事件，再讀紀錄，所以兩者之間寫入的 Item 不會漏；紀錄裡已有的 Item 再來一次時，presenter 用 `seq` 略過。`openDraft` 會帶上這輪迴圈已發出 `item.completed` 的最大 `seq`（核准後接續的 Run 會帶入當時既有的最大 `seq`），如果讀到的紀錄已經有比它大的 `agent_message`（代表 `append` 已寫入、`item.completed` 還沒發出），就不補 `resumeText` 前綴，避免重複送出同一段文字。回應先送 `start`（同一個 `messageId`）和 `data-run`，從目前 Run 的第一個 Item（包含它的 `user_message`）重送，再接著送新的事件。已完成的 `agent_message` 整段送（`text-start`、一個 `text-delta`、`text-end`），不送缺開頭的 `text-delta`（`useChat` 會報錯）。這一台還有沒寫進紀錄的文字時，重送之後補 `text-start` 和訂閱當下已累積的文字，之後的 `text-delta` 只送新的部分；因為接回端點的 presenter 設為 `typing: false`，這一台接回之後同一個 Run 的下一則回答不逐字顯示，而是完成時整段送出。別台沒有逐字片段，每秒以 `afterSeq` 增量讀一次紀錄（遇到短暫讀取錯誤記 warn 並重試，連續失敗 3 次才結束；只有在 Run 變成 `waiting_approval` 要計算待決定呼叫時才讀一次完整紀錄），只送新的已完成 Item，且因為別台拿不到 `step.started`／`step.ended`，後續項目都會留在同一個開啟的 step 裡，沒有 step 邊界。另外別台的 `failed`／`expired` 沒有錯誤文字，結束訊息一律是 `"The run stopped."`。只送缺的 Item 時，`useChat` 會蓋掉已載入的部分訊息。`afterSeq` 給不用 `useChat` 的用戶端當下限（略過的 Item 的事件也不會再來）。Run 是 `running` 時才串流（這一台或別台）；`waiting_approval`、已結束、沒有 Run 回 204（停在核准上的 Session 開著串流，`useChat` 會停在 `streaming`，按核准不會自動送出）。客戶端離開只取消訂閱或停止輪詢，Run 照跑（A-06）。
 
-`data-plan` 的「後送的取代先送的」只在同一則訊息裡成立。前一個 Run 的計畫留在舊訊息，畫面取最新的。
+`data-plan` 的「後送的取代先送的」只在同一則訊息裡成立。前一個 Run 的計畫留在舊訊息。畫面不顯示 `data-plan`：每次 `update_plan` 的呼叫由 `ui/PlanCard.tsx` 用呼叫的參數畫成清單，留在它出現的位置。
 
 每一列都用 `ai@7.0.166` 的解析器和 `useChat` 實測過（失敗那一列的順序也測過，見 protocol-check 3.4）。細節在 [protocol-check.zh-TW.md](protocol-check.zh-TW.md)。協定只出現在這一個檔案；要換協定，改這個檔案和前端對應的 adapter。
 
@@ -1184,7 +1187,8 @@ plugins/ai-chat/src/
     AiChatPanel.tsx         側邊面板。舊系統由 app 掛在路由外面
     ToolsetPanel.tsx        自己畫（assistant-ui 的模型裡沒有工具組）
     ToolCallCard.tsx        吃工具元件的 props：核准、拒絕、誰決定的、等待中、失敗
-    ShareDialog.tsx（P2）  SharedBanner.tsx（P2）  PlanPanel.tsx（P3）
+    PlanCard.tsx            update_plan 的工具元件（tools.by_name）：把呼叫的參數畫成清單
+    ShareDialog.tsx（P2）  SharedBanner.tsx（P2）
   alpha.tsx                 新 frontend system 的 extension（頁面、API、app root 的面板）
   plugin.ts                 舊 frontend system
 ```

@@ -53,7 +53,7 @@ describe('the plan of an update_plan call', () => {
     const steps = within(list).getAllByRole('listitem');
     expect(steps.map(step => step.textContent)).toEqual([
       '✓Find the failed deploymentDone',
-      '◐Read its logsIn progress',
+      '→Read its logsIn progress',
       '○Restart the serviceTo do',
     ]);
     // The output of the call is not shown: the list is the result.

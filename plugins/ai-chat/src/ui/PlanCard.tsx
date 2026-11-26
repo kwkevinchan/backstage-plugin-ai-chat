@@ -28,7 +28,7 @@ const STEP: Record<
   { mark: string; label: string; tone?: 'success' | 'info' }
 > = {
   pending: { mark: '○', label: 'To do' },
-  in_progress: { mark: '◐', label: 'In progress', tone: 'info' },
+  in_progress: { mark: '→', label: 'In progress', tone: 'info' },
   completed: { mark: '✓', label: 'Done', tone: 'success' },
 };
 
