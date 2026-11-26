@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { KeyboardEvent } from 'react';
+import { useMemo, type KeyboardEvent } from 'react';
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
@@ -23,10 +23,18 @@ import {
 } from '@assistant-ui/react';
 import { Button } from '@backstage/ui';
 import { MAX_MESSAGE_LENGTH } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { AttachmentSource } from '../adapters/assistantUi/attachmentAdapter';
 import { useSessionRuntime } from '../adapters/assistantUi/sessionRuntime';
+import type { OutgoingMessage } from '../domain/types';
+import {
+  AttachButton,
+  AttachmentRejections,
+  DraftImages,
+  RejectionNotes,
+} from './Attachments';
 import { cx } from './styles';
 
-type Handler = (text: string) => Promise<boolean | void> | void;
+type Handler = (message: OutgoingMessage) => Promise<boolean | void> | void;
 
 export interface ComposerProps {
   /** Shown above the box. */
@@ -39,6 +47,8 @@ export interface ComposerProps {
   canQueue?: boolean;
   /** Shows Stop, which stops the run through the runtime. */
   canStop?: boolean;
+  /** Why images were not taken; give the same notes to the attachments of the runtime. */
+  rejections?: RejectionNotes;
 }
 
 const DEFAULT_PLACEHOLDER =
@@ -54,17 +64,26 @@ export function Composer(props: ComposerProps) {
   const aui = useAui();
   // The primitive buttons pass `disabled` to their child, which the Button of
   // @backstage/ui (React Aria) does not read: it takes `isDisabled`.
-  const canSend = useAuiState(s => s.composer.canSend);
+  // A message waits for its images: assistant-ui would send it as a
+  // submission, which an inserted or queued message leaves in the thread.
+  const uploading = useAuiState(s =>
+    s.composer.attachments.some(a => a.status.type === 'running'),
+  );
+  const canSend = useAuiState(s => s.composer.canSend) && !uploading;
   const canCancel = useAuiState(s => s.composer.canCancel);
 
   const enqueue = () => {
-    if (aui.composer.getState().canSend) aui.composer.send({ steer: false });
+    if (canSend) aui.composer.send({ steer: false });
   };
   // The default of assistant-ui steers on Ctrl or Cmd with Enter as well.
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter') return;
     // keyCode 229: some browsers end a composition with this Enter.
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
+      return;
+    }
+    if (uploading && !event.shiftKey) {
+      event.preventDefault();
       return;
     }
     if (!(event.ctrlKey || event.metaKey)) return;
@@ -78,59 +97,73 @@ export function Composer(props: ComposerProps) {
       {props.hint && (
         <div className={cx('chat-composer-hint')}>{props.hint}</div>
       )}
-      <ComposerPrimitive.Root className={cx('chat-composer')}>
-        <ComposerPrimitive.Input
-          className={cx('chat-composer-input')}
-          aria-label="Message"
-          placeholder={props.placeholder ?? DEFAULT_PLACEHOLDER}
-          minRows={2}
-          maxRows={6}
-          maxLength={MAX_MESSAGE_LENGTH}
-          // Escape does not stop a run; only the Stop button does.
-          cancelOnEscape={false}
-          onKeyDown={onKeyDown}
-        />
-        {props.canStop && (
-          <ComposerPrimitive.Cancel asChild>
-            <Button variant="secondary" isDisabled={!canCancel}>
-              Stop
+      <ComposerPrimitive.AttachmentDropzone className={cx('chat-composer-box')}>
+        {props.rejections && <AttachmentRejections notes={props.rejections} />}
+        <DraftImages />
+        <ComposerPrimitive.Root className={cx('chat-composer')}>
+          <AttachButton />
+          <ComposerPrimitive.Input
+            className={cx('chat-composer-input')}
+            aria-label="Message"
+            placeholder={props.placeholder ?? DEFAULT_PLACEHOLDER}
+            minRows={2}
+            maxRows={6}
+            maxLength={MAX_MESSAGE_LENGTH}
+            // Escape does not stop a run; only the Stop button does.
+            cancelOnEscape={false}
+            onKeyDown={onKeyDown}
+          />
+          {props.canStop && (
+            <ComposerPrimitive.Cancel asChild>
+              <Button variant="secondary" isDisabled={!canCancel}>
+                Stop
+              </Button>
+            </ComposerPrimitive.Cancel>
+          )}
+          {props.canQueue && (
+            <Button variant="secondary" isDisabled={!canSend} onPress={enqueue}>
+              Queue
             </Button>
-          </ComposerPrimitive.Cancel>
-        )}
-        {props.canQueue && (
-          <Button variant="secondary" isDisabled={!canSend} onPress={enqueue}>
-            Queue
-          </Button>
-        )}
-        <ComposerPrimitive.Send asChild>
-          <Button variant="primary" isDisabled={!canSend}>
-            {props.sendLabel ?? 'Send'}
-          </Button>
-        </ComposerPrimitive.Send>
-      </ComposerPrimitive.Root>
+          )}
+          <ComposerPrimitive.Send asChild>
+            <Button variant="primary" isDisabled={!canSend}>
+              {props.sendLabel ?? 'Send'}
+            </Button>
+          </ComposerPrimitive.Send>
+        </ComposerPrimitive.Root>
+      </ComposerPrimitive.AttachmentDropzone>
     </>
   );
 }
 
 export interface DraftComposerProps {
-  /** Resolves with `false` when the message was not sent: the text stays in the box. */
+  /** Resolves with `false` when the message was not sent: it stays in the box. */
   onSend: Handler;
   disabled: boolean;
+  /** The uploads; without it there is no attach button. */
+  attachments?: AttachmentSource;
 }
 
 const NO_MESSAGES: never[] = [];
 
 /** The input box of a session that does not exist yet: the first message creates it. */
 export function DraftComposer(props: DraftComposerProps) {
+  const rejections = useMemo(() => new RejectionNotes(), []);
+  const { attachments } = props;
+  const withNotes = useMemo(
+    () => attachments && { ...attachments, onAdd: rejections.begin },
+    [attachments, rejections],
+  );
   const runtime = useSessionRuntime({
     messages: NO_MESSAGES,
     isRunning: false,
     isSendDisabled: props.disabled,
     onSend: props.onSend,
+    attachments: withNotes,
   });
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <Composer />
+      <Composer rejections={rejections} />
     </AssistantRuntimeProvider>
   );
 }

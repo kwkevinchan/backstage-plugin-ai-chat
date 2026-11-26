@@ -36,6 +36,7 @@ import {
   RUN_NOT_RUNNING_TEXT,
   useSessionChat,
 } from '../../application/useSessionChat';
+import { toCompleteAttachment } from './attachmentAdapter';
 import { insertedItemId, useQueueAdapter } from './queueAdapter';
 
 // The contract of the queue adapter: each method of the queue of assistant-ui
@@ -55,11 +56,18 @@ const queueOf = (...texts: string[]) => ({
   paused: false,
 });
 
-const message = (text: string) =>
+const image = {
+  id: 'img-1',
+  mediaType: 'image/png',
+  name: 'dot.png',
+  size: 70,
+};
+
+const message = (text: string, attachments = [] as (typeof image)[]) =>
   ({
     role: 'user',
-    content: [{ type: 'text', text }],
-    attachments: [],
+    content: text ? [{ type: 'text', text }] : [],
+    attachments: attachments.map(toCompleteAttachment),
     createdAt: new Date(),
     parentId: null,
     sourceId: null,
@@ -127,15 +135,16 @@ describe('queue adapter: the two lanes', () => {
     expect(queue.laneOf('nothing')).toBeUndefined();
   });
 
-  it('counts the images of an item', () => {
+  it('gives the images of an item', () => {
     const d = waitingDetail();
-    d.queue.items[0].attachments = [
+    const images = [
       { id: 'i1', mediaType: 'image/png', name: 'a.png', size: 1 },
       { id: 'i2', mediaType: 'image/png', name: 'b.png', size: 1 },
     ];
+    d.queue.items[0].attachments = images;
     const { result } = setup(d);
-    expect(result.current.queue.imageCountOf('q1')).toBe(2);
-    expect(result.current.queue.imageCountOf('q2')).toBe(0);
+    expect(result.current.queue.attachmentsOf('q1')).toEqual(images);
+    expect(result.current.queue.attachmentsOf('q2')).toEqual([]);
   });
 });
 
@@ -190,6 +199,39 @@ describe('queue adapter: steer and enqueue in each state of the run', () => {
     ]);
     expect(api.queueMessage).not.toHaveBeenCalled();
     expect(api.insertMessage).not.toHaveBeenCalled();
+  });
+
+  it('sends the images of a message: insert and queue while running, send with no run', async () => {
+    const running = setup(runningDetail());
+    running.api.insertMessage.mockResolvedValue(insertedItem(4, ''));
+    running.api.queueMessage.mockResolvedValue(queued('q4', '', 4));
+    await act(async () => {
+      expect(
+        await running.result.current.queue.steer(message('', [image])),
+      ).toBe(true);
+    });
+    expect(running.api.insertMessage).toHaveBeenCalledWith('s-1', 'r-1', {
+      text: '',
+      page,
+      attachmentIds: ['img-1'],
+    });
+    await act(async () => {
+      expect(
+        await running.result.current.queue.enqueue(message('look', [image])),
+      ).toBe(true);
+    });
+    expect(running.api.queueMessage).toHaveBeenCalledWith('s-1', {
+      text: 'look',
+      page,
+      attachmentIds: ['img-1'],
+    });
+
+    const idle = setup(idleDetail());
+    await act(() => idle.result.current.queue.enqueue(message('', [image])));
+    await waitFor(() => expect(idle.api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(idle.api.sendMessage.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ text: '', attachmentIds: ['img-1'] }),
+    );
   });
 
   it('sends nothing for a message without text', async () => {

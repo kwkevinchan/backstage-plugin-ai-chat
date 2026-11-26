@@ -16,6 +16,7 @@
 
 import { createContext, useContext } from 'react';
 import {
+  AuiIf,
   MessagePrimitive,
   ThreadPrimitive,
   useAuiState,
@@ -24,6 +25,7 @@ import {
 } from '@assistant-ui/react';
 import { Button } from '@backstage/ui';
 import type {
+  ChatAttachment,
   ChatInsertedData,
   ChatNoticeData,
   ChatTool,
@@ -32,6 +34,8 @@ import type { AiChatToolResultsApi } from '@kwkevinchan/backstage-plugin-ai-chat
 import type { DecisionInfo } from '../domain/itemsToMessages';
 import { UPDATE_PLAN_TOOL } from '../domain/plan';
 import type { ChatUnreadData } from '../domain/types';
+import { chatAttachmentsOf } from '../adapters/assistantUi/attachmentAdapter';
+import { ChatImages, messageAttachmentComponents } from './Attachments';
 import { MarkdownText } from './MarkdownText';
 import { PlanToolCall } from './PlanCard';
 import { cx } from './styles';
@@ -67,12 +71,12 @@ export interface MessageListProps {
   interrupted?: boolean;
   /** Sends the first message of the run again (the run gave no answer). */
   onSendAgain?(): void;
-  /** Sends a message that the run did not read again. */
-  onSendTextAgain?(text: string): void;
+  /** Sends a message that the run did not read again, with its images. */
+  onSendTextAgain?(text: string, attachments?: ChatAttachment[]): void;
 }
 
 const SendTextAgainContext = createContext<
-  ((text: string) => void) | undefined
+  ((text: string, attachments?: ChatAttachment[]) => void) | undefined
 >(undefined);
 
 function UserText({ text }: TextMessagePartProps) {
@@ -92,7 +96,17 @@ function AssistantText({ text }: TextMessagePartProps) {
 /** A message that the user added to the run, shown where the model read it. */
 function Inserted({ data }: DataMessagePartProps<ChatInsertedData>) {
   return (
-    <div className={cx('chat-message', 'chat-message-user')}>{data.text}</div>
+    <>
+      {data.text && (
+        <div className={cx('chat-message', 'chat-message-user')}>
+          {data.text}
+        </div>
+      )}
+      <ChatImages
+        attachments={data.attachments ?? []}
+        className="chat-message-images"
+      />
+    </>
   );
 }
 
@@ -103,6 +117,7 @@ function Unread({ data }: DataMessagePartProps<ChatUnreadData>) {
     const part = s.message.parts.find(p => p.type === 'text');
     return part?.type === 'text' ? part.text : undefined;
   });
+  const attachments = useAuiState(s => s.message.attachments);
   return (
     <div className={cx('chat-unread')} role="status">
       {UNREAD_TEXT}
@@ -112,7 +127,10 @@ function Unread({ data }: DataMessagePartProps<ChatUnreadData>) {
           <Button
             size="small"
             variant="tertiary"
-            onPress={() => onSendTextAgain(text)}
+            onPress={() => {
+              const images = chatAttachmentsOf(attachments);
+              onSendTextAgain(text, images.length > 0 ? images : undefined);
+            }}
           >
             Send this message again
           </Button>
@@ -134,6 +152,13 @@ const data = {
 function UserMessage() {
   return (
     <MessagePrimitive.Root style={{ display: 'contents' }}>
+      <AuiIf condition={s => (s.message.attachments?.length ?? 0) > 0}>
+        <ul className={cx('chat-images', 'chat-message-images')}>
+          <MessagePrimitive.Attachments
+            components={messageAttachmentComponents}
+          />
+        </ul>
+      </AuiIf>
       <MessagePrimitive.Parts components={{ Text: UserText, data }} />
     </MessagePrimitive.Root>
   );

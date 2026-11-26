@@ -14,16 +14,18 @@
  * limitations under the License.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { AssistantRuntimeProvider, ThreadPrimitive } from '@assistant-ui/react';
 import { useApiHolder } from '@backstage/core-plugin-api';
 import { aiChatToolResultsApiRef } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import type {
+  ChatAttachment,
   ChatPageContext,
   ChatSessionDetail,
   ChatToolset,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { AiChatApi } from '../api';
+import type { AttachmentSource } from '../adapters/assistantUi/attachmentAdapter';
 import { useQueueAdapter } from '../adapters/assistantUi/queueAdapter';
 import { useSessionRuntime } from '../adapters/assistantUi/sessionRuntime';
 import { describeError } from '../adapters/describeError';
@@ -31,6 +33,7 @@ import { useSessionChat } from '../application/useSessionChat';
 import { useSessionTools } from '../application/useSessionTools';
 import { useInputConfig } from '../application/useInputConfig';
 import { usePageContext } from '../application/usePageContext';
+import { AttachmentLoaderContext, RejectionNotes } from './Attachments';
 import { Composer } from './Composer';
 import { ComposerQueue } from './ComposerQueue';
 import { MessageList } from './MessageList';
@@ -46,6 +49,8 @@ export interface SessionViewProps {
   toolsets: ChatToolset[];
   /** The message to send when the session opens, for a session just created. */
   firstMessage?: string;
+  /** Images of that first message. */
+  firstAttachments?: ChatAttachment[];
   /**
    * The page of each message. The panel passes the launch and the path at
    * send time. Omitted, the route is used.
@@ -64,8 +69,10 @@ export function SessionView(props: SessionViewProps) {
     detail,
     page,
     firstMessage: props.firstMessage,
+    firstAttachments: props.firstAttachments,
     onChanged: props.onChanged,
   });
+  const sessionId = detail.session.id;
   const [enabled, setEnabled] = useState(detail.session.enabledToolsets);
   const tools = useSessionTools(api, detail.session.id, enabled.join(','));
   const toolResults = useApiHolder().get(aiChatToolResultsApiRef);
@@ -93,7 +100,26 @@ export function SessionView(props: SessionViewProps) {
   const waiting = chat.activeRun?.status === 'waiting_approval';
   // A run that goes on, or a response on its way before the run is known.
   const inRun = running || chat.busy;
-  const queueMax = useInputConfig(api)?.queueMaxMessages ?? DEFAULT_QUEUE_MAX;
+  const inputConfig = useInputConfig(api);
+  const queueMax = inputConfig?.queueMaxMessages ?? DEFAULT_QUEUE_MAX;
+  const rejections = useMemo(() => new RejectionNotes(), []);
+  const images = inputConfig?.images;
+  const attachments = useMemo<AttachmentSource | undefined>(
+    () =>
+      images?.enabled
+        ? {
+            limits: images,
+            upload: (file, onProgress) =>
+              api.uploadAttachment(sessionId, file, file.name, onProgress),
+            onAdd: rejections.begin,
+          }
+        : undefined,
+    [api, images, rejections, sessionId],
+  );
+  const loadAttachment = useCallback(
+    (attachmentId: string) => api.readAttachment(sessionId, attachmentId),
+    [api, sessionId],
+  );
   const queue = useQueueAdapter({
     queued: chat.queue,
     inserted: chat.pending,
@@ -115,6 +141,7 @@ export function SessionView(props: SessionViewProps) {
     onStop: chat.stop,
     onDecide: chat.decide,
     queue,
+    attachments,
   });
   // While a run goes on the box takes messages: Enter inserts, Ctrl or Cmd
   // with Enter queues, and a run that waits for a decision only queues.
@@ -133,54 +160,57 @@ export function SessionView(props: SessionViewProps) {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <ThreadPrimitive.Root className={cx('chat-main')}>
-        <ToolsetPanel
-          toolsets={toolsets}
-          enabled={enabled}
-          disabled={running}
-          onChange={changeToolsets}
-        />
-        {toolsetError && (
-          <div className={cx('chat-error')} role="alert">
-            {toolsetError}
-          </div>
-        )}
-        <MessageList
-          busy={chat.busy}
-          disabled={chat.deciding}
-          notice={chat.notice}
-          tools={tools}
-          decisions={chat.decisions}
-          toolResults={toolResults}
-          error={chat.error}
-          interrupted={chat.interrupted && chat.canResend}
-          onSendAgain={chat.sendAgain}
-          onSendTextAgain={
-            running || chat.busy ? undefined : chat.sendTextAgain
-          }
-        />
-        <ComposerQueue
-          queue={queue}
-          paused={chat.queuePaused}
-          pausedReason={chat.queuePausedReason}
-          notice={chat.queueNotice}
-          onContinue={chat.continueQueue}
-          moving={chat.queueMoving}
-          canSendNow={
-            chat.activeRun?.status === 'running' &&
-            !chat.followingNext &&
-            !chat.sendingNow
-          }
-          maxMessages={queueMax}
-        />
-        <Composer
-          hint={hint}
-          placeholder={placeholder}
-          sendLabel={waiting ? 'Queue' : undefined}
-          canQueue={running && !waiting}
-          canStop={running}
-        />
-      </ThreadPrimitive.Root>
+      <AttachmentLoaderContext.Provider value={loadAttachment}>
+        <ThreadPrimitive.Root className={cx('chat-main')}>
+          <ToolsetPanel
+            toolsets={toolsets}
+            enabled={enabled}
+            disabled={running}
+            onChange={changeToolsets}
+          />
+          {toolsetError && (
+            <div className={cx('chat-error')} role="alert">
+              {toolsetError}
+            </div>
+          )}
+          <MessageList
+            busy={chat.busy}
+            disabled={chat.deciding}
+            notice={chat.notice}
+            tools={tools}
+            decisions={chat.decisions}
+            toolResults={toolResults}
+            error={chat.error}
+            interrupted={chat.interrupted && chat.canResend}
+            onSendAgain={chat.sendAgain}
+            onSendTextAgain={
+              running || chat.busy ? undefined : chat.sendTextAgain
+            }
+          />
+          <ComposerQueue
+            queue={queue}
+            paused={chat.queuePaused}
+            pausedReason={chat.queuePausedReason}
+            notice={chat.queueNotice}
+            onContinue={chat.continueQueue}
+            moving={chat.queueMoving}
+            canSendNow={
+              chat.activeRun?.status === 'running' &&
+              !chat.followingNext &&
+              !chat.sendingNow
+            }
+            maxMessages={queueMax}
+          />
+          <Composer
+            hint={hint}
+            placeholder={placeholder}
+            sendLabel={waiting ? 'Queue' : undefined}
+            canQueue={running && !waiting}
+            canStop={running}
+            rejections={rejections}
+          />
+        </ThreadPrimitive.Root>
+      </AttachmentLoaderContext.Provider>
     </AssistantRuntimeProvider>
   );
 }

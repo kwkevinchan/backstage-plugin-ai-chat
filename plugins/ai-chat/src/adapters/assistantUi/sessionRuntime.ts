@@ -14,14 +14,25 @@
  * limitations under the License.
  */
 
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   useExternalStoreRuntime,
   type AppendMessage,
   type AssistantRuntime,
 } from '@assistant-ui/react';
 import { isToolUIPart } from 'ai';
-import type { ChatUiMessage, ToolPart } from '../../domain/types';
+import type {
+  ChatUiMessage,
+  OutgoingMessage,
+  ToolPart,
+} from '../../domain/types';
+import {
+  createAttachmentAdapter,
+  isEmptyMessage,
+  outgoingOf,
+  toCompleteAttachment,
+  type AttachmentSource,
+} from './attachmentAdapter';
 import type { SessionQueueAdapter } from './queueAdapter';
 import { toThreadMessage } from './toThreadMessage';
 
@@ -36,10 +47,11 @@ export interface SessionRuntimeOptions {
   /** Nothing can be sent now; the box can still be typed into. */
   isSendDisabled?: boolean;
   /**
-   * Sends the text of the box. Resolves with `false` when the message was not
-   * sent: the text goes back into the box, unless the user typed again.
+   * Sends the text and the images of the box. Resolves with `false` when the
+   * message was not sent: it goes back into the box, unless the box has
+   * something new.
    */
-  onSend(text: string): Promise<boolean | void> | void;
+  onSend(message: OutgoingMessage): Promise<boolean | void> | void;
   /** Stops the run. Without it there is no Stop. */
   onStop?(): Promise<void> | void;
   /** The decision of the user on a call that waits for approval. */
@@ -50,13 +62,11 @@ export interface SessionRuntimeOptions {
    * when no run goes on), not through `onSend`.
    */
   queue?: SessionQueueAdapter;
-}
-
-function textOf(message: AppendMessage): string {
-  return message.content
-    .map(part => (part.type === 'text' ? part.text : ''))
-    .join('')
-    .trim();
+  /**
+   * The uploads of the session. Without it (the model reads no images) there
+   * is no attach button, and pasted and dropped files are not taken.
+   */
+  attachments?: AttachmentSource;
 }
 
 /** The call that an approval id belongs to; the stream uses the call id. */
@@ -89,26 +99,47 @@ export function useSessionRuntime(
   latest.current = options;
   const runtimeRef = useRef<AssistantRuntime>();
 
-  /** A message that was not taken goes back into the box, unless the user typed again. */
-  const keepIfNotSent = useCallback((sent: boolean | void, text: string) => {
-    if (sent !== false) return;
-    const composer = runtimeRef.current?.thread.composer;
-    if (composer && !composer.getState().text) composer.setText(text);
-  }, []);
+  /** A message that was not taken goes back into the box, unless the box has something new. */
+  const keepIfNotSent = useCallback(
+    (sent: boolean | void, message: AppendMessage) => {
+      if (sent !== false) return;
+      const composer = runtimeRef.current?.thread.composer;
+      if (!composer) return;
+      const state = composer.getState();
+      if (state.text || state.attachments.length > 0) return;
+      const { text, attachments } = outgoingOf(message);
+      composer.setText(text);
+      for (const attachment of attachments ?? []) {
+        void composer.addAttachment(toCompleteAttachment(attachment));
+      }
+    },
+    [],
+  );
 
-  const { onStop, onDecide, queue } = options;
+  const { onStop, onDecide, queue, attachments } = options;
+  const attachmentAdapter = useMemo(
+    () =>
+      attachments &&
+      createAttachmentAdapter(
+        attachments,
+        () =>
+          runtimeRef.current?.thread.composer.getState().attachments.length ??
+          0,
+      ),
+    [attachments],
+  );
   const queueWithDraft = useMemo<SessionQueueAdapter | undefined>(
     () =>
       queue && {
         ...queue,
         steer: async message => {
           const sent = await queue.steer(message);
-          keepIfNotSent(sent, textOf(message));
+          keepIfNotSent(sent, message);
           return sent;
         },
         enqueue: async message => {
           const sent = await queue.enqueue(message);
-          keepIfNotSent(sent, textOf(message));
+          keepIfNotSent(sent, message);
           return sent;
         },
       },
@@ -120,11 +151,12 @@ export function useSessionRuntime(
     isRunning: options.isRunning,
     isSendDisabled: options.isSendDisabled,
     onNew: async message => {
-      const text = textOf(message);
-      if (!text) return;
-      keepIfNotSent(await latest.current.onSend(text), text);
+      const outgoing = outgoingOf(message);
+      if (isEmptyMessage(outgoing)) return;
+      keepIfNotSent(await latest.current.onSend(outgoing), message);
     },
     queue: queueWithDraft,
+    ...(attachmentAdapter && { adapters: { attachments: attachmentAdapter } }),
     ...(onStop && {
       onCancel: async () => {
         await latest.current.onStop?.();
@@ -140,5 +172,12 @@ export function useSessionRuntime(
     }),
   });
   runtimeRef.current = runtime;
+  // The composer of assistant-ui reads `accept` of the adapter into its state
+  // only when the composer itself changes; the adapter comes later (with the
+  // input config). Without this, the file dialog would offer every file.
+  useEffect(() => {
+    const composer = runtime.thread.composer;
+    composer.setRunConfig({ ...composer.getState().runConfig });
+  }, [runtime, attachmentAdapter]);
   return runtime;
 }

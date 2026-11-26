@@ -66,6 +66,9 @@ export default defineConfig({
       url: `${backendUrl}/.backstage/health/v1/readiness`,
       reuseExistingServer: !ci,
       timeout: 600_000,
+      // The image tests attach a picture. Images stay off in the committed
+      // app config; this turns them on for the backend that this file starts.
+      env: { ...process.env, APP_CONFIG_aiChat_llm_images: 'true' },
     },
   ],
   use: {

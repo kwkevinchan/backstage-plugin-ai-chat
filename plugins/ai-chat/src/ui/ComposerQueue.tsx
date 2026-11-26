@@ -27,6 +27,7 @@ import {
   type ChatQueuePausedReason,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { SessionQueueAdapter } from '../adapters/assistantUi/queueAdapter';
+import { ChatImages } from './Attachments';
 import { cx } from './styles';
 
 /** Why the queue is paused, for the screen. The reason is not known after a reload. */
@@ -60,22 +61,16 @@ export interface ComposerQueueProps {
   maxMessages: number;
 }
 
-function ImageCount({ count }: { count: number }) {
-  if (count === 0) return null;
-  return (
-    <span className={cx('chat-queue-images')}>
-      {count === 1 ? '1 image' : `${count} images`}
-    </span>
-  );
-}
-
 /** A message inserted into the run: no Delete and no Send now, it is in the run already. */
 function InsertedRow({ queue }: { queue: SessionQueueAdapter }) {
   const id = useAuiState(s => s.queueItem.id);
   return (
     <li className={cx('chat-pending-item')}>
       <QueueItemPrimitive.Text className={cx('chat-pending-text')} />
-      <ImageCount count={queue.imageCountOf(id)} />
+      <ChatImages
+        attachments={queue.attachmentsOf(id)}
+        className="chat-queue-images"
+      />
       <span className={cx('chat-pending-label')}>{WAITING_TEXT}</span>
     </li>
   );
@@ -129,7 +124,10 @@ function QueuedRow(props: {
   return (
     <li className={cx('chat-queue-item')}>
       <QueueItemPrimitive.Text className={cx('chat-queue-text')} title={text} />
-      <ImageCount count={queue.imageCountOf(id)} />
+      <ChatImages
+        attachments={queue.attachmentsOf(id)}
+        className="chat-queue-images"
+      />
       <span className={cx('chat-queue-actions')}>
         <button
           type="button"

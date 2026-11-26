@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderInTestApp } from '@backstage/test-utils';
 import {
@@ -41,6 +41,12 @@ import {
   INSERT_LIMIT_TEXT,
   RUN_NOT_RUNNING_TEXT,
 } from '../application/useSessionChat';
+import {
+  WRONG_TYPE_TEXT,
+  tooLargeText,
+  tooManyText,
+} from '../adapters/assistantUi/attachmentAdapter';
+import { IMAGE_GONE_TEXT } from './Attachments';
 import { UNREAD_TEXT } from './MessageList';
 import { SessionView } from './SessionView';
 
@@ -81,6 +87,18 @@ async function open(
     routeEntries: ['/ai-chat/s-1'],
   });
   return screen.getByLabelText('Message');
+}
+
+/** Object URLs in jsdom, which has none: each is `blob:<n>`, and revokes are recorded. */
+function stubObjectUrls() {
+  let next = 0;
+  const create = jest.fn(() => {
+    next += 1;
+    return `blob:${next}`;
+  });
+  const revoke = jest.fn();
+  Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke });
+  return { create, revoke };
 }
 
 const answerStream = () =>
@@ -521,8 +539,10 @@ describe('the queue while a run is running', () => {
     expect(api.getSession).toHaveBeenCalledWith('s-1');
   });
 
-  it('says when the queue is full, and shows how many images a queued message has', async () => {
+  it('says when the queue is full, and shows the images of a queued message', async () => {
     const api = mockApi();
+    api.readAttachment.mockResolvedValue(new Blob(['png']));
+    stubObjectUrls();
     const d = runningWithQueue('a', 'b', 'c', 'd', 'e');
     d.queue.items[1].attachments = [
       { id: 'i1', mediaType: 'image/png', name: 'a.png', size: 1 },
@@ -532,8 +552,12 @@ describe('the queue while a run is running', () => {
     expect(
       await within(queueRegion()).findByText(queueFullText(5)),
     ).toBeInTheDocument();
-    expect(row('b')).toHaveTextContent('2 images');
-    expect(row('a')).not.toHaveTextContent('image');
+    expect(
+      await within(row('b')).findByRole('img', { name: 'a.png' }),
+    ).toBeInTheDocument();
+    expect(within(row('b')).getByRole('img', { name: 'b.png' })).toBeVisible();
+    expect(api.readAttachment).toHaveBeenCalledWith('s-1', 'i1');
+    expect(within(row('a')).queryByRole('img')).toBeNull();
   });
 
   it('has no full note below the limit', async () => {
@@ -699,5 +723,316 @@ describe('the thread', () => {
     await userEvent.click(send);
     await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
     expect(box).toHaveValue('');
+  });
+});
+
+describe('images', () => {
+  const image = (id = 'att-1', name = 'dot.png') => ({
+    id,
+    mediaType: 'image/png',
+    name,
+    size: 4,
+  });
+  const png = (name = 'dot.png', size = 4) =>
+    new File([new Uint8Array(size)], name, { type: 'image/png' });
+
+  function imagesOn(api: ReturnType<typeof mockApi>, maxPerMessage = 4) {
+    api.getInputConfig.mockResolvedValue({
+      images: {
+        enabled: true,
+        mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+        maxPerMessage,
+        maxBytes: 1024,
+        maxBytesPerInput: 20 * 1024 * 1024,
+        maxPendingPerSession: 12,
+      },
+      insertMaxPerRun: 5,
+      queueMaxMessages: 5,
+    });
+    api.uploadAttachment.mockImplementation(async (_s, _file, name) =>
+      image(`att-${name}`, name),
+    );
+    stubObjectUrls();
+  }
+
+  const withImages = <T extends object>(item: T, attachments: object[]) =>
+    ({ ...item, attachments } as T);
+
+  const idle = () => detail({ items: items(user('done'), answer('ok')) });
+
+  async function attachWithButton(files: File[]) {
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Attach' }),
+    );
+    const input =
+      document.body.querySelector<HTMLInputElement>('input[type=file]')!;
+    expect(input.accept).toBe('image/png,image/jpeg,image/webp,image/gif');
+    await userEvent.upload(input, files, { applyAccept: false });
+  }
+  const paste = (box: HTMLElement, files: File[]) =>
+    fireEvent.paste(box, { clipboardData: { files, getData: () => '' } });
+  const drop = (files: File[]) => {
+    const zone = screen
+      .getByLabelText('Message')
+      .closest('[class*="chat-composer-box"]')!;
+    const dataTransfer = { files, types: ['Files'] };
+    fireEvent.dragEnter(zone, { dataTransfer });
+    fireEvent.drop(zone, { dataTransfer });
+  };
+  const draft = (name: string) =>
+    screen.getByRole('button', { name: `Remove ${name}` }).parentElement!;
+
+  it('has no Attach when the model reads no images, and takes no pasted or dropped image', async () => {
+    const api = mockApi();
+    stubObjectUrls();
+    const box = await open(api, idle());
+    await waitFor(() => expect(api.getInputConfig).toHaveBeenCalled());
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(screen.queryByRole('button', { name: 'Attach' })).toBeNull();
+    paste(box, [png()]);
+    drop([png('b.png')]);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(api.uploadAttachment).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /^Remove/ })).toBeNull();
+  });
+
+  it('attaches with the button, a paste and a drop, uploads each to the session, and sends their ids', async () => {
+    const api = mockApi();
+    imagesOn(api);
+    api.sendMessage.mockResolvedValue(answerStream());
+    const box = await open(api, idle());
+    await attachWithButton([png('a.png')]);
+    paste(box, [png('b.png')]);
+    drop([png('c.png')]);
+    await waitFor(() => expect(api.uploadAttachment).toHaveBeenCalledTimes(3));
+    expect(api.uploadAttachment.mock.calls.map(c => [c[0], c[2]])).toEqual([
+      ['s-1', 'a.png'],
+      ['s-1', 'b.png'],
+      ['s-1', 'c.png'],
+    ]);
+    for (const name of ['a.png', 'b.png', 'c.png']) {
+      expect(within(draft(name)).getByRole('img', { name })).toBeVisible();
+    }
+    await userEvent.type(box, 'look{Enter}');
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(api.sendMessage.mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        text: 'look',
+        attachmentIds: ['att-a.png', 'att-b.png', 'att-c.png'],
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /^Remove/ })).toBeNull(),
+    );
+  });
+
+  it('does not upload a file of another type, one too large or one too many, and says why; the next attach replaces the reasons', async () => {
+    const api = mockApi();
+    imagesOn(api, 1);
+    const box = await open(api, idle());
+    await screen.findByRole('button', { name: 'Attach' });
+    paste(box, [
+      new File(['x'], 'notes.txt', { type: 'text/plain' }),
+      png('big.png', 2048),
+      png('a.png'),
+      png('b.png'),
+    ]);
+    await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(3));
+    expect(screen.getAllByRole('alert').map(a => a.textContent)).toEqual([
+      WRONG_TYPE_TEXT,
+      tooLargeText(1024),
+      tooManyText(1),
+    ]);
+    expect(api.uploadAttachment).toHaveBeenCalledTimes(1);
+    expect(api.uploadAttachment.mock.calls[0][2]).toBe('a.png');
+
+    // The next attach replaces the reasons; a remove makes room.
+    await userEvent.click(screen.getByRole('button', { name: 'Remove a.png' }));
+    paste(box, [png('c.png')]);
+    await waitFor(() => expect(api.uploadAttachment).toHaveBeenCalledTimes(2));
+    expect(screen.queryAllByRole('alert')).toEqual([]);
+  });
+
+  it('sends no image that was removed', async () => {
+    const api = mockApi();
+    imagesOn(api);
+    api.sendMessage.mockResolvedValue(answerStream());
+    const box = await open(api, idle());
+    await screen.findByRole('button', { name: 'Attach' });
+    paste(box, [png('a.png'), png('b.png')]);
+    await waitFor(() => expect(api.uploadAttachment).toHaveBeenCalledTimes(2));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove a.png' }));
+    await userEvent.type(box, 'one{Enter}');
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(api.sendMessage.mock.calls[0][1].attachmentIds).toEqual([
+      'att-b.png',
+    ]);
+  });
+
+  it('keeps the text and says why when the upload is refused (413)', async () => {
+    const api = mockApi();
+    imagesOn(api);
+    api.uploadAttachment.mockRejectedValue(
+      Object.assign(new Error('Request failed with 413'), {
+        cause: new Error('An image may be at most 1024 bytes'),
+      }),
+    );
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    const box = await open(api, idle());
+    await userEvent.type(box, 'keep this text');
+    await screen.findByRole('button', { name: 'Attach' });
+    paste(box, [png()]);
+    await screen.findByRole('button', { name: 'Remove dot.png' });
+    expect(
+      await within(draft('dot.png')).findByRole('alert'),
+    ).toHaveTextContent('An image may be at most 1024 bytes');
+    expect(box).toHaveValue('keep this text');
+
+    // Send keeps the message while the failed image is in the box.
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(box).toHaveValue('keep this text'));
+    expect(within(draft('dot.png')).getByRole('alert')).toBeVisible();
+    expect(api.sendMessage).not.toHaveBeenCalled();
+    expect(api.uploadAttachment).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends nothing while an image uploads, and sends it with the message when the upload ends', async () => {
+    const api = mockApi();
+    imagesOn(api);
+    api.sendMessage.mockResolvedValue(answerStream());
+    let finish: () => void = () => {};
+    api.uploadAttachment.mockImplementation(
+      (_s, file, name) =>
+        new Promise(resolve => {
+          finish = () =>
+            resolve({
+              id: `att-${name}`,
+              name,
+              mediaType: (file as File).type,
+              size: (file as File).size,
+            });
+        }),
+    );
+    const box = await open(api, idle());
+    await screen.findByRole('button', { name: 'Attach' });
+    paste(box, [png()]);
+    expect(await screen.findByText('Uploading...')).toBeVisible();
+    await userEvent.type(box, 'wait for it{Enter}');
+    const send = screen.getByRole('button', { name: 'Send' });
+    expect(send).toBeDisabled();
+    expect(box).toHaveValue('wait for it');
+    expect(api.sendMessage).not.toHaveBeenCalled();
+
+    finish();
+    await waitFor(() => expect(send).toBeEnabled());
+    await userEvent.click(send);
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(api.sendMessage.mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        text: 'wait for it',
+        attachmentIds: ['att-dot.png'],
+      }),
+    );
+  });
+
+  it('sends a message that is only an image', async () => {
+    const api = mockApi();
+    imagesOn(api);
+    api.sendMessage.mockResolvedValue(answerStream());
+    const box = await open(api, idle());
+    const send = screen.getByRole('button', { name: 'Send' });
+    expect(send).toBeDisabled();
+    await screen.findByRole('button', { name: 'Attach' });
+    paste(box, [png()]);
+    await waitFor(() => expect(send).toBeEnabled());
+    await userEvent.click(send);
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(api.sendMessage.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ text: '', attachmentIds: ['att-dot.png'] }),
+    );
+  });
+
+  it('inserts a message with an image into the running run', async () => {
+    const api = mockApi();
+    imagesOn(api);
+    api.insertMessage.mockResolvedValue(insertedItem(2, ''));
+    const box = await open(api, running());
+    await screen.findByRole('button', { name: 'Attach' });
+    paste(box, [png()]);
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Remove dot.png' }),
+      ).toBeVisible(),
+    );
+    await userEvent.type(box, '{Enter}');
+    await waitFor(() => expect(api.insertMessage).toHaveBeenCalledTimes(1));
+    expect(api.insertMessage.mock.calls[0][2]).toEqual(
+      expect.objectContaining({ text: '', attachmentIds: ['att-dot.png'] }),
+    );
+  });
+
+  it('shows the images of a message, loaded with the request of the user, and says when one is gone', async () => {
+    const api = mockApi();
+    stubObjectUrls();
+    api.readAttachment.mockImplementation(async (_s, id) => {
+      if (id === 'gone') throw new Error('404');
+      return new Blob(['png']);
+    });
+    const d = detail({
+      items: items(
+        withImages(user('two pictures'), [
+          image('att-1', 'a.png'),
+          image('gone', 'b.png'),
+        ]),
+        answer('I see them'),
+      ),
+    });
+    await open(api, d);
+    const shown = await screen.findByRole('img', { name: 'a.png' });
+    expect(shown).toHaveAttribute('src', expect.stringMatching(/^blob:/));
+    expect(
+      await screen.findByText(`b.png. ${IMAGE_GONE_TEXT}`),
+    ).toBeInTheDocument();
+    expect(api.readAttachment).toHaveBeenCalledWith('s-1', 'att-1');
+    expect(api.readAttachment).toHaveBeenCalledWith('s-1', 'gone');
+  });
+
+  it('shows the image of an inserted message where the model read it', async () => {
+    const api = mockApi();
+    stubObjectUrls();
+    api.readAttachment.mockResolvedValue(new Blob(['png']));
+    const d = detail({
+      items: items(
+        user('start'),
+        withImages(inserted('', 'read'), [image('att-9', 'added.png')]),
+        answer('done', 2),
+      ),
+    });
+    await open(api, d);
+    expect(
+      await screen.findByRole('img', { name: 'added.png' }),
+    ).toBeInTheDocument();
+  });
+
+  it('sends a message that the run did not read again with its images', async () => {
+    const api = mockApi();
+    stubObjectUrls();
+    api.readAttachment.mockResolvedValue(new Blob(['png']));
+    api.sendMessage.mockResolvedValue(answerStream());
+    const d = detail({
+      items: items(
+        user('start'),
+        answer('first answer', 1),
+        withImages(inserted('look', 'unread'), [image('att-5', 'late.png')]),
+      ),
+    });
+    await open(api, d);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Send this message again' }),
+    );
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(api.sendMessage.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ text: 'look', attachmentIds: ['att-5'] }),
+    );
   });
 });

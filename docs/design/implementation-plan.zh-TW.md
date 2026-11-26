@@ -701,9 +701,9 @@ flowchart LR
   - 端對端：附加、送出、重新整理後還在、Run 進行中插入帶圖片的訊息。
   - PR 寫 `Closes #23`。
 
-- **測試**：契約在 `adapters/assistantUi/attachmentAdapter.test.ts`（`accept`；`add` 的型別、大小、張數，同時加入多張也算進張數；上傳中、上傳完成、上傳失敗三種狀態；`send` 回傳帶附件 id 的附件，上傳失敗過的在 `send` 再上傳一次；`remove`）和 `sessionRuntime.test.tsx`（送出、插入、排隊的訊息帶附件；沒被收下時文字和圖片放回輸入框）。訊息轉換在 `toThreadMessage.test.ts`。object URL 在 `application/useAttachmentUrl.test.tsx`。元件在 `ui/SessionView.test.tsx`（三種附加方式、拒絕的原因、移除、上傳失敗、只有圖片的訊息、訊息和插入和排隊裡的縮圖、圖片已不存在、模型不能讀圖片時沒有按鈕）和 `ui/ChatPage.test.tsx`（新對話頁：第一次附加建立 Session、兩張只建立一個、第一則訊息用同一個 Session、改工具組後馬上送出、模型不能讀圖片時沒有按鈕）。端對端在 `e2e-tests/images.test.ts`。
+- **測試**：契約在 `adapters/assistantUi/attachmentAdapter.test.ts`（`accept`；`add` 的型別、大小、張數，同時加入多張也算進張數；上傳中、上傳完成、上傳失敗三種狀態；上傳失敗的在 `send` 丟出原因；`remove`）和 `sessionRuntime.test.tsx`（送出、插入、排隊的訊息帶附件，thread 不多出訊息；沒被收下時文字和圖片放回輸入框）。訊息轉換在 `toThreadMessage.test.ts`。object URL 在 `application/useAttachmentUrl.test.tsx`。元件在 `ui/SessionView.test.tsx`（三種附加方式、拒絕的原因、移除、上傳失敗、上傳中不送出、只有圖片的訊息、訊息和插入和排隊裡的縮圖、圖片已不存在、模型不能讀圖片時沒有按鈕）和 `ui/ChatPage.test.tsx`（新對話頁：第一次附加建立 Session、兩張只建立一個、第一則訊息用同一個 Session、改工具組後馬上送出、模型不能讀圖片時沒有按鈕）。端對端在 `e2e-tests/images.test.ts`。
 - **實作和上面不同的地方**：
-  - 上傳在 `add` 就開始，`send` 只把上傳完成的換成帶附件 id 的附件。這樣草稿才看得到「上傳中」和「失敗」，新對話頁也才需要在第一次附加時建立 Session。上傳失敗的圖片留在草稿；按送出時 `send` 再上傳一次，又失敗就整則留在輸入框，文字也在。
+  - 上傳在 `add` 就開始，上傳完成的那張直接是 `complete`，`send` 不上傳。這樣草稿才看得到「上傳中」和「失敗」，新對話頁也才需要在第一次附加時建立 Session。上傳失敗的圖片留在草稿；按送出時 `send` 丟出原因，整則留在輸入框，文字也在，要先移除那張。圖片還在上傳時不能送出（原因見 architecture 的附件一節）。
   - 型別不對的檔案由 assistant-ui 依 `accept` 擋下，不會進到 `add`。拒絕的原因由輸入框接 `composer.attachmentAddError` 事件顯示。一次附加（同一次選檔、貼上或拖放）的原因取代上一次的；送出成功時清空。
   - 沒有刪除附件的 API，`remove` 只讓還在上傳的那張不再進草稿。沒用到的附件照後端的規則在 24 小時後刪除。
   - 排隊項目的縮圖用帶身分的請求載入，不放進 `QueueItemState` 的 `parts`（那裡的圖片是網址）。`queueAdapter` 的 `imageCountOf` 換成 `attachmentsOf`。
