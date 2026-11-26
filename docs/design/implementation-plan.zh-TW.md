@@ -727,6 +727,7 @@ flowchart LR
 - **P3-05**：在擴充點加上 `addHook`。Hook 回傳 `continue` 時，`ask` 的工具仍然要核准。Hook 丟例外時，這個工具呼叫被拒絕，Run 繼續。
 - **P3-06**：搜尋結果只有使用者有權限看的文件。先確認 Backstage 有沒有官方的 search action，有就直接用。
 - **P3-07**：在擴充點加上 `addModelClient`。逐項驗收見下方 P3-07。四個唯讀工具同時執行，其中一個逾時，其他三個的結果照原本順序交回。
+- **P3-08**：用不了的 Toolset 的工具不送給模型。遮蔽掉的值不在紀錄、串流和送給模型的內容裡。寫入超過每人每分鐘的配額時不執行。逐項驗收見下方 P3-08。
 
 ### P3-01 `ai-chat-node`、擴充點、設定檔裡的 Agent
 
@@ -1062,6 +1063,63 @@ flowchart LR
   - 每人同時的 Run 數包含 `waiting_approval`（H-03 的「進行中」）。兩台後端的計數用資料庫：PostgreSQL 在建立 Run 的 transaction 開頭先取這個使用者的 advisory lock（`pg_advisory_xact_lock`），再數、再新增；SQLite 只有一條連線，transaction 本來就一個接一個。這個鎖在任何列鎖之前取，其他 transaction 不取它，所以不會跟第 13.8 節的鎖順序形成循環。
   - 限流用固定的一分鐘格子：`model_call_windows` 的 `(model_id, window_start)` 一列一個計數，`INSERT … ON CONFLICT DO UPDATE … WHERE calls < 上限 RETURNING`，一句話決定拿到沒有。格子邊界前後最多可能有兩倍的量。拿不到就等到下一格（加一點隨機延遲）再試。限流算所有呼叫這個模型的地方：每一步、摘要、自動標題。舊的格子在之後的呼叫裡刪除。
   - 依 Agent 的模型決定能不能附加圖片不在這一項：上傳和送出的檢查仍看 `aiChat.llm.images`。Agent 的模型不讀圖片時，迴圈照 IN-05 把圖片換成一行說明，不會送出。
+
+### P3-08 Toolset 的權限、輸出上限和遮蔽、寫入配額
+
+- **範圍**：
+  - 共用套件（`@kwkevinchan/backstage-plugin-ai-chat-common`）：permission `aiChatToolsetUsePermission`（`ai-chat.toolset.use`，`resourceType: 'ai-chat-toolset'`，`attributes: { action: 'use' }`）。
+  - 宿主（`@kwkevinchan/backstage-plugin-ai-chat-backend`）：
+    - T-08：`adapters/backstage/toolsetAccess.ts` 註冊 resource type `ai-chat-toolset`（resource 是 `{ id }`）、規則 `IS_TOOLSET`（參數 `{ toolsetIds }`），匯出 `aiChatToolsetConditions`、`createAiChatToolsetConditionalDecision`。`AccessControl` port 加 `usableToolsets`：`PermissionAccessControl` 問 permission framework，`OwnerOrShareAccessControl` 全部允許。`application/ToolsetScope.ts` 算出一段 Session 給模型的 Toolset：Session 開啟的 ∩ Agent 的 `toolsets`（沒寫就不限）∩ 使用者能用的。`ActionsToolGateway` 用它過濾工具。`GET /toolsets` 只列使用者能用的；`CreateSession`、`UpdateSession` 不收使用者不能用的 Toolset。
+    - T-09：設定 `aiChat.toolOutput`：鍵是 action id 樣式，值有 `maxOutputChars`、`redact`。`domain/toolOutput.ts` 算出一個 action 的規則，並遮蔽輸出。`ActionsToolGateway.execute` 先遮蔽、再裁切。`AiChatHarnessRegistry.extensions` 在最後一個 `afterToolCall` 之後，照同一個 action 的規則再遮蔽、再裁切。
+    - T-10：設定 `aiChat.writesPerMinute`。port `WriteQuota`，adapter `KnexWriteQuota`，新表 `write_quota_windows`（migration）。`ActionsToolGateway.execute` 在所有檢查都通過之後、呼叫 action 之前拿一次額度。
+  - 不做：一個一個 action 的權限（action 的 plugin 自己檢查）；內建工具（`update_plan`、`load_skill`）的權限和輸出規則；畫面；用 regex 遮蔽字串內容；遮蔽工具的參數和錯誤訊息；已經存下的結果；每個 Toolset 或每個 action 各自的配額；每天的配額；拿不到額度時等下一分鐘；Agent 的 `limits`。
+- **依賴**：P3-01（Agent 定義）、P3-05（`afterToolCall` 之後的裁切）、P3-07（`toolTimeoutSeconds`、寫入逾時的規則、`model_call_windows` 的寫法）。
+- **驗收**：
+  - Toolset 的權限（T-08）：
+    - Permission framework 沒有開時（`authorizeConditional` 回 ALLOW），工具清單、`GET /toolsets`、新 Session 的預設 Toolset 都和沒有這一項時一樣。
+    - DENY：送給模型的工具只有內建工具；`GET /sessions/:id/tools` 只列內建工具；`GET /toolsets` 是空陣列。
+    - CONDITIONAL（`isToolset({ toolsetIds: ['catalog'] })`）：只有 `catalog` 組的工具送給模型。一個 action 也在別的組時，因為它在 `catalog` 組，所以照樣送。
+    - 同一份設定，兩個使用者拿到的工具不同：policy 給一個人 ALLOW、給另一個人只有一組。
+    - 模型呼叫不能用的工具：結果是 `invalid`，沒有核准卡片，action 沒有被呼叫。
+    - 等核准時權限被收回：核准之後不執行，結果是 `error`，action 沒有被呼叫，Run 繼續。
+    - `CreateSession` 指名不能用的 Toolset：400。沒有指名時，存下的是預設的組裡能用的那些。
+    - `UpdateSession`：新加入不能用的 Toolset 回 400；原本就存著的留著，回 200，但那組的工具不送給模型。
+    - Agent 的 `toolsets: [catalog]`：這個 Agent 的 Session 只拿到 `catalog` 組的工具。沒寫 `toolsets` 的 Agent 不受限制。`toolsets: []` 的 Agent 只拿到內建工具。Session 的 Agent 已經從設定拿掉時，不受 Agent 的限制。
+    - Permission backend 丟例外時，不當成全部允許：列出工具失敗，例外往上丟。
+    - `ai-chat.toolset.use` 和 `IS_TOOLSET` 出現在 `/.well-known/backstage/permissions/metadata`。
+  - 輸出上限和遮蔽（T-09）：
+    - `redact: [token]`：任何深度的 `token`（物件裡、陣列裡的物件裡）換成 `"[redacted]"`，其他欄位不變。
+    - 遮蔽掉的值不在 `tool_result`、`item.completed` 的串流、`GET /sessions/:id/items`、下一步送給模型的內容裡。串流和紀錄是同一份。
+    - 先遮蔽再裁切：秘密在長輸出的後段，裁過的 `text` 裡也沒有它。
+    - 每個 action 的上限：設了 `maxOutputChars` 的 action，輸出序列化後不超過它；其他 action 照全站的 `maxToolOutputChars`。
+    - 樣式重疊時，上限取最小的，`redact` 取聯集。
+    - `afterToolCall` 收到的是已經遮蔽的結果。Hook 加回被遮蔽的欄位、或把輸出加長時，存下的照這個 action 的規則再遮蔽、再裁切。
+    - 遮蔽失敗（輸出超過 100 層）：結果是 `error`，訊息固定，沒有輸出。寫入工具的這種結果不是 `unknown`。
+    - 同時執行的唯讀呼叫各自遮蔽，照順序寫入。
+    - `update_plan`、`load_skill` 不受 `toolOutput` 影響。
+    - 設定不對就丟 `InputError`，訊息指出 `aiChat.toolOutput…`，後端啟動失敗：區塊或其中一筆不是物件；鍵是空字串；鍵是 `update_plan` 或 `load_skill`；`maxOutputChars` 不是整數、小於 100 或大於 `maxToolOutputChars`；`redact` 不是字串陣列、有空字串或超過 200 字元的項目；有未知的欄位。
+  - 寫入配額（T-10）：
+    - `writesPerMinute: 2`：同一分鐘第三次寫入不執行，結果是 `error`，訊息寫明上限；Run 繼續，模型下一步收到這個結果。下一分鐘又可以寫入。
+    - 同一個使用者的不同 Session 合計；別的使用者不受影響。
+    - 只算真的要呼叫 action 的寫入：使用者拒絕、`invalid`、執行前的檢查擋下的、唯讀工具，都不算。
+    - 被擋下的寫入不讓同一步後面的寫入變成 `denied`（和逾時不同）。
+    - 被擋下的寫入有一筆 `fail` 的稽核紀錄。
+    - 兩台後端合計不超過上限；PostgreSQL 上兩條連線同時拿額度，拿到的數量剛好是上限。
+    - 沒有 `writesPerMinute` 時不經過計數器。
+    - `writesPerMinute` 不是 1 到 10000 的整數：`InputError`，後端啟動失敗。
+- **規格沒寫、實作選定的地方**：
+  - 「誰能用哪個 Toolset」由 permission policy 決定，和 SH-05 同樣的寫法。Policy 看不到 resourceRef，所以要用 `IS_TOOLSET` 條件來分 Toolset。Permission framework 沒開時，Backstage 一律回 ALLOW，所以每個人都能用全部的 Toolset。
+  - 每次列出工具都問一次 permission，所以提出呼叫和執行前都照當時的權限。
+  - 使用者不能用的 Toolset 和不存在的一樣，回 400 `UnknownToolset`，不透露它存在。`UpdateSession` 只擋新加入的；原本存著的留著，權限恢復後又生效。
+  - Agent 的 `toolsets` 只在列出工具時生效，`CreateSession`、`UpdateSession` 不檢查它：畫面不知道 Session 的 Agent，建立 Session 時送的是預設的組。所以 Session 可以存著 Agent 用不到的組，畫面上開著也不會給模型。
+  - `toolOutput` 的鍵可以用樣式（`policy` 不行）：上限取小、遮蔽取聯集只會更嚴，重疊沒有歧義。`'*'` 讓所有 action 一起遮蔽某個欄位。
+  - `maxOutputChars` 只能調低：全站的上限保護上下文預算（H-09）。
+  - `redact` 是欄位名稱，大小寫要相同，任何深度都算。值換成字串 `"[redacted]"`，鍵留著，`ToolOutput` 不加欄位。
+  - 先遮蔽再裁切：裁切後的輸出是一段字串，認不出欄位，秘密也可能被切成一半留下來。
+  - 遮蔽失敗時整個輸出不存：寧可沒有結果，也不存可能沒遮到的內容。巢狀上限 100 層。
+  - 「寫入」是不是唯讀的 action 真的被呼叫一次。逾時的寫入算（已經呼叫了）；`unknown` 不再執行，所以不再算。唯讀工具（包括 `egress` 的）不算。
+  - 拿不到額度就不執行，不等下一分鐘：使用者已經核准，等待看起來像卡住。`ToolOutput` 沒有 `denied`，所以結果是 `error`。它不是 `timeout`，所以同一步後面的寫入照常各自拿額度。被擋下的寫入仍算在 `maxToolCallsPerStep`、`maxToolCallsPerRun` 裡（提出呼叫時就算了）。拿額度的時間算在這個呼叫的 `toolTimeoutSeconds` 裡。
+  - 配額用固定的一分鐘格子，和 P-06 一樣：`write_quota_windows` 的 `(user_ref, window_start)` 一列一個計數，`INSERT … ON CONFLICT DO UPDATE … WHERE writes < 上限 RETURNING` 一句話決定。格子邊界前後最多可能有兩倍的量。舊的格子在之後的呼叫裡刪除。
 
 ### P4：擴大
 
