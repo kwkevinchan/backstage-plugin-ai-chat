@@ -60,8 +60,8 @@ const POLICY_NAMES: readonly string[] = ['allow', 'ask', 'deny'];
  * that no skill has stops the backend. `planning: required` gives the agent
  * only `update_plan` in the first step of every run. `model` names the model
  * of the agent's runs; an id that is not a model of the installation stops
- * the backend. `toolsets` and `limits` are recorded; the loop does not apply
- * them yet.
+ * the backend. `toolsets` limits the tools of the agent's sessions
+ * (`ToolsetScope`). `limits` are recorded; the loop does not apply them yet.
  *
  * Without `aiChat.toolsets` it builds one toolset, `default`, switched on for
  * every session, from the deprecated `aiChat.actions.include` and

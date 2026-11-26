@@ -28,3 +28,17 @@ export const aiChatSessionReadPermission = createPermission({
   attributes: { action: 'read' },
   resourceType: 'ai-chat-session',
 });
+
+/**
+ * Whether the caller may use one toolset: its tools go to the model only
+ * then (T-08). The resource is the toolset id. When the permission framework
+ * is off, everyone may use every toolset. A policy narrows it with the
+ * `IS_TOOLSET` condition of the backend.
+ *
+ * @public
+ */
+export const aiChatToolsetUsePermission = createPermission({
+  name: 'ai-chat.toolset.use',
+  attributes: {},
+  resourceType: 'ai-chat-toolset',
+});

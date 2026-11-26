@@ -126,9 +126,11 @@ export class SessionsController {
     };
   }
 
-  async toolsets(): Promise<ChatToolsetList> {
+  async toolsets(principal: Principal): Promise<ChatToolsetList> {
     return {
-      items: (await this.useCases.listToolsets.execute()).map(toChatToolset),
+      items: (await this.useCases.listToolsets.execute({ principal })).map(
+        toChatToolset,
+      ),
     };
   }
 }

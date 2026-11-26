@@ -30,3 +30,11 @@ export type {
   SessionAccess,
   SessionAccessQuery,
 } from './adapters/backstage/sessionAccess';
+export {
+  aiChatToolsetConditions,
+  createAiChatToolsetConditionalDecision,
+} from './adapters/backstage/toolsetAccess';
+export type {
+  ToolsetAccess,
+  ToolsetAccessQuery,
+} from './adapters/backstage/toolsetAccess';
