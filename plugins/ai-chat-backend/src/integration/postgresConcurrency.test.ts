@@ -21,6 +21,7 @@ import {
 import type { Knex } from 'knex';
 import { KnexAttachmentStore } from '../adapters/persistence/KnexAttachmentStore';
 import { KnexModelCallLimiter } from '../adapters/persistence/KnexModelCallLimiter';
+import { KnexWriteQuota } from '../adapters/persistence/KnexWriteQuota';
 import { KnexItemLog } from '../adapters/persistence/KnexItemLog';
 import { KnexQueuedMessageRepository } from '../adapters/persistence/KnexQueuedMessageRepository';
 import { KnexRunRepository } from '../adapters/persistence/KnexRunRepository';
@@ -1013,6 +1014,25 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
         expect((await db.sessions.get(session.id)).entityRef).toBe(
           a ? 'component:default/a' : 'component:default/b',
         );
+      }
+    });
+  });
+
+  describe('the quota of changes (T-10)', () => {
+    it('twenty changes of one user at the same time, from two backends, 10 rounds: exactly writesPerMinute of them run', async () => {
+      const a = new KnexWriteQuota(db.knex);
+      const b = new KnexWriteQuota(db.knex);
+      const now = new Date('2026-01-01T00:00:30.000Z');
+      for (let round = 0; round < 10; round++) {
+        const userRef = `user:default/u${Math.random()
+          .toString(36)
+          .slice(2, 8)}`;
+        const taken = await Promise.all(
+          Array.from({ length: 20 }, (_, i) =>
+            jitter().then(() => (i % 2 ? a : b).tryTake(userRef, 5, now)),
+          ),
+        );
+        expect(taken.filter(Boolean)).toHaveLength(5);
       }
     });
   });

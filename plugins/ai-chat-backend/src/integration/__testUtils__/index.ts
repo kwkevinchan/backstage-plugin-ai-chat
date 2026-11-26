@@ -42,6 +42,7 @@ import { KnexQueuedMessageRepository } from '../../adapters/persistence/KnexQueu
 import { KnexRunRepository } from '../../adapters/persistence/KnexRunRepository';
 import { KnexSessionRepository } from '../../adapters/persistence/KnexSessionRepository';
 import { KnexShareRepository } from '../../adapters/persistence/KnexShareRepository';
+import { KnexWriteQuota } from '../../adapters/persistence/KnexWriteQuota';
 import {
   CreateSession,
   OwnerOrShareAccessControl,
@@ -63,6 +64,7 @@ import {
   type EntityFacts,
   type Principal,
   type Run,
+  type ToolOutputRule,
 } from '../../domain';
 import { createHost, type HostPorts } from '../../host';
 import { createMigratedDb } from '../../__testUtils__';
@@ -269,6 +271,12 @@ export async function createWorld(
     toolsets?: JsonObject;
     /** Who may use which toolset; everyone may use every toolset by default. */
     access?: AccessControl;
+    /** `aiChat.maxToolOutputChars`; 20000 by default. */
+    maxToolOutputChars?: number;
+    /** `aiChat.toolOutput`, as read from the configuration. */
+    toolOutput?: ToolOutputRule[];
+    /** `aiChat.writesPerMinute`; no limit by default. */
+    writesPerMinute?: number;
   } = {},
 ) {
   const entities = options.entities ?? new FakeEntityReader();
@@ -384,7 +392,15 @@ export async function createWorld(
             sessionId: ctx.sessionId,
             principal: ctx.principal as Principal,
           }),
-        maxOutputChars: 20000,
+        maxOutputChars: options.maxToolOutputChars ?? 20000,
+        ...(options.toolOutput && { toolOutput: options.toolOutput }),
+        ...(options.writesPerMinute !== undefined && {
+          writeQuota: {
+            quota: new KnexWriteQuota(knex),
+            perMinute: options.writesPerMinute,
+            clock,
+          },
+        }),
       }),
       model: extra.model ?? modelForHost,
       ...(extra.models && { models: extra.models }),
