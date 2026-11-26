@@ -130,14 +130,23 @@ function InvisibleWarning({ input }: { input: unknown }) {
   );
 }
 
+// The backend replaces an output over its limit with the first part of its
+// JSON and the full length; the stream does not carry the `truncated` flag of
+// the item, so the shape tells.
 function isCutOutput(
   output: unknown,
-): output is { truncated: true; originalLength: number; text: string } {
+): output is { text: string; originalLength: number } {
+  if (typeof output !== 'object' || output === null || Array.isArray(output)) {
+    return false;
+  }
+  const { text, originalLength } = output as {
+    text?: unknown;
+    originalLength?: unknown;
+  };
   return (
-    typeof output === 'object' &&
-    output !== null &&
-    (output as { truncated?: unknown }).truncated === true &&
-    typeof (output as { text?: unknown }).text === 'string'
+    Object.keys(output).length === 2 &&
+    typeof text === 'string' &&
+    typeof originalLength === 'number'
   );
 }
 
@@ -357,6 +366,7 @@ export function ToolCall(props: ToolCallMessagePartProps) {
       )}
       <ToolResult
         call={props}
+        status={statusOfCall(props)}
         title={tool?.title ?? titleOfTool(props.toolName)}
         toolResults={view.toolResults}
       />

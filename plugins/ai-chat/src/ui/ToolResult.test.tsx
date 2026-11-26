@@ -23,7 +23,11 @@ import type {
 import { createAiChatToolResultsApi } from '../application/toolResultsApi';
 import type { ChatUiMessage } from '../domain/types';
 import { RESULT_NOT_KNOWN } from '../domain/toolView';
-import { assistantText, renderThread } from './__testUtils__/renderThread';
+import {
+  assistantText,
+  renderThread,
+  ThreadHarness,
+} from './__testUtils__/renderThread';
 
 const ACTION = 'example:list-services';
 
@@ -158,6 +162,28 @@ describe('the result component of an action', () => {
       expect.any(Error),
       expect.anything(),
     );
+  });
+
+  it('tries the component again when the status changes after it threw', () => {
+    function ThrowsWhileRunning(props: AiChatToolResultProps) {
+      if (props.status === 'running') throw new Error('no output yet');
+      return <span>Shown when {props.status}</span>;
+    }
+    const toolResults = createAiChatToolResultsApi([
+      { actionId: ACTION, component: ThrowsWhileRunning },
+    ]);
+    const view = renderThread([call({ state: 'input-available' })], {
+      list: { toolResults },
+    });
+    expect(
+      screen.queryByRole('group', { name: /^Result:/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Running')).toBeInTheDocument();
+
+    view.rerender(
+      <ThreadHarness messages={[done]} options={{ list: { toolResults } }} />,
+    );
+    expect(screen.getByText('Shown when complete')).toBeInTheDocument();
   });
 
   it.each([

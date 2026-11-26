@@ -18,8 +18,8 @@ import { Component, type ErrorInfo, type ReactNode } from 'react';
 import type { ToolCallMessagePartProps } from '@assistant-ui/react';
 import type { AiChatToolResultsApi } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import { isBuiltInTool, resultStatusOf } from '../domain/toolResults';
+import type { ToolStatus } from '../domain/toolView';
 import { cx } from './styles';
-import { statusOfCall } from './ToolCallCard';
 
 /**
  * Shows nothing when the result component of a plugin throws while it
@@ -58,20 +58,20 @@ class ToolResultBoundary extends Component<
  */
 export function ToolResult({
   call,
+  status: callStatus,
   title,
   toolResults,
 }: {
-  call: Pick<
-    ToolCallMessagePartProps,
-    'toolName' | 'args' | 'result' | 'isError' | 'approval'
-  >;
+  call: Pick<ToolCallMessagePartProps, 'toolName' | 'args' | 'result'>;
+  /** The status of the call, as its row or card shows it. */
+  status: ToolStatus;
   title: string;
   toolResults?: AiChatToolResultsApi;
 }) {
   const actionId = call.toolName;
   if (isBuiltInTool(actionId)) return null;
   const Result = toolResults?.getComponent(actionId);
-  const status = resultStatusOf(statusOfCall(call));
+  const status = resultStatusOf(callStatus);
   if (!Result || !status) return null;
   return (
     // A new status is a new try for a component that failed before.

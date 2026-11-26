@@ -11,7 +11,6 @@ import { ExtensionDataRef } from '@backstage/frontend-plugin-api';
 // @public
 export interface AiChatToolResult {
   actionId: string;
-  // (undocumented)
   component: ComponentType<AiChatToolResultProps>;
 }
 
@@ -38,7 +37,6 @@ export interface AiChatToolResultProps {
   errorText?: string;
   input: unknown;
   output?: unknown;
-  // (undocumented)
   status: AiChatToolResultStatus;
 }
 

@@ -34,6 +34,9 @@ describe('isSafeLinkHref', () => {
     // eslint-disable-next-line no-script-url -- an address the link refuses
     'JaVaScRiPt:alert(1)',
     'data:text/html,<script>alert(1)</script>',
+    'java\tscript:alert(1)',
+    '\tjavascript:alert(1)',
+    '\u0000javascript:alert(1)',
     'vbscript:msgbox(1)',
     'file:///etc/passwd',
     '/catalog/default/component/x',

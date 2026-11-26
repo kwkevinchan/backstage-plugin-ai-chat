@@ -49,12 +49,14 @@ export interface AiChatToolResultProps {
   actionId: string;
   /** The input of the call, as the model wrote it. */
   input: unknown;
+  /** Where the call is: running, complete, failed, denied or unknown. */
   status: AiChatToolResultStatus;
   /**
    * The output of the action, set when `status` is `complete`. An output
-   * longer than the limit of the backend is cut and arrives as
-   * `{ truncated: true, originalLength, text }`; handle any shape you do not
-   * expect.
+   * longer than the limit of the backend is replaced by
+   * `{ text, originalLength }`: the first part of its JSON and the full
+   * length. A field that the administrator hides arrives as the string
+   * `[redacted]`. Handle any shape you do not expect.
    */
   output?: unknown;
   /** Why the call failed, set when `status` is `failed` or `unknown`. */
@@ -71,6 +73,7 @@ export interface AiChatToolResultProps {
 export interface AiChatToolResult {
   /** The id of the action, such as `catalog:get-catalog-entity`. */
   actionId: string;
+  /** The component that shows a call of the action. */
   component: ComponentType<AiChatToolResultProps>;
 }
 

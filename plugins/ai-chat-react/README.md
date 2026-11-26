@@ -86,8 +86,9 @@ export const listServicesResult: AiChatToolResult = {
 The component receives `actionId`, `input`, `status` (`running`, `complete`,
 `failed`, `denied` or `unknown`), `output` when the call is complete, and
 `errorText` when it failed or its result is not known. An output longer than
-the limit of the backend arrives cut, as `{ truncated: true, originalLength,
-text }`.
+the limit of the backend is replaced by `{ text, originalLength }` (the first
+part of its JSON and the full length), and a field that the administrator
+hides arrives as the string `[redacted]`.
 
 New frontend system: add an extension of `AiChatToolResultBlueprint` from the
 `/alpha` entry point to your plugin. It attaches to the chat plugin, so the app
