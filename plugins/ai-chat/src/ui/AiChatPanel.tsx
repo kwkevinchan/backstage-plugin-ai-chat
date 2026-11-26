@@ -32,6 +32,7 @@ import { usePageContext } from '../application/usePageContext';
 import { useToolsets } from '../application/useToolsets';
 import { panelMessagePage } from '../domain/launch';
 import type { PanelState } from '../domain/panel';
+import type { OutgoingMessage } from '../domain/types';
 import { DraftComposer } from './Composer';
 import { SessionView } from './SessionView';
 import { cx } from './styles';
@@ -191,7 +192,7 @@ function PanelConversation(props: {
     };
   }, [api, launchId, prompt, sessionId, setSession, start, toolsets]);
 
-  const send = async (text: string) => {
+  const send = async ({ text }: OutgoingMessage) => {
     setOpening(true);
     setError(undefined);
     try {

@@ -15,7 +15,7 @@
  */
 
 import { Route, Routes, useLocation } from 'react-router-dom';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderInTestApp, TestApiProvider } from '@backstage/test-utils';
 import {
@@ -363,5 +363,145 @@ describe('ChatPageContent', () => {
     expect(
       await screen.findByRole('group', { name: 'Result: Restart service' }),
     ).toHaveTextContent('Service is restarting');
+  });
+});
+
+describe('the new conversation with images', () => {
+  const png = (name: string) =>
+    new File([new Uint8Array(4)], name, { type: 'image/png' });
+  const paste = (files: File[]) =>
+    fireEvent.paste(screen.getByLabelText('Message'), {
+      clipboardData: { files, getData: () => '' },
+    });
+
+  function imagesApi(enabled = true) {
+    const api = mockApi({ listToolsets: jest.fn().mockResolvedValue(tools) });
+    api.getInputConfig.mockResolvedValue({
+      images: {
+        enabled,
+        mediaTypes: ['image/png'],
+        maxPerMessage: 4,
+        maxBytes: 1024,
+        maxBytesPerInput: 20 * 1024 * 1024,
+        maxPendingPerSession: 12,
+      },
+      insertMaxPerRun: 5,
+      queueMaxMessages: 5,
+    });
+    api.uploadAttachment.mockImplementation(async (_s, file, name) => ({
+      id: `att-${name}`,
+      mediaType: file.type,
+      name,
+      size: file.size,
+    }));
+    api.getSession.mockResolvedValue(detail());
+    api.sendMessage.mockResolvedValue(
+      streamResponse([
+        { type: 'start', messageId: 'run_r-1' },
+        { type: 'finish', finishReason: 'stop' },
+      ]),
+    );
+    Object.assign(URL, {
+      createObjectURL: jest.fn(() => 'blob:1'),
+      revokeObjectURL: jest.fn(),
+    });
+    return api;
+  }
+
+  it('has no Attach when the model reads no images', async () => {
+    const api = imagesApi(false);
+    await renderPage(api);
+    await waitFor(() => expect(api.getInputConfig).toHaveBeenCalled());
+    await waitFor(() => expect(api.listToolsets).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: 'Attach' })).toBeNull();
+    paste([png('a.png')]);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(api.createSession).not.toHaveBeenCalled();
+    expect(api.uploadAttachment).not.toHaveBeenCalled();
+  });
+
+  it('creates the session on the first image, once for two images, and the first message goes to it with both', async () => {
+    const api = imagesApi();
+    await renderPage(api);
+    await screen.findByRole('button', { name: 'Attach' });
+    paste([png('a.png'), png('b.png')]);
+    await waitFor(() => expect(api.uploadAttachment).toHaveBeenCalledTimes(2));
+    expect(api.createSession).toHaveBeenCalledTimes(1);
+    expect(api.createSession).toHaveBeenCalledWith({
+      enabledToolsets: ['read'],
+    });
+    expect(api.uploadAttachment.mock.calls.map(c => c[0])).toEqual([
+      's-1',
+      's-1',
+    ]);
+    expect(where()).toBe('/ai-chat');
+
+    await userEvent.type(screen.getByLabelText('Message'), 'look{Enter}');
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(api.createSession).toHaveBeenCalledTimes(1);
+    expect(where()).toBe('/ai-chat/s-1');
+    expect(api.sendMessage.mock.calls[0][0]).toBe('s-1');
+    expect(api.sendMessage.mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        text: 'look',
+        attachmentIds: ['att-a.png', 'att-b.png'],
+      }),
+    );
+  });
+
+  it('writes a change of the toolsets after the first image before the first run', async () => {
+    const api = imagesApi();
+    let written: (value: unknown) => void = () => {};
+    api.updateSession.mockImplementation(
+      () =>
+        new Promise(resolve => {
+          written = () =>
+            resolve({ ...session, enabledToolsets: ['read', 'write'] });
+        }) as never,
+    );
+    await renderPage(api);
+    await screen.findByRole('button', { name: 'Attach' });
+    paste([png('a.png')]);
+    await waitFor(() => expect(api.uploadAttachment).toHaveBeenCalledTimes(1));
+
+    await userEvent.click(screen.getByText(/Toolsets \(/));
+    await userEvent.click(screen.getByLabelText(/Write/));
+    await userEvent.type(screen.getByLabelText('Message'), 'go{Enter}');
+    await waitFor(() =>
+      expect(api.updateSession).toHaveBeenCalledWith('s-1', {
+        enabledToolsets: ['read', 'write'],
+      }),
+    );
+    // The first message waits for the toolsets.
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(api.sendMessage).not.toHaveBeenCalled();
+    expect(where()).toBe('/ai-chat');
+
+    written(undefined);
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(api.createSession).toHaveBeenCalledTimes(1);
+    expect(api.updateSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not send, and says why, when the toolsets could not be written', async () => {
+    const api = imagesApi();
+    api.updateSession.mockRejectedValue(new Error('Service Unavailable'));
+    await renderPage(api);
+    await screen.findByRole('button', { name: 'Attach' });
+    paste([png('a.png')]);
+    await waitFor(() => expect(api.uploadAttachment).toHaveBeenCalledTimes(1));
+    await userEvent.click(screen.getByText(/Toolsets \(/));
+    await userEvent.click(screen.getByLabelText(/Write/));
+    await userEvent.type(screen.getByLabelText('Message'), 'go{Enter}');
+
+    expect(await screen.findByText('Service Unavailable')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByLabelText('Message')).toHaveValue('go'),
+    );
+    expect(screen.getByRole('button', { name: 'Remove a.png' })).toBeVisible();
+    // The image put back has no file to preview: its name stands for it.
+    expect(screen.getByText('a.png')).toBeVisible();
+    expect(api.sendMessage).not.toHaveBeenCalled();
+    expect(where()).toBe('/ai-chat');
   });
 });

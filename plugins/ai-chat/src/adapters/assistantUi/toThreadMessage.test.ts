@@ -17,6 +17,7 @@
 import { fromThreadMessageLike } from '@assistant-ui/react';
 import { NOT_RUN, RESULT_NOT_KNOWN } from '../../domain/toolView';
 import type { ChatUiMessage, ToolPart } from '../../domain/types';
+import { chatAttachmentOf } from './attachmentAdapter';
 import { toThreadMessage, toToolCall } from './toThreadMessage';
 
 // The contract between the messages of `useSessionChat` (AI SDK UI messages
@@ -70,6 +71,30 @@ describe('toThreadMessage', () => {
       role: 'assistant',
       content: [{ type: 'text', text: 'Done **now**.' }],
     });
+  });
+
+  it('gives a user message its images as attachments that carry our attachment and no URL', () => {
+    const images = [
+      { id: 'att-1', mediaType: 'image/png', name: 'a.png', size: 4 },
+      { id: 'att-2', mediaType: 'image/jpeg', name: 'b.jpg', size: 5 },
+    ];
+    const message: ChatUiMessage = {
+      id: 'item_2',
+      role: 'user',
+      parts: [{ type: 'text', text: '' }],
+      metadata: { attachments: images },
+    };
+    const converted = thread(message);
+    expect(converted.attachments).toHaveLength(2);
+    expect(converted.attachments?.map(a => [a.id, a.type, a.name])).toEqual([
+      ['att-1', 'image', 'a.png'],
+      ['att-2', 'image', 'b.jpg'],
+    ]);
+    expect(converted.attachments?.map(chatAttachmentOf)).toEqual(images);
+    expect(JSON.stringify(converted.attachments)).not.toMatch(
+      /blob:|http|data:/,
+    );
+    expect(thread({ ...message, metadata: undefined }).attachments).toEqual([]);
   });
 
   it('leaves out step boundaries and reasoning, and keeps the order of the rest', () => {

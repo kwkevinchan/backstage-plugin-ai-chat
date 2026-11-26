@@ -22,6 +22,7 @@ import {
   MessagePrimitive,
   ThreadPrimitive,
   useAui,
+  useAuiState,
   type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
 import type { ChatUiMessage } from '../../domain/types';
@@ -79,6 +80,7 @@ function App(options: SessionRuntimeOptions) {
           <ComposerPrimitive.Cancel>Stop</ComposerPrimitive.Cancel>
         </ComposerPrimitive.Root>
         <QueueButton />
+        <AddImage />
       </ThreadPrimitive.Root>
     </AssistantRuntimeProvider>
   );
@@ -90,6 +92,38 @@ function QueueButton() {
     <button onClick={() => aui.composer.send({ steer: false })}>Queue</button>
   );
 }
+
+const dot = new File([new Uint8Array(4)], 'dot.png', { type: 'image/png' });
+const uploaded = {
+  id: 'att-1',
+  mediaType: 'image/png',
+  name: 'dot.png',
+  size: 4,
+};
+
+/** Adds `dot.png` as a paste or a drop would, and shows the images of the box. */
+function AddImage() {
+  const aui = useAui();
+  const images = useAuiState(s =>
+    s.composer.attachments.map(a => `${a.name}:${a.status.type}`).join(','),
+  );
+  const canAttach = useAuiState(s => s.thread.capabilities.attachments);
+  return (
+    <>
+      <button onClick={() => aui.composer.addAttachment(dot).catch(() => {})}>
+        Add image
+      </button>
+      <output aria-label="Images">{images}</output>
+      <output aria-label="Can attach">{String(canAttach)}</output>
+    </>
+  );
+}
+
+const limits = {
+  mediaTypes: ['image/png'],
+  maxPerMessage: 4,
+  maxBytes: 1000,
+};
 
 function queueSource(
   overrides: Partial<SessionQueueSource> = {},
@@ -132,7 +166,7 @@ describe('useSessionRuntime', () => {
     render(<App messages={[]} isRunning={false} onSend={onSend} />);
     await userEvent.type(screen.getByLabelText('Message'), '  hello  ');
     await userEvent.click(screen.getByRole('button', { name: 'Send' }));
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith('hello'));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith({ text: 'hello' }));
     expect(screen.getByLabelText('Message')).toHaveValue('');
   });
 
@@ -216,13 +250,15 @@ describe('useSessionRuntime', () => {
         />,
       );
       await userEvent.type(screen.getByLabelText('Message'), 'more{Enter}');
-      await waitFor(() => expect(source.send).toHaveBeenCalledWith('more'));
+      await waitFor(() =>
+        expect(source.send).toHaveBeenCalledWith({ text: 'more' }),
+      );
       expect(screen.getByLabelText('Message')).toHaveValue('');
 
       await userEvent.type(screen.getByLabelText('Message'), 'later');
       await userEvent.click(screen.getByRole('button', { name: 'Queue' }));
       await waitFor(() =>
-        expect(source.queueMessage).toHaveBeenCalledWith('later'),
+        expect(source.queueMessage).toHaveBeenCalledWith({ text: 'later' }),
       );
       expect(onSend).not.toHaveBeenCalled();
     });
@@ -240,7 +276,7 @@ describe('useSessionRuntime', () => {
       );
       await userEvent.type(screen.getByLabelText('Message'), 'hello{Enter}');
       await waitFor(() =>
-        expect(source.queueMessage).toHaveBeenCalledWith('hello'),
+        expect(source.queueMessage).toHaveBeenCalledWith({ text: 'hello' }),
       );
       expect(onSend).not.toHaveBeenCalled();
     });
@@ -259,6 +295,138 @@ describe('useSessionRuntime', () => {
       await waitFor(() =>
         expect(screen.getByLabelText('Message')).toHaveValue('keep me'),
       );
+    });
+  });
+
+  describe('with images', () => {
+    it('has no attachments without the uploads: the model reads no images', async () => {
+      render(<App messages={[]} isRunning={false} onSend={jest.fn()} />);
+      expect(screen.getByLabelText('Can attach')).toHaveTextContent('false');
+      await userEvent.click(screen.getByText('Add image'));
+      expect(screen.getByLabelText('Images')).toHaveTextContent('');
+    });
+
+    it('uploads an added image and sends its id with the message, also with no text', async () => {
+      const upload = jest.fn().mockResolvedValue(uploaded);
+      const onSend = jest.fn();
+      render(
+        <App
+          messages={[]}
+          isRunning={false}
+          onSend={onSend}
+          attachments={{ limits, upload }}
+        />,
+      );
+      expect(screen.getByLabelText('Can attach')).toHaveTextContent('true');
+      await userEvent.click(screen.getByText('Add image'));
+      await waitFor(() =>
+        expect(screen.getByLabelText('Images')).toHaveTextContent(
+          'dot.png:complete',
+        ),
+      );
+      expect(upload).toHaveBeenCalledWith(dot);
+      await userEvent.click(screen.getByText('Send'));
+      await waitFor(() =>
+        expect(onSend).toHaveBeenCalledWith({
+          text: '',
+          attachments: [uploaded],
+        }),
+      );
+      expect(screen.getByLabelText('Images')).toHaveTextContent('');
+    });
+
+    it('inserts and queues the images through the queue, and adds no message to the thread', async () => {
+      const source = queueSource();
+      render(
+        <App
+          messages={[question]}
+          isRunning
+          onSend={jest.fn()}
+          queue={createQueueAdapter(source)}
+          attachments={{
+            limits,
+            upload: jest.fn().mockResolvedValue(uploaded),
+          }}
+        />,
+      );
+      await userEvent.click(screen.getByText('Add image'));
+      await userEvent.type(screen.getByLabelText('Message'), 'look{Enter}');
+      await waitFor(() =>
+        expect(source.send).toHaveBeenCalledWith({
+          text: 'look',
+          attachments: [uploaded],
+        }),
+      );
+      // The thread shows the question and the running answer only; the
+      // queue shows the inserted and queued messages.
+      expect(screen.getAllByTestId('message')).toHaveLength(2);
+      await userEvent.click(screen.getByText('Add image'));
+      await waitFor(() =>
+        expect(screen.getByLabelText('Images')).toHaveTextContent('complete'),
+      );
+      await userEvent.click(screen.getByText('Queue'));
+      await waitFor(() =>
+        expect(source.queueMessage).toHaveBeenCalledWith({
+          text: '',
+          attachments: [uploaded],
+        }),
+      );
+      expect(screen.getAllByTestId('message')).toHaveLength(2);
+    });
+
+    it('puts the text and the image back when the queue did not take the message', async () => {
+      const source = queueSource({ send: jest.fn().mockResolvedValue(false) });
+      render(
+        <App
+          messages={[question]}
+          isRunning
+          onSend={jest.fn()}
+          queue={createQueueAdapter(source)}
+          attachments={{
+            limits,
+            upload: jest.fn().mockResolvedValue(uploaded),
+          }}
+        />,
+      );
+      await userEvent.click(screen.getByText('Add image'));
+      await userEvent.type(screen.getByLabelText('Message'), 'keep me{Enter}');
+      await waitFor(() => expect(source.send).toHaveBeenCalled());
+      await waitFor(() =>
+        expect(screen.getByLabelText('Message')).toHaveValue('keep me'),
+      );
+      expect(screen.getByLabelText('Images')).toHaveTextContent(
+        'dot.png:complete',
+      );
+    });
+
+    it('keeps the message in the box when an upload failed, and uploads nothing at send', async () => {
+      const upload = jest.fn().mockRejectedValue(new Error('Too large'));
+      const onSend = jest.fn();
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      render(
+        <App
+          messages={[]}
+          isRunning={false}
+          onSend={onSend}
+          attachments={{ limits, upload }}
+        />,
+      );
+      await userEvent.click(screen.getByText('Add image'));
+      await waitFor(() =>
+        expect(screen.getByLabelText('Images')).toHaveTextContent(
+          'dot.png:incomplete',
+        ),
+      );
+      await userEvent.type(screen.getByLabelText('Message'), 'keep me');
+      await userEvent.click(screen.getByText('Send'));
+      await waitFor(() =>
+        expect(screen.getByLabelText('Message')).toHaveValue('keep me'),
+      );
+      expect(screen.getByLabelText('Images')).toHaveTextContent(
+        'dot.png:incomplete',
+      );
+      expect(onSend).not.toHaveBeenCalled();
+      expect(upload).toHaveBeenCalledTimes(1);
     });
   });
 });

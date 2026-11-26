@@ -24,6 +24,8 @@ import type {
   ChatAttachment,
   ChatQueuedMessage,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { OutgoingMessage } from '../../domain/types';
+import { isEmptyMessage, outgoingOf } from './attachmentAdapter';
 
 /** Where `move` puts an item (not exported by name from `@assistant-ui/react`). */
 type QueuePlacement = Parameters<ExternalThreadQueueAdapter['move']>[1];
@@ -42,9 +44,9 @@ export interface SessionQueueSource {
   /** The messages inserted into the run that the model has not read. */
   inserted: readonly InsertedMessage[];
   /** Inserts into a running run, queues while it waits for a decision, or sends with no run. */
-  send(text: string): Promise<boolean>;
+  send(message: OutgoingMessage): Promise<boolean>;
   /** Queues while a run goes on, or sends with no run. */
-  queueMessage(text: string): Promise<boolean>;
+  queueMessage(message: OutgoingMessage): Promise<boolean>;
   editQueued(id: string, text: string): Promise<boolean>;
   removeQueued(id: string): Promise<void>;
   /** Moves a queued message by `offset` places. */
@@ -69,9 +71,11 @@ export interface SessionQueueAdapter extends ExternalThreadQueueAdapter {
   editText(queueItemId: string, text: string): Promise<boolean>;
   /** The lane of an item; inserted messages are in `steer`. */
   laneOf(queueItemId: string): 'queue' | 'steer' | undefined;
-  /** The number of images of an item. */
-  imageCountOf(queueItemId: string): number;
+  /** The images of an item. */
+  attachmentsOf(queueItemId: string): readonly ChatAttachment[];
 }
+
+const NO_IMAGES: readonly ChatAttachment[] = [];
 
 /** The id of an inserted message in the steer lane; queued messages keep the id of the backend. */
 export const insertedItemId = (seq: number) => `inserted-${seq}`;
@@ -111,11 +115,11 @@ export function createQueueAdapter(
     itemOf(insertedItemId(m.seq), m.text),
   );
   const items = source.queued.map(m => itemOf(m.id, m.text));
-  const images = new Map<string, number>([
+  const images = new Map<string, readonly ChatAttachment[]>([
     ...source.inserted.map(
-      m => [insertedItemId(m.seq), m.attachments?.length ?? 0] as const,
+      m => [insertedItemId(m.seq), m.attachments ?? NO_IMAGES] as const,
     ),
-    ...source.queued.map(m => [m.id, m.attachments?.length ?? 0] as const),
+    ...source.queued.map(m => [m.id, m.attachments ?? NO_IMAGES] as const),
   ]);
   const laneOf = (id: string) => {
     if (steerItems.some(item => item.id === id)) return 'steer' as const;
@@ -131,17 +135,17 @@ export function createQueueAdapter(
     items,
     steerItems,
     laneOf,
-    imageCountOf: id => images.get(id) ?? 0,
+    attachmentsOf: id => images.get(id) ?? NO_IMAGES,
     // Enter while a run goes on.
     steer: async message => {
-      const text = textOf(message);
-      return text ? source.send(text) : false;
+      const outgoing = outgoingOf(message);
+      return isEmptyMessage(outgoing) ? false : source.send(outgoing);
     },
     // Ctrl or Cmd with Enter, and the Queue button. With no run,
     // assistant-ui sends through `enqueue`; `queueMessage` starts the run then.
     enqueue: async message => {
-      const text = textOf(message);
-      return text ? source.queueMessage(text) : false;
+      const outgoing = outgoingOf(message);
+      return isEmptyMessage(outgoing) ? false : source.queueMessage(outgoing);
     },
     edit: (id, message) => editText(id, textOf(message)),
     editText,

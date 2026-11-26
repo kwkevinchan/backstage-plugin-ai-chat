@@ -18,6 +18,7 @@ import { isToolUIPart } from 'ai';
 import type { ThreadMessageLike } from '@assistant-ui/react';
 import { toolIdOf } from '../../domain/toolView';
 import type { ChatUiMessage, ToolPart } from '../../domain/types';
+import { toCompleteAttachment } from './attachmentAdapter';
 
 type Part = Exclude<ThreadMessageLike['content'], string>[number];
 type ToolCallLike = Extract<Part, { type: 'tool-call' }>;
@@ -76,7 +77,8 @@ export function toToolCall(part: ToolPart): ToolCallLike {
  * the data parts (`data-inserted`, `data-unread`, `data-run`, `data-notice`
  * and the others) keep their order; a data part keeps its name and data.
  * Step boundaries, reasoning and files are left out: the screen does not
- * show them.
+ * show them. The images of a user message (`metadata.attachments`) are its
+ * attachments; they carry our attachment, not a URL.
  */
 export function toThreadMessage(message: ChatUiMessage): ThreadMessageLike {
   const content: Part[] = [];
@@ -98,9 +100,14 @@ export function toThreadMessage(message: ChatUiMessage): ThreadMessageLike {
       content.push(toToolCall(part as ToolPart));
     }
   }
+  const attachments =
+    message.role === 'user' ? message.metadata?.attachments ?? [] : [];
   return {
     id: message.id,
     role: message.role,
     content,
+    ...(attachments.length > 0 && {
+      attachments: attachments.map(toCompleteAttachment),
+    }),
   };
 }

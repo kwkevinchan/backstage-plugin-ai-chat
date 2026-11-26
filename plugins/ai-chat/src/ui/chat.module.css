@@ -149,12 +149,18 @@
   font-size: var(--bui-font-size-2);
 }
 
+.chat-composer-box {
+  border-top: 1px solid var(--bui-border-1);
+}
+.chat-composer-box[data-dragging='true'] {
+  outline: 2px dashed var(--bui-border-info);
+  outline-offset: -2px;
+}
 .chat-composer {
   display: flex;
   gap: var(--bui-space-2);
   align-items: flex-end;
   padding: var(--bui-space-3);
-  border-top: 1px solid var(--bui-border-1);
 }
 .chat-composer-input {
   flex: 1;
@@ -517,10 +523,94 @@
   display: flex;
   gap: var(--bui-space-1);
 }
-.chat-queue-images {
-  color: var(--bui-fg-secondary);
+.chat-queue-images .chat-image {
+  width: 32px;
+  height: 32px;
+}
+.chat-pending-item .chat-images {
+  margin-top: var(--bui-space-1);
+}
+
+/* Images: the draft above the box, and the images of messages and of the queue. */
+.chat-rejections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bui-space-1);
+  padding: var(--bui-space-2) var(--bui-space-3) 0;
+  color: var(--bui-fg-danger);
+  font-size: var(--bui-font-size-2);
+}
+.chat-drafts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bui-space-2);
+  padding: var(--bui-space-3) var(--bui-space-3) 0;
+}
+.chat-draft {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bui-space-1);
+  width: 120px;
+  padding: var(--bui-space-1);
+  border: 1px solid var(--bui-border-2);
+  border-radius: var(--bui-radius-2);
+  background: var(--bui-bg-neutral-1);
   font-size: var(--bui-font-size-1);
-  white-space: nowrap;
+}
+.chat-draft img {
+  width: 100%;
+  height: 72px;
+  object-fit: cover;
+  border-radius: var(--bui-radius-1);
+}
+.chat-draft-meta {
+  color: var(--bui-fg-secondary);
+  overflow-wrap: anywhere;
+}
+.chat-draft-name {
+  overflow-wrap: anywhere;
+}
+.chat-draft-failed {
+  color: var(--bui-fg-danger);
+}
+.chat-draft-remove {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--bui-fg-info);
+  font: inherit;
+  cursor: pointer;
+}
+.chat-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bui-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.chat-message-images {
+  align-self: flex-end;
+  justify-content: flex-end;
+  max-width: min(760px, 100%);
+}
+.chat-image {
+  display: block;
+  width: 160px;
+  height: 120px;
+  object-fit: cover;
+  border: 1px solid var(--bui-border-2);
+  border-radius: var(--bui-radius-2);
+  background: var(--bui-bg-neutral-2);
+}
+.chat-image-missing {
+  display: block;
+  padding: var(--bui-space-2) var(--bui-space-3);
+  border: 1px dashed var(--bui-border-2);
+  border-radius: var(--bui-radius-2);
+  color: var(--bui-fg-secondary);
+  font-size: var(--bui-font-size-2);
 }
 
 /* Side panel. It stays mounted across pages; a closed conversation is hidden, not removed. */

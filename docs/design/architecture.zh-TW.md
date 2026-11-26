@@ -1235,11 +1235,13 @@ plugins/ai-chat/src/
     useToolsets.ts          GET /toolsets
     useSessionTools.ts      GET /sessions/:id/tools
     usePageContext.ts       B-01：路徑和 entityRef
+    useAttachmentUrl.ts     一張圖片：帶身分的請求 → object URL，換圖或卸載時釋放
   ui/                       assistant-ui 的 primitives，套 @backstage/ui 的樣式
     ChatPage.tsx            路由（SE-01）、Session 列表、新對話
     SessionView.tsx         一個 Session：Toolset、訊息、輸入框。可傳 page
     Composer.tsx            ComposerPrimitive：Enter 是 steer，Ctrl 或 Cmd 加 Enter 和「排隊」按鈕是 enqueue
     ComposerQueue.tsx       ComposerPrimitive.Queue、QueueItemPrimitive；自己畫暫停和「繼續」、上限、錯誤
+    Attachments.tsx         ComposerPrimitive.Attachments、AttachmentPrimitive：草稿縮圖；訊息和排隊裡的圖片；拒絕的原因
     AiChatPanel.tsx         側邊面板。舊系統由 app 掛在路由外面
     ToolsetPanel.tsx        自己畫（assistant-ui 的模型裡沒有工具組）
     ToolCallCard.tsx        吃工具元件的 props：核准、拒絕、誰決定的、等待中、失敗
@@ -1275,7 +1277,7 @@ plugins/ai-chat/src/
 
 - 給了 `queue` 之後，沒有 Run 時的送出也走 `enqueue`（Run 進行中 Enter 走 `steer`），不走 `onNew`，所以「沒有 Run 就直接送出」在 adapter 背後的 `useSessionChat`。訊息沒被收下時，文字放回輸入框。
 - `composer.queue` 是兩條道合起來的清單，steer 在前。插入的訊息的 id 是 `inserted-<seq>`，排隊的用後端的 id；畫面用 `laneOf` 分辨。插入的訊息不能改、刪、移動。
-- adapter 的方法回傳 Promise（`false` 是沒有改變），比介面的 `void` 多給畫面用；另有 `editText`、`laneOf`、`imageCountOf`。
+- adapter 的方法回傳 Promise（`false` 是沒有改變），比介面的 `void` 多給畫面用；另有 `editText`、`laneOf`、`attachmentsOf`。
 - 「現在就送」只在 Run 是 `running` 時能按，請求進行中不能再按。按下時先讀一次佇列：那一則已經不在就說明並停下；在的話送出，畫面用回應裡實際寫入的內容（別的分頁改過時就是改過的內容）。404：說明並重新讀佇列。409 `RunNotRunning`：說明並重新讀 Session。409 `InsertLimitReached`：說明，訊息留在佇列。
 - 佇列的上限來自 `GET /input-config` 的 `queueMaxMessages`（還沒回來時用 5），滿了在佇列區塊說明。
 
@@ -1294,7 +1296,22 @@ Session 列表（`threadListAdapter`，實作 `RemoteThreadListAdapter`）。
 | `custom`                       | `pinned`、`activity`           | 釘選和即時狀態放這裡                                           |
 | `threadId`、`onThreadIdChange` | 網址 `/ai-chat/:id`            | 受控的寫法，給 URL 路由用                                      |
 
-附件（`attachmentAdapter`，實作 `AttachmentAdapter`）。`add` 先檢查型別、大小、張數；`send` 換成我們的上傳，回傳帶附件 id 的附件；`remove` 處理還沒送出的草稿。訊息裡的圖片仍用帶身分的請求載入，轉成 object URL。
+附件（`attachmentAdapter`，實作 `AttachmentAdapter`）。
+
+| 它的            | 我們的做法                                                                                                                                                            |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `accept`        | `GET /input-config` 的四種圖片型別。型別不對的檔案由 assistant-ui 擋下                                                                                                |
+| `add({ file })` | 先檢查大小和張數（上限來自 `input-config`），不符合就丟錯、不上傳。符合就開始上傳（`POST …/attachments`），依序回報上傳中、完成（`complete`，內容是我們的附件）或失敗 |
+| `send(附件)`    | 只有上傳失敗的那張會走到這裡：丟出失敗的原因，整則留在輸入框，不再上傳                                                                                                |
+| `remove(附件)`  | 還在上傳的那張不再進草稿。已知限制：沒有刪除附件的 API，移除的圖片仍算進後端的 `maxPendingPerSession`，約 24 小時後才刪除                                             |
+
+- 張數算草稿裡的圖片加上這一刻同時開始加入的：同一次拖放或選檔的幾張是同時加入的。
+- 上傳完成的圖片在 `add` 的最後一個狀態就是 `complete`。`add` 的型別只列未完成的狀態，0.15.38 照樣收下。帶著未完成附件的訊息，assistant-ui 會當成「送出中」，在 thread 裡多畫一則，直到 thread 出現新的使用者訊息；插入和排隊的訊息不會變成那樣的一則，多出來的那則會留著。所以圖片還在上傳時，送出、排隊和 Enter 都先停用。
+- 拒絕的原因由輸入框接 `composer.attachmentAddError` 事件顯示。一次附加的原因取代上一次的；送出成功時清空。
+- `toThreadMessage` 把訊息的 `metadata.attachments` 轉成使用者訊息的 `attachments`。附件的內容只有一個 `data` 片段，裝我們的 `ChatAttachment`，沒有網址。
+- 訊息、插入的訊息和排隊項目裡的圖片，都用帶身分的請求（`readAttachment`）載入，轉成 object URL（`application/useAttachmentUrl.ts`）。換圖或卸載時釋放。讀不到時顯示檔名和「圖片已不存在」。使用者給的任何內容都不當成網址載入。
+- 模型不能讀圖片（`input-config` 的 `images.enabled` 是 `false`）或設定還沒讀到時，runtime 沒有附件的 adapter：沒有附加按鈕，貼上和拖放的檔案不處理。
+- 新對話頁第一次附加就建立 Session，之後的附加和第一則訊息都用它。之後改工具組會寫到這段 Session，送出前先等它寫完；寫入失敗就顯示錯誤、不送出。
 
 **assistant-ui 的模型裡沒有、我們自己畫的**
 
