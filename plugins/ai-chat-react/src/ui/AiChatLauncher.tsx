@@ -14,9 +14,13 @@
  * limitations under the License.
  */
 
-import type { ReactNode } from 'react';
+import { useCallback, useSyncExternalStore, type ReactNode } from 'react';
 import { useApiHolder } from '@backstage/core-plugin-api';
 import { aiChatPanelApiRef } from '../api';
+
+const noop = () => {};
+const noopSubscribe = () => noop;
+const getClosed = () => false;
 
 /**
  * Props of {@link AiChatLauncher}. Both fields are optional. A prompt starts
@@ -47,12 +51,22 @@ export interface AiChatLauncherProps {
  */
 export function AiChatLauncher(props: AiChatLauncherProps): JSX.Element | null {
   const api = useApiHolder().get(aiChatPanelApiRef);
+  const subscribe = useCallback(
+    (listener: () => void) => (api ? api.subscribe(listener) : noopSubscribe()),
+    [api],
+  );
+  const getSnapshot = useCallback(
+    () => (api ? api.isOpen() : getClosed()),
+    [api],
+  );
+  const isOpen = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   if (!api) return null;
   const { prompt, entityRef, className, children } = props;
   return (
     <button
       type="button"
       className={className}
+      aria-expanded={isOpen}
       onClick={() => {
         if (prompt === undefined && entityRef === undefined) api.open();
         else api.open({ prompt, entityRef });
