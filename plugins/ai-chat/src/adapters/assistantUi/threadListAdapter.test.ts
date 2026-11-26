@@ -127,15 +127,21 @@ describe('threadListAdapter', () => {
     expect(created).toEqual({ remoteId: 's-new' });
   });
 
-  it('renames, archives, unarchives, deletes and updates pinned via the session API', async () => {
+  it('renames, archives, deletes and updates pinned via the session API and omits unarchive', async () => {
     const api = mockApi();
     const onActionStart = jest.fn();
     const onActionSuccess = jest.fn();
+    const onCustomUpdated = jest.fn();
+    const onArchiveSettled = jest.fn();
     const adapter = createThreadListAdapter({
       api,
       onActionStart,
       onActionSuccess,
+      onCustomUpdated,
+      onArchiveSettled,
     });
+
+    expect(adapter.unarchive).toBeUndefined();
 
     await adapter.rename('s-1', 'New title');
     expect(api.updateSession).toHaveBeenCalledWith('s-1', {
@@ -144,18 +150,17 @@ describe('threadListAdapter', () => {
 
     await adapter.archive('s-1');
     expect(api.updateSession).toHaveBeenCalledWith('s-1', { archived: true });
-
-    await adapter.unarchive!('s-1');
-    expect(api.updateSession).toHaveBeenCalledWith('s-1', { archived: false });
+    expect(onArchiveSettled).toHaveBeenCalledWith('s-1');
 
     await adapter.updateCustom!('s-1', { pinned: true });
     expect(api.updateSession).toHaveBeenCalledWith('s-1', { pinned: true });
+    expect(onCustomUpdated).toHaveBeenCalledTimes(1);
 
     await adapter.delete('s-1');
     expect(api.deleteSession).toHaveBeenCalledWith('s-1');
 
-    expect(onActionStart).toHaveBeenCalledTimes(5);
-    expect(onActionSuccess).toHaveBeenCalledTimes(5);
+    expect(onActionStart).toHaveBeenCalledTimes(4);
+    expect(onActionSuccess).toHaveBeenCalledTimes(4);
   });
 
   it('reports mutation errors and rethrows so optimistic updates roll back', async () => {

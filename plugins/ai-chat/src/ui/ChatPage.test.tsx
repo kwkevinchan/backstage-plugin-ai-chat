@@ -841,7 +841,17 @@ describe('session list controls and live status', () => {
   });
 
   it('keeps low-frequency fallback polling even when Signals is present and pauses while hidden', async () => {
-    jest.useFakeTimers();
+    jest.useFakeTimers({
+      doNotFake: [
+        'nextTick',
+        'setImmediate',
+        'queueMicrotask',
+        'setTimeout',
+        'clearTimeout',
+        'Date',
+        'performance',
+      ],
+    });
     const originalVisibility = Object.getOwnPropertyDescriptor(
       Document.prototype,
       'visibilityState',
@@ -851,6 +861,7 @@ describe('session list controls and live status', () => {
       configurable: true,
       get: () => visibility,
     });
+    let unmount: (() => void) | undefined;
     try {
       const signals = mockSignals();
       const api = mockApi({
@@ -858,7 +869,10 @@ describe('session list controls and live status', () => {
           .fn()
           .mockResolvedValue([{ ...session, id: 's-1', title: 'Polled chat' }]),
       });
-      await renderPage(api, '/ai-chat', [[signalApiRef, signals.api] as never]);
+      const rendered = await renderPage(api, '/ai-chat', [
+        [signalApiRef, signals.api] as never,
+      ]);
+      unmount = rendered.unmount;
       await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(1));
 
       // Polling still fires after 15s even though Signals is installed.
@@ -884,17 +898,144 @@ describe('session list controls and live status', () => {
       });
       await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(3));
     } finally {
+      unmount?.();
+      delete (document as { visibilityState?: DocumentVisibilityState })
+        .visibilityState;
       if (originalVisibility) {
         Object.defineProperty(
           Document.prototype,
           'visibilityState',
           originalVisibility,
         );
-      } else {
-        delete (document as { visibilityState?: DocumentVisibilityState })
-          .visibilityState;
       }
       jest.useRealTimers();
     }
+  });
+
+  it('does not auto-unarchive when opening an archived conversation directly by URL or navigating back to it', async () => {
+    const archivedSession = {
+      ...session,
+      id: 's-arch',
+      title: 'Archived chat',
+      archivedAt: '2026-11-26T00:00:00.000Z',
+    };
+    const regularSession = {
+      ...session,
+      id: 's-reg',
+      title: 'Regular chat',
+    };
+    const api = mockApi({
+      listSessions: jest.fn(async opts =>
+        opts?.includeArchived
+          ? [regularSession, archivedSession]
+          : [regularSession],
+      ),
+      getSession: jest.fn(async id =>
+        detail({
+          session: id === 's-arch' ? archivedSession : regularSession,
+          items: items(user(`Message in ${id}`)),
+        }),
+      ),
+    });
+
+    // 1. Direct URL open of an archived conversation must NOT PATCH archived: false.
+    await renderPage(api, '/ai-chat/s-arch');
+    expect(await screen.findByText('Message in s-arch')).toBeInTheDocument();
+    expect(where()).toBe('/ai-chat/s-arch');
+    expect(api.updateSession).not.toHaveBeenCalled();
+
+    // 2. Navigate to another conversation, then go back to the archived one: still no unarchive.
+    await userEvent.click(await screen.findByText('Regular chat'));
+    await waitFor(() => expect(where()).toBe('/ai-chat/s-reg'));
+    expect(await screen.findByText('Message in s-reg')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Browser back' }));
+    await waitFor(() => expect(where()).toBe('/ai-chat/s-arch'));
+    expect(await screen.findByText('Message in s-arch')).toBeInTheDocument();
+    expect(api.updateSession).not.toHaveBeenCalled();
+  });
+
+  it('navigates back to /ai-chat when deleting s-2 after archiving/unarchiving/re-archiving s-1', async () => {
+    const state = new Map<
+      string,
+      { id: string; title: string; archivedAt?: string }
+    >([
+      ['s-1', { id: 's-1', title: 'First chat' }],
+      ['s-2', { id: 's-2', title: 'Second chat' }],
+    ]);
+    const api = mockApi({
+      listSessions: jest.fn(async opts =>
+        [...state.values()]
+          .filter(s => opts?.includeArchived || !s.archivedAt)
+          .map(s => ({ ...session, ...s })),
+      ),
+      getSession: jest.fn(async id => {
+        const found = state.get(id);
+        return detail({
+          session: {
+            ...session,
+            id,
+            title: found?.title,
+            archivedAt: found?.archivedAt,
+          },
+        });
+      }),
+      updateSession: jest.fn(async (id, patch) => {
+        const cur = state.get(id)!;
+        const next = {
+          ...cur,
+          archivedAt: patch.archived ? '2026-11-26T00:00:00.000Z' : undefined,
+        };
+        state.set(id, next);
+        return { ...session, ...next };
+      }),
+      deleteSession: jest.fn(async id => {
+        state.delete(id);
+      }),
+    });
+
+    await renderPage(api, '/ai-chat/s-1');
+    expect(await screen.findByText('First chat')).toBeInTheDocument();
+
+    // Archive s-1 -> stays on /ai-chat/s-1.
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Archive conversation First chat' }),
+    );
+    await waitFor(() =>
+      expect(api.updateSession).toHaveBeenCalledWith('s-1', { archived: true }),
+    );
+    expect(where()).toBe('/ai-chat/s-1');
+
+    // Show archived -> unarchive s-1 -> archive s-1 again.
+    await userEvent.click(screen.getByLabelText('Show archived'));
+    await userEvent.click(
+      await screen.findByRole('button', {
+        name: 'Unarchive conversation First chat',
+      }),
+    );
+    await waitFor(() =>
+      expect(api.updateSession).toHaveBeenLastCalledWith('s-1', {
+        archived: false,
+      }),
+    );
+    await userEvent.click(
+      await screen.findByRole('button', {
+        name: 'Archive conversation First chat',
+      }),
+    );
+    await waitFor(() =>
+      expect(api.updateSession).toHaveBeenLastCalledWith('s-1', {
+        archived: true,
+      }),
+    );
+
+    // Switch to s-2, then delete s-2: URL must return to /ai-chat (no stale archive flag).
+    await userEvent.click(screen.getByText('Second chat'));
+    await waitFor(() => expect(where()).toBe('/ai-chat/s-2'));
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Delete conversation Second chat' }),
+    );
+    await waitFor(() => expect(api.deleteSession).toHaveBeenCalledWith('s-2'));
+    await waitFor(() => expect(where()).toBe('/ai-chat'));
   });
 });

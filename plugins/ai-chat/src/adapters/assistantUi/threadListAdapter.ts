@@ -44,6 +44,10 @@ export interface ThreadListAdapterOptions {
   onActionSuccess?(): void;
   /** Called when a mutating action fails before the error is rethrown. */
   onActionError?(error: unknown): void;
+  /** Called after `updateCustom` succeeds so the list can re-fetch server ordering. */
+  onCustomUpdated?(): void;
+  /** Called in `finally` when `archive` settles (success or error). */
+  onArchiveSettled?(remoteId: string): void;
   /** Polling interval in ms while waiting for the backend-generated title. */
   generateTitlePollMs?: number;
   /** Maximum time in ms to wait for the backend-generated title. */
@@ -173,6 +177,8 @@ export function createThreadListAdapter(
     onActionStart,
     onActionSuccess,
     onActionError,
+    onCustomUpdated,
+    onArchiveSettled,
     generateTitlePollMs = DEFAULT_TITLE_POLL_MS,
     generateTitleTimeoutMs = DEFAULT_TITLE_TIMEOUT_MS,
   } = options;
@@ -191,7 +197,7 @@ export function createThreadListAdapter(
   }
 
   return {
-    storeKey: `ai-chat:${trimmedQuery ?? ''}:${includeArchived ? '1' : '0'}`,
+    storeKey: 'ai-chat',
 
     async list() {
       const sessions = await api.listSessions({
@@ -224,12 +230,20 @@ export function createThreadListAdapter(
     },
 
     async archive(remoteId) {
-      await runMutation(() => api.updateSession(remoteId, { archived: true }));
+      try {
+        await runMutation(() =>
+          api.updateSession(remoteId, { archived: true }),
+        );
+      } finally {
+        onArchiveSettled?.(remoteId);
+      }
     },
 
-    async unarchive(remoteId) {
-      await runMutation(() => api.updateSession(remoteId, { archived: false }));
-    },
+    // Intentionally omit `unarchive` from the adapter: assistant-ui's
+    // RemoteThreadList automatically calls `adapter.unarchive` whenever a
+    // controlled `threadId` switches to an archived thread (e.g. reload,
+    // bookmark, or browser back). Unarchiving is handled by an explicit
+    // button in ThreadListSidebar instead.
 
     async delete(remoteId) {
       await runMutation(() => api.deleteSession(remoteId));
@@ -238,6 +252,7 @@ export function createThreadListAdapter(
     async updateCustom(remoteId, custom) {
       const pinned = Boolean(custom?.pinned);
       await runMutation(() => api.updateSession(remoteId, { pinned }));
+      onCustomUpdated?.();
     },
 
     async generateTitle(remoteId) {

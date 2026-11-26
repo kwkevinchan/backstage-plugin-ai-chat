@@ -314,8 +314,13 @@ interface ChatPageBodyProps {
   showArchived: boolean;
   onShowArchivedChange(value: boolean): void;
   actionError?: string;
+  onActionError(error: unknown): void;
   onClearError(): void;
-  onArchiveCurrent(): void;
+  onArchiveStart(remoteId: string): void;
+  onThreadItems(
+    items: ReadonlyArray<{ id: string; remoteId?: string; status: string }>,
+  ): void;
+  reloadRef: React.MutableRefObject<(() => void) | undefined>;
 }
 
 function ChatPageBody(props: ChatPageBodyProps) {
@@ -329,8 +334,11 @@ function ChatPageBody(props: ChatPageBodyProps) {
     showArchived,
     onShowArchivedChange,
     actionError,
+    onActionError,
     onClearError,
-    onArchiveCurrent,
+    onArchiveStart,
+    onThreadItems,
+    reloadRef,
   } = props;
   const aui = useAui();
   const navigate = useNavigate();
@@ -344,6 +352,10 @@ function ChatPageBody(props: ChatPageBodyProps) {
   const signalVersionsRef = useRef<Record<string, number>>({});
   const openIdRef = useRef(openId);
   openIdRef.current = openId;
+
+  useEffect(() => {
+    onThreadItems(threadItems);
+  }, [onThreadItems, threadItems]);
 
   const reloadList = useCallback(() => {
     const seqAtStart = signalSeqRef.current;
@@ -363,6 +375,8 @@ function ChatPageBody(props: ChatPageBodyProps) {
       });
     });
   }, [aui]);
+
+  reloadRef.current = reloadList;
 
   // Clear the "New reply" badge once the user opens that conversation.
   useEffect(() => {
@@ -465,12 +479,18 @@ function ChatPageBody(props: ChatPageBodyProps) {
     navigate(basePath || '/');
   }, [aui, basePath, navigate]);
 
-  const handlePinChanged = useCallback(() => {
-    // Re-read the list after pinning so server-side pinned-first ordering applies.
-    setTimeout(() => {
-      reloadList();
-    }, 0);
-  }, [reloadList]);
+  const handleUnarchive = useCallback(
+    async (remoteId: string) => {
+      onClearError();
+      try {
+        await api.updateSession(remoteId, { archived: false });
+        reloadList();
+      } catch (error) {
+        onActionError(error);
+      }
+    },
+    [api, onActionError, onClearError, reloadList],
+  );
 
   const basics: Basics = {
     api,
@@ -490,10 +510,10 @@ function ChatPageBody(props: ChatPageBodyProps) {
         onShowArchivedChange={onShowArchivedChange}
         actionError={actionError}
         onClearError={onClearError}
-        onArchiveCurrent={onArchiveCurrent}
+        onArchiveStart={onArchiveStart}
+        onUnarchive={handleUnarchive}
         onNewChat={handleNewChat}
         signalActivities={signalActivities}
-        onPinChanged={handlePinChanged}
       />
       <Routes>
         <Route index element={<NewSession {...basics} />} />
@@ -524,7 +544,11 @@ export function ChatPageContent() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const [actionError, setActionError] = useState<string>();
-  const keepUrlOnArchiveRef = useRef(false);
+  const archivingIdsRef = useRef(new Set<string>());
+  const threadItemsRef = useRef<
+    ReadonlyArray<{ id: string; remoteId?: string; status: string }>
+  >([]);
+  const reloadRef = useRef<(() => void) | undefined>();
 
   useEffect(() => {
     const trimmed = search.trim();
@@ -543,9 +567,22 @@ export function ChatPageContent() {
     setActionError(undefined);
   }, []);
 
-  const markArchiveCurrent = useCallback(() => {
-    keepUrlOnArchiveRef.current = true;
+  const reportActionError = useCallback((error: unknown) => {
+    setActionError(describeError(error));
   }, []);
+
+  const markArchiveStart = useCallback((remoteId: string) => {
+    archivingIdsRef.current.add(remoteId);
+  }, []);
+
+  const handleThreadItems = useCallback(
+    (
+      items: ReadonlyArray<{ id: string; remoteId?: string; status: string }>,
+    ) => {
+      threadItemsRef.current = items;
+    },
+    [],
+  );
 
   const adapter = useMemo(
     () =>
@@ -555,22 +592,28 @@ export function ChatPageContent() {
         includeArchived: showArchived,
         onActionStart: clearActionError,
         onActionSuccess: clearActionError,
-        onActionError: error => {
-          keepUrlOnArchiveRef.current = false;
-          setActionError(describeError(error));
+        onActionError: reportActionError,
+        onCustomUpdated: () => reloadRef.current?.(),
+        onArchiveSettled: remoteId => {
+          archivingIdsRef.current.delete(remoteId);
         },
       }),
-    [api, debouncedSearch, showArchived, clearActionError],
+    [api, debouncedSearch, showArchived, clearActionError, reportActionError],
   );
 
   const onThreadIdChange = useCallback(
     (nextId: string | undefined) => {
       if (nextId === undefined) {
-        if (keepUrlOnArchiveRef.current) {
-          keepUrlOnArchiveRef.current = false;
-          return;
-        }
         if (openId) {
+          const isArchiving = archivingIdsRef.current.has(openId);
+          const isArchived = threadItemsRef.current.some(
+            item =>
+              (item.remoteId === openId || item.id === openId) &&
+              item.status === 'archived',
+          );
+          if (isArchiving || isArchived) {
+            return;
+          }
           navigate(basePath || '/');
         }
         return;
@@ -601,8 +644,11 @@ export function ChatPageContent() {
         showArchived={showArchived}
         onShowArchivedChange={setShowArchived}
         actionError={actionError}
+        onActionError={reportActionError}
         onClearError={clearActionError}
-        onArchiveCurrent={markArchiveCurrent}
+        onArchiveStart={markArchiveStart}
+        onThreadItems={handleThreadItems}
+        reloadRef={reloadRef}
       />
     </AssistantRuntimeProvider>
   );

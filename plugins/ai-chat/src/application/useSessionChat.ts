@@ -395,17 +395,12 @@ export function useSessionChat(options: UseSessionChatOptions) {
   // A request has ended: follow the run that goes on, or show what is stored
   // when the stream did not end with the answer.
   const { status } = chat;
-  const prevStatus = useRef(status);
   useEffect(() => {
-    const wasActive =
-      prevStatus.current === 'submitted' || prevStatus.current === 'streaming';
-    prevStatus.current = status;
     if (status === 'submitted') {
       setNotice(undefined);
       return;
     }
     if (status !== 'ready' && status !== 'error') return;
-    if (wasActive) openedRunning.current = false;
     onChanged?.();
     // A decision made on this page is known to the log, not to the stream:
     // read who decided it and when.

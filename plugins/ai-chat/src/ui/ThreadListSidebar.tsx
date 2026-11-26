@@ -51,16 +51,16 @@ type SidebarContextValue = {
   openId: string;
   signalActivities: Record<string, SessionSignalActivity>;
   onClearError(): void;
-  onArchiveCurrent(): void;
-  onPinChanged(): void;
+  onArchiveStart(remoteId: string): void;
+  onUnarchive(remoteId: string): void;
 };
 
 const SidebarContext = createContext<SidebarContextValue>({
   openId: '',
   signalActivities: {},
   onClearError: () => {},
-  onArchiveCurrent: () => {},
-  onPinChanged: () => {},
+  onArchiveStart: () => {},
+  onUnarchive: () => {},
 });
 
 const DEFAULT_TITLE = 'New conversation';
@@ -102,8 +102,8 @@ function ThreadListItemRow() {
     openId,
     signalActivities,
     onClearError,
-    onArchiveCurrent,
-    onPinChanged,
+    onArchiveStart,
+    onUnarchive,
   } = useContext(SidebarContext);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState('');
@@ -148,7 +148,6 @@ function ThreadListItemRow() {
       ...item.custom,
       pinned: !custom.pinned,
     });
-    onPinChanged();
   };
 
   return (
@@ -243,20 +242,21 @@ function ThreadListItemRow() {
               <RiPencilLine size="1em" />
             </button>
             {isArchived ? (
-              <ThreadListItemPrimitive.Unarchive
+              <button
+                type="button"
                 className={cx('chat-icon-button')}
                 aria-label={`Unarchive conversation ${displayTitle}`}
-                onClick={onClearError}
+                onClick={() => onUnarchive(remoteId)}
               >
                 <RiInboxUnarchiveLine size="1em" />
-              </ThreadListItemPrimitive.Unarchive>
+              </button>
             ) : (
               <ThreadListItemPrimitive.Archive
                 className={cx('chat-icon-button')}
                 aria-label={`Archive conversation ${displayTitle}`}
                 onClick={() => {
                   onClearError();
-                  if (isSelected) onArchiveCurrent();
+                  onArchiveStart(remoteId);
                 }}
               >
                 <RiArchiveLine size="1em" />
@@ -289,10 +289,10 @@ export interface ThreadListSidebarProps {
   onShowArchivedChange(value: boolean): void;
   actionError?: string;
   onClearError(): void;
-  onArchiveCurrent(): void;
+  onArchiveStart(remoteId: string): void;
+  onUnarchive(remoteId: string): void;
   onNewChat(): void;
   signalActivities: Record<string, SessionSignalActivity>;
-  onPinChanged(): void;
 }
 
 /** Conversation list built on assistant-ui's ThreadList primitives. */
@@ -305,10 +305,10 @@ export function ThreadListSidebar(props: ThreadListSidebarProps) {
     onShowArchivedChange,
     actionError,
     onClearError,
-    onArchiveCurrent,
+    onArchiveStart,
+    onUnarchive,
     onNewChat,
     signalActivities,
-    onPinChanged,
   } = props;
   const loadError = useAuiState(s => s.threads.loadError);
   const archivedCount = useAuiState(s => s.threads.archivedThreadIds.length);
@@ -321,10 +321,10 @@ export function ThreadListSidebar(props: ThreadListSidebarProps) {
       openId,
       signalActivities,
       onClearError,
-      onArchiveCurrent,
-      onPinChanged,
+      onArchiveStart,
+      onUnarchive,
     }),
-    [openId, signalActivities, onClearError, onArchiveCurrent, onPinChanged],
+    [openId, signalActivities, onClearError, onArchiveStart, onUnarchive],
   );
 
   return (
