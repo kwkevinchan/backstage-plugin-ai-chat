@@ -69,6 +69,7 @@ import {
   type AgentCatalog,
   type AttachmentStore,
   type AuditLog,
+  type EntityReader,
   type Logger,
   type ModelCallLimiter,
   type Notifier,
@@ -91,6 +92,12 @@ export type HostPorts = {
   runs: RunRepository;
   queue: QueuedMessageRepository;
   agents: AgentCatalog;
+  /**
+   * The catalog, read as the user: a session is bound only to an entity the
+   * user can read (SE-02), and the built-in context provider `entity` reads
+   * it at every step.
+   */
+  entities: EntityReader;
   attachments: AttachmentStore;
   shares: ShareRepository;
   access: AccessControl;
@@ -166,6 +173,7 @@ export function createHost(ports: HostPorts) {
     attachments,
     shares,
     access,
+    entities,
   } = ports;
   const images: ImageSettings = ports.images ?? {
     ...DEFAULT_IMAGE_LIMITS,
@@ -268,7 +276,7 @@ export function createHost(ports: HostPorts) {
   return {
     supervisor,
     useCases: {
-      createSession: new CreateSession({ sessions, agents }),
+      createSession: new CreateSession({ sessions, agents, entities }),
       getSession: new GetSession({
         sessions,
         runs,
@@ -292,6 +300,7 @@ export function createHost(ports: HostPorts) {
         settings,
         attachments,
         images,
+        entities,
         notify,
         logger,
       }),

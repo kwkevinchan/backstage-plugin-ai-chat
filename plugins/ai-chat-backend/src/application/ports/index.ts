@@ -23,6 +23,7 @@ export type {
   QueueAuditEvent,
   ToolAuditEvent,
 } from './AuditLog';
+export type { EntityReader } from './EntityReader';
 export type { Logger } from './Logger';
 export type { ModelCallLimiter } from './ModelCallLimiter';
 export type { Notifier, SessionActivity } from './Notifier';

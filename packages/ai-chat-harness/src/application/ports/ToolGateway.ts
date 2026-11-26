@@ -37,6 +37,11 @@ export interface CallContext {
    * a decision or a resume carries on has the page of that request.
    */
   page?: { path: string; entityRef?: string };
+  /**
+   * The entity the session is bound to (SE-02), as the host stored it. Unlike
+   * `page.entityRef`, it is the same for every message of the session.
+   */
+  sessionEntityRef?: string;
 }
 
 /** @public */

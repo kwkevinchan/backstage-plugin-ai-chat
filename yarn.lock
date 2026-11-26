@@ -5298,6 +5298,7 @@ __metadata:
     "@backstage/config": "backstage:^"
     "@backstage/errors": "backstage:^"
     "@backstage/plugin-catalog-common": "backstage:^"
+    "@backstage/plugin-catalog-node": "backstage:^"
     "@backstage/plugin-permission-common": "backstage:^"
     "@backstage/plugin-permission-node": "backstage:^"
     "@backstage/plugin-search-backend": "backstage:^"

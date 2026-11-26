@@ -27,7 +27,8 @@ export type ListedSession = Session & {
 
 /**
  * The sessions of the signed-in user. Pinned ones come first, then the most
- * recently updated. `query` matches the title (SE-03).
+ * recently updated. `query` matches the title (SE-03). `entityRef` keeps the
+ * sessions bound to that entity (SE-06), a ref normalized by the caller.
  */
 export class ListSessions {
   constructor(
@@ -42,6 +43,7 @@ export class ListSessions {
     includeArchived?: boolean;
     limit?: number;
     query?: string;
+    entityRef?: string;
   }): Promise<ListedSession[]> {
     const sessions = await this.deps.sessions.listByOwner(
       input.principal.userRef,
@@ -49,6 +51,7 @@ export class ListSessions {
         includeArchived: input.includeArchived,
         limit: input.limit,
         query: input.query,
+        ...(input.entityRef !== undefined && { entityRef: input.entityRef }),
       },
     );
     const active = await this.deps.runs.findActiveForSessions(

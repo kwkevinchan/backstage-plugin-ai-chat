@@ -36,7 +36,11 @@ export interface ChatSession {
   ownerRef: string;
   agentId: string;
   title?: string;
-  /** The entity the session was opened for. */
+  /**
+   * The entity the session is bound to (`kind:namespace/name`, lower case):
+   * the one it was created with, or the entity of the page of its first
+   * message. It does not change.
+   */
   entityRef?: string;
   /** The ids of the toolsets that are switched on in this session. */
   enabledToolsets: string[];

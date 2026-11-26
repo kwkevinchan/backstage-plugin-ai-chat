@@ -47,6 +47,9 @@ export function stepContextOf(
     runId: req.ctx.runId,
     principal: req.ctx.principal,
     ...(req.ctx.page ? { page: { ...req.ctx.page } } : {}),
+    ...(req.ctx.sessionEntityRef !== undefined
+      ? { sessionEntityRef: req.ctx.sessionEntityRef }
+      : {}),
     agentId: req.agent.id,
     step,
     signal: req.signal,

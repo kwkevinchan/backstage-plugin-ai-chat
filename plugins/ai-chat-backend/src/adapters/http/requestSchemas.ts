@@ -22,6 +22,7 @@ import {
   MAX_TITLE_LENGTH,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import { z } from 'zod';
+import { normalizeEntityRef } from '../../domain';
 
 // PostgreSQL cannot store a NUL character in a text column.
 const noNul = (text: string) => !text.includes('\u0000');
@@ -163,6 +164,18 @@ export const resumeBody = z.object({ page: page.optional() });
 
 export const listQuery = z.object({
   includeArchived: z.enum(['true', 'false']).optional(),
+  // The sessions bound to this entity (SE-06): the same form as a binding,
+  // with a kind, normalized as the binding is stored.
+  entityRef: z
+    .string()
+    .min(1)
+    .max(255)
+    .refine(
+      value => isEntityRef(value) && normalizeEntityRef(value) !== undefined,
+      'must be an entity reference with a kind, like component:default/name',
+    )
+    .transform(value => normalizeEntityRef(value)!)
+    .optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   q: z
     .string()

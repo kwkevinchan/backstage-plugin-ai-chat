@@ -74,6 +74,9 @@ export async function buildRunRequest(
       runId: run.id,
       principal,
       ...(page !== undefined && { page }),
+      ...(session.entityRef !== undefined && {
+        sessionEntityRef: session.entityRef,
+      }),
     },
     usage: run.usage,
   };

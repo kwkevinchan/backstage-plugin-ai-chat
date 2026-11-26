@@ -19,9 +19,9 @@
  * in the harness and re-exported here, so a module does not import the
  * harness or the backend plugin.
  *
- * This version exposes `addAgent`, `addHook` and `addSkill`. Context
- * providers and a model client are added on later items, together with the
- * loop calling them.
+ * This version exposes `addAgent`, `addContextProvider`, `addHook` and
+ * `addSkill`. A model client is added on a later item, together with the loop
+ * calling it.
  *
  * @packageDocumentation
  */
@@ -33,6 +33,7 @@ export type {
   AgentLimits,
   AiChatHarnessExtensionPoint,
   BeforeToolCallDecision,
+  ContextProvider,
   HookName,
   Hooks,
   ModelChunk,

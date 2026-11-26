@@ -113,6 +113,20 @@ export class UnknownToolset extends ChatDomainError {
   }
 }
 
+/**
+ * A session cannot be bound to this entity (SE-02): the ref has no kind, the
+ * entity does not exist, or the user cannot read it. The message is the same
+ * for each, so it does not tell whether the entity exists.
+ */
+export class UnknownEntity extends ChatDomainError {
+  constructor() {
+    super(
+      'UNKNOWN_ENTITY',
+      'entityRef must be the ref of an entity you can read, with its kind',
+    );
+  }
+}
+
 /** This backend is shutting down and takes no new runs (H-11). */
 export class ShuttingDown extends ChatDomainError {
   constructor() {

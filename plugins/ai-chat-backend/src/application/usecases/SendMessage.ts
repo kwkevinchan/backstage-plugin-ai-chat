@@ -15,10 +15,20 @@
  */
 
 import type { ModelCatalog } from '../models';
-import type { Clock, ItemLog } from '@kwkevinchan/ai-chat-harness';
-import { assertOwner, ShuttingDown, type Principal } from '../../domain';
+import {
+  CONTEXT_PROVIDER_TIMEOUT_MS,
+  type Clock,
+  type ItemLog,
+} from '@kwkevinchan/ai-chat-harness';
+import {
+  assertOwner,
+  ShuttingDown,
+  type Principal,
+  type Session,
+} from '../../domain';
 import { abandonRun } from '../abandonRun';
 import { buildRunRequest, type RunSettings } from '../buildRunRequest';
+import { readableEntityRef } from '../entityContext';
 import type { ActivityNotifier } from '../notifyActivity';
 import type { RunHandle, RunSupervisor } from '../RunSupervisor';
 import {
@@ -29,6 +39,7 @@ import {
 import type {
   AgentCatalog,
   AttachmentStore,
+  EntityReader,
   Logger,
   RunRepository,
   SessionRepository,
@@ -51,6 +62,7 @@ export class SendMessage {
       settings: RunSettings;
       attachments: AttachmentStore;
       images: ImageSettings;
+      entities: EntityReader;
       notify?: ActivityNotifier;
       logger?: Logger;
     },
@@ -63,6 +75,11 @@ export class SendMessage {
    * The run comes first: the message of the user is written only once the
    * session has the run, so a message that the session cannot take (another
    * run is active) is not left in the log.
+   *
+   * The first message of a session that is bound to no entity binds it to
+   * the entity of its page (SE-02: a session opened on the page of an
+   * entity), when the user can read that entity. Otherwise the message is
+   * sent as it is, unbound.
    */
   async execute(input: {
     principal: Principal;
@@ -92,9 +109,16 @@ export class SendMessage {
 
     const run = await runs.start(session.id);
     try {
+      const bound = await this.bindToPage(session, input);
       const request = await buildRunRequest(
         { agents, models, clock, settings },
-        { session, run, principal: input.principal, page: input.page },
+        {
+          session:
+            bound === undefined ? session : { ...session, entityRef: bound },
+          run,
+          principal: input.principal,
+          page: input.page,
+        },
       );
       await items.append(
         session.id,
@@ -118,5 +142,61 @@ export class SendMessage {
       });
       throw error;
     }
+  }
+
+  /**
+   * The entity the session is bound to after this call: the page binds a
+   * session that is bound to none and has nothing in its log yet. A failure
+   * of the catalog leaves the session unbound and the message goes on. The
+   * run holds its lease meanwhile, so a catalog that does not answer in
+   * `CONTEXT_PROVIDER_TIMEOUT_MS` counts as a failure.
+   */
+  private async bindToPage(
+    session: Session,
+    input: { principal: Principal; page?: { entityRef?: string } },
+  ): Promise<string | undefined> {
+    const wanted = input.page?.entityRef;
+    if (session.entityRef !== undefined || wanted === undefined) {
+      return undefined;
+    }
+    const { items, sessions, entities, logger } = this.deps;
+    try {
+      const log = await items.read(session.id, { fromLatestSummary: true });
+      if (log.length > 0) return undefined;
+      const ref = await withTimeout(
+        readableEntityRef(entities, wanted, input.principal),
+        CONTEXT_PROVIDER_TIMEOUT_MS,
+      );
+      if (ref === undefined) return undefined;
+      if (await sessions.bindEntityIfUnbound(session.id, ref)) return ref;
+      return (await sessions.get(session.id)).entityRef;
+    } catch (error) {
+      logger?.warn(
+        'AI chat could not bind the session to the entity of the page',
+        {
+          sessionId: session.id,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+      return undefined;
+    }
+  }
+}
+
+/** `promise`, or a rejection once `ms` passed first. */
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`no answer within ${ms} ms`)),
+          ms,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }

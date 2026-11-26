@@ -18,6 +18,7 @@ import { InputError } from '@backstage/errors';
 import type {
   AgentDefinition,
   AiChatHarnessExtensionPoint,
+  ContextProvider,
   Extensions,
   HookName,
   Hooks,
@@ -28,6 +29,7 @@ import type {
 import type { Logger } from '../../application/ports';
 import { limitToolResult } from './ActionsToolGateway';
 import { assertExtensionId, readExtensionAgent } from './agentShape';
+import { readExtensionContextProvider } from './contextProviderShape';
 import { readExtensionSkill } from './skillShape';
 
 const HOOK_NAMES: readonly HookName[] = [
@@ -44,14 +46,15 @@ function isHookName(value: unknown): value is HookName {
 /**
  * What backend modules add through `aiChatHarnessExtensionPoint` (X-02).
  * The plugin registers this object before the modules run, then reads the
- * agents, hooks, skills and model clients when it builds the catalog and the
- * host. A repeated agent, skill or model id is refused and the first
- * registration stays.
+ * agents, hooks, skills, model clients and context providers when it builds
+ * the catalog and the host. A repeated agent, skill, model or context provider
+ * id is refused and the first registration stays.
  */
 export class AiChatHarnessRegistry implements AiChatHarnessExtensionPoint {
   private readonly agentList: AgentDefinition[] = [];
   private readonly skillList: Skill[] = [];
   private readonly modelClientMap = new Map<string, ModelClient>();
+  private readonly contextProviderList: ContextProvider[] = [];
   private readonly hookLists: {
     [K in HookName]: Hooks[K][];
   } = {
@@ -118,6 +121,16 @@ export class AiChatHarnessRegistry implements AiChatHarnessExtensionPoint {
     this.modelClientMap.set(id, client);
   }
 
+  addContextProvider(provider: ContextProvider): void {
+    const checked = readExtensionContextProvider(provider);
+    if (this.contextProviderList.some(existing => existing.id === checked.id)) {
+      throw new InputError(
+        `context provider ${checked.id} is already registered`,
+      );
+    }
+    this.contextProviderList.push(checked);
+  }
+
   agents(): readonly AgentDefinition[] {
     return [...this.agentList];
   }
@@ -128,6 +141,10 @@ export class AiChatHarnessRegistry implements AiChatHarnessExtensionPoint {
 
   modelClients(): ReadonlyMap<string, ModelClient> {
     return new Map(this.modelClientMap);
+  }
+
+  contextProviderCount(): number {
+    return this.contextProviderList.length;
   }
 
   hookCount(): number {
@@ -143,8 +160,16 @@ export class AiChatHarnessRegistry implements AiChatHarnessExtensionPoint {
    * failure means. When a module changes tool results, the changed output is
    * cut to `maxToolOutputChars` after the last `afterToolCall` hook, as the
    * tool gateway cuts the output of a tool.
+   *
+   * The context providers of the modules come after `builtIns`, in the order
+   * they were registered. Each one logs what it throws, with its id and the
+   * run, and throws it again: the loop leaves its text out of that step.
    */
-  extensions(opts: { logger: Logger; maxToolOutputChars: number }): Extensions {
+  extensions(opts: {
+    logger: Logger;
+    maxToolOutputChars: number;
+    builtInContextProviders?: readonly ContextProvider[];
+  }): Extensions {
     const { logger, maxToolOutputChars } = opts;
     const afterToolCall = this.hookLists.afterToolCall.map(hook =>
       logged('afterToolCall', hook, logger),
@@ -167,8 +192,33 @@ export class AiChatHarnessRegistry implements AiChatHarnessExtensionPoint {
           logged('onRunEnd', hook, logger),
         ),
       },
+      contextProviders: [
+        ...(opts.builtInContextProviders ?? []),
+        ...this.contextProviderList,
+      ].map(provider => loggedProvider(provider, logger)),
     };
   }
+}
+
+function loggedProvider(
+  provider: ContextProvider,
+  logger: Logger,
+): ContextProvider {
+  return {
+    id: provider.id,
+    async provide(ctx) {
+      try {
+        return await provider.provide(ctx);
+      } catch (error) {
+        logger.warn('An AI chat context provider failed', {
+          contextProvider: provider.id,
+          runId: ctx.runId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    },
+  };
 }
 
 function logged<K extends HookName>(

@@ -45,9 +45,11 @@ import type {
  * @public
  */
 export interface AiChatApi {
+  /** `entityRef` keeps the sessions bound to that entity. */
   listSessions(options?: {
     query?: string;
     includeArchived?: boolean;
+    entityRef?: string;
   }): Promise<ChatSession[]>;
   createSession(request?: CreateChatSessionRequest): Promise<ChatSession>;
   getSession(id: string): Promise<ChatSessionDetail>;

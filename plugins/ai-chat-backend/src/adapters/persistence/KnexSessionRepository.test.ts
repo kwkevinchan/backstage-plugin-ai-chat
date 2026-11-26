@@ -187,6 +187,86 @@ describe('KnexSessionRepository', () => {
     expect(await p.sessions.setTitleIfAbsent('missing', 'x')).toBe(false);
   });
 
+  it('bindEntityIfUnbound binds a session once, and never changes the binding (SE-02)', async () => {
+    const created = await p.sessions.create(NEW_SESSION);
+    p.clock.advance(60);
+    expect(
+      await p.sessions.bindEntityIfUnbound(
+        created.id,
+        'component:default/shop',
+      ),
+    ).toBe(true);
+    expect(await p.sessions.get(created.id)).toMatchObject({
+      entityRef: 'component:default/shop',
+      updatedAt: '2026-01-01T00:01:00.000Z',
+    });
+    expect(
+      await p.sessions.bindEntityIfUnbound(
+        created.id,
+        'component:default/other',
+      ),
+    ).toBe(false);
+    expect((await p.sessions.get(created.id)).entityRef).toBe(
+      'component:default/shop',
+    );
+    const bound = await p.sessions.create({
+      ...NEW_SESSION,
+      entityRef: 'component:default/a',
+    });
+    expect(
+      await p.sessions.bindEntityIfUnbound(bound.id, 'component:default/b'),
+    ).toBe(false);
+    expect(
+      await p.sessions.bindEntityIfUnbound('missing', 'component:default/b'),
+    ).toBe(false);
+  });
+
+  it('lists only the sessions bound to an entity, with the other filters (SE-06)', async () => {
+    const shop = await p.sessions.create({
+      ...NEW_SESSION,
+      title: 'shop alpha',
+      entityRef: 'component:default/shop',
+    });
+    const archived = await p.sessions.create({
+      ...NEW_SESSION,
+      title: 'shop beta',
+      entityRef: 'component:default/shop',
+    });
+    await p.sessions.update(archived.id, { archived: true });
+    await p.sessions.create({
+      ...NEW_SESSION,
+      entityRef: 'component:default/other',
+    });
+    await p.sessions.create(NEW_SESSION);
+    await p.sessions.create({
+      ...NEW_SESSION,
+      ownerRef: 'user:default/mallory',
+      entityRef: 'component:default/shop',
+    });
+
+    const ids = async (opts: Parameters<typeof p.sessions.listByOwner>[1]) =>
+      (await p.sessions.listByOwner('user:default/jane', opts)).map(s => s.id);
+    expect(await ids({ entityRef: 'component:default/shop' })).toEqual([
+      shop.id,
+    ]);
+    expect(
+      (
+        await ids({
+          entityRef: 'component:default/shop',
+          includeArchived: true,
+        })
+      ).sort(),
+    ).toEqual([shop.id, archived.id].sort());
+    expect(
+      await ids({
+        entityRef: 'component:default/shop',
+        includeArchived: true,
+        query: 'beta',
+      }),
+    ).toEqual([archived.id]);
+    expect(await ids({ entityRef: 'component:default/none' })).toEqual([]);
+  });
+
   it('deletes a session and what belongs to it', async () => {
     const created = await p.sessions.create(NEW_SESSION);
     await p.runs.start(created.id);

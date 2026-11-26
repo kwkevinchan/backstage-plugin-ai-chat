@@ -20,6 +20,12 @@ export { bindAttachments, toAttachmentRef } from './attachments';
 export type { ImageSettings } from './attachments';
 export { createAfterRun } from './afterRun';
 export { buildRunRequest } from './buildRunRequest';
+export {
+  BUILT_IN_CONTEXT_PROVIDER_IDS,
+  entityContextProvider,
+  readableEntityRef,
+  userContextProvider,
+} from './entityContext';
 export type { RunSettings } from './buildRunRequest';
 export { DEFAULT_MODEL_ID, HostModelClient, ModelCatalog } from './models';
 export type { AfterRun, HostEvent, QueueState } from './hostEvents';

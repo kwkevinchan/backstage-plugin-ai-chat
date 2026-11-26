@@ -141,7 +141,7 @@
 | ---- | ------------------------------------------------------------------------------------------------------------------------------ | ---------- |
 | X-01 | Agent 定義：系統提示、Toolsets、Skills、模型、上限、規劃模式。放在設定檔                                                       | P3         |
 | X-02 | `aiChatHarnessExtensionPoint`：backend module 可以加 Context provider、Skill、Hook、Agent                                      | P3         |
-| X-03 | Context provider：每一步回傳一段要加進上下文的文字，有長度上限。內建：使用者身分、綁定的 entity、目前的計畫                    | P3         |
+| X-03 | Context provider：每一步回傳一段要加進上下文的文字，有長度上限。內建：使用者身分、綁定的 entity、目前的計畫                    | P3（完成） |
 | X-04 | Skill：格式是 `SKILL.md`。上下文只放名稱和一句說明。`load_skill` 載入全文，唯讀，`allow`                                       | P3（完成） |
 | X-05 | Hook 的時機：`beforeModelCall`、`beforeToolCall`、`afterToolCall`、`onRunEnd`。`beforeToolCall` 可以拒絕或把政策調嚴，不能調鬆 | P3（完成） |
 | X-06 | `update_plan`：模型寫入或更新計畫。計畫是一筆 Item，每一步放進上下文，畫面顯示成清單                                           | P3（完成） |
@@ -176,14 +176,14 @@ S-05 到 S-07（`SandboxProvider`）在 0.2 版移除。編號不重用。
 
 ### 4.6 Session 管理（SE）
 
-| 編號  | 需求                                                              | 分期       |
-| ----- | ----------------------------------------------------------------- | ---------- |
-| SE-01 | 每段 Session 有自己的網址                                         | P1（完成） |
-| SE-02 | 可以綁定一個 entity。從 entity 頁面開的 Session 自動綁定          | P3         |
-| SE-03 | 列表可以搜尋、釘選、改名、封存                                    | P2         |
-| SE-04 | 第一輪結束後自動產生標題                                          | P2         |
-| SE-05 | 保存期限：到期自動刪除。稽核紀錄不受影響                          | P2         |
-| SE-06 | entity 頁面的分頁列出跟這個 entity 有關、而且自己看得到的 Session | P3         |
+| 編號  | 需求                                                              | 分期                       |
+| ----- | ----------------------------------------------------------------- | -------------------------- |
+| SE-01 | 每段 Session 有自己的網址                                         | P1（完成）                 |
+| SE-02 | 可以綁定一個 entity。從 entity 頁面開的 Session 自動綁定          | P3（完成）                 |
+| SE-03 | 列表可以搜尋、釘選、改名、封存                                    | P2                         |
+| SE-04 | 第一輪結束後自動產生標題                                          | P2                         |
+| SE-05 | 保存期限：到期自動刪除。稽核紀錄不受影響                          | P2                         |
+| SE-06 | entity 頁面的分頁列出跟這個 entity 有關、而且自己看得到的 Session | P3（後端完成；畫面另一項） |
 
 ### 4.7 分享（SH）
 
@@ -384,7 +384,7 @@ aiChat:
 
 ## 7. 擴充點介面
 
-backend 的擴充點放在 `ai-chat-node` 套件，型別來自核心。前端的擴充點放在 `ai-chat-react` 套件。介面的完整版本在程式架構文件的第 6 節。目前公開的是 `addAgent`、`addHook`、`addSkill` 和 `addModelClient`。`addContextProvider` 在 P3-02 才加，連同迴圈的呼叫一起進來。下面是最終形狀。
+backend 的擴充點放在 `ai-chat-node` 套件，型別來自核心。前端的擴充點放在 `ai-chat-react` 套件。介面的完整版本在程式架構文件的第 6 節。目前公開的是 `addAgent`、`addContextProvider`、`addHook`、`addSkill` 和 `addModelClient`。下面是最終形狀。
 
 ```ts
 interface AiChatHarnessExtensionPoint {
@@ -397,7 +397,8 @@ interface AiChatHarnessExtensionPoint {
 
 interface ContextProvider {
   id: string;
-  provide(ctx: StepContext): Promise<string | undefined>; // 有長度上限
+  // 每一步呼叫，可以同步回傳。輸出是不可信的資料，有長度上限
+  provide(ctx: StepContext): string | undefined | Promise<string | undefined>;
 }
 
 interface Skill {
@@ -501,6 +502,7 @@ interface Hooks {
 | 2026-11-25 | 1.2  | X-08 完成（P3-06）：用 Backstage search backend 官方的 `search:query`（唯讀），以使用者的身分搜尋；`permission.enabled: true` 時只回傳使用者能讀的文件，每筆結果帶 `document.location`。不另外寫 action（V-05）                                                                                                                                                                              |
 | 2026-11-26 | 1.2  | X-06、X-07 完成（P3-03）：內建 `update_plan`（`readOnly: true`，預設 `allow`）給每個 Agent，寫入 `plan_update`；有計畫時每一步的上下文都有目前的計畫，畫面把每次更新顯示成清單。`planning: required` 的 Agent，每個 Run 的第一步只提供 `update_plan`。目前的計畫用 `ItemLog.latestPlanUpdate` 讀，摘要涵蓋舊的 `plan_update` 也讀得到（D-07）                                                |
 | 2026-11-26 | 1.2  | P-01、P-02、P-03、P-05、P-06、X-09 完成（P3-07）：同一步的唯讀呼叫同時執行，結果照模型的順序交回；每個工具呼叫有逾時，寫入逾時後這一步後面的寫入不執行；每步的工具呼叫數和每人同時的 Run 數有上限；模型呼叫有所有後端共用的限流。`aiChat.models` 加其他模型，擴充點改為 `addModelClient`（只新增，不覆蓋設定檔的模型）。第 6 節的設定範例改成實際的平鋪寫法；P-04 註明唯讀的照 D-09 同時執行 |
+| 2026-11-26 | 1.2  | X-03、SE-02 完成，SE-06 的後端完成（P3-02）：Context provider 每一步把一段文字加進系統提示，標成不可信的資料，有長度上限和逾時，失敗時 Run 繼續；內建使用者身分、綁定的 entity、目前的計畫。Session 建立時或第一則訊息的頁面綁定一個使用者讀得到的 entity，之後不改；後端可以列出一個 entity 的 Session。entity 頁面的分頁另做                                                               |
 
 ## 12. 對照的開源專案
 

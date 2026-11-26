@@ -63,6 +63,7 @@ export type AgentMessageBody = {
 export interface AiChatHarnessExtensionPoint {
   // (undocumented)
   addAgent(agent: AgentDefinition): void;
+  addContextProvider(provider: ContextProvider): void;
   addHook<K extends HookName>(name: K, hook: Hooks[K]): void;
   addModelClient(id: string, client: ModelClient): void;
   // (undocumented)
@@ -128,6 +129,7 @@ export interface CallContext {
   principal: unknown;
   // (undocumented)
   runId: string;
+  sessionEntityRef?: string;
   // (undocumented)
   sessionId: string;
 }
@@ -142,12 +144,27 @@ export interface Clock {
 }
 
 // @public
+export const CONTEXT_PROVIDER_MAX_CHARS = 8000;
+
+// @public
+export const CONTEXT_PROVIDER_TIMEOUT_MS = 5000;
+
+// @public
+export const CONTEXT_PROVIDERS_MAX_CHARS = 16000;
+
+// @public
 export type ContextBudget = {
   tokenBudget: number;
   keepRecentSteps: number;
   tokensPerImage?: number;
   maxImageBytesPerInput?: number;
 };
+
+// @public
+export interface ContextProvider {
+  id: string;
+  provide(ctx: StepContext): string | undefined | Promise<string | undefined>;
+}
 
 // @public
 export function decideNextAction(
@@ -194,6 +211,7 @@ export function estimateTokens(text: string): number;
 export type Extensions = {
   readonly hooks?: Partial<HookRegistry>;
   readonly skills?: readonly Skill[];
+  readonly contextProviders?: readonly ContextProvider[];
 };
 
 // @public
@@ -502,6 +520,11 @@ export type PageContext = {
 export type Plan = {
   items: PlanItem[];
 };
+
+// @public
+export function planContextProvider(
+  log: Pick<ItemLog, 'latestPlanUpdate'>,
+): ContextProvider;
 
 // @public (undocumented)
 export type PlanItem = {

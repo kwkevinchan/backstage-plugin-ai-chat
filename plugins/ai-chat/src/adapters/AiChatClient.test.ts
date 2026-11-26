@@ -69,6 +69,17 @@ describe('AiChatClient', () => {
     ]);
   });
 
+  it('sends the entity of the sessions to list, encoded (SE-06)', async () => {
+    const { client, fetch } = setup(json({ items: [] }));
+    await client.listSessions({ entityRef: 'component:default/a b&c' });
+    expect(urls(fetch)).toEqual([
+      [
+        'GET',
+        'http://backend/api/ai-chat/sessions?entityRef=component%3Adefault%2Fa+b%26c',
+      ],
+    ]);
+  });
+
   it('creates, updates and deletes with the right methods and bodies', async () => {
     const { client, fetch } = setup(() => json({ id: 'new' }));
     await client.createSession({ enabledToolsets: ['read'] });

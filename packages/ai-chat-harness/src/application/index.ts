@@ -22,6 +22,7 @@ export {
   emptyExtensions,
   type AiChatHarnessExtensionPoint,
   type BeforeToolCallDecision,
+  type ContextProvider,
   type Extensions,
   type HookName,
   type HookRegistry,
@@ -32,7 +33,12 @@ export {
   type ToolCall,
   type ToolResult,
 } from './ports/extensions';
-export { readCurrentPlan } from './plan';
+export { planContextProvider, readCurrentPlan } from './plan';
+export {
+  CONTEXT_PROVIDER_MAX_CHARS,
+  CONTEXT_PROVIDER_TIMEOUT_MS,
+  CONTEXT_PROVIDERS_MAX_CHARS,
+} from './steps/contextProviders';
 export { UPDATE_PLAN_TOOL_ID, updatePlanDescriptor } from './steps/plan';
 export {
   LOAD_SKILL_TOOL_ID,
