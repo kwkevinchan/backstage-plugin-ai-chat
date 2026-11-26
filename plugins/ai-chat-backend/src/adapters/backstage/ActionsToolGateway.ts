@@ -206,7 +206,7 @@ export class ActionsToolGateway implements ToolGateway {
   }
 
   /** The limit and the fields to hide for the output of a tool (T-09). */
-  limitsOf(toolId: string): ToolOutputLimits {
+  private limitsOf(toolId: string): ToolOutputLimits {
     return toolOutputLimitsOf(
       toolId,
       this.deps.toolOutput ?? [],
