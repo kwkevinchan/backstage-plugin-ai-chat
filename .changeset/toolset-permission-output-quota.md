@@ -2,6 +2,7 @@
 '@kwkevinchan/ai-chat-harness': patch
 '@kwkevinchan/backstage-plugin-ai-chat-common': minor
 '@kwkevinchan/backstage-plugin-ai-chat-backend': minor
+'@kwkevinchan/backstage-plugin-ai-chat-node': patch
 ---
 
 Decide who may use which toolset, hide fields of tool outputs and limit them per action, and limit the changes of each user per minute.
