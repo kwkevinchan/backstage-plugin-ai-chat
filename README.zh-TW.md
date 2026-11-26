@@ -242,9 +242,7 @@ aiChat:
       title: Docs
       systemPrompt: >-
         Answer from TechDocs. Search with the type techdocs and a pageLimit of
-        5. The location of a result is a path under https://backstage.example.com;
-        cite every result you use as a full link, for example
-        https://backstage.example.com/docs/default/component/payments/deploy/.
+        5. Cite every result you use with a Markdown link to its location.
 ```
 
 - action 用送出訊息的使用者的身分執行。只有 `permission.enabled` 是 `true` 時，search backend 才拿掉這個使用者不能讀的文件。
@@ -254,8 +252,8 @@ aiChat:
 - `search:query` 是唯讀的，`policy` 沒有另外設定時直接執行，不用核准。模型看到的名稱是 `search_query`（工具名稱不能有 `:`）。
 - 每一筆結果的文字是一頁裡一段的全文；對話從搜尋結果讀文件。TechDocs backend 的 `techdocs:get-techdocs-metadata`
   回傳網站的目錄，不回傳內容。要提供它，把 `techdocs` 加進 `backend.actions.pluginSources`，再把它放進一個工具組。
-- 每一筆結果有 `document.title` 和 `document.location`。`location` 是路徑（`/docs/...`），對話只把 `http`、`https`、
-  `mailto` 的網址做成連結，所以上面的系統提示請模型寫成完整的網址。`search.collators.techdocs.locationTemplate` 保留預設：
+- 每一筆結果有 `document.title` 和 `document.location`。`location` 是路徑（`/docs/...`），對話會把單一 `/` 開頭的
+  Markdown 連結依 `app.baseUrl` 補成同源完整網址，所以模型可以直接引用 `document.location`。`search.collators.techdocs.locationTemplate` 保留預設：
   它套用在整個搜尋索引，TechDocs 閱讀頁的搜尋框會把 `location` 當成 app 裡的路徑去換頁。
 - 這個 action 的 input schema 有遞迴的 `$ref`（在 `filters`）。不接受工具 schema 裡有 `$ref` 的模型伺服器會拒絕請求。
 - 搜尋失敗時，模型收到 `Request failed with <狀態碼> <狀態文字>`，不含搜尋引擎的錯誤內容。搜尋不回應時，過了 `toolTimeoutSeconds` 結果是逾時；`runTimeoutSeconds` 先到就結束 Run。
