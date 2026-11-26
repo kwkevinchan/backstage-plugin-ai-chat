@@ -191,6 +191,19 @@ const app = createApp({ plugins: [aiChatPlugin /* … */] });
 <AiChatPanel />;
 ```
 
+### Result components of actions
+
+A plugin can show the result of an action with its own component, for
+example a table, under the row of the call. The chat keeps that row and the
+approval card. On the new frontend system the plugin adds an extension of
+`AiChatToolResultBlueprint` (`@kwkevinchan/backstage-plugin-ai-chat-react/alpha`);
+on the legacy frontend system the app replaces `aiChatToolResultsApiRef` with
+`createAiChatToolResultsApi([...])`. The output is untrusted data: a component
+never uses `dangerouslySetInnerHTML` and links only `http:`, `https:` and
+`mailto:` addresses (`AiChatSafeLink`). The details and the rules are in the
+[README of `ai-chat-react`](plugins/ai-chat-react/README.md#result-components-of-actions).
+The development apps show `dev-actions:list-services` as a table.
+
 ## Configure
 
 ```yaml

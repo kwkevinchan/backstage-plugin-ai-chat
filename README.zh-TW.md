@@ -58,6 +58,12 @@ backend.add(import('@backstage/plugin-signals-backend'));
 送出的訊息帶著它。面板等登入完成後才出現，掛在路由外面，換頁不會卸下進行中的對話。
 舊前端系統要在 router 裡、路由外面掛一次 `<AiChatPanel>`；新前端系統註冊 plugin 就有這塊面板。
 舊前端系統的接法見[英文 README](README.md#frontend-legacy-frontend-system)。
+別的 frontend plugin 可以為某個 action 註冊結果顯示元件（例如把輸出畫成表格），畫在那個呼叫的列下面；
+內建的列和核准卡片照舊。新前端系統用 `@kwkevinchan/backstage-plugin-ai-chat-react/alpha` 的
+`AiChatToolResultBlueprint`；舊前端系統由 app 用 `createAiChatToolResultsApi([...])` 覆蓋
+`aiChatToolResultsApiRef`。結果是不可信的資料：元件不能用 `dangerouslySetInnerHTML`，連結只放行
+`http`、`https`、`mailto`（用 `AiChatSafeLink`）。細節見
+[`ai-chat-react` 的 README](plugins/ai-chat-react/README.md#result-components-of-actions)。
 
 後端用自己的資料庫存狀態（`sessions`、`runs`、`items` 三張表），啟動時自己跑 migration。SQLite 只允許一條連線（連線池的上限必須是 1，這是 Knex 對 SQLite 的預設，除非設定改過）。需要多條連線時用 PostgreSQL。
 
