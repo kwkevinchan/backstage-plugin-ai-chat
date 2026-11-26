@@ -59,6 +59,8 @@ export interface AiChatTransportOptions {
    * another request carries the run on, as in the case above.
    */
   onNothingToResume?(): void;
+  /** Called when follow returns 204 because the run has already ended. */
+  onNoStreamToFollow?(): void;
 }
 
 function isEventStream(response: Response): boolean {
@@ -168,6 +170,10 @@ export class AiChatTransport implements ChatTransport<ChatUiMessage> {
       this.options.sessionId,
       request.abortSignal,
     );
-    return response ? chunksOf(response) : null;
+    if (!response) {
+      this.options.onNoStreamToFollow?.();
+      return null;
+    }
+    return chunksOf(response);
   }
 }

@@ -611,7 +611,7 @@ flowchart LR
 | PU-02 | 地基：runtime、訊息串、工具、Markdown | L    | PU-01                        | runtime、訊息轉換、訊息串、工具卡片和核准、Markdown、契約測試、瀏覽器 e2e | #55 | 完成 |
 | PU-03 | 排隊和插入                            | M    | PU-02、PU-07                 | `queueAdapter`、佇列區塊、暫停和未讀的小元件、契約測試                    | #63 | 完成 |
 | PU-04 | 圖片附件                              | M    | PU-02、PI-06 的後端          | `attachmentAdapter`、草稿和訊息裡的縮圖                                   | #64 | 完成 |
-| PU-05 | Session 列表                          | M    | PU-02、P2-01 和 P2-06 的後端 | `threadListAdapter`、搜尋、釘選、封存、即時狀態                           |     |      |
+| PU-05 | Session 列表                          | M    | PU-02、P2-01 和 P2-06 的後端 | `threadListAdapter`、搜尋、釘選、封存、即時狀態                           |     | 完成 |
 | PU-06 | 側邊面板的內容                        | S    | PU-02、P2-07                 | 面板接上新的訊息串；和整頁同時開著同一段對話時兩邊都正確                  |     |      |
 | PU-07 | 後端：把排隊的訊息改成插入            | M    | 無                           | 「現在就送」的 API 一次做完；和 `startNext` 並行時只有一邊成功            | #47 | 完成 |
 

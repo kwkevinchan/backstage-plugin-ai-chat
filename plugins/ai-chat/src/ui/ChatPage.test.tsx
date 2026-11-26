@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-import { Route, Routes, useLocation } from 'react-router-dom';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderInTestApp, TestApiProvider } from '@backstage/test-utils';
 import {
@@ -23,6 +23,11 @@ import {
   type AiChatToolResultProps,
 } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import { aiChatApiRef } from '../api';
+import {
+  AI_CHAT_SIGNAL_CHANNEL,
+  signalApiRef,
+  type SignalApi,
+} from '../adapters/signals';
 import { createAiChatToolResultsApi } from '../application/toolResultsApi';
 import {
   call,
@@ -39,8 +44,14 @@ import { ChatPageContent } from './ChatPage';
 
 function Where() {
   const location = useLocation();
+  const navigate = useNavigate();
   return (
-    <div data-testid="where">{`${location.pathname}${location.search}`}</div>
+    <>
+      <div data-testid="where">{`${location.pathname}${location.search}`}</div>
+      <button type="button" onClick={() => navigate(-1)}>
+        Browser back
+      </button>
+    </>
   );
 }
 
@@ -503,5 +514,387 @@ describe('the new conversation with images', () => {
     expect(screen.getByText('a.png')).toBeVisible();
     expect(api.sendMessage).not.toHaveBeenCalled();
     expect(where()).toBe('/ai-chat');
+  });
+});
+
+describe('session list controls and live status', () => {
+  function mockSignals() {
+    const subscribers = new Map<string, Set<(message: unknown) => void>>();
+    const api: SignalApi = {
+      subscribe: jest.fn((channel: string, cb: (message: unknown) => void) => {
+        let set = subscribers.get(channel);
+        if (!set) {
+          set = new Set();
+          subscribers.set(channel, set);
+        }
+        set.add(cb);
+        return {
+          unsubscribe: () => {
+            set?.delete(cb);
+          },
+        };
+      }),
+    };
+    const emit = (message: unknown, channel = AI_CHAT_SIGNAL_CHANNEL) => {
+      act(() => {
+        subscribers.get(channel)?.forEach(cb => cb(message));
+      });
+    };
+    return { api, emit };
+  }
+
+  it('searches sessions with debounced query and clears back to the full list', async () => {
+    const api = mockApi({
+      listSessions: jest
+        .fn()
+        .mockResolvedValueOnce([
+          { ...session, id: 's-1', title: 'Alpha chat' },
+          { ...session, id: 's-2', title: 'Beta chat' },
+        ])
+        .mockResolvedValueOnce([{ ...session, id: 's-2', title: 'Beta chat' }])
+        .mockResolvedValueOnce([
+          { ...session, id: 's-1', title: 'Alpha chat' },
+          { ...session, id: 's-2', title: 'Beta chat' },
+        ]),
+    });
+    await renderPage(api);
+    expect(await screen.findByText('Alpha chat')).toBeInTheDocument();
+
+    const searchBox = screen.getByRole('searchbox', {
+      name: 'Search conversations',
+    });
+    await userEvent.type(searchBox, 'Beta');
+    await waitFor(() =>
+      expect(api.listSessions).toHaveBeenCalledWith({ query: 'Beta' }),
+    );
+    expect(await screen.findByText('Beta chat')).toBeInTheDocument();
+    expect(screen.queryByText('Alpha chat')).toBeNull();
+
+    await userEvent.clear(searchBox);
+    await waitFor(() => expect(api.listSessions).toHaveBeenLastCalledWith({}));
+    expect(await screen.findByText('Alpha chat')).toBeInTheDocument();
+  });
+
+  it('pins and unpins a session and rolls back on failure', async () => {
+    let pinned = false;
+    const api = mockApi({
+      listSessions: jest.fn(async () => [
+        { ...session, id: 's-1', title: 'Deploy', pinned },
+      ]),
+      updateSession: jest
+        .fn()
+        .mockImplementationOnce(async () => {
+          pinned = true;
+          return { ...session, id: 's-1', title: 'Deploy', pinned: true };
+        })
+        .mockRejectedValueOnce(new Error('Pin failed')),
+    });
+    await renderPage(api);
+
+    const pinButton = await screen.findByRole('button', {
+      name: 'Pin conversation Deploy',
+    });
+    await userEvent.click(pinButton);
+
+    await waitFor(() =>
+      expect(api.updateSession).toHaveBeenCalledWith('s-1', { pinned: true }),
+    );
+
+    const unpinButton = await screen.findByRole('button', {
+      name: 'Unpin conversation Deploy',
+    });
+    await userEvent.click(unpinButton);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Pin failed');
+    // Optimistic unpin rolled back to pinned state.
+    expect(
+      await screen.findByRole('button', {
+        name: 'Unpin conversation Deploy',
+      }),
+    ).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('renames inline: empty initial value for untitled, blocks blank submit, and rolls back on error', async () => {
+    const api = mockApi({
+      listSessions: jest.fn().mockResolvedValue([
+        { ...session, id: 's-1', title: undefined },
+        { ...session, id: 's-2', title: 'Old title' },
+      ]),
+      updateSession: jest
+        .fn()
+        .mockRejectedValueOnce(new Error('Rename failed'))
+        .mockResolvedValueOnce({ ...session, id: 's-2', title: 'Saved title' }),
+    });
+    await renderPage(api);
+
+    // Untitled conversation starts with an empty input, not "New conversation".
+    await userEvent.click(
+      await screen.findByRole('button', {
+        name: 'Rename conversation New conversation',
+      }),
+    );
+    const untitledInput = screen.getByRole('textbox', {
+      name: 'Conversation title',
+    });
+    expect(untitledInput).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Save title' })).toBeDisabled();
+    await userEvent.type(untitledInput, '   {Enter}');
+    expect(api.updateSession).not.toHaveBeenCalled();
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Cancel rename' }),
+    );
+
+    // Titled conversation starts with its actual title and rolls back when API rejects.
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Rename conversation Old title' }),
+    );
+    const titledInput = screen.getByRole('textbox', {
+      name: 'Conversation title',
+    });
+    expect(titledInput).toHaveValue('Old title');
+    await userEvent.clear(titledInput);
+    await userEvent.type(titledInput, 'Broken title{Enter}');
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Rename failed');
+    expect(await screen.findByText('Old title')).toBeInTheDocument();
+
+    // Succeeding on the next rename clears the previous error and saves.
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Rename conversation Old title' }),
+    );
+    const retryInput = screen.getByRole('textbox', {
+      name: 'Conversation title',
+    });
+    await userEvent.clear(retryInput);
+    await userEvent.type(retryInput, 'Saved title{Enter}');
+    await waitFor(() =>
+      expect(api.updateSession).toHaveBeenLastCalledWith('s-2', {
+        title: 'Saved title',
+      }),
+    );
+    expect(await screen.findByText('Saved title')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('keeps the URL when archiving the open conversation, shows archived, opens without unarchiving, and unarchives', async () => {
+    let archivedAt: string | undefined;
+    const api = mockApi({
+      listSessions: jest.fn(async opts => {
+        if (archivedAt && !opts?.includeArchived) return [];
+        return [{ ...session, id: 's-1', title: 'Current chat', archivedAt }];
+      }),
+      getSession: jest.fn().mockResolvedValue(detail()),
+      updateSession: jest.fn(async (_id, patch) => {
+        archivedAt = patch.archived ? '2026-11-26T00:00:00.000Z' : undefined;
+        return { ...session, id: 's-1', title: 'Current chat', archivedAt };
+      }),
+    });
+    await renderPage(api, '/ai-chat/s-1');
+    expect(await screen.findByText('Current chat')).toBeInTheDocument();
+
+    // Archiving the currently open conversation stays on /ai-chat/s-1.
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Archive conversation Current chat' }),
+    );
+    await waitFor(() =>
+      expect(api.updateSession).toHaveBeenCalledWith('s-1', { archived: true }),
+    );
+    expect(where()).toBe('/ai-chat/s-1');
+
+    // Toggle "Show archived" to see archived sessions.
+    await userEvent.click(screen.getByLabelText('Show archived'));
+    await waitFor(() =>
+      expect(api.listSessions).toHaveBeenCalledWith({ includeArchived: true }),
+    );
+    expect(await screen.findByText('Archived')).toBeInTheDocument();
+
+    // Clicking an archived item does not auto-unarchive it.
+    await userEvent.click(screen.getByText('Current chat'));
+    expect(api.updateSession).toHaveBeenCalledTimes(1);
+
+    // Explicit Unarchive restores the conversation.
+    await userEvent.click(
+      screen.getByRole('button', {
+        name: 'Unarchive conversation Current chat',
+      }),
+    );
+    await waitFor(() =>
+      expect(api.updateSession).toHaveBeenLastCalledWith('s-1', {
+        archived: false,
+      }),
+    );
+  });
+
+  it('rolls back failed delete and clears the error on the next action', async () => {
+    const api = mockApi({
+      listSessions: jest
+        .fn()
+        .mockResolvedValue([{ ...session, id: 's-1', title: 'Keep me' }]),
+      deleteSession: jest
+        .fn()
+        .mockRejectedValueOnce(new Error('Delete denied')),
+    });
+    await renderPage(api);
+
+    await userEvent.click(
+      await screen.findByRole('button', {
+        name: 'Delete conversation Keep me',
+      }),
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('Delete denied');
+    expect(await screen.findByText('Keep me')).toBeInTheDocument();
+
+    // Next action clears the previous delete error.
+    await userEvent.click(screen.getByRole('button', { name: 'New chat' }));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('syncs the active conversation across row clicks and browser back', async () => {
+    const api = mockApi({
+      listSessions: jest.fn().mockResolvedValue([
+        { ...session, id: 's-1', title: 'First chat' },
+        { ...session, id: 's-2', title: 'Second chat' },
+      ]),
+      getSession: jest.fn(async id =>
+        detail({
+          session: {
+            ...session,
+            id,
+            title: id === 's-1' ? 'First chat' : 'Second chat',
+          },
+          items: items(user(`Message in ${id}`)),
+        }),
+      ),
+    });
+    await renderPage(api);
+
+    await userEvent.click(await screen.findByText('First chat'));
+    expect(where()).toBe('/ai-chat/s-1');
+    expect(await screen.findByText('Message in s-1')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText('Second chat'));
+    expect(where()).toBe('/ai-chat/s-2');
+    expect(await screen.findByText('Message in s-2')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Second chat' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Browser back' }));
+    await waitFor(() => expect(where()).toBe('/ai-chat/s-1'));
+    expect(await screen.findByText('Message in s-1')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'First chat' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    );
+  });
+
+  it('shows activity badges, updates from Signals, clears New reply on open, and forwards liveActivity to SessionView', async () => {
+    const signals = mockSignals();
+    const api = mockApi({
+      listSessions: jest.fn().mockResolvedValue([
+        { ...session, id: 's-1', title: 'Open chat' },
+        {
+          ...session,
+          id: 's-2',
+          title: 'Other chat',
+          activity: 'waiting_approval',
+        },
+      ]),
+      getSession: jest.fn(async id =>
+        detail({
+          session: {
+            ...session,
+            id,
+            title: id === 's-1' ? 'Open chat' : 'Other chat',
+          },
+        }),
+      ),
+      follow: jest.fn().mockResolvedValue(
+        streamResponse([
+          { type: 'start', messageId: 'run_r-9' },
+          { type: 'finish', finishReason: 'stop' },
+        ]),
+      ),
+    });
+    await renderPage(api, '/ai-chat/s-1', [
+      [signalApiRef, signals.api] as never,
+    ]);
+
+    expect(await screen.findByText('Waiting for approval')).toBeInTheDocument();
+
+    // Signals pushes "replied" for a non-open session -> "New reply" badge.
+    signals.emit({ sessionId: 's-2', activity: 'replied' });
+    expect(await screen.findByText('New reply')).toBeInTheDocument();
+
+    // Signals pushes "running" for the open idle session -> Processing badge + follow().
+    signals.emit({ sessionId: 's-1', activity: 'running' });
+    expect(await screen.findByText('Processing')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(api.follow).toHaveBeenCalledWith('s-1', expect.anything()),
+    );
+
+    // Opening s-2 clears its "New reply" badge.
+    await userEvent.click(screen.getByText('Other chat'));
+    await waitFor(() => expect(where()).toBe('/ai-chat/s-2'));
+    expect(screen.queryByText('New reply')).toBeNull();
+  });
+
+  it('keeps low-frequency fallback polling even when Signals is present and pauses while hidden', async () => {
+    jest.useFakeTimers();
+    const originalVisibility = Object.getOwnPropertyDescriptor(
+      Document.prototype,
+      'visibilityState',
+    );
+    let visibility: DocumentVisibilityState = 'visible';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    });
+    try {
+      const signals = mockSignals();
+      const api = mockApi({
+        listSessions: jest
+          .fn()
+          .mockResolvedValue([{ ...session, id: 's-1', title: 'Polled chat' }]),
+      });
+      await renderPage(api, '/ai-chat', [[signalApiRef, signals.api] as never]);
+      await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(1));
+
+      // Polling still fires after 15s even though Signals is installed.
+      await act(async () => {
+        jest.advanceTimersByTime(15_000);
+      });
+      await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(2));
+
+      // Pause while tab is hidden.
+      visibility = 'hidden';
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await act(async () => {
+        jest.advanceTimersByTime(45_000);
+      });
+      expect(api.listSessions).toHaveBeenCalledTimes(2);
+
+      // Returning to visible triggers a refresh and resumes polling.
+      visibility = 'visible';
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(3));
+    } finally {
+      if (originalVisibility) {
+        Object.defineProperty(
+          Document.prototype,
+          'visibilityState',
+          originalVisibility,
+        );
+      } else {
+        delete (document as { visibilityState?: DocumentVisibilityState })
+          .visibilityState;
+      }
+      jest.useRealTimers();
+    }
   });
 });

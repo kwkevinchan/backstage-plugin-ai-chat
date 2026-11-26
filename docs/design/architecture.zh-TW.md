@@ -1347,7 +1347,7 @@ Session 列表（`threadListAdapter`，實作 `RemoteThreadListAdapter`）。
 
 **接回**。`useChat({ resume })` 在載入時 Run 是 `running` 才為真，`reconnectToStream` 打 `GET /sessions/:id/stream`（204 回 `null`），不帶 `afterSeq`（帶了 SDK 找不到前面的 tool part）；`resumeStreamIsReplay` 為真，SDK 在第一個 `start` 把訊息重置，所以重送不會讓文字重複。逐字到一半時，這一台先送已累積的文字，後面的字接在同一則訊息上。
 
-**即時狀態（B-05）**。`GET /sessions` 在有進行中的 Run 時帶 `activity`（`running` 或 `waiting_approval`）。裝了 `aiChatSignalsModule` 時，backend 把 `{ sessionId, activity }` 發給擁有者（頻道 `ai-chat`）；成功完成通知 `replied`，進入等待核准通知 `waiting_approval`，開始或接續通知 `running`，失敗、取消、過期（包含取消等核准的 Run、租約過期、以及啟動失敗）通知 `idle`。`useSessionChat` 接收 `liveActivity` 參數：開著的對話若不在串流中，活動變成 `running` 就接回（剛載入時已是 `running` 的處理會在首次取得狀態或轉態時清掉，不會吃掉之後等核准再恢復的接回）；從進行中變成沒有活動就重新讀取一次。列表 UI 訂閱與標記留到新版前端實作。
+**即時狀態（B-05）**。`GET /sessions` 在有進行中的 Run 時帶 `activity`（`running` 或 `waiting_approval`）。裝了 `aiChatSignalsModule` 時，backend 把 `{ sessionId, activity }` 發給擁有者（頻道 `ai-chat`）；成功完成通知 `replied`，進入等待核准通知 `waiting_approval`，開始或接續通知 `running`，失敗、取消、過期（包含取消等核准的 Run、租約過期、以及啟動失敗）通知 `idle`。`useSessionChat` 接收 `liveActivity` 參數：開著的對話若不在串流中，活動變成 `running` 就接回（剛載入時已是 `running` 的處理會在首次取得狀態、轉態或自身串流結束時清掉，不會吃掉之後等核准再恢復或別處新開的接回）；從進行中變成沒有活動就重新讀取一次。列表（`ChatPage` / `ThreadListSidebar`）透過可選的 `signalApiRef` 訂閱 `ai-chat` 頻道，不論有沒有安裝 Signals 都保留 15 秒低頻後備輪詢（分頁隱藏時暫停、切回前景時立即重讀），顯示 `Processing`、`Waiting for approval`、`New reply` 標籤並把目前開著的 Session 活動傳給 `SessionView`。
 
 **停止**。畫面有進行中的 Run（載入時的 `run`，之後由 `data-run` 更新）就顯示 Stop，也包含停在等核准的 Run（新訊息要等 Run 結束）。Stop 呼叫 `POST …/runs/:runId/cancel`（409 忽略），不呼叫 `useChat.stop()`：後端結束 Run 時串流自己以 `abort` 結束。沒有串流開著（Run 在等核准）時，畫面自己重新讀取。`data-run` 是 `failed`、`cancelled`、`expired`，或串流出錯時，結束後重新讀取 `GET /sessions/:id`，畫面以紀錄為準。
 

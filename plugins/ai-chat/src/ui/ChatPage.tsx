@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Route,
   Routes,
@@ -22,10 +22,17 @@ import {
   useNavigate,
   useParams,
 } from 'react-router-dom';
+import {
+  AssistantRuntimeProvider,
+  useAui,
+  useAuiState,
+  useExternalStoreRuntime,
+  useRemoteThreadListRuntime,
+  type ThreadMessage,
+} from '@assistant-ui/react';
 import { Content, Header, Page } from '@backstage/core-components';
-import { useApi } from '@backstage/core-plugin-api';
-import { RiAddLine, RiDeleteBinLine } from '@remixicon/react';
-import { Button, Container } from '@backstage/ui';
+import { useApi, useApiHolder } from '@backstage/core-plugin-api';
+import { Container } from '@backstage/ui';
 import type {
   ChatAttachment,
   ChatSession,
@@ -35,26 +42,55 @@ import type {
 import { aiChatApiRef } from '../api';
 import type { AiChatApi } from '../api';
 import type { AttachmentSource } from '../adapters/assistantUi/attachmentAdapter';
+import {
+  createThreadListAdapter,
+  readThreadCustom,
+  type SessionListActivity,
+} from '../adapters/assistantUi/threadListAdapter';
+import {
+  AI_CHAT_SIGNAL_CHANNEL,
+  parseSessionActivitySignal,
+  signalApiRef,
+  type SessionSignalActivity,
+} from '../adapters/signals';
 import { describeError } from '../adapters/describeError';
 import { useInputConfig } from '../application/useInputConfig';
 import { usePageContext } from '../application/usePageContext';
 import type { OutgoingMessage } from '../domain/types';
-import { useSessionList } from '../application/useSessionList';
 import { useToolsets } from '../application/useToolsets';
 import { DraftComposer } from './Composer';
 import { SessionView } from './SessionView';
 import { cx } from './styles';
+import { ThreadListSidebar } from './ThreadListSidebar';
 import { ToolsetPanel } from './ToolsetPanel';
+
+const SEARCH_DEBOUNCE_MS = 250;
+const FALLBACK_POLL_MS = 15_000;
+const TITLE_FOLLOWUP_POLL_MS = 2_000;
+const EMPTY_MESSAGES: readonly ThreadMessage[] = [];
+const NOOP_ON_NEW = async () => {};
+
+/**
+ * Minimal thread runtime hosted by `useRemoteThreadListRuntime`. The active
+ * conversation renders its own `SessionView` with `useSessionRuntime`.
+ */
+function usePlaceholderThreadRuntime() {
+  return useExternalStoreRuntime({
+    messages: EMPTY_MESSAGES,
+    onNew: NOOP_ON_NEW,
+  });
+}
 
 type Basics = {
   api: AiChatApi;
   basePath: string;
   toolsets: ChatToolset[];
+  liveActivity?: SessionListActivity;
   onChanged(): void;
 };
 
 /** A session opens on its own URL: `<page>/<session id>` (SE-01). */
-function OpenSession({ api, toolsets, onChanged }: Basics) {
+function OpenSession({ api, toolsets, liveActivity, onChanged }: Basics) {
   const { sessionId = '' } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -126,6 +162,7 @@ function OpenSession({ api, toolsets, onChanged }: Basics) {
       toolsets={toolsets}
       firstMessage={firstMessage}
       firstAttachments={firstAttachments}
+      liveActivity={liveActivity}
       onChanged={onChanged}
     />
   );
@@ -267,10 +304,208 @@ function NewSession({ api, basePath, toolsets, onChanged }: Basics) {
   );
 }
 
+interface ChatPageBodyProps {
+  api: AiChatApi;
+  basePath: string;
+  openId: string;
+  toolsets: ChatToolset[];
+  search: string;
+  onSearchChange(value: string): void;
+  showArchived: boolean;
+  onShowArchivedChange(value: boolean): void;
+  actionError?: string;
+  onClearError(): void;
+  onArchiveCurrent(): void;
+}
+
+function ChatPageBody(props: ChatPageBodyProps) {
+  const {
+    api,
+    basePath,
+    openId,
+    toolsets,
+    search,
+    onSearchChange,
+    showArchived,
+    onShowArchivedChange,
+    actionError,
+    onClearError,
+    onArchiveCurrent,
+  } = props;
+  const aui = useAui();
+  const navigate = useNavigate();
+  const apiHolder = useApiHolder();
+  const signals = apiHolder.get(signalApiRef);
+  const threadItems = useAuiState(s => s.threads.threadItems);
+  const [signalActivities, setSignalActivities] = useState<
+    Record<string, SessionSignalActivity>
+  >({});
+  const signalSeqRef = useRef(0);
+  const signalVersionsRef = useRef<Record<string, number>>({});
+  const openIdRef = useRef(openId);
+  openIdRef.current = openId;
+
+  const reloadList = useCallback(() => {
+    const seqAtStart = signalSeqRef.current;
+    void aui.threads.reload().then(() => {
+      setSignalActivities(current => {
+        const next: Record<string, SessionSignalActivity> = {};
+        let changed = false;
+        for (const [id, activity] of Object.entries(current)) {
+          const version = signalVersionsRef.current[id] ?? 0;
+          if (activity === 'replied' || version > seqAtStart) {
+            next[id] = activity;
+          } else {
+            changed = true;
+          }
+        }
+        return changed ? next : current;
+      });
+    });
+  }, [aui]);
+
+  // Clear the "New reply" badge once the user opens that conversation.
+  useEffect(() => {
+    if (!openId) return;
+    setSignalActivities(current => {
+      if (current[openId] !== 'replied') return current;
+      const { [openId]: _cleared, ...rest } = current;
+      return rest;
+    });
+  }, [openId]);
+
+  // Subscribe to Backstage Signals when available for immediate status updates.
+  useEffect(() => {
+    if (!signals) return undefined;
+    const followupTimers = new Set<ReturnType<typeof setTimeout>>();
+    const subscription = signals.subscribe(AI_CHAT_SIGNAL_CHANNEL, message => {
+      const event = parseSessionActivitySignal(message);
+      if (!event) return;
+      signalSeqRef.current += 1;
+      signalVersionsRef.current[event.sessionId] = signalSeqRef.current;
+      setSignalActivities(current => {
+        if (
+          event.activity === 'replied' &&
+          event.sessionId === openIdRef.current
+        ) {
+          if (!(event.sessionId in current)) return current;
+          const { [event.sessionId]: _cleared, ...rest } = current;
+          return rest;
+        }
+        return { ...current, [event.sessionId]: event.activity };
+      });
+      if (event.activity === 'replied' || event.activity === 'idle') {
+        reloadList();
+      }
+      if (event.activity === 'replied') {
+        // Auto-title is written after the replied notification; follow up once
+        // so the generated title appears without waiting for the next poll.
+        const timer = setTimeout(() => {
+          followupTimers.delete(timer);
+          reloadList();
+        }, TITLE_FOLLOWUP_POLL_MS);
+        followupTimers.add(timer);
+      }
+    });
+    return () => {
+      subscription.unsubscribe();
+      followupTimers.forEach(timer => clearTimeout(timer));
+    };
+  }, [signals, reloadList]);
+
+  // Always keep low-frequency fallback polling even when Signals is present,
+  // paused while the tab is hidden.
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const start = () => {
+      if (timer !== undefined) return;
+      timer = setInterval(() => {
+        if (document.visibilityState !== 'hidden') {
+          reloadList();
+        }
+      }, FALLBACK_POLL_MS);
+    };
+    const stop = () => {
+      if (timer !== undefined) {
+        clearInterval(timer);
+        timer = undefined;
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        stop();
+      } else {
+        reloadList();
+        start();
+      }
+    };
+    if (document.visibilityState !== 'hidden') {
+      start();
+    }
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [reloadList]);
+
+  const liveActivity = useMemo<SessionListActivity | undefined>(() => {
+    if (!openId) return undefined;
+    const pushed = signalActivities[openId];
+    if (pushed === 'running' || pushed === 'waiting_approval') return pushed;
+    if (pushed === 'idle' || pushed === 'replied') return undefined;
+    const match = threadItems.find(
+      item => item.remoteId === openId || item.id === openId,
+    );
+    return readThreadCustom(match?.custom).activity;
+  }, [openId, signalActivities, threadItems]);
+
+  const handleNewChat = useCallback(() => {
+    aui.threads.switchToNewThread();
+    navigate(basePath || '/');
+  }, [aui, basePath, navigate]);
+
+  const handlePinChanged = useCallback(() => {
+    // Re-read the list after pinning so server-side pinned-first ordering applies.
+    setTimeout(() => {
+      reloadList();
+    }, 0);
+  }, [reloadList]);
+
+  const basics: Basics = {
+    api,
+    basePath,
+    toolsets,
+    liveActivity,
+    onChanged: reloadList,
+  };
+
+  return (
+    <div className={cx('chat-layout')}>
+      <ThreadListSidebar
+        openId={openId}
+        search={search}
+        onSearchChange={onSearchChange}
+        showArchived={showArchived}
+        onShowArchivedChange={onShowArchivedChange}
+        actionError={actionError}
+        onClearError={onClearError}
+        onArchiveCurrent={onArchiveCurrent}
+        onNewChat={handleNewChat}
+        signalActivities={signalActivities}
+        onPinChanged={handlePinChanged}
+      />
+      <Routes>
+        <Route index element={<NewSession {...basics} />} />
+        <Route path=":sessionId" element={<OpenSession {...basics} />} />
+      </Routes>
+    </div>
+  );
+}
+
 /** The list of sessions, the open session and the input box. */
 export function ChatPageContent() {
   const api = useApi(aiChatApiRef);
-  const list = useSessionList(api);
   const toolsets = useToolsets(api);
   const navigate = useNavigate();
   const location = useLocation();
@@ -284,72 +519,92 @@ export function ChatPageContent() {
     .map(segment => `/${segment}`)
     .join('');
   const openId = rest[0] ? decodeURIComponent(rest[0]) : '';
-  const basics: Basics = {
-    api,
-    basePath,
-    toolsets,
-    onChanged: list.refresh,
-  };
+
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
+  const [actionError, setActionError] = useState<string>();
+  const keepUrlOnArchiveRef = useRef(false);
+
+  useEffect(() => {
+    const trimmed = search.trim();
+    if (!trimmed) {
+      setDebouncedSearch('');
+      return undefined;
+    }
+    const timer = setTimeout(
+      () => setDebouncedSearch(trimmed),
+      SEARCH_DEBOUNCE_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const clearActionError = useCallback(() => {
+    setActionError(undefined);
+  }, []);
+
+  const markArchiveCurrent = useCallback(() => {
+    keepUrlOnArchiveRef.current = true;
+  }, []);
+
+  const adapter = useMemo(
+    () =>
+      createThreadListAdapter({
+        api,
+        query: debouncedSearch,
+        includeArchived: showArchived,
+        onActionStart: clearActionError,
+        onActionSuccess: clearActionError,
+        onActionError: error => {
+          keepUrlOnArchiveRef.current = false;
+          setActionError(describeError(error));
+        },
+      }),
+    [api, debouncedSearch, showArchived, clearActionError],
+  );
+
+  const onThreadIdChange = useCallback(
+    (nextId: string | undefined) => {
+      if (nextId === undefined) {
+        if (keepUrlOnArchiveRef.current) {
+          keepUrlOnArchiveRef.current = false;
+          return;
+        }
+        if (openId) {
+          navigate(basePath || '/');
+        }
+        return;
+      }
+      if (nextId !== openId) {
+        navigate(`${basePath}/${encodeURIComponent(nextId)}`);
+      }
+    },
+    [basePath, navigate, openId],
+  );
+
+  const threadListRuntime = useRemoteThreadListRuntime({
+    adapter,
+    threadId: openId || undefined,
+    onThreadIdChange,
+    runtimeHook: usePlaceholderThreadRuntime,
+  });
 
   return (
-    <div className={cx('chat-layout')}>
-      <nav className={cx('chat-sidebar')} aria-label="Conversations">
-        <Button
-          variant="secondary"
-          iconStart={<RiAddLine size="1em" />}
-          onPress={() => navigate(basePath || '/')}
-        >
-          New chat
-        </Button>
-        {list.error && (
-          <div className={cx('chat-error')} role="alert">
-            {list.error}
-          </div>
-        )}
-        {list.sessions.map(session => {
-          const title = session.title ?? 'New conversation';
-          return (
-            <div
-              key={session.id}
-              className={cx(
-                'chat-conversation',
-                session.id === openId && 'chat-conversation-selected',
-              )}
-            >
-              <button
-                type="button"
-                className={cx('chat-conversation-open')}
-                aria-current={session.id === openId}
-                onClick={() =>
-                  navigate(`${basePath}/${encodeURIComponent(session.id)}`)
-                }
-              >
-                {title}
-              </button>
-              <button
-                type="button"
-                className={cx('chat-icon-button')}
-                aria-label={`Delete conversation ${title}`}
-                onClick={async () => {
-                  if (
-                    (await list.remove(session.id)) &&
-                    session.id === openId
-                  ) {
-                    navigate(basePath || '/');
-                  }
-                }}
-              >
-                <RiDeleteBinLine size="1em" />
-              </button>
-            </div>
-          );
-        })}
-      </nav>
-      <Routes>
-        <Route index element={<NewSession {...basics} />} />
-        <Route path=":sessionId" element={<OpenSession {...basics} />} />
-      </Routes>
-    </div>
+    <AssistantRuntimeProvider runtime={threadListRuntime}>
+      <ChatPageBody
+        api={api}
+        basePath={basePath}
+        openId={openId}
+        toolsets={toolsets}
+        search={search}
+        onSearchChange={setSearch}
+        showArchived={showArchived}
+        onShowArchivedChange={setShowArchived}
+        actionError={actionError}
+        onClearError={clearActionError}
+        onArchiveCurrent={markArchiveCurrent}
+      />
+    </AssistantRuntimeProvider>
   );
 }
 

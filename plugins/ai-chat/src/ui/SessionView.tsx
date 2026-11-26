@@ -21,6 +21,7 @@ import { aiChatToolResultsApiRef } from '@kwkevinchan/backstage-plugin-ai-chat-r
 import type {
   ChatAttachment,
   ChatPageContext,
+  ChatSession,
   ChatSessionDetail,
   ChatToolset,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
@@ -56,6 +57,8 @@ export interface SessionViewProps {
    * send time. Omitted, the route is used.
    */
   page?: ChatPageContext;
+  /** Live run activity from the session list (Signals or fallback polling). */
+  liveActivity?: ChatSession['activity'];
   onChanged?(): void;
 }
 
@@ -70,6 +73,7 @@ export function SessionView(props: SessionViewProps) {
     page,
     firstMessage: props.firstMessage,
     firstAttachments: props.firstAttachments,
+    liveActivity: props.liveActivity,
     onChanged: props.onChanged,
   });
   const sessionId = detail.session.id;
