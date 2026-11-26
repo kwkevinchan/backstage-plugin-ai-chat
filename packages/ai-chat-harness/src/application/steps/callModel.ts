@@ -283,12 +283,7 @@ export async function* callModel(
       activeSkills,
       step,
       position,
-      overLimit:
-        position >= remaining
-          ? 'tool call limit'
-          : position >= req.limits.maxToolCallsPerStep
-          ? 'tool call limit per step'
-          : undefined,
+      overLimit: limitOf(position, remaining, req.limits.maxToolCallsPerStep),
       stepCtx,
     });
     if (classified.aborted) {
@@ -330,6 +325,20 @@ export async function* callModel(
     trimmed: trimmedKey,
     ...(summaryFailed ? { summaryFailed: true as const } : {}),
   };
+}
+
+/**
+ * The message of the limit a call at `position` is beyond: the calls the run
+ * may still make, then the calls of one step.
+ */
+function limitOf(
+  position: number,
+  remaining: number,
+  perStep: number,
+): string | undefined {
+  if (position >= remaining) return 'tool call limit';
+  if (position >= perStep) return 'tool call limit per step';
+  return undefined;
 }
 
 async function classify(

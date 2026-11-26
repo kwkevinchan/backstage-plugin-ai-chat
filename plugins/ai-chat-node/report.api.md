@@ -10,11 +10,20 @@ import { BeforeToolCallDecision } from '@kwkevinchan/ai-chat-harness';
 import { ExtensionPoint } from '@backstage/backend-plugin-api';
 import { HookName } from '@kwkevinchan/ai-chat-harness';
 import { Hooks } from '@kwkevinchan/ai-chat-harness';
+import { ModelChunk } from '@kwkevinchan/ai-chat-harness';
+import { ModelClient } from '@kwkevinchan/ai-chat-harness';
+import { ModelImage } from '@kwkevinchan/ai-chat-harness';
+import { ModelImageData } from '@kwkevinchan/ai-chat-harness';
+import { ModelInput } from '@kwkevinchan/ai-chat-harness';
+import { ModelMessage } from '@kwkevinchan/ai-chat-harness';
+import { ModelStreamOptions } from '@kwkevinchan/ai-chat-harness';
+import { ModelToolCall } from '@kwkevinchan/ai-chat-harness';
 import { PlanningMode } from '@kwkevinchan/ai-chat-harness';
 import { RunSummary } from '@kwkevinchan/ai-chat-harness';
 import { Skill } from '@kwkevinchan/ai-chat-harness';
 import { StepContext } from '@kwkevinchan/ai-chat-harness';
 import { ToolCall } from '@kwkevinchan/ai-chat-harness';
+import { ToolDescriptor } from '@kwkevinchan/ai-chat-harness';
 import { ToolResult } from '@kwkevinchan/ai-chat-harness';
 
 export { AgentDefinition };
@@ -32,6 +41,22 @@ export { HookName };
 
 export { Hooks };
 
+export { ModelChunk };
+
+export { ModelClient };
+
+export { ModelImage };
+
+export { ModelImageData };
+
+export { ModelInput };
+
+export { ModelMessage };
+
+export { ModelStreamOptions };
+
+export { ModelToolCall };
+
 export { PlanningMode };
 
 export { RunSummary };
@@ -41,6 +66,8 @@ export { Skill };
 export { StepContext };
 
 export { ToolCall };
+
+export { ToolDescriptor };
 
 export { ToolResult };
 ```

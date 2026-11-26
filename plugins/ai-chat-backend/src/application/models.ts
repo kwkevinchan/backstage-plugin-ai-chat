@@ -40,14 +40,15 @@ export function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
       reject(signal.reason);
       return;
     }
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(signal.reason);
-    };
+    let onAbort = () => {};
     const timer = setTimeout(() => {
       signal.removeEventListener('abort', onAbort);
       resolve();
     }, ms);
+    onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
     signal.addEventListener('abort', onAbort, { once: true });
   });
 }

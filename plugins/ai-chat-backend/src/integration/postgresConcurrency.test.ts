@@ -197,9 +197,12 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
       `r${Math.random().toString(36).slice(2, 8)}`,
     );
     db.sessions = new KnexSessionRepository(db.knex, clock, ids);
-    db.runs = new KnexRunRepository(db.knex, clock, ids);
+    // The tests share one owner and leave runs going on; the limit of runs per
+    // user has its own test below.
+    const unlimited = { runsPerUser: Number.MAX_SAFE_INTEGER };
+    db.runs = new KnexRunRepository(db.knex, clock, ids, unlimited);
     db.items = new KnexItemLog(db.knex, clock, { maxInsertsPerRun: 1000 });
-    db.queue = new KnexQueuedMessageRepository(db.knex, clock, ids);
+    db.queue = new KnexQueuedMessageRepository(db.knex, clock, ids, unlimited);
     db.clock = clock;
     db.attachments = new KnexAttachmentStore(db.knex, clock, ids);
     db.insertMessage = new InsertMessage({
@@ -942,7 +945,9 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
         );
         // Two sessions start from their queue, two from a message.
         for (const session of sessions.slice(2)) {
-          await queue.add(session.id, { text: 'queued' }, { max: 5 });
+          const before = await db.runs.start(session.id);
+          await db.queue.add(session.id, { text: 'queued' }, { max: 5 });
+          await db.runs.transition(before.id, 'completed');
         }
         const results = await Promise.allSettled(
           sessions.map((session, i) =>
@@ -966,6 +971,7 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
           .knex('runs')
           .join('sessions', 'sessions.id', 'runs.session_id')
           .where('sessions.owner_ref', ownerRef)
+          .where('runs.status', 'running')
           .count({ count: '*' });
         expect(Number(count)).toBe(2);
       }

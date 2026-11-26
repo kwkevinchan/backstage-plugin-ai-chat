@@ -83,7 +83,10 @@ export interface ModelClient {
    * The answer of the model as a stream. Throws when the call fails; the loop
    * ends the run as `failed`. Stops, and may throw, when the signal aborts.
    */
-  stream(input: ModelInput, opts: ModelStreamOptions): AsyncIterable<ModelChunk>;
+  stream(
+    input: ModelInput,
+    opts: ModelStreamOptions,
+  ): AsyncIterable<ModelChunk>;
   /**
    * What the model can do (X-09). `images`: it reads the images of a message
    * (IN-05); when it is `false`, the loop never gives it an image.

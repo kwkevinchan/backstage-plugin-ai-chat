@@ -138,7 +138,13 @@ describe('aiChatPlugin: models and limits (P3-07)', () => {
           }),
         ],
       });
-      return { server: started.server, db };
+      // Stops the backend before its database goes: a run that ended may still
+      // be naming its session.
+      const close = async () => {
+        await started.stop();
+        await db.destroy();
+      };
+      return { server: started.server, close };
     } catch (error) {
       await db.destroy();
       throw error;
@@ -167,7 +173,7 @@ describe('aiChatPlugin: models and limits (P3-07)', () => {
     const main = await llmServer(() => text('from default'));
     const small = await llmServer(() => text('from small'));
     const seen: ModelInput[] = [];
-    const { server, db } = await start({
+    const { server, close } = await start({
       aiChat: {
         llm: { baseUrl: main.url, model: 'main-model' },
         models: {
@@ -206,7 +212,7 @@ describe('aiChatPlugin: models and limits (P3-07)', () => {
       expect(fromMain[0].body.model).toBe('main-model');
       expect(fromMain[0].body.parallel_tool_calls).toBeUndefined();
     } finally {
-      await db.destroy();
+      await close();
     }
   });
 
@@ -256,7 +262,7 @@ describe('aiChatPlugin: models and limits (P3-07)', () => {
 
   it('answers 429 TooManyActiveRuns beyond runsPerUser, for that user only', async () => {
     const llm = await llmServer(() => call('demo_change-thing', { name: 'x' }));
-    const { server, db } = await start({
+    const { server, close } = await start({
       aiChat: { llm: { baseUrl: llm.url, model: 'm' }, runsPerUser: 1 },
     });
     try {
@@ -271,7 +277,7 @@ describe('aiChatPlugin: models and limits (P3-07)', () => {
       const other = await send(server, undefined, bob);
       expect(other.status).toBe(200);
     } finally {
-      await db.destroy();
+      await close();
     }
   });
 });

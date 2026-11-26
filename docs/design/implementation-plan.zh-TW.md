@@ -880,7 +880,7 @@ flowchart LR
     - `ModelClient.stream` 的 `opts` 加 `readImage`：宿主給的函式，用 `ModelImage` 讀出圖片的型別和位元組（X-09）。核心不呼叫它，只把它交給模型轉接。
     - `AdvanceRunRequest` 加 `model`：這個 Run 的 Agent 用的 `ModelClient`。`AdvanceRunDeps` 拿掉 `model`。
     - `AiChatHarnessExtensionPoint` 加 `addModelClient(id, client)`。
-  - 擴充點（`plugins/ai-chat-node`）：重新匯出 `ModelClient`、`ModelChunk`、`ModelInput`、`ModelMessage`、`ModelImage`、`ModelImageData`、`ModelStreamOptions`、`ToolDescriptor`。
+  - 擴充點（`plugins/ai-chat-node`）：重新匯出 `ModelClient`、`ModelChunk`、`ModelInput`、`ModelMessage`、`ModelImage`、`ModelImageData`、`ModelStreamOptions`、`ModelToolCall`、`ToolDescriptor`。
   - 宿主（`plugins/ai-chat-backend`）：
     - 設定：`aiChat.models.<id>` 和 `aiChat.llm` 同樣的欄位，加上 `parallelToolCalls`、`requestsPerMinute`。`aiChat.llm` 就是 id `default` 的模型，也可以寫這兩個欄位。新的上限：`aiChat.maxToolCallsPerStep`（預設 8）、`aiChat.readConcurrency`（預設 4）、`aiChat.toolTimeoutSeconds`（預設 60）、`aiChat.runsPerUser`（預設 3）。
     - `AiChatHarnessRegistry.addModelClient`：檢查 id 的寫法和 client 的形狀。`ModelCatalog` 合併設定檔的模型和模組註冊的 client。

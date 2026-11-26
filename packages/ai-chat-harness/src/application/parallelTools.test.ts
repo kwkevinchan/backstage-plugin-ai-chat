@@ -119,9 +119,7 @@ describe('executeTools: read-only calls at the same time (P-01, P-02, P-03)', ()
 
     expect(outcome).toEqual({ status: 'completed' });
     // All four started before any of them ended.
-    expect(t0.trace.slice(0, 4).every(e => e.startsWith('start:'))).toBe(
-      true,
-    );
+    expect(t0.trace.slice(0, 4).every(e => e.startsWith('start:'))).toBe(true);
     const items = await t.read();
     const calls = callsOf(items);
     const results = resultsOf(items);
@@ -256,9 +254,12 @@ describe('executeTools: read-only calls at the same time (P-01, P-02, P-03)', ()
       ['end:read-a', 'end:read-b', 'start:read-a', 'start:read-b'].sort(),
     );
     expect(writeEnd).toBe(writeStart + 1);
-    expect(t0.trace.slice(writeEnd + 1).slice(0, 2).sort()).toEqual(
-      ['start:read-c', 'start:read-d'].sort(),
-    );
+    expect(
+      t0.trace
+        .slice(writeEnd + 1)
+        .slice(0, 2)
+        .sort(),
+    ).toEqual(['start:read-c', 'start:read-d'].sort());
     expect(t0.most()).toBe(2);
     const items = await t.read();
     const started = items.findIndex(i => i.kind === 'tool_started');

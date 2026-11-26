@@ -216,11 +216,7 @@ function decisionFor(
   const decision = needsApproval(call)
     ? decisionOf(items, call.callId)
     : 'allow';
-  if (
-    decision !== 'allow' &&
-    decision !== 'deny' &&
-    decision !== undefined
-  ) {
+  if (decision !== 'allow' && decision !== 'deny' && decision !== undefined) {
     throw new Error(
       `The decision of call ${call.callId} is not allow or deny: ${String(
         decision,
@@ -254,12 +250,7 @@ async function settleCall(
   }
   const raw = await runInTime(deps, req, call);
   if (!raw) return { kind: 'aborted' };
-  const output = await runAfterToolCall(
-    deps.extensions,
-    call,
-    raw,
-    req.signal,
-  );
+  const output = await runAfterToolCall(deps.extensions, call, raw, req.signal);
   return { kind: 'write', draft: resultOf(call, output) };
 }
 
