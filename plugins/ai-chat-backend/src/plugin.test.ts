@@ -19,6 +19,7 @@ import {
   createServiceFactory,
 } from '@backstage/backend-plugin-api';
 import { actionsServiceRef } from '@backstage/backend-plugin-api/alpha';
+import { metricsServiceFactory } from '@backstage/backend-defaults/alpha';
 import exampleModule from '@kwkevinchan/backstage-plugin-ai-chat-backend-module-example';
 import { aiChatHarnessExtensionPoint } from '@kwkevinchan/backstage-plugin-ai-chat-node';
 import { catalogServiceMock } from '@backstage/plugin-catalog-node/testUtils';
@@ -415,6 +416,38 @@ describe('aiChatPlugin', () => {
     expect(again.body).toEqual({ approved: true });
     expect(actions.invocations).toHaveLength(2);
     expect(auditEvents).toEqual(['tool-call-approve', 'tool-call-invoke']);
+  });
+
+  it('measures the runs on the metrics service of Backstage with no OpenTelemetry SDK installed, and the chat works as before (O-01)', async () => {
+    const logger = mockServices.logger.mock();
+    const server = await startBackend(undefined, [
+      // The default of Backstage, named here: without an SDK its meter does nothing.
+      metricsServiceFactory,
+      logger.factory,
+    ]);
+    answers = [call('demo_list-things', {}), text('One thing.')];
+    const { body } = await request(server)
+      .post('/api/ai-chat/sessions')
+      .set('Authorization', alice);
+    const res = await request(server)
+      .post(`/api/ai-chat/sessions/${body.id}/runs`)
+      .set('Authorization', alice)
+      .send({ text: 'list' });
+    const chunks = await parseSse(res.text);
+    expect(chunks[chunks.length - 1]).toMatchObject({ type: 'finish' });
+    expect(actions.invocations.map(i => i.id)).toEqual(['demo:list-things']);
+
+    const messages = (logger.info as jest.Mock).mock.calls.map(c => c[0]);
+    expect(messages).toEqual(
+      expect.arrayContaining(['Model call', 'Tool call', 'Run ended']),
+    );
+    const warnings = [
+      ...(logger.warn as jest.Mock).mock.calls,
+      ...(logger.error as jest.Mock).mock.calls,
+    ].map(c => c[0]);
+    expect(warnings).not.toContain(
+      'Could not record a measurement of the AI chat',
+    );
   });
 
   it('offers only update_plan in the first step of an agent with planning: required, then every tool, and streams the plan (X-06, X-07)', async () => {

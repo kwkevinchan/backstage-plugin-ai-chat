@@ -32,6 +32,7 @@ import {
   type Run,
 } from '../domain';
 import { EventChannel } from './EventChannel';
+import { modelErrorFields } from './modelErrors';
 import { notifyActivity, type ActivityNotifier } from './notifyActivity';
 import type { AfterRun, HostEvent } from './hostEvents';
 import { RUN_END_HOOK_TIMEOUT_MS, type RunEnded } from './runEnded';
@@ -407,10 +408,11 @@ export class RunSupervisor {
           continue;
         }
         if (event.type === 'summary.failed') {
-          // The cause is the original error: it goes to the log only.
+          // Only the name and the status of the error: the message of the
+          // model server may carry what the user or a tool wrote.
           this.deps.logger.warn('A summary could not be made', {
             runId: run.id,
-            cause: describe(event.cause),
+            ...(event.cause !== undefined && modelErrorFields(event.cause)),
           });
         }
         this.publish(loop, forSubscribers(event));
@@ -523,9 +525,11 @@ export class RunSupervisor {
   ): Promise<{ run?: Run; outcome: RunOutcome } | 'unread'> {
     if (loop.shuttingDown) return { outcome };
     if (outcome.status === 'failed') {
+      // Only the name and the status of the error: the message of the model
+      // server may carry what the user or a tool wrote.
       this.deps.logger.error('A run failed', {
         runId: loop.run.id,
-        cause: describe(outcome.cause),
+        ...(outcome.cause !== undefined && modelErrorFields(outcome.cause)),
       });
     }
     const [to, endReason] = statusOf(outcome);

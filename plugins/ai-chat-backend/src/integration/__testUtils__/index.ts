@@ -54,6 +54,9 @@ import type {
   AuditEvent,
   AuditLog,
   EntityReader,
+  MetricAttributes,
+  MetricOptions,
+  Metrics,
   Notifier,
 } from '../../application/ports';
 import {
@@ -319,6 +322,8 @@ export async function createWorld(
       rateLimits?: HostPorts['rateLimits'];
       notifier?: Notifier;
       extensions?: Extensions;
+      /** Where the measurements go; nowhere by default. */
+      metrics?: Metrics;
       heartbeatMs?: number;
       /**
        * Runs around every `transition` of this backend: `call()` makes the
@@ -382,6 +387,7 @@ export async function createWorld(
       logger,
       ...(extra.notifier && { notifier: extra.notifier }),
       ...(extra.extensions && { extensions: extra.extensions }),
+      ...(extra.metrics && { metrics: extra.metrics }),
       settings: {
         limits,
         budget: { tokenBudget: 100000, keepRecentSteps: 6 },
@@ -440,5 +446,41 @@ export async function until(condition: () => boolean | Promise<boolean>) {
   while (!(await condition())) {
     if (Date.now() > deadline) throw new Error('Timed out waiting');
     await new Promise(resolve => setTimeout(resolve, 5));
+  }
+}
+
+/** Metrics that keep every instrument and every measurement. */
+export class RecordingMetrics implements Metrics {
+  readonly instruments: {
+    kind: 'counter' | 'histogram';
+    name: string;
+    options: MetricOptions;
+  }[] = [];
+  readonly measurements: {
+    name: string;
+    value: number;
+    attributes: MetricAttributes;
+  }[] = [];
+
+  counter(name: string, options: MetricOptions) {
+    this.instruments.push({ kind: 'counter', name, options });
+    return {
+      add: (value: number, attributes: MetricAttributes) => {
+        this.measurements.push({ name, value, attributes: { ...attributes } });
+      },
+    };
+  }
+
+  histogram(name: string, options: MetricOptions) {
+    this.instruments.push({ kind: 'histogram', name, options });
+    return {
+      record: (value: number, attributes: MetricAttributes) => {
+        this.measurements.push({ name, value, attributes: { ...attributes } });
+      },
+    };
+  }
+
+  of(name: string) {
+    return this.measurements.filter(m => m.name === name);
   }
 }

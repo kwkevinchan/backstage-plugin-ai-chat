@@ -15,7 +15,9 @@
  */
 
 import type {
+  Clock,
   ItemLog,
+  ModelCallOutcome,
   ModelClient,
   ModelInput,
   RunOutcome,
@@ -28,7 +30,9 @@ import {
   titleFromModelAnswer,
   type Run,
 } from '../../domain';
-import type { ModelCatalog } from '../models';
+import { modelErrorFields } from '../modelErrors';
+import { DEFAULT_MODEL_ID, type ModelCatalog } from '../models';
+import type { RunTelemetry } from '../RunTelemetry';
 import type {
   AgentCatalog,
   Logger,
@@ -65,6 +69,9 @@ export class NameSession {
       models: Pick<ModelCatalog, 'forAgent'>;
       logger: Logger;
       timeoutMs?: number;
+      /** With `telemetry`: measures the call of the model (O-01). */
+      clock?: Clock;
+      telemetry?: Pick<RunTelemetry, 'titleCall'>;
     },
   ) {
     this.timeoutMs = deps.timeoutMs ?? TITLE_TIMEOUT_MS;
@@ -99,8 +106,11 @@ export class NameSession {
     // The title is made by the model of the agent, which the conversation was
     // already sent to. An agent that is gone has no model to send it to.
     let model: ModelClient;
+    let modelId: string;
     try {
-      model = models.forAgent(await agents.agent(session.agentId));
+      const agent = await agents.agent(session.agentId);
+      model = models.forAgent(agent);
+      modelId = agent.model ?? DEFAULT_MODEL_ID;
     } catch (error) {
       if (error instanceof AgentNotFound) return;
       throw error;
@@ -115,10 +125,26 @@ export class NameSession {
     const signal = input.signal
       ? AbortSignal.any([input.signal, timeout])
       : timeout;
+    const { clock, telemetry } = this.deps;
+    const startedAt = clock?.now().getTime();
+    const answer: Answer = { text: '' };
+    const measure = (outcome: ModelCallOutcome, errorStatus?: number) => {
+      if (!telemetry || !clock || startedAt === undefined) return;
+      telemetry.titleCall({
+        sessionId: session.id,
+        runId: input.run.id,
+        agentId: session.agentId,
+        modelId,
+        durationMs: Math.max(0, clock.now().getTime() - startedAt),
+        outcome,
+        ...(errorStatus !== undefined && { errorStatus }),
+        ...answer.usage,
+      });
+    };
     let text = '';
     try {
       text = await Promise.race([
-        collectText(model, modelInput, session.id, signal),
+        collectText(model, modelInput, session.id, signal, answer),
         new Promise<string>(resolve => {
           if (signal.aborted) {
             resolve('');
@@ -129,6 +155,7 @@ export class NameSession {
       ]);
     } catch (error) {
       if (timeout.aborted) {
+        measure('timeout');
         logger.warn('Could not name the session', {
           sessionId: session.id,
           runId: input.run.id,
@@ -136,14 +163,22 @@ export class NameSession {
         });
         return;
       }
-      if (signal.aborted) return;
+      if (signal.aborted) {
+        measure('cancelled');
+        return;
+      }
+      const fields = modelErrorFields(error);
+      measure('failed', fields.errorStatus);
       logger.warn('Could not name the session', {
         sessionId: session.id,
         runId: input.run.id,
-        error: error instanceof Error ? error.message : String(error),
+        ...fields,
       });
       return;
     }
+    if (timeout.aborted) measure('timeout');
+    else if (signal.aborted) measure('cancelled');
+    else measure(text.trim().length > 0 ? 'ok' : 'empty');
     if (timeout.aborted) {
       logger.warn('Could not name the session', {
         sessionId: session.id,
@@ -159,17 +194,40 @@ export class NameSession {
   }
 }
 
-/** The text of one model call. A tool call in the answer is ignored. */
+/** What the model call gave so far: the text and the reported tokens. */
+type Answer = {
+  text: string;
+  usage?: { inputTokens: number; outputTokens: number };
+};
+
+/**
+ * The text of one model call. A tool call in the answer is ignored. The
+ * tokens the server reports go to `answer`.
+ */
 async function collectText(
   model: ModelClient,
   input: ModelInput,
   sessionId: string,
   signal: AbortSignal,
+  answer: Answer,
 ): Promise<string> {
-  let text = '';
   for await (const chunk of model.stream(input, { signal, sessionId })) {
     if (signal.aborted) break;
-    if (chunk.type === 'text') text += chunk.text;
+    if (chunk.type === 'text') answer.text += chunk.text;
+    else if (
+      chunk.type === 'usage' &&
+      isCount(chunk.inputTokens) &&
+      isCount(chunk.outputTokens)
+    ) {
+      answer.usage = {
+        inputTokens: chunk.inputTokens,
+        outputTokens: chunk.outputTokens,
+      };
+    }
   }
-  return text;
+  return answer.text;
+}
+
+function isCount(value: number): boolean {
+  return Number.isInteger(value) && value >= 0;
 }

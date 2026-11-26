@@ -346,13 +346,13 @@ describe('RunObserver: the size of the context (O-01)', () => {
           text: 'look',
           attachments: [
             {
-              attachmentId: 'a1',
+              id: 'a1',
               mediaType: 'image/png',
               name: 'one.png',
               size: 10,
             },
             {
-              attachmentId: 'a2',
+              id: 'a2',
               mediaType: 'image/png',
               name: 'two.png',
               size: 10,

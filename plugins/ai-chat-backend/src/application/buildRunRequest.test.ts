@@ -86,4 +86,38 @@ describe('buildRunRequest', () => {
     const request = await buildRunRequest(deps, { session, run, principal });
     expect(request.ctx).not.toHaveProperty('sessionEntityRef');
   });
+
+  it('names the model of the agent for the measurements, default when the agent names none (O-01)', async () => {
+    const small = { ...model };
+    const withModels = {
+      ...deps,
+      agents: {
+        agent: async (id: string) => ({
+          id,
+          systemPrompt: 'Rules.',
+          ...(id === 'sre' && { model: 'small' }),
+        }),
+        policy: async () => ({}),
+      } as unknown as AgentCatalog,
+      models: new ModelCatalog(
+        new Map([
+          [DEFAULT_MODEL_ID, model],
+          ['small', small],
+        ]),
+      ),
+    };
+    const plain = await buildRunRequest(withModels, {
+      session,
+      run,
+      principal,
+    });
+    const sre = await buildRunRequest(withModels, {
+      session: { ...session, agentId: 'sre' },
+      run,
+      principal,
+    });
+    expect(plain.modelId).toBe('default');
+    expect(sre.modelId).toBe('small');
+    expect(sre.model).toBe(small);
+  });
 });

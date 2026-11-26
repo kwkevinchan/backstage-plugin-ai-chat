@@ -56,6 +56,14 @@ export interface LlmToolCall {
 export interface LlmResult {
   content: string;
   toolCalls: LlmToolCall[];
+  /** The tokens of the call, when the server reported them. */
+  usage?: LlmUsage;
+}
+
+/** The tokens of one call, as the server reports them in `usage`. */
+export interface LlmUsage {
+  inputTokens: number;
+  outputTokens: number;
 }
 
 export interface LlmRequest {
@@ -108,7 +116,8 @@ export class OpenAiCompatibleClient implements LlmClient {
     private readonly config: Pick<
       AiChatConfig['llm'],
       'baseUrl' | 'apiKey' | 'model' | 'timeoutMs'
-    >,
+    > &
+      Partial<Pick<AiChatConfig['llm'], 'reportUsage'>>,
   ) {}
 
   async complete(request: LlmRequest): Promise<LlmResult> {
@@ -137,6 +146,11 @@ export class OpenAiCompatibleClient implements LlmClient {
             ? { parallel_tool_calls: true }
             : {}),
           stream: true,
+          // The tokens come in a last chunk; a server that does not know the
+          // field may refuse it, so the configuration can turn it off.
+          ...(this.config.reportUsage !== false && {
+            stream_options: { include_usage: true },
+          }),
         }),
       });
     } catch (error) {
@@ -190,7 +204,21 @@ function readWholeAnswer(body: any, request: LlmRequest): LlmResult {
       arguments: call.function?.arguments ?? '',
     }),
   );
-  return { content, toolCalls };
+  const usage = usageOf(body?.usage);
+  return { content, toolCalls, ...(usage && { usage }) };
+}
+
+/** The tokens of `usage` in an answer, when both counts are there. */
+function usageOf(usage: any): LlmUsage | undefined {
+  const count = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0;
+  if (!count(usage?.prompt_tokens) || !count(usage?.completion_tokens)) {
+    return undefined;
+  }
+  return {
+    inputTokens: usage.prompt_tokens,
+    outputTokens: usage.completion_tokens,
+  };
 }
 
 async function readStream(
@@ -199,6 +227,7 @@ async function readStream(
 ): Promise<LlmResult> {
   if (!response.body) throw new LlmError('The model server sent no answer');
   let content = '';
+  let usage: LlmUsage | undefined;
   const calls: Array<{ id: string; name: string; arguments: string }> = [];
   const handle = (data: string) => {
     if (data === '[DONE]') return;
@@ -215,6 +244,8 @@ async function readStream(
         ).slice(0, MAX_ERROR_BODY)}`,
       );
     }
+    // The chunk of the usage has no choices.
+    usage = usageOf(chunk?.usage) ?? usage;
     const delta = chunk?.choices?.[0]?.delta;
     if (!delta) return;
     if (typeof delta.content === 'string' && delta.content) {
@@ -253,6 +284,7 @@ async function readStream(
     toolCalls: calls
       .filter(Boolean)
       .map(call => ({ ...call, id: safeCallId(call.id) })),
+    ...(usage && { usage }),
   };
 }
 
