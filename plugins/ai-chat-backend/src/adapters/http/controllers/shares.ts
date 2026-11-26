@@ -15,17 +15,19 @@
  */
 
 import type {
+  ChatSession,
   ChatShare,
   ChatShareList,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type {
+  ForkSession,
   ListShares,
   RevokeShare,
   ShareSession,
   UpdateShare,
 } from '../../../application';
 import type { Principal } from '../../../domain';
-import { toChatShare } from '../presenters/session';
+import { toChatSession, toChatShare } from '../presenters/session';
 import { createShareBody, parse, updateShareBody } from '../requestSchemas';
 
 export type ShareUseCases = {
@@ -33,6 +35,7 @@ export type ShareUseCases = {
   shareSession: Pick<ShareSession, 'execute'>;
   updateShare: Pick<UpdateShare, 'execute'>;
   revokeShare: Pick<RevokeShare, 'execute'>;
+  forkSession: Pick<ForkSession, 'execute'>;
 };
 
 /** The shares of a session; only its owner reaches them (SH-01, SH-10). */
@@ -104,5 +107,12 @@ export class SharesController {
     shareId: string,
   ): Promise<void> {
     await this.useCases.revokeShare.execute({ principal, sessionId, shareId });
+  }
+
+  /** `POST /sessions/:id/fork` */
+  async fork(principal: Principal, sessionId: string): Promise<ChatSession> {
+    return toChatSession(
+      await this.useCases.forkSession.execute({ principal, sessionId }),
+    );
   }
 }

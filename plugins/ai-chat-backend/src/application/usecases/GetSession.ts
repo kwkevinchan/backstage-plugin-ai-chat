@@ -23,6 +23,8 @@ import {
 } from '@kwkevinchan/ai-chat-harness';
 import {
   callsAwaitingDecision,
+  isShareExpired,
+  shareGrantsRead,
   type Principal,
   type Run,
   type Session,
@@ -62,6 +64,12 @@ export type SessionView = {
    * IN-12).
    */
   insertStates: ReadonlyMap<number, 'read' | 'pending' | 'unread'>;
+  /** Present when the caller is a sharee rather than the owner (SH-12). */
+  shared?: {
+    mode: 'snapshot' | 'live';
+    snapshotAt?: string;
+    expiresAt?: string;
+  };
 };
 
 /**
@@ -185,6 +193,39 @@ export class GetSession {
         visible.some(item => item.runId === active.id))
         ? active
         : undefined;
+    const now = this.deps.clock.now().toISOString();
+    const granted = shares.filter(one => shareGrantsRead(one, principal));
+    const shared: NonNullable<SessionView['shared']> =
+      share.upToSeq === undefined
+        ? (() => {
+            const activeLive = granted
+              .filter(
+                one => one.upToSeq === undefined && !isShareExpired(one, now),
+              )
+              .map(one => one.expiresAt)
+              .filter((v): v is string => v !== undefined)
+              .sort();
+            const expiresAt = activeLive[activeLive.length - 1];
+            return {
+              mode: 'live',
+              ...(expiresAt !== undefined && { expiresAt }),
+            };
+          })()
+        : (() => {
+            const timestamps = granted
+              .map(one =>
+                one.upToSeq === undefined
+                  ? one.expiresAt ?? one.createdAt
+                  : one.createdAt,
+              )
+              .sort();
+            const snapshotAt =
+              timestamps[timestamps.length - 1] ?? share.createdAt;
+            return {
+              mode: 'snapshot',
+              snapshotAt,
+            };
+          })();
     return {
       session,
       ...(run && { run }),
@@ -193,6 +234,7 @@ export class GetSession {
       resumable: false,
       queue: { items: [], paused: false },
       insertStates: statesOf(list, visible, run),
+      shared,
     };
   }
 }

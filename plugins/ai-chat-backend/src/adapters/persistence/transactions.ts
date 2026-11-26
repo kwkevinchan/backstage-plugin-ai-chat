@@ -176,7 +176,7 @@ export async function writeItems(
   clock: Clock,
   input: {
     sessionId: string;
-    runId: string;
+    runId?: string;
     firstSeq: number;
     drafts: ItemDraft[];
     keys: (string | undefined)[];
@@ -190,7 +190,7 @@ export async function writeItems(
     return {
       session_id: sessionId,
       seq: firstSeq + index,
-      run_id: runId,
+      run_id: runId ?? null,
       kind,
       payload: JSON.stringify(rest),
       dedupe_key: keys[index] ?? null,

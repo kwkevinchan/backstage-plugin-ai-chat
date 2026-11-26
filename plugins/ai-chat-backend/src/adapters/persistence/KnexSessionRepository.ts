@@ -14,9 +14,16 @@
  * limitations under the License.
  */
 
-import type { Clock, IdGenerator } from '@kwkevinchan/ai-chat-harness';
+import {
+  dedupeKeyOf,
+  type Clock,
+  type IdGenerator,
+  type Item,
+  type ItemDraft,
+} from '@kwkevinchan/ai-chat-harness';
 import type { Knex } from 'knex';
 import { isPostgres } from './postgres';
+import { markAttachmentsUsed, reserveSeq, writeItems } from './transactions';
 import type { SessionRepository } from '../../application/ports';
 import {
   RunAlreadyActive,
@@ -224,6 +231,31 @@ export class KnexSessionRepository implements SessionRepository {
       if (await deleteExpired(this.knex, id, cutoff)) deleted += 1;
     }
     return deleted;
+  }
+
+  async seedItems(sessionId: string, drafts: ItemDraft[]): Promise<Item[]> {
+    if (drafts.length === 0) return [];
+    const keys = drafts.map(draft => dedupeKeyOf(draft));
+    return this.knex.transaction(async trx => {
+      const firstSeq = await reserveSeq(trx, sessionId, drafts.length);
+      const written = await writeItems(trx, this.clock, {
+        sessionId,
+        firstSeq,
+        drafts,
+        keys,
+      });
+      for (const item of written) {
+        if (item.kind === 'user_message' && item.attachments?.length) {
+          await markAttachmentsUsed(
+            trx,
+            sessionId,
+            item.attachments.map(ref => ref.id),
+            item.seq,
+          );
+        }
+      }
+      return written;
+    });
   }
 }
 

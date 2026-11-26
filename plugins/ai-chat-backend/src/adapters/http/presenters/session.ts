@@ -119,6 +119,7 @@ export function toChatSessionDetail(view: SessionView): ChatSessionDetail {
     awaitingDecision: view.awaitingDecision,
     resumable: view.resumable,
     queue: toChatQueue(view.queue),
+    ...(view.shared && { shared: view.shared }),
   };
 }
 

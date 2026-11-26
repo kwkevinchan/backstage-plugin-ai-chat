@@ -446,6 +446,22 @@ components:
             text:
               type: string
           required: [kind, text]
+    ChatSharedView:
+      type: object
+      description: Present on `GET /sessions/{id}` when the caller reads someone else's session through a share. Absent for the owner.
+      properties:
+        mode:
+          type: string
+          enum: [snapshot, live]
+        snapshotAt:
+          type: string
+          format: date-time
+          description: Present when `mode` is `snapshot`; the timestamp of the snapshot or expiry.
+        expiresAt:
+          type: string
+          format: date-time
+          description: Present when `mode` is `live`; when the live share expires.
+      required: [mode]
     ChatSessionDetail:
       type: object
       properties:
@@ -467,6 +483,8 @@ components:
           description: The run waits for an approval and no call is left to decide, so the loop did not start after the last decision. `POST /sessions/{id}/resume` carries it on.
         queue:
           $ref: '#/components/schemas/ChatQueue'
+        shared:
+          $ref: '#/components/schemas/ChatSharedView'
       required: [session, items, awaitingDecision, resumable, queue]
     ChatQueuedMessage:
       type: object
@@ -1375,6 +1393,25 @@ paths:
       responses:
         '204':
           description: Cancelled.
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /sessions/{id}/fork:
+    parameters:
+      - $ref: '#/components/parameters/sessionId'
+    post:
+      operationId: forkSession
+      tags: [Shares]
+      summary: Copy a readable session into a new session owned by the caller.
+      description: Copies only `user_message`, `agent_message`, and `plan_update` items within the caller's visible scope. Tool calls, tool outputs, approvals, summaries, notes, queued messages, and shares are omitted. Images referenced by copied user messages are duplicated as new attachments owned by the caller.
+      responses:
+        '201':
+          description: The newly created copy of the session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSession'
         '403':
           $ref: '#/components/responses/Error'
         '404':

@@ -155,6 +155,12 @@ export function createRouter(options: RouterOptions): express.Router {
       res.status(204).end();
     }),
   );
+  router.post(
+    '/sessions/:id/fork',
+    route(async (user, req, res) => {
+      res.status(201).json(await shares.fork(user, req.params.id));
+    }),
+  );
   router.get(
     '/toolsets',
     route(async (user, _req, res) => {

@@ -193,6 +193,7 @@ export const chatPaths: {
   stream: (id: string) => string;
   shares: (id: string) => string;
   share: (id: string, shareId: string) => string;
+  forkSession: (id: string) => string;
   tools: (id: string) => string;
   toolsets: () => string;
 };
@@ -316,6 +317,7 @@ export interface ChatSessionDetail {
   run?: ChatRun;
   // (undocumented)
   session: ChatSession;
+  shared?: ChatSharedView;
 }
 
 // @public
@@ -339,6 +341,13 @@ export interface ChatShare {
   outputsUpToSeq?: number;
   subjectRef: string;
   upToSeq?: number;
+}
+
+// @public
+export interface ChatSharedView {
+  expiresAt?: string;
+  mode: ChatShareMode;
+  snapshotAt?: string;
 }
 
 // @public
