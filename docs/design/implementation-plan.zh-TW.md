@@ -727,6 +727,7 @@ flowchart LR
 - **P3-05**：在擴充點加上 `addHook`。Hook 回傳 `continue` 時，`ask` 的工具仍然要核准。Hook 丟例外時，這個工具呼叫被拒絕，Run 繼續。
 - **P3-06**：搜尋結果只有使用者有權限看的文件。先確認 Backstage 有沒有官方的 search action，有就直接用。
 - **P3-07**：在擴充點加上 `addModelClient`。逐項驗收見下方 P3-07。四個唯讀工具同時執行，其中一個逾時，其他三個的結果照原本順序交回。
+- **P3-10**：別的前端 plugin 用 `ai-chat-react` 為 action id 註冊元件，兩個前端系統都能用。核准卡片不被取代；元件出錯時退回預設的顯示。逐項驗收見下方 P3-10。
 
 ### P3-01 `ai-chat-node`、擴充點、設定檔裡的 Agent
 
@@ -1063,6 +1064,52 @@ flowchart LR
   - 限流用固定的一分鐘格子：`model_call_windows` 的 `(model_id, window_start)` 一列一個計數，`INSERT … ON CONFLICT DO UPDATE … WHERE calls < 上限 RETURNING`，一句話決定拿到沒有。格子邊界前後最多可能有兩倍的量。拿不到就等到下一格（加一點隨機延遲）再試。限流算所有呼叫這個模型的地方：每一步、摘要、自動標題。舊的格子在之後的呼叫裡刪除。
   - 依 Agent 的模型決定能不能附加圖片不在這一項：上傳和送出的檢查仍看 `aiChat.llm.images`。Agent 的模型不讀圖片時，迴圈照 IN-05 把圖片換成一行說明，不會送出。
 
+### P3-10 結果顯示元件
+
+- **範圍**：
+  - `ai-chat-react`（別的前端 plugin 用的套件）：
+    - 型別，都有 TSDoc：`AiChatToolResult`（`actionId` 和 `component`）、`AiChatToolResultProps`（`actionId`、`input`、`status`、`output`、`errorText`）、`AiChatToolResultStatus`（`running`、`complete`、`failed`、`denied`、`unknown`）、`AiChatToolResultsApi`。
+    - `aiChatToolResultsApiRef`（id `plugin.ai-chat.tool-results`）。
+    - `AiChatSafeLink`：網址是 `http:`、`https:`、`mailto:` 才畫成連結（新分頁、`rel="noopener noreferrer"`），其他的只顯示文字。
+    - 新的入口 `/alpha`：`AiChatToolResultBlueprint`（新前端系統），掛在 `api:ai-chat/tool-results` 的 `toolResults` 輸入。為了它，依賴加上 `@backstage/frontend-plugin-api`。
+  - `ai-chat`：
+    - `createAiChatToolResultsApi(results)`：實作 `AiChatToolResultsApi`，處理重複和內建工具的 id。
+    - 舊前端系統：`aiChatPlugin` 的 `apis` 註冊一個空的預設。新前端系統：`alpha.tsx` 的 `api:ai-chat/tool-results`（`ApiBlueprint` 加上 `toolResults` 輸入），收集 `AiChatToolResultBlueprint` 的輸出。
+    - `ui/`：工具呼叫的畫面向這個 API 查元件。註冊的元件畫在內建的那一列（或核准卡片）下面，包在 error boundary 裡。
+  - 範例 app：`app` 和 `app-next` 都為 `dev-actions:list-services` 註冊一個表格（名稱、狀態、重啟次數；名稱用 `AiChatSafeLink` 連到 `serviceUrl`）。
+  - 文件：`ai-chat-react` 的 README（怎麼註冊、結果是不可信的資料）；架構第 6.2、9 節。
+  - 不做：client tool（`AiChatClientToolBlueprint`，P4）；核准卡片的改動；後端、串流和共用型別的改動；元件的懶載入。
+- **依賴**：PU-02（工具呼叫用 assistant-ui 的工具畫面）。
+- **驗收**：
+  - 註冊（B-03）：
+    - 別的前端 plugin 只依賴 `ai-chat-react`，不 import `@assistant-ui/*`：`ai-chat-react` 的依賴裡沒有 `@assistant-ui/*`；`ai-chat` 裡只有 `adapters/assistantUi/` 和 `ui/` import 它（`assistantUiImports.test.ts`）。
+    - 舊前端系統：app 用 `createAiChatToolResultsApi` 覆蓋 `aiChatToolResultsApiRef`，註冊的元件出現在對話裡。
+    - 新前端系統：一個 `AiChatToolResultBlueprint` 的 extension 掛上 `api:ai-chat/tool-results`，對話裡出現那個元件，app 不用寫程式。
+    - 同一個 action id 註冊兩次：先註冊的有效，後註冊的不生效，console 有一條警告。
+    - 內建工具（`update_plan`、`load_skill`）的 id 註冊不生效，console 有一條警告；`update_plan` 照樣顯示成清單。
+  - 元件拿到的資料：
+    - 完成：`actionId`、`input`、`output` 和 `status: 'complete'`。
+    - 進行中（包含已允許、還沒有結果）是 `running`；失敗是 `failed`，帶 `errorText`；被拒絕是 `denied`；結果不明是 `unknown`。
+  - 顯示：
+    - 註冊了的 action：元件畫在內建的那一列下面，列的狀態、標題和收合的輸入、結果照舊。
+    - 沒有註冊的 action：照預設顯示，沒有多的區塊。
+    - 元件 render 時丟例外：只剩預設的顯示，同一段對話的其他訊息照常顯示。
+    - 核准卡片不被取代：等核准時元件不畫，卡片的說明、輸入、Allow 和 Deny 照舊；決定之後卡片仍寫誰決定的，元件畫在卡片下面。
+  - 不可信的資料（S-02）：
+    - `AiChatSafeLink`：`http`、`https`、`mailto` 的網址是連結；`javascript:`、`data:`、相對網址和無法解析的網址只顯示文字。
+    - `ai-chat-react` 的 README 寫明：結果是不可信的資料，元件不能用 `dangerouslySetInnerHTML`，連結只放行 `http`、`https`、`mailto`（用 `AiChatSafeLink`）。
+  - 範例 app：
+    - 煙霧測試（兩個 app）：`list services` 之後，對話裡有服務的表格，看得到 `payments` 和它的狀態。
+- **規格沒寫、實作選定的地方**：
+  - 註冊方式是一個 Utility API（`aiChatToolResultsApiRef`），兩個前端系統都經過它，整頁和側邊面板用同一份。新前端系統照 Backstage 的慣例用 Blueprint（和 Scaffolder 的 `FormFieldBlueprint` 掛在 form fields API 上一樣）：別的 plugin 或 module 做一個 `AiChatToolResultBlueprint` 的 extension。舊前端系統沒有 extension 的輸入，所以由 app 在 `apis` 覆蓋這個 API，把各 plugin 匯出的 `AiChatToolResult` 傳給 `createAiChatToolResultsApi`。不用 `AiChatPage` 的 props：側邊面板不在頁面裡，也要同一份。
+  - Blueprint 的參數就是 `AiChatToolResult`，所以一個 plugin 匯出一份定義，兩個系統都能用。
+  - 「先註冊」的順序：舊前端系統是傳入清單的順序；新前端系統是 extension 輸入的順序，也就是 app 載入 feature 的順序。
+  - 註冊的元件不取代內建的那一列：列上的狀態、標題、id，以及收合的原始輸入和結果，一律由 `ai-chat` 畫，元件只多畫結果。元件出錯或畫錯，使用者仍看得到真正的狀態和原始資料。
+  - 元件不畫的時候：等核准（那是卡片的事）和「沒有執行」（Run 在呼叫之前結束，沒有結果可以畫）。
+  - `output` 照紀錄給：超過輸出上限、被裁掉的結果是 `{ truncated: true, originalLength, text }`。元件要能處理它不認得的形狀。
+  - 元件丟例外之後，同一個呼叫的狀態改變時再試一次。
+  - 內建工具的 id 由 `ai-chat` 檢查，`ai-chat-react` 不知道有哪些內建工具。
+
 ### P4：擴大
 
 | 編號  | 工作項目           | 大小 | 完成的需求       | PR  | 狀態 |
@@ -1211,3 +1258,4 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-26 | 1.2  | P3-03 完成（X-06、X-07、D-07，#56）：內建 `update_plan`（`readOnly: true`，預設 `allow`）、`planning: required` 的第一步只提供 `update_plan`、`readCurrentPlan` 和 `ItemLog.latestPlanUpdate`（摘要涵蓋舊的 `plan_update` 也讀得到）、畫面用 assistant-ui 的工具畫面把計畫顯示成清單。逐項驗收見 P3-03                                                                                                                                                                                                                                                                                                                                                                                               |
 | 2026-11-26 | 1.2  | P3-07 完成（P-01、P-02、P-03、P-05、P-06、X-09，#57）：唯讀呼叫同時執行（`readConcurrency`）、結果照順序寫入；每個工具呼叫的逾時（`toolTimeoutSeconds`），寫入逾時後這一步後面的寫入不執行；`maxToolCallsPerStep`、`runsPerUser`（429）；`aiChat.models` 與擴充點 `addModelClient`（只新增），模組用 `readImage` 讀圖片；`requestsPerMinute` 的限流由所有後端共用（`model_call_windows`）                                                                                                                                                                                                                                                                                                            |
 | 2026-11-26 | 1.2  | P3-02 完成（X-03、SE-02、SE-06 的後端，#58）：擴充點加入 `addContextProvider`；每一步呼叫內建的 `user`、`entity`、`plan` 和 module 的 provider，輸出放在系統提示、標成不可信的資料，每個 8000、全部 16000 字元，逾時 5 秒，失敗時 Run 繼續。Session 可以綁定一個 entity（建立時或第一則訊息的頁面，要讀得到，綁定不改），`GET /sessions?entityRef=` 列出自己綁定那個 entity 的 Session。逐項驗收見 P3-02                                                                                                                                                                                                                                                                                             |
+| 2026-11-26 | 1.2  | P3-10 加上範圍、逐項驗收和實作選定的地方（B-03）：註冊用 `aiChatToolResultsApiRef`，新前端系統用 `AiChatToolResultBlueprint`，舊前端系統由 app 覆蓋這個 API。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
