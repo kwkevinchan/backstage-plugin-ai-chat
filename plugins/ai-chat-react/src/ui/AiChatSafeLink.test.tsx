@@ -28,8 +28,10 @@ describe('isSafeLinkHref', () => {
   });
 
   it.each([
+    // eslint-disable-next-line no-script-url -- an address the link refuses
     'javascript:alert(1)',
     ' javascript:alert(1)',
+    // eslint-disable-next-line no-script-url -- an address the link refuses
     'JaVaScRiPt:alert(1)',
     'data:text/html,<script>alert(1)</script>',
     'vbscript:msgbox(1)',
@@ -71,6 +73,7 @@ describe('AiChatSafeLink', () => {
   it('shows any other address as text, without a link', () => {
     render(
       <>
+        {/* eslint-disable-next-line no-script-url -- an address the link refuses */}
         <AiChatSafeLink href="javascript:alert(1)">run</AiChatSafeLink>
         <AiChatSafeLink href="/relative" />
         <AiChatSafeLink href={42} />

@@ -30,11 +30,11 @@ class ToolResultBoundary extends Component<
   { actionId: string; children: ReactNode },
   { failed: boolean }
 > {
-  state = { failed: false };
-
   static getDerivedStateFromError() {
     return { failed: true };
   }
+
+  state = { failed: false };
 
   componentDidCatch(error: unknown, info: ErrorInfo) {
     // eslint-disable-next-line no-console

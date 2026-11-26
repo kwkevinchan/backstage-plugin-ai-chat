@@ -4,6 +4,7 @@
 
 ```ts
 import { ApiRef } from '@backstage/frontend-plugin-api';
+import type { ComponentType } from 'react';
 import type { ReactNode } from 'react';
 
 // @public
@@ -33,6 +34,53 @@ export interface AiChatPanelApi {
 
 // @public
 export const aiChatPanelApiRef: ApiRef<AiChatPanelApi>;
+
+// @public
+export function AiChatSafeLink(props: AiChatSafeLinkProps): JSX.Element;
+
+// @public
+export interface AiChatSafeLinkProps {
+  children?: ReactNode;
+  href: unknown;
+}
+
+// @public
+export interface AiChatToolResult {
+  actionId: string;
+  // (undocumented)
+  component: ComponentType<AiChatToolResultProps>;
+}
+
+// @public
+export interface AiChatToolResultProps {
+  actionId: string;
+  errorText?: string;
+  input: unknown;
+  output?: unknown;
+  // (undocumented)
+  status: AiChatToolResultStatus;
+}
+
+// @public
+export interface AiChatToolResultsApi {
+  getComponent(
+    actionId: string,
+  ): ComponentType<AiChatToolResultProps> | undefined;
+}
+
+// @public
+export const aiChatToolResultsApiRef: ApiRef<AiChatToolResultsApi>;
+
+// @public
+export type AiChatToolResultStatus =
+  | 'running'
+  | 'complete'
+  | 'failed'
+  | 'denied'
+  | 'unknown';
+
+// @public
+export function isSafeLinkHref(href: unknown): href is string;
 
 // @public
 export function useAiChatPanel(): {

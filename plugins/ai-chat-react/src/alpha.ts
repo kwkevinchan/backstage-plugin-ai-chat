@@ -27,6 +27,12 @@ import {
 } from '@backstage/frontend-plugin-api';
 import type { AiChatToolResult } from './toolResults';
 
+export type {
+  AiChatToolResult,
+  AiChatToolResultProps,
+  AiChatToolResultStatus,
+} from './toolResults';
+
 const toolResultDataRef = createExtensionDataRef<AiChatToolResult>().with({
   id: 'ai-chat.tool-result',
 });

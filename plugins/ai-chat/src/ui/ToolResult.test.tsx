@@ -125,14 +125,18 @@ describe('the result component of an action', () => {
       [call({ state: 'output-available', output: { ok: true } }, 'other:x')],
       withResults(registered()),
     );
-    expect(screen.queryByRole('group', { name: /^Result:/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('group', { name: /^Result:/ }),
+    ).not.toBeInTheDocument();
     expect(screen.getByText('other:x')).toBeInTheDocument();
     expect(received).toEqual([]);
   });
 
   it('shows the default view when the chat has no result components', () => {
     renderThread([done]);
-    expect(screen.queryByRole('group', { name: /^Result:/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('group', { name: /^Result:/ }),
+    ).not.toBeInTheDocument();
     expect(screen.getByText('List services')).toBeInTheDocument();
   });
 
@@ -143,7 +147,9 @@ describe('the result component of an action', () => {
     renderThread([done, assistantText('After the call.', 'run_2')], {
       list: { toolResults: api },
     });
-    expect(screen.queryByRole('group', { name: /^Result:/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('group', { name: /^Result:/ }),
+    ).not.toBeInTheDocument();
     expect(screen.getByText('List services')).toBeInTheDocument();
     expect(screen.getByText('Done')).toBeInTheDocument();
     expect(screen.getByText('After the call.')).toBeInTheDocument();
@@ -195,7 +201,9 @@ describe('the result component of an action', () => {
       [call({ state: 'output-error', errorText: 'The call did not run.' })],
       withResults(registered()),
     );
-    expect(screen.queryByRole('group', { name: /^Result:/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('group', { name: /^Result:/ }),
+    ).not.toBeInTheDocument();
     expect(screen.getByText('Did not run')).toBeInTheDocument();
   });
 });
@@ -217,7 +225,9 @@ describe('the approval card with a result component', () => {
     expect(
       within(card).getByRole('button', { name: 'Deny' }),
     ).toBeInTheDocument();
-    expect(screen.queryByRole('group', { name: /^Result:/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('group', { name: /^Result:/ }),
+    ).not.toBeInTheDocument();
     expect(received).toEqual([]);
   });
 
@@ -278,7 +288,9 @@ describe('the tools of the core', () => {
       withResults(api),
     );
     expect(screen.getByRole('region', { name: 'Plan' })).toBeInTheDocument();
-    expect(screen.queryByRole('group', { name: /^Result:/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('group', { name: /^Result:/ }),
+    ).not.toBeInTheDocument();
     expect(received).toEqual([]);
   });
 });

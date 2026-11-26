@@ -40,7 +40,7 @@ export type AiChatToolResultStatus =
  *
  * Every field comes from the model or from the action, so it is untrusted
  * data: never pass it to `dangerouslySetInnerHTML`, and link only `http:`,
- * `https:` and `mailto:` addresses ({@link AiChatSafeLink} does this).
+ * `https:` and `mailto:` addresses (`AiChatSafeLink` does this).
  *
  * @public
  */
