@@ -25,6 +25,8 @@ import {
   AgentNotFound,
   EmptyMessage,
   InsertLimitReached,
+  InvalidShare,
+  LiveSharingDisabled,
   NoActiveRun,
   NotSessionOwner,
   QueueChanged,
@@ -35,6 +37,7 @@ import {
   RunNotRunning,
   RunNotWaiting,
   SessionNotFound,
+  ShareNotFound,
   ShuttingDown,
   ToolCallNotFound,
   ToolCallNotWaiting,
@@ -72,6 +75,9 @@ describe('toHttpError', () => {
     [new QueuedMessageNotFound('q1'), 'QueuedMessageNotFound', 404],
     [new EmptyMessage(), 'EmptyMessage', 400],
     [new TooManyActiveRuns(3), 'TooManyActiveRuns', 429],
+    [new ShareNotFound('sh1'), 'ShareNotFound', 404],
+    [new InvalidShare('hours must be an integer'), 'InvalidShare', 400],
+    [new LiveSharingDisabled(), 'LiveSharingDisabled', 400],
   ])(
     'keeps the name of %p in the answer, with the status %p',
     (error, name, status) => {

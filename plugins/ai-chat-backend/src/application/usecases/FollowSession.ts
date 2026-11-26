@@ -16,20 +16,30 @@
 
 import { abortableSleep } from '../sleep';
 import type {
+  Clock,
   Item,
   ItemLog,
   RunOutcome,
   StopReason,
 } from '@kwkevinchan/ai-chat-harness';
 import {
-  assertOwner,
+  NotSessionOwner,
   callsAwaitingDecision,
   type Principal,
   type Run,
+  type Session,
+  type Share,
 } from '../../domain';
 import type { HostEvent } from '../hostEvents';
 import type { RunSupervisor } from '../RunSupervisor';
-import type { Logger, RunRepository, SessionRepository } from '../ports';
+import type {
+  AccessControl,
+  Logger,
+  RunRepository,
+  SessionRepository,
+  ShareRepository,
+} from '../ports';
+import { authorizeRead, shareeView } from '../sessionRead';
 
 /** How often a run on another backend is read. The spec says one second. */
 const DEFAULT_POLL_MS = 1000;
@@ -92,6 +102,9 @@ export class FollowSession {
       runs: RunRepository;
       items: ItemLog;
       supervisor: RunSupervisor;
+      shares: ShareRepository;
+      access: AccessControl;
+      clock: Clock;
       logger?: Logger;
       /** Waits between reads of a run on another backend. One second by default. */
       sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -110,9 +123,21 @@ export class FollowSession {
     /** Leaves out the items up to this `seq`. */
     afterSeq?: number;
   }): Promise<FollowHandle | undefined> {
-    const { sessions, runs, supervisor } = this.deps;
-    const session = await sessions.get(input.sessionId);
-    assertOwner(session, input.principal);
+    const { runs, supervisor } = this.deps;
+    const reader = await authorizeRead(
+      this.deps,
+      input.sessionId,
+      input.principal,
+    );
+    const { session } = reader;
+    if (!reader.isOwner) {
+      return this.followAsSharee(
+        session,
+        input.principal,
+        reader.shares,
+        input.afterSeq,
+      );
+    }
     const run = await runs.findActive(session.id);
     if (!run || run.status !== 'running') return undefined;
 
@@ -147,6 +172,56 @@ export class FollowSession {
     };
   }
 
+  /**
+   * A sharee follows only a share that keeps updating and has not expired: a
+   * snapshot does not move. The sharee always gets the poll, even when the
+   * loop is on this backend, because the events of the loop carry tool
+   * output and text fragments the share may not show. Each read takes the
+   * shares again and reads the log after the cursor only (the whole log
+   * when a share is past its expiry), so a cancel or an expiry ends the stream within one
+   * interval; the policy and the groups are checked once, at the start.
+   */
+  private async followAsSharee(
+    session: Session,
+    principal: Principal,
+    shares: readonly Share[],
+    afterSeq?: number,
+  ): Promise<FollowHandle | undefined> {
+    const first = await shareeView(this.deps, session, principal, shares);
+    if (first.share.upToSeq !== undefined) return undefined;
+    const run = await this.deps.runs.findActive(session.id);
+    if (!run || run.status !== 'running') return undefined;
+    const view = viewOf(
+      first.visible.filter(item => item.runId === run.id),
+      afterSeq ?? 0,
+    );
+    const read: PollRead = async (current, cursor) => {
+      const now = await this.deps.shares.listBySession(session.id);
+      let seen;
+      try {
+        seen = await shareeView(this.deps, session, principal, now, {
+          afterSeq: cursor,
+        });
+      } catch (error) {
+        if (error instanceof NotSessionOwner) return undefined;
+        throw error;
+      }
+      if (seen.share.upToSeq !== undefined) return undefined;
+      return {
+        log: seen.visible.filter(
+          item => item.runId === current.id && item.seq > cursor,
+        ),
+        // The decisions are the owner's: no call to approve is sent.
+        fullLog: [],
+      };
+    };
+    return {
+      ...view,
+      run,
+      events: this.remoteEvents(session.id, run.id, view.upToSeq, read),
+    };
+  }
+
   private logOf(
     sessionId: string,
     runId: string,
@@ -167,6 +242,16 @@ export class FollowSession {
     sessionId: string,
     runId: string,
     fromSeq: number,
+    read: PollRead = async (current, cursor) => {
+      if (current.status === 'waiting_approval') {
+        const fullLog = await this.logOf(sessionId, current.id);
+        return { log: fullLog, fullLog };
+      }
+      return {
+        log: await this.logOf(sessionId, current.id, cursor),
+        fullLog: [],
+      };
+    },
   ): AsyncIterable<HostEvent> {
     const interval = this.deps.pollIntervalMs ?? DEFAULT_POLL_MS;
     const sleep = this.deps.sleep ?? abortableSleep;
@@ -194,15 +279,16 @@ export class FollowSession {
               }
               let run: Run;
               let log: Item[];
-              let fullLog: Item[] = [];
+              let fullLog: Item[];
               try {
                 run = await this.deps.runs.get(runId);
-                if (run.status === 'waiting_approval') {
-                  fullLog = await this.logOf(sessionId, runId);
-                  log = fullLog;
-                } else {
-                  log = await this.logOf(sessionId, runId, cursor);
+                const got = await read(run, cursor);
+                if (got === undefined) {
+                  // The reader may not see the run any more.
+                  stopped = true;
+                  continue;
                 }
+                ({ log, fullLog } = got);
                 pollErrors = 0;
               } catch (error) {
                 pollErrors += 1;
@@ -263,6 +349,16 @@ export class FollowSession {
     };
   }
 }
+
+/**
+ * One read of a poll: the items of the run after `cursor` and, while the run
+ * waits for an approval, the log that names the calls to decide. `undefined`
+ * when the reader may no longer see the run, which ends the stream.
+ */
+type PollRead = (
+  run: Run,
+  cursor: number,
+) => Promise<{ log: Item[]; fullLog: Item[] } | undefined>;
 
 function viewOf(log: Item[], afterSeq: number) {
   return {

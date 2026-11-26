@@ -112,6 +112,8 @@ describe('the OpenAPI spec', () => {
       chatPaths.decision('{id}', '{callId}'),
       chatPaths.resume('{id}'),
       chatPaths.stream('{id}'),
+      chatPaths.shares('{id}'),
+      chatPaths.share('{id}', '{shareId}'),
       chatPaths.tools('{id}'),
       chatPaths.toolsets(),
     ].map(path => decodeURIComponent(path));

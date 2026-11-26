@@ -44,7 +44,25 @@ export type QueueAuditEvent = {
   queuedMessageId: string;
 };
 
-export type AuditEvent = ToolAuditEvent | QueueAuditEvent;
+/**
+ * A change of a share (SH-06). The fields are the share as it is after the
+ * change; an absent seq or `expiresAt` is one the share does not have.
+ */
+export type ShareAuditEvent = {
+  eventId: 'session-share' | 'session-share-update' | 'session-share-revoke';
+  /** The entity ref of the user who made the change. */
+  actorRef: string;
+  sessionId: string;
+  shareId: string;
+  subjectRef: string;
+  mode: 'snapshot' | 'live';
+  upToSeq?: number;
+  outputsUpToSeq?: number;
+  /** ISO 8601. */
+  expiresAt?: string;
+};
+
+export type AuditEvent = ToolAuditEvent | QueueAuditEvent | ShareAuditEvent;
 
 /** An event that has begun; end it with `success` or `fail`. */
 export interface AuditSpan {

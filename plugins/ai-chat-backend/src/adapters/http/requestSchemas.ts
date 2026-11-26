@@ -185,6 +185,28 @@ export const listQuery = z.object({
     .optional(),
 });
 
+/** The life of a live share; the use case checks the maximum of the administrator. */
+const shareHours = z.number().int().min(1).max(100000);
+
+export const createShareBody = z.object({
+  subjectRef: z.string().trim().min(1).max(255).refine(noNul, NUL_MESSAGE),
+  mode: z.enum(['snapshot', 'live']).optional(),
+  includeToolOutputs: z.boolean().optional(),
+  includeLaterToolOutputs: z.boolean().optional(),
+  hours: shareHours.optional(),
+});
+
+export const updateShareBody = z
+  .object({
+    refresh: z.literal(true).optional(),
+    includeToolOutputs: z.boolean().optional(),
+    includeLaterToolOutputs: z.boolean().optional(),
+    hours: shareHours.optional(),
+  })
+  .refine(body => Object.values(body).some(value => value !== undefined), {
+    message: 'must change at least one field',
+  });
+
 export const afterSeqQuery = z.object({
   afterSeq: z.coerce.number().int().min(0).optional(),
 });

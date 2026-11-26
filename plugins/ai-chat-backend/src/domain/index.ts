@@ -35,6 +35,8 @@ export {
   ImagesNotSupported,
   InsertLimitReached,
   InvalidAttachment,
+  InvalidShare,
+  LiveSharingDisabled,
   NoActiveRun,
   NotSessionOwner,
   QueueChanged,
@@ -45,6 +47,7 @@ export {
   RunNotRunning,
   RunNotWaiting,
   SessionNotFound,
+  ShareNotFound,
   ShuttingDown,
   TooManyActiveRuns,
   TooManyAttachments,
@@ -75,8 +78,29 @@ export {
   isSessionExpired,
   sessionRetentionCutoff,
 } from './retention';
-export { allowsSessionRead, shareGrantsRead, shareScope } from './share';
-export type { NewShare, Share, ShareScope, ShareScopeInput } from './share';
+export {
+  allowsSessionRead,
+  createShareScope,
+  DEFAULT_LIVE_SHARE_LIMITS,
+  isShareExpired,
+  liveShareExpiry,
+  MAX_SUBJECT_REF_LENGTH,
+  normalizeSubjectRef,
+  shareGrantsRead,
+  shareModeOf,
+  shareScope,
+  updatedShareScope,
+} from './share';
+export type {
+  LiveShareLimits,
+  NewShare,
+  Share,
+  ShareChange,
+  ShareMode,
+  ShareRequest,
+  ShareScope,
+  ShareScopeInput,
+} from './share';
 export { assertOwner, isSessionOwner } from './session';
 export type { NewSession, Session, SessionPatch } from './session';
 export {

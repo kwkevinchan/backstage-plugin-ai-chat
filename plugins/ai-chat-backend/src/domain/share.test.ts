@@ -16,8 +16,14 @@
 
 import {
   allowsSessionRead,
+  createShareScope,
+  isShareExpired,
+  liveShareExpiry,
+  normalizeSubjectRef,
   shareGrantsRead,
+  shareModeOf,
   shareScope,
+  updatedShareScope,
   type Share,
 } from './share';
 
@@ -165,5 +171,174 @@ describe('allowsSessionRead', () => {
         share({ subjectRef: 'group:default/team' }),
       ]),
     ).toBe(true);
+  });
+});
+
+describe('normalizeSubjectRef', () => {
+  it.each([
+    ['user:default/bob', 'user:default/bob'],
+    ['group:default/team', 'group:default/team'],
+    ['user:bob', 'user:default/bob'],
+    ['User:Default/Bob', 'user:default/bob'],
+    ['  group:ops/SRE  ', 'group:ops/sre'],
+  ])('reads %p as %p', (ref, normalized) => {
+    expect(normalizeSubjectRef(ref)).toBe(normalized);
+  });
+
+  it.each([
+    'component:default/x',
+    'bob',
+    'user:',
+    'user:default/',
+    'user:a/b/c',
+    'user:default/b ob',
+    'user:x:y/z',
+  ])('refuses %p', ref => {
+    expect(normalizeSubjectRef(ref)).toBeUndefined();
+  });
+});
+
+describe('shareModeOf and isShareExpired', () => {
+  it('is live without a seq cap and a snapshot with one', () => {
+    expect(shareModeOf({})).toBe('live');
+    expect(shareModeOf({ upToSeq: 0 })).toBe('snapshot');
+  });
+
+  it('expires only after expiresAt, not at the same instant', () => {
+    const at = '2026-01-02T00:00:00.000Z';
+    expect(isShareExpired({ expiresAt: at }, at)).toBe(false);
+    expect(isShareExpired({ expiresAt: at }, '2026-01-02T00:00:00.001Z')).toBe(
+      true,
+    );
+    expect(isShareExpired({}, '2099-01-01T00:00:00.000Z')).toBe(false);
+  });
+});
+
+describe('createShareScope', () => {
+  it.each([
+    [{ mode: 'snapshot' as const }, { upToSeq: 7 }],
+    [
+      { mode: 'snapshot' as const, includeToolOutputs: false },
+      { upToSeq: 7, outputsUpToSeq: 0 },
+    ],
+    [{ mode: 'live' as const }, { outputsUpToSeq: 7 }],
+    [{ mode: 'live' as const, includeLaterToolOutputs: true }, {}],
+    [
+      { mode: 'live' as const, includeToolOutputs: false },
+      { outputsUpToSeq: 0 },
+    ],
+  ])('maps %p at seq 7 to %p', (request, scope) => {
+    expect(createShareScope(request, 7)).toEqual(scope);
+  });
+
+  it('refuses later output on a snapshot, and later output without output', () => {
+    expect(() =>
+      createShareScope({ mode: 'snapshot', includeLaterToolOutputs: true }, 7),
+    ).toThrow(expect.objectContaining({ name: 'InvalidShare' }));
+    expect(() =>
+      createShareScope(
+        {
+          mode: 'live',
+          includeToolOutputs: false,
+          includeLaterToolOutputs: true,
+        },
+        7,
+      ),
+    ).toThrow(expect.objectContaining({ name: 'InvalidShare' }));
+  });
+});
+
+describe('updatedShareScope', () => {
+  const snapshot = { upToSeq: 3 };
+  const hidden = { upToSeq: 3, outputsUpToSeq: 0 };
+  const live = { outputsUpToSeq: 3 };
+
+  it.each([
+    [
+      'refresh moves a snapshot to now',
+      snapshot,
+      { refresh: true },
+      { upToSeq: 9 },
+    ],
+    [
+      'refresh keeps hidden output hidden',
+      hidden,
+      { refresh: true },
+      { upToSeq: 9, outputsUpToSeq: 0 },
+    ],
+    [
+      'hides the output of a snapshot',
+      snapshot,
+      { includeToolOutputs: false },
+      hidden,
+    ],
+    [
+      'shows every output of a snapshot again',
+      hidden,
+      { includeToolOutputs: true },
+      snapshot,
+    ],
+    [
+      'shows the later output of a live share',
+      live,
+      { includeLaterToolOutputs: true },
+      {},
+    ],
+    [
+      'stops the output of a live share at now',
+      {},
+      { includeLaterToolOutputs: false },
+      { outputsUpToSeq: 9 },
+    ],
+    [
+      'shows the output of a live share up to now',
+      { outputsUpToSeq: 0 },
+      { includeToolOutputs: true },
+      { outputsUpToSeq: 9 },
+    ],
+    [
+      'hides the output of a live share',
+      live,
+      { includeToolOutputs: false },
+      { outputsUpToSeq: 0 },
+    ],
+    ['changes nothing for an empty change', live, {}, live],
+  ])('%s', (_name, current, change, scope) => {
+    expect(updatedShareScope(current, change, 9)).toEqual(scope);
+  });
+
+  it('refuses a refresh of a live share and later output on a snapshot', () => {
+    expect(() => updatedShareScope(live, { refresh: true }, 9)).toThrow(
+      expect.objectContaining({ name: 'InvalidShare' }),
+    );
+    expect(() =>
+      updatedShareScope(snapshot, { includeLaterToolOutputs: false }, 9),
+    ).toThrow(expect.objectContaining({ name: 'InvalidShare' }));
+    expect(() =>
+      updatedShareScope(
+        live,
+        { includeToolOutputs: false, includeLaterToolOutputs: true },
+        9,
+      ),
+    ).toThrow(expect.objectContaining({ name: 'InvalidShare' }));
+  });
+});
+
+describe('liveShareExpiry', () => {
+  const now = new Date('2026-01-01T00:00:00.000Z');
+  const limits = { defaultHours: 24, maxHours: 72 };
+
+  it('is defaultHours from now when no life is given, or the hours given', () => {
+    expect(liveShareExpiry(now, undefined, limits)).toBe(
+      '2026-01-02T00:00:00.000Z',
+    );
+    expect(liveShareExpiry(now, 72, limits)).toBe('2026-01-04T00:00:00.000Z');
+    expect(liveShareExpiry(now, 1, limits)).toBe('2026-01-01T01:00:00.000Z');
+  });
+
+  it.each([0, -1, 73, 1.5])('refuses %p hours', hours => {
+    expect(() => liveShareExpiry(now, hours, limits)).toThrow(
+      expect.objectContaining({ name: 'InvalidShare' }),
+    );
   });
 });

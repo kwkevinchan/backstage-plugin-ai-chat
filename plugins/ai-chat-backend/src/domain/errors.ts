@@ -285,3 +285,25 @@ export class EmptyMessage extends ChatDomainError {
     super('EMPTY_MESSAGE', 'must have text or at least one image');
   }
 }
+
+export class ShareNotFound extends ChatDomainError {
+  constructor(shareId: string) {
+    super('SHARE_NOT_FOUND', `There is no share ${shareId}`);
+  }
+}
+
+/** A share request that cannot be made; `message` says which field. */
+export class InvalidShare extends ChatDomainError {
+  constructor(message: string) {
+    super('INVALID_SHARE', message);
+  }
+}
+
+export class LiveSharingDisabled extends ChatDomainError {
+  constructor() {
+    super(
+      'LIVE_SHARING_DISABLED',
+      'The administrator does not allow shares that keep updating',
+    );
+  }
+}

@@ -26,7 +26,9 @@ import { KnexItemLog } from '../adapters/persistence/KnexItemLog';
 import { KnexQueuedMessageRepository } from '../adapters/persistence/KnexQueuedMessageRepository';
 import { KnexRunRepository } from '../adapters/persistence/KnexRunRepository';
 import { KnexSessionRepository } from '../adapters/persistence/KnexSessionRepository';
-import { InsertMessage } from '../application';
+import { KnexShareRepository } from '../adapters/persistence/KnexShareRepository';
+import { InsertMessage, RevokeShare } from '../application';
+import type { AuditEvent } from '../application/ports';
 import {
   DEFAULT_IMAGE_LIMITS,
   InsertLimitReached,
@@ -1033,6 +1035,89 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
           ),
         );
         expect(taken.filter(Boolean)).toHaveLength(5);
+      }
+    });
+  });
+  describe('shares (SH-06)', () => {
+    it('two cancels of a share at the same time, 20 rounds: one cancels it, the other gets ShareNotFound, and one success is audited', async () => {
+      const shares = new KnexShareRepository(
+        db.knex,
+        db.clock,
+        new SequentialIdGenerator(`sh${Math.random().toString(36).slice(2)}`),
+      );
+      for (let round = 0; round < 20; round++) {
+        const session = await db.sessions.create({
+          ownerRef: owner.userRef,
+          agentId: 'default',
+        });
+        const share = await shares.add({
+          sessionId: session.id,
+          subjectRef: 'user:default/bob',
+          createdBy: owner.userRef,
+        });
+        const outcomes: string[] = [];
+        const revoke = new RevokeShare({
+          sessions: db.sessions,
+          shares,
+          audit: {
+            begin: async (_event: AuditEvent) => ({
+              success: async () => {
+                outcomes.push('success');
+              },
+              fail: async () => {
+                outcomes.push('fail');
+              },
+            }),
+          },
+        });
+        const cancel = () =>
+          jitter().then(() =>
+            revoke.execute({
+              principal: owner as never,
+              sessionId: session.id,
+              shareId: share.id,
+            }),
+          );
+        const results = await Promise.allSettled([cancel(), cancel()]);
+        const failures = failuresOf(results);
+        expect(failures).toHaveLength(1);
+        expect(failures[0]).toContain('There is no share');
+        expect(outcomes.filter(o => o === 'success')).toHaveLength(1);
+        expect(
+          (await shares.get(session.id, share.id))?.revokedAt,
+        ).toBeDefined();
+      }
+    });
+
+    it(`a cancel and a change of a share at the same time, ${ROUNDS} rounds: the share ends cancelled, and a change after the cancel finds nothing`, async () => {
+      const shares = new KnexShareRepository(
+        db.knex,
+        db.clock,
+        new SequentialIdGenerator(`sh${Math.random().toString(36).slice(2)}`),
+      );
+      for (let round = 0; round < ROUNDS; round++) {
+        const session = await db.sessions.create({
+          ownerRef: owner.userRef,
+          agentId: 'default',
+        });
+        const share = await shares.add({
+          sessionId: session.id,
+          subjectRef: 'user:default/bob',
+          upToSeq: 1,
+          createdBy: owner.userRef,
+        });
+        const [revoked, updated] = await Promise.all([
+          jitter().then(() => shares.revoke(session.id, share.id)),
+          jitter().then(() =>
+            shares.update(session.id, share.id, { upToSeq: 5 }),
+          ),
+        ]);
+        expect(revoked?.revokedAt).toBeDefined();
+        const stored = await shares.get(session.id, share.id);
+        expect(stored?.revokedAt).toBeDefined();
+        // The change either came first (and the cancel kept it) or found the
+        // share cancelled and changed nothing.
+        expect(stored?.upToSeq).toBe(updated === undefined ? 1 : 5);
       }
     });
   });

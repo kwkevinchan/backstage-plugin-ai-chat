@@ -29,26 +29,45 @@ export class AuditorAuditLog implements AuditLog {
     const started = await this.auditor.createEvent({
       eventId: event.eventId,
       severityLevel: 'medium',
-      meta:
-        event.eventId === 'queued-message-send'
-          ? {
-              actor: event.actorRef,
-              sessionId: event.sessionId,
-              runId: event.runId,
-              queuedMessageId: event.queuedMessageId,
-            }
-          : {
-              actor: event.actorRef,
-              sessionId: event.sessionId,
-              runId: event.runId,
-              toolCallId: event.callId,
-              actionId: event.toolId,
-              readOnly: event.readOnly,
-            },
+      meta: metaOf(event),
     });
     return {
       success: () => started.success(),
       fail: message => started.fail({ error: new Error(message) }),
     };
+  }
+}
+
+function metaOf(event: AuditEvent) {
+  switch (event.eventId) {
+    case 'queued-message-send':
+      return {
+        actor: event.actorRef,
+        sessionId: event.sessionId,
+        runId: event.runId,
+        queuedMessageId: event.queuedMessageId,
+      };
+    case 'session-share':
+    case 'session-share-update':
+    case 'session-share-revoke':
+      return {
+        actor: event.actorRef,
+        sessionId: event.sessionId,
+        shareId: event.shareId,
+        subjectRef: event.subjectRef,
+        mode: event.mode,
+        upToSeq: event.upToSeq ?? null,
+        outputsUpToSeq: event.outputsUpToSeq ?? null,
+        expiresAt: event.expiresAt ?? null,
+      };
+    default:
+      return {
+        actor: event.actorRef,
+        sessionId: event.sessionId,
+        runId: event.runId,
+        toolCallId: event.callId,
+        actionId: event.toolId,
+        readOnly: event.readOnly,
+      };
   }
 }

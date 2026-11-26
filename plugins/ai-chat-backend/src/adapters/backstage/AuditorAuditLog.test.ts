@@ -51,4 +51,37 @@ describe('AuditorAuditLog', () => {
     await span.fail('nope');
     expect(fail).toHaveBeenCalledWith({ error: new Error('nope') });
   });
+  it('puts the share as it is after the change in the meta, null for what it lacks', async () => {
+    const auditor = mockServices.auditor.mock({
+      createEvent: jest.fn(async () => ({
+        success: jest.fn(),
+        fail: jest.fn(),
+      })),
+    });
+    const log = new AuditorAuditLog(auditor);
+    await log.begin({
+      eventId: 'session-share',
+      actorRef: 'user:default/jane',
+      sessionId: 's1',
+      shareId: 'sh1',
+      subjectRef: 'group:default/team',
+      mode: 'live',
+      outputsUpToSeq: 4,
+      expiresAt: '2026-01-02T00:00:00.000Z',
+    });
+    expect(auditor.createEvent).toHaveBeenCalledWith({
+      eventId: 'session-share',
+      severityLevel: 'medium',
+      meta: {
+        actor: 'user:default/jane',
+        sessionId: 's1',
+        shareId: 'sh1',
+        subjectRef: 'group:default/team',
+        mode: 'live',
+        upToSeq: null,
+        outputsUpToSeq: 4,
+        expiresAt: '2026-01-02T00:00:00.000Z',
+      },
+    });
+  });
 });

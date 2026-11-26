@@ -562,7 +562,7 @@ plugins/ai-chat-backend/
       approval.ts                      callsAwaitingDecision()：哪些呼叫在等決定（用核心的 needsApproval）
       runLimits.ts                     runLimits()：Run 的工作時間不超過憑證的有效期（V-06）
       systemPrompt.ts                  buildSystemPrompt()
-      share.ts                         Share、ShareMode、到期的處理
+      share.ts                         Share、ShareMode、到期的處理、分享對象的寫法、建立和修改時的兩個序號（P2-04）
       visibility.ts                    visibleItems()：某個檢視者看得到哪些 Item
       fork.ts                          forkItems()：複製時帶走哪些 Item
       toolset.ts                       Toolset、enabledTools()、offeredToolsetIds()（T-08）
@@ -573,7 +573,7 @@ plugins/ai-chat-backend/
       ports/
         SessionRepository.ts           create、get、listByOwner（搜尋、釘選在前）、update、setTitleIfAbsent、delete
         RunRepository.ts               start、acquireLease、transition、requestCancel、expireStale、hasOtherNormalEnd。也實作核心的 RunControl（heartbeat、recordUsage）
-        ShareRepository.ts             P2
+        ShareRepository.ts             add、get、update、revoke（只改還沒取消的列）、listBySession、listActiveFor
         AccessControl.ts               能不能讀這段 Session（SH-05）、能用哪些 Toolset（usableToolsets，T-08）
         WriteQuota.ts                  tryTake：每個使用者每分鐘的寫入次數（T-10）
         AuditLog.ts                    begin() 回傳 AuditSpan（success、fail）
@@ -596,12 +596,16 @@ plugins/ai-chat-backend/
         CancelRun.ts
         FollowSession.ts               接回（從目前 Run 的第一個 Item 重送）。這一台即時；別台每秒讀已完成的 Item
         ListToolsets.ts                管理者定義、而且使用者能用的 Toolset 清單（T-08）
-        ShareSession.ts                P2
-        UpdateShare.ts                 P2：更新快照、開關工具輸出、停止
+        ListShares.ts                  沒有取消的分享，給擁有者（SH-10）
+        ShareSession.ts                建立分享（SH-01、SH-08、SH-09、SH-11）
+        UpdateShare.ts                 更新快照、開關工具輸出、延長持續更新
+        RevokeShare.ts                 取消分享（停止）
         ForkSession.ts                 P2
         ExpireStaleRuns.ts
         PurgeExpiredSessions.ts        P2
       RunSupervisor.ts                 這一台正在跑的 Run：啟動、續租、訂閱、關機
+      sessionRead.ts                   authorizeRead()、shareeView()：每一個讀取的權限檢查和被分享的人看得到的範圍
+      shareChanges.ts                  分享的稽核事件、先記稽核再寫入
       resumeIfDecided.ts               DecideApproval 和 ResumeRun 共用：全部已決定就 acquireLease 並啟動迴圈
       EventChannel.ts                  給一個訂閱者的事件佇列
       AuditedToolGateway.ts            包住 ToolGateway：不是唯讀的工具執行時寫稽核（O-02）
@@ -614,6 +618,7 @@ plugins/ai-chat-backend/
         controllers/
           sessions.ts                  JSON 路由：Session 的建立、讀取、修改、刪除、Toolset 清單
           runs.ts                      串流路由：送訊息、決定、接續、取消、接回
+          shares.ts                    分享的列出、建立、修改、取消
         presenters/
           uiMessageStream.ts           HarnessEvent 轉成 UI message stream（協定只出現在這個檔案、uiMessageChunk.ts 和 sse.ts）
           uiMessageChunk.ts            送出的事件的型別
@@ -625,7 +630,7 @@ plugins/ai-chat-backend/
         KnexItemLog.ts
         KnexSessionRepository.ts
         KnexRunRepository.ts
-        KnexShareRepository.ts         P2
+        KnexShareRepository.ts
         KnexWriteQuota.ts              `write_quota_windows`，每人每分鐘一格（T-10）
         uniqueViolation.ts             判斷資料庫的唯一性錯誤（SQLite、PostgreSQL 各一種格式）
       backstage/
@@ -688,25 +693,25 @@ export function enabledTools(
 
 每個 use case 一個類別，只有一個 `execute` 方法。
 
-| Use case                             | 做什麼                                                                                                               | 用到的 port                                                                                                         | 規格                    |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `CreateSession`                      | 建立 Session，套用 Toolset 的預設值，綁定 entity                                                                     | SessionRepository、AgentCatalog、EntityReader                                                                       | SE-01、T-01             |
-| `GetSession`                         | 檢查權限，回傳 Session、進行中的 Run、看得到的 Item                                                                  | SessionRepository、RunRepository、ItemLog、（P2：AccessControl、ShareRepository）                                   | SH-02、SH-05            |
-| `UpdateSession`                      | 改名、釘選、封存、開關 Toolset                                                                                       | SessionRepository、AgentCatalog                                                                                     | SE-03、T-11             |
-| `SendMessage`                        | 建立 Run、寫入使用者訊息、啟動迴圈、回傳事件串流；啟動失敗設為 `failed` 並通知 `idle`                                | SessionRepository、RunRepository、ItemLog、RunSupervisor、AgentCatalog、EntityReader、Notifier（P2：AccessControl） | H-01、H-03、B-01、SE-02 |
-| `DecideApproval`                     | 寫入 `approval`。全部決定後重新啟動迴圈；啟動失敗設為 `failed` 並通知 `idle`                                         | SessionRepository、ItemLog、RunRepository、RunSupervisor、AgentCatalog、AuditLog、Notifier                          | D-05、T-06、T-07、P-04  |
-| `ResumeRun`                          | 全部已決定但 Run 還在等核准時接續，不帶新的決定；啟動失敗設為 `failed` 並通知 `idle`                                 | SessionRepository、RunRepository、ItemLog、RunSupervisor、AgentCatalog、Notifier                                    | P-04                    |
-| `CancelRun`                          | 設定停止要求。Run 在這一台就直接中止；等核准時直接轉成 `cancelled` 並通知 `idle`                                     | RunRepository、RunSupervisor、Notifier                                                                              | H-06                    |
-| `FollowSession`                      | 從目前 Run 的第一個 Item 重送，再接上新的。這一台送未完成的文字；別台每秒送已完成的 Item。沒有 `running` 的 Run 不接 | SessionRepository、RunRepository、ItemLog、RunSupervisor、Logger（P2：AccessControl）                               | A-07                    |
-| `ShareSession`、`UpdateShare`        | 建立和修改分享                                                                                                       | ShareRepository、ItemLog、AuditLog、Notifier                                                                        | SH-01、SH-06 到 SH-11   |
-| `ForkSession`                        | 複製成自己的 Session                                                                                                 | SessionRepository、ItemLog、AccessControl、AuditLog、AttachmentStore                                                | SH-04                   |
-| `ExpireStaleRuns`                    | 租約過期的 Run 標成 `expired`，並通知 `idle`                                                                         | RunRepository、Notifier                                                                                             | H-04                    |
-| `PurgeExpiredSessions`               | 刪除超過保存期限的 Session                                                                                           | SessionRepository                                                                                                   | SE-05                   |
-| `UploadAttachment`、`ReadAttachment` | 上傳和讀取圖片附件（PI，13.3）                                                                                       | SessionRepository、AttachmentStore                                                                                  | IN-01 到 IN-04、IN-08   |
-| `InsertMessage`                      | Run 進行中插入訊息（PI，13.4）                                                                                       | SessionRepository、ItemLog、AttachmentStore、AgentCatalog                                                           | IN-10、IN-11、IN-17     |
-| `QueueMessage` 等                    | 排隊、修改、刪除、重排、列出（PI，13.6）                                                                             | SessionRepository、QueuedMessageRepository、AttachmentStore                                                         | IN-13                   |
-| `StartNextQueued`、`ResumeQueue`     | 用最前面的排隊訊息開新的 Run（PI，13.6）；啟動失敗設為 `failed` 並通知 `idle`                                        | QueuedMessageRepository、RunSupervisor、AgentCatalog、AuditLog、Notifier                                            | IN-14 到 IN-17          |
-| `PurgeUnusedAttachments`             | 刪除沒用到的附件（PI）                                                                                               | AttachmentStore                                                                                                     | IN-04                   |
+| Use case                                                   | 做什麼                                                                                                                                                                         | 用到的 port                                                                                                         | 規格                         |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `CreateSession`                                            | 建立 Session，套用 Toolset 的預設值，綁定 entity                                                                                                                               | SessionRepository、AgentCatalog、EntityReader                                                                       | SE-01、T-01                  |
+| `GetSession`                                               | 檢查權限，回傳 Session、進行中的 Run、看得到的 Item                                                                                                                            | SessionRepository、RunRepository、ItemLog、AccessControl、ShareRepository                                           | SH-02、SH-05                 |
+| `UpdateSession`                                            | 改名、釘選、封存、開關 Toolset                                                                                                                                                 | SessionRepository、AgentCatalog                                                                                     | SE-03、T-11                  |
+| `SendMessage`                                              | 建立 Run、寫入使用者訊息、啟動迴圈、回傳事件串流；啟動失敗設為 `failed` 並通知 `idle`                                                                                          | SessionRepository、RunRepository、ItemLog、RunSupervisor、AgentCatalog、EntityReader、Notifier（P2：AccessControl） | H-01、H-03、B-01、SE-02      |
+| `DecideApproval`                                           | 寫入 `approval`。全部決定後重新啟動迴圈；啟動失敗設為 `failed` 並通知 `idle`                                                                                                   | SessionRepository、ItemLog、RunRepository、RunSupervisor、AgentCatalog、AuditLog、Notifier                          | D-05、T-06、T-07、P-04       |
+| `ResumeRun`                                                | 全部已決定但 Run 還在等核准時接續，不帶新的決定；啟動失敗設為 `failed` 並通知 `idle`                                                                                           | SessionRepository、RunRepository、ItemLog、RunSupervisor、AgentCatalog、Notifier                                    | P-04                         |
+| `CancelRun`                                                | 設定停止要求。Run 在這一台就直接中止；等核准時直接轉成 `cancelled` 並通知 `idle`                                                                                               | RunRepository、RunSupervisor、Notifier                                                                              | H-06                         |
+| `FollowSession`                                            | 從目前 Run 的第一個 Item 重送，再接上新的。這一台送未完成的文字；別台每秒送已完成的 Item。沒有 `running` 的 Run 不接。被分享的人只接未到期的持續更新，一律每秒讀，套分享的規則 | SessionRepository、RunRepository、ItemLog、RunSupervisor、Logger、AccessControl、ShareRepository                    | A-07、SH-09                  |
+| `ShareSession`、`UpdateShare`、`RevokeShare`、`ListShares` | 建立、修改、取消、列出分享。只有擁有者。先寫稽核再寫入                                                                                                                         | SessionRepository、ShareRepository、ItemLog、AuditLog                                                               | SH-01、SH-06 到 SH-11        |
+| `ForkSession`                                              | 複製成自己的 Session                                                                                                                                                           | SessionRepository、ItemLog、AccessControl、AuditLog、AttachmentStore                                                | SH-04                        |
+| `ExpireStaleRuns`                                          | 租約過期的 Run 標成 `expired`，並通知 `idle`                                                                                                                                   | RunRepository、Notifier                                                                                             | H-04                         |
+| `PurgeExpiredSessions`                                     | 刪除超過保存期限的 Session                                                                                                                                                     | SessionRepository                                                                                                   | SE-05                        |
+| `UploadAttachment`、`ReadAttachment`                       | 上傳和讀取圖片附件（PI，13.3）。被分享的人讀得到他看得到的訊息裡的圖片（13.5）                                                                                                 | SessionRepository、AttachmentStore（讀取另加 AccessControl、ShareRepository、ItemLog）                              | IN-01 到 IN-04、IN-08、IN-19 |
+| `InsertMessage`                                            | Run 進行中插入訊息（PI，13.4）                                                                                                                                                 | SessionRepository、ItemLog、AttachmentStore、AgentCatalog                                                           | IN-10、IN-11、IN-17          |
+| `QueueMessage` 等                                          | 排隊、修改、刪除、重排、列出（PI，13.6）                                                                                                                                       | SessionRepository、QueuedMessageRepository、AttachmentStore                                                         | IN-13                        |
+| `StartNextQueued`、`ResumeQueue`                           | 用最前面的排隊訊息開新的 Run（PI，13.6）；啟動失敗設為 `failed` 並通知 `idle`                                                                                                  | QueuedMessageRepository、RunSupervisor、AgentCatalog、AuditLog、Notifier                                            | IN-14 到 IN-17               |
+| `PurgeUnusedAttachments`                                   | 刪除沒用到的附件（PI）                                                                                                                                                         | AttachmentStore                                                                                                     | IN-04                        |
 
 `SendMessage` 的樣子（P1 沒有 `AccessControl`，擁有者檢查是 domain 的 `assertOwner`）：
 
@@ -1089,34 +1094,34 @@ PI 加兩種寫入：插入的 `user_message` 要求 Run 是 `running` 而且租
 
 路徑都在 `/api/ai-chat` 底下。
 
-| 方法和路徑                                                                    | Use case                  | 回應                                                                    | 分期                      |
-| ----------------------------------------------------------------------------- | ------------------------- | ----------------------------------------------------------------------- | ------------------------- |
-| `GET /sessions`                                                               | ListSessions              | JSON；進行中的 Run 帶 `activity`                                        | P1、P2-06                 |
-| `POST /sessions`                                                              | CreateSession             | JSON                                                                    | P1                        |
-| `GET /sessions/:id`                                                           | GetSession                | JSON：Session、Run 狀態、Item                                           | P1                        |
-| `PATCH /sessions/:id`                                                         | UpdateSession             | JSON                                                                    | P1（Toolset）、P2（其他） |
-| `DELETE /sessions/:id`                                                        | DeleteSession             | 204                                                                     | P1                        |
-| `POST /sessions/:id/runs`                                                     | SendMessage               | SSE                                                                     | P1                        |
-| `POST /sessions/:id/runs/:runId/cancel`                                       | CancelRun                 | 202；Run 已結束時 409                                                   | P1                        |
-| `POST /sessions/:id/tool-calls/:callId/decision`                              | DecideApproval            | 還有別的要決定：JSON。全部決定了：SSE                                   | P1                        |
-| `POST /sessions/:id/resume`                                                   | ResumeRun                 | SSE；沒有東西可接續時 204                                               | P1                        |
-| `GET /sessions/:id/stream?afterSeq=`（`afterSeq` 選用）                       | FollowSession             | SSE；`running` 才串流（別台每秒送已完成的 Item），否則 204              | P1、P2-06                 |
-| `GET/POST /sessions/:id/shares`、`PATCH/DELETE /sessions/:id/shares/:shareId` | ShareSession、UpdateShare | JSON                                                                    | P2                        |
-| `POST /sessions/:id/fork`                                                     | ForkSession               | JSON                                                                    | P2                        |
-| `GET /toolsets`                                                               | ListToolsets              | JSON                                                                    | P1                        |
-| `GET /sessions/:id/tools`                                                     | ListSessionTools          | JSON：這個 Session 現在給模型的工具（id、title、description、readOnly） | P1                        |
-| `GET /agents`                                                                 | AgentCatalog              | JSON                                                                    | P3                        |
-| `POST /sessions/:id/attachments?name=`                                        | UploadAttachment          | 201 JSON：`{ id, mediaType, name, size }`                               | PI                        |
-| `GET /sessions/:id/attachments/:attachmentId`                                 | ReadAttachment            | 200 圖片的位元組；304                                                   | PI                        |
-| `POST /sessions/:id/runs/:runId/messages`                                     | InsertMessage             | 201 JSON：寫入的 Item                                                   | PI                        |
-| `GET /sessions/:id/queue`                                                     | ListQueue                 | JSON：`{ items, paused }`                                               | PI                        |
-| `POST /sessions/:id/queue`                                                    | QueueMessage              | 201 JSON：排隊的訊息                                                    | PI                        |
-| `PATCH /sessions/:id/queue/:queuedId`                                         | UpdateQueuedMessage       | JSON：排隊的訊息                                                        | PI                        |
-| `DELETE /sessions/:id/queue/:queuedId`                                        | DeleteQueuedMessage       | 204                                                                     | PI                        |
-| `PUT /sessions/:id/queue/order`                                               | ReorderQueue              | JSON：`{ items, paused }`。請求內容 `{ ids }`                           | PI                        |
-| `POST /sessions/:id/queue/resume`                                             | ResumeQueue               | SSE；沒有東西可送時 204                                                 | PI                        |
-| `POST /sessions/:id/queue/:queuedId/insert`                                   | InsertQueuedMessage       | 201 JSON：寫入的 Item                                                   | PU                        |
-| `GET /input-config`                                                           | （設定）                  | JSON：圖片能不能用、張數、大小、型別、佇列和插入的上限                  | PI                        |
+| 方法和路徑                                                                    | Use case                                           | 回應                                                                    | 分期                      |
+| ----------------------------------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------- |
+| `GET /sessions`                                                               | ListSessions                                       | JSON；進行中的 Run 帶 `activity`                                        | P1、P2-06                 |
+| `POST /sessions`                                                              | CreateSession                                      | JSON                                                                    | P1                        |
+| `GET /sessions/:id`                                                           | GetSession                                         | JSON：Session、Run 狀態、Item                                           | P1                        |
+| `PATCH /sessions/:id`                                                         | UpdateSession                                      | JSON                                                                    | P1（Toolset）、P2（其他） |
+| `DELETE /sessions/:id`                                                        | DeleteSession                                      | 204                                                                     | P1                        |
+| `POST /sessions/:id/runs`                                                     | SendMessage                                        | SSE                                                                     | P1                        |
+| `POST /sessions/:id/runs/:runId/cancel`                                       | CancelRun                                          | 202；Run 已結束時 409                                                   | P1                        |
+| `POST /sessions/:id/tool-calls/:callId/decision`                              | DecideApproval                                     | 還有別的要決定：JSON。全部決定了：SSE                                   | P1                        |
+| `POST /sessions/:id/resume`                                                   | ResumeRun                                          | SSE；沒有東西可接續時 204                                               | P1                        |
+| `GET /sessions/:id/stream?afterSeq=`（`afterSeq` 選用）                       | FollowSession                                      | SSE；`running` 才串流（別台每秒送已完成的 Item），否則 204              | P1、P2-06                 |
+| `GET/POST /sessions/:id/shares`、`PATCH/DELETE /sessions/:id/shares/:shareId` | ListShares、ShareSession、UpdateShare、RevokeShare | JSON；`DELETE` 是 204                                                   | P2-04                     |
+| `POST /sessions/:id/fork`                                                     | ForkSession                                        | JSON                                                                    | P2                        |
+| `GET /toolsets`                                                               | ListToolsets                                       | JSON                                                                    | P1                        |
+| `GET /sessions/:id/tools`                                                     | ListSessionTools                                   | JSON：這個 Session 現在給模型的工具（id、title、description、readOnly） | P1                        |
+| `GET /agents`                                                                 | AgentCatalog                                       | JSON                                                                    | P3                        |
+| `POST /sessions/:id/attachments?name=`                                        | UploadAttachment                                   | 201 JSON：`{ id, mediaType, name, size }`                               | PI                        |
+| `GET /sessions/:id/attachments/:attachmentId`                                 | ReadAttachment                                     | 200 圖片的位元組；304                                                   | PI                        |
+| `POST /sessions/:id/runs/:runId/messages`                                     | InsertMessage                                      | 201 JSON：寫入的 Item                                                   | PI                        |
+| `GET /sessions/:id/queue`                                                     | ListQueue                                          | JSON：`{ items, paused }`                                               | PI                        |
+| `POST /sessions/:id/queue`                                                    | QueueMessage                                       | 201 JSON：排隊的訊息                                                    | PI                        |
+| `PATCH /sessions/:id/queue/:queuedId`                                         | UpdateQueuedMessage                                | JSON：排隊的訊息                                                        | PI                        |
+| `DELETE /sessions/:id/queue/:queuedId`                                        | DeleteQueuedMessage                                | 204                                                                     | PI                        |
+| `PUT /sessions/:id/queue/order`                                               | ReorderQueue                                       | JSON：`{ items, paused }`。請求內容 `{ ids }`                           | PI                        |
+| `POST /sessions/:id/queue/resume`                                             | ResumeQueue                                        | SSE；沒有東西可送時 204                                                 | PI                        |
+| `POST /sessions/:id/queue/:queuedId/insert`                                   | InsertQueuedMessage                                | 201 JSON：寫入的 Item                                                   | PU                        |
+| `GET /input-config`                                                           | （設定）                                           | JSON：圖片能不能用、張數、大小、型別、佇列和插入的上限                  | PI                        |
 
 PI 的路由、請求和回應的變更、新的錯誤名稱在第 13.7 節。
 
@@ -1425,7 +1430,7 @@ Session 列表（`threadListAdapter`，實作 `RemoteThreadListAdapter`）。
 | Use case                 | 做什麼                                                                                                | 用到的 port                                                                                      | 規格                |
 | ------------------------ | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------- |
 | `UploadAttachment`       | 檢查擁有者和檔案，存成附件                                                                            | SessionRepository、AttachmentStore                                                               | IN-01 到 IN-04      |
-| `ReadAttachment`         | 檢查擁有者，回傳位元組和型別                                                                          | SessionRepository、AttachmentStore                                                               | IN-03、IN-08        |
+| `ReadAttachment`         | 檢查讀取權限（擁有者，以及看得到那則訊息的被分享的人），回傳位元組和型別                              | SessionRepository、AttachmentStore                                                               | IN-03、IN-08        |
 | `InsertMessage`          | 檢查訊息，寫入 `delivery: inserted` 的 `user_message`。不建立 Run，不啟動迴圈                         | SessionRepository、ItemLog、AttachmentStore                                                      | IN-10、IN-11、IN-17 |
 | `QueueMessage`           | 檢查訊息，加進佇列                                                                                    | SessionRepository、QueuedMessageRepository、AttachmentStore                                      | IN-13               |
 | `UpdateQueuedMessage`    | 改文字、附件、頁面                                                                                    | SessionRepository、QueuedMessageRepository                                                       | IN-13               |
@@ -1701,7 +1706,7 @@ controller 依序做（`controllers/attachments.ts`；`route()` 先取出身分�
 
 **讀取**
 
-`GET /sessions/:id/attachments/:attachmentId`。`ReadAttachment` 做擁有者檢查；附件不屬於這段 Session 回 404。回應標頭：
+`GET /sessions/:id/attachments/:attachmentId`。`ReadAttachment` 檢查讀取權限：擁有者，以及看得到那則訊息的被分享的人（13.5）；附件不屬於這段 Session、或被分享的人看不到，回 404。回應標頭：
 
 - `Content-Type`：存下的型別。
 - `X-Content-Type-Options: nosniff`、`Content-Disposition: inline`。
@@ -1734,7 +1739,7 @@ controller 依序做（`controllers/attachments.ts`；`route()` 先取出身分�
 
 **分享和複製（P2）**
 
-- 被分享的人看得到圖片。圖片是使用者訊息的一部分，範圍和那則訊息相同（SH-02、D-13）。讀取時用 `used_seq`：快照分享只能讀 `used_seq` 不超過 `up_to_seq` 的附件；持續更新可以讀全部；分享的人沒辦法對還沒出現的內容把關，但這一點和文字相同。
+- 被分享的人看得到圖片。圖片是使用者訊息的一部分，範圍和那則訊息相同（SH-02、D-13）。`ReadAttachment` 用 `shareeView` 算出他看得到的 Item，附件出現在其中一則 `user_message` 才給讀，所以 `used_seq` 一定不超過 `up_to_seq`（到期的持續更新是停住的那一筆）。持續更新可以讀所有已經進訊息的附件；還沒進訊息、排隊保留的附件讀不到。讀不到的回 404 `AttachmentNotFound`，和不存在的一樣；`If-None-Match` 不會讓它變成 304。分享的人沒辦法對還沒出現的內容把關，但這一點和文字相同。
 - 複製（SH-04、IN-19）帶走圖片。`ForkSession` 用 `visibleItems` 取得他看得到的範圍，收集範圍內 `user_message` 的附件 id（包含插入的），呼叫 `AttachmentStore.copy`：在新 Session 建立新的附件（新的 id、`owner_ref` 是複製的人、型別、名稱、`sha256` 相同，位元組複製），回傳舊 id 到新 id 的對照。`forkItems(visible, idMap)` 把 `attachments` 裡的 id 換成新的，`delivery` 一律是 `direct`。新附件的 `used_seq` 在寫入新 Session 的 `user_message` 的同一個 transaction 設定。範圍以外的訊息用到的附件不複製。附件已經讀不到（被刪除）時，那則訊息的 `attachments` 去掉那一項。複製出去的收不回來（D-13），這一點分享對話框已經說明（SH-07）；圖片和文字同一個規則。
 - 複製的附件不計入 `maxPendingPerSession`（它們一建立就進了訊息）。複製寫進 Auditor（SH-06 的 `session-fork`，內容多附件數）。
 - 圖片和文字一樣會送到模型供應商。管理員把模型的 `images` 設成 `false` 就能整個關掉。

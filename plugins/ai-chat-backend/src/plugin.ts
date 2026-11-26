@@ -313,6 +313,7 @@ export const aiChatPlugin = createBackendPlugin({
             },
           },
           retentionDays: aiChat.retentionDays,
+          liveShares: aiChat.sharing.live,
           extensions: {
             ...harnessExtensions.extensions({
               logger,

@@ -14,12 +14,34 @@
  * limitations under the License.
  */
 
-import type { NewShare, Share } from '../../domain';
+import type { NewShare, Share, ShareScope } from '../../domain';
 
-/** Where the shares of a session are kept. Creating and cancelling them is later. */
+/** Where the shares of a session are kept. */
 export interface ShareRepository {
   /** Inserts one share. It is not cancelled. */
   add(input: NewShare): Promise<Share>;
+
+  /** One share of the session, cancelled or not; `undefined` when there is none. */
+  get(sessionId: string, shareId: string): Promise<Share | undefined>;
+
+  /**
+   * Sets both seq fields (an absent one becomes null) and, when given,
+   * `expiresAt`, in one statement that matches only a share that is not
+   * cancelled. Returns the share as stored, or `undefined` when it is
+   * cancelled or missing, so a cancel that came first is never undone.
+   */
+  update(
+    sessionId: string,
+    shareId: string,
+    change: ShareScope & { expiresAt?: string },
+  ): Promise<Share | undefined>;
+
+  /**
+   * Cancels a share that is not cancelled yet. Returns it, or `undefined`
+   * when it was cancelled already or is missing: of two cancels at the same
+   * time, one gets the share.
+   */
+  revoke(sessionId: string, shareId: string): Promise<Share | undefined>;
 
   /** Every share of the session, cancelled ones included, oldest first. */
   listBySession(sessionId: string): Promise<Share[]>;

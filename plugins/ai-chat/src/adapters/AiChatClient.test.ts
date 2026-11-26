@@ -58,6 +58,42 @@ describe('AiChatClient', () => {
     ]);
   });
 
+  it('lists, makes, changes and cancels the shares of a session (P2-04)', async () => {
+    const share = { id: 'sh/1', subjectRef: 'user:default/bob' };
+    const { client, fetch } = setup(() => json({ items: [share], ...share }));
+    expect(await client.listShares('a/b')).toEqual([share]);
+    expect(
+      await client.createShare('a/b', {
+        subjectRef: 'user:default/bob',
+        mode: 'live',
+      }),
+    ).toMatchObject(share);
+    await client.updateShare('a/b', 'sh/1', { includeToolOutputs: false });
+    await client.revokeShare('a/b', 'sh/1');
+    expect(urls(fetch)).toEqual([
+      ['GET', 'http://backend/api/ai-chat/sessions/a%2Fb/shares'],
+      ['POST', 'http://backend/api/ai-chat/sessions/a%2Fb/shares'],
+      ['PATCH', 'http://backend/api/ai-chat/sessions/a%2Fb/shares/sh%2F1'],
+      ['DELETE', 'http://backend/api/ai-chat/sessions/a%2Fb/shares/sh%2F1'],
+    ]);
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({
+      subjectRef: 'user:default/bob',
+      mode: 'live',
+    });
+    expect(JSON.parse(fetch.mock.calls[2][1].body)).toEqual({
+      includeToolOutputs: false,
+    });
+  });
+
+  it('throws the answer of a refused share', async () => {
+    const { client } = setup(
+      json({ error: { name: 'ShareNotFound', message: 'x' } }, 404),
+    );
+    await expect(client.revokeShare('a', 'sh1')).rejects.toBeInstanceOf(
+      ResponseError,
+    );
+  });
+
   it('sends a title search and the archived flag as query parameters', async () => {
     const { client, fetch } = setup(json({ items: [] }));
     await client.listSessions({ query: 'Build', includeArchived: true });

@@ -25,6 +25,7 @@ import {
 } from './controllers/attachments';
 import { QueueController, type QueueUseCases } from './controllers/queue';
 import { RunsController, type RunUseCases } from './controllers/runs';
+import { SharesController, type ShareUseCases } from './controllers/shares';
 import {
   SessionsController,
   type SessionUseCases,
@@ -34,7 +35,11 @@ import { toHttpError } from './errorMapping';
 export type RouterOptions = {
   /** The signed-in user of the request. Refuses a request that has none. */
   principal(req: express.Request): Promise<Principal>;
-  useCases: SessionUseCases & RunUseCases & QueueUseCases & AttachmentUseCases;
+  useCases: SessionUseCases &
+    RunUseCases &
+    QueueUseCases &
+    AttachmentUseCases &
+    ShareUseCases;
   /** The answer of `GET /input-config`. */
   inputConfig: ChatInputConfig;
   logger: Logger;
@@ -53,6 +58,7 @@ export function createRouter(options: RouterOptions): express.Router {
   const runs = new RunsController(useCases, logger, keepAliveMs);
   const queue = new QueueController(useCases);
   const attachments = new AttachmentsController(useCases);
+  const shares = new SharesController(useCases);
   const router = Router();
   router.use(express.json({ limit: '64kb' }));
 
@@ -120,6 +126,33 @@ export function createRouter(options: RouterOptions): express.Router {
     '/sessions/:id/tools',
     route(async (user, req, res) => {
       res.json(await sessions.tools(user, req.params.id));
+    }),
+  );
+  router.get(
+    '/sessions/:id/shares',
+    route(async (user, req, res) => {
+      res.json(await shares.list(user, req.params.id));
+    }),
+  );
+  router.post(
+    '/sessions/:id/shares',
+    route(async (user, req, res) => {
+      res.status(201).json(await shares.create(user, req.params.id, req.body));
+    }),
+  );
+  router.patch(
+    '/sessions/:id/shares/:shareId',
+    route(async (user, req, res) => {
+      res.json(
+        await shares.update(user, req.params.id, req.params.shareId, req.body),
+      );
+    }),
+  );
+  router.delete(
+    '/sessions/:id/shares/:shareId',
+    route(async (user, req, res) => {
+      await shares.revoke(user, req.params.id, req.params.shareId);
+      res.status(204).end();
     }),
   );
   router.get(

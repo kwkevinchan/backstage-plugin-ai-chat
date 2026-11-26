@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { InvalidShare } from './errors';
 import type { Principal } from './principal';
 import { isSessionOwner, type Session } from './session';
 
@@ -47,6 +48,8 @@ export type Share = {
  * `new Date(expiresAt).toISOString()` so string comparison stays valid.
  */
 export type NewShare = {
+  /** Given when the caller needs the id before the row is written. */
+  id?: string;
   sessionId: string;
   subjectRef: string;
   upToSeq?: number;
@@ -122,4 +125,159 @@ export function allowsSessionRead(
 ): boolean {
   if (isSessionOwner(session, principal.userRef)) return true;
   return shares.some(share => shareGrantsRead(share, principal));
+}
+
+/** `live` when the share has no seq cap, whether or not it has expired. */
+export type ShareMode = 'snapshot' | 'live';
+
+export function shareModeOf(share: Pick<Share, 'upToSeq'>): ShareMode {
+  return share.upToSeq === undefined ? 'live' : 'snapshot';
+}
+
+/** Past `expiresAt` (a later `now`; the same instant is not past it). */
+export function isShareExpired(
+  share: Pick<Share, 'expiresAt'>,
+  now: string,
+): boolean {
+  return share.expiresAt !== undefined && now > share.expiresAt;
+}
+
+const SUBJECT_REF = /^(user|group):(?:([^:/\s]+)\/)?([^:/\s]+)$/i;
+
+/**
+ * `user:<namespace>/<name>` or `group:<namespace>/<name>`, with `default`
+ * when the namespace is left out, all in lower case like `normalizeEntityRef`:
+ * the refs of the user and of their groups (`ownershipRefs`) come lower case,
+ * and a share matches them as strings. Anything else is `undefined`.
+ */
+export function normalizeSubjectRef(ref: string): string | undefined {
+  const match = SUBJECT_REF.exec(ref.trim());
+  if (!match) return undefined;
+  const [, kind, namespace = 'default', name] = match;
+  return `${kind}:${namespace}/${name}`.toLowerCase();
+}
+
+/** The longest subject ref a share stores, after it is normalized. */
+export const MAX_SUBJECT_REF_LENGTH = 255;
+
+/** What the owner asks for when sharing. */
+export type ShareRequest = {
+  mode: ShareMode;
+  /** True by default. False hides every tool output. */
+  includeToolOutputs?: boolean;
+  /** Live only. True also shows tool output written after the share. */
+  includeLaterToolOutputs?: boolean;
+};
+
+/**
+ * The two seq fields of a new share, from what the owner asks for and the
+ * latest seq of the log. Throws `InvalidShare` for a request that is not
+ * consistent.
+ */
+export function createShareScope(
+  request: ShareRequest,
+  atSeq: number,
+): ShareScope {
+  const include = request.includeToolOutputs ?? true;
+  if (request.mode === 'snapshot' && request.includeLaterToolOutputs) {
+    throw new InvalidShare(
+      'includeLaterToolOutputs is only for a share that keeps updating',
+    );
+  }
+  if (!include && request.includeLaterToolOutputs) {
+    throw new InvalidShare('includeLaterToolOutputs needs includeToolOutputs');
+  }
+  if (!include) {
+    return shareScope({ mode: request.mode, atSeq, outputsUpToSeq: 0 });
+  }
+  return shareScope({
+    mode: request.mode,
+    atSeq,
+    ...(request.includeLaterToolOutputs && { outputsUpToSeq: null }),
+  });
+}
+
+/** What the owner changes on a share. */
+export type ShareChange = {
+  /** Snapshot only: moves the seq cap to the latest seq. */
+  refresh?: boolean;
+  includeToolOutputs?: boolean;
+  /** Live only. */
+  includeLaterToolOutputs?: boolean;
+};
+
+/**
+ * The seq fields of a share after a change, given the latest seq of the log.
+ * `includeToolOutputs: false` hides every output. `true` shows every output
+ * of a snapshot, and the output up to now of a live share.
+ * `includeLaterToolOutputs: true` shows every output of a live share, and
+ * `false` stops at now. Throws `InvalidShare` for a change that does not fit
+ * the mode.
+ */
+export function updatedShareScope(
+  share: Pick<Share, 'upToSeq' | 'outputsUpToSeq'>,
+  change: ShareChange,
+  atSeq: number,
+): ShareScope {
+  const mode = shareModeOf(share);
+  if (change.refresh && mode === 'live') {
+    throw new InvalidShare('refresh is only for a snapshot');
+  }
+  if (mode === 'snapshot' && change.includeLaterToolOutputs !== undefined) {
+    throw new InvalidShare(
+      'includeLaterToolOutputs is only for a share that keeps updating',
+    );
+  }
+  if (
+    change.includeToolOutputs === false &&
+    change.includeLaterToolOutputs === true
+  ) {
+    throw new InvalidShare('includeLaterToolOutputs needs includeToolOutputs');
+  }
+  let upToSeq = share.upToSeq;
+  let outputsUpToSeq = share.outputsUpToSeq;
+  if (change.refresh) upToSeq = atSeq;
+  if (change.includeToolOutputs === false) outputsUpToSeq = 0;
+  if (change.includeToolOutputs === true) {
+    outputsUpToSeq = mode === 'snapshot' ? undefined : atSeq;
+  }
+  if (change.includeLaterToolOutputs === true) outputsUpToSeq = undefined;
+  if (change.includeLaterToolOutputs === false) outputsUpToSeq = atSeq;
+  return {
+    ...(upToSeq !== undefined && { upToSeq }),
+    ...(outputsUpToSeq !== undefined && { outputsUpToSeq }),
+  };
+}
+
+/** `aiChat.sharing.live`. */
+export type LiveShareLimits = {
+  enabled: boolean;
+  defaultHours: number;
+  maxHours: number;
+};
+
+/** The values of `aiChat.sharing.live` that are left out (SH-11). */
+export const DEFAULT_LIVE_SHARE_LIMITS: LiveShareLimits = {
+  enabled: true,
+  defaultHours: 24,
+  maxHours: 72,
+};
+
+/**
+ * When a live share made at `now` ends (SH-11): `hours` from now, or
+ * `defaultHours` when not given. Throws `InvalidShare` when `hours` is not an
+ * integer from 1 to `maxHours`.
+ */
+export function liveShareExpiry(
+  now: Date,
+  hours: number | undefined,
+  limits: Pick<LiveShareLimits, 'defaultHours' | 'maxHours'>,
+): string {
+  const life = hours ?? limits.defaultHours;
+  if (!Number.isInteger(life) || life < 1 || life > limits.maxHours) {
+    throw new InvalidShare(
+      `hours must be an integer from 1 to ${limits.maxHours}`,
+    );
+  }
+  return new Date(now.getTime() + life * 3_600_000).toISOString();
 }

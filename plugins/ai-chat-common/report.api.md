@@ -191,6 +191,8 @@ export const chatPaths: {
   queueResume: (id: string) => string;
   resume: (id: string) => string;
   stream: (id: string) => string;
+  shares: (id: string) => string;
+  share: (id: string, shareId: string) => string;
   tools: (id: string) => string;
   toolsets: () => string;
 };
@@ -323,6 +325,32 @@ export interface ChatSessionList {
 }
 
 // @public
+export interface ChatShare {
+  // (undocumented)
+  createdAt: string;
+  // (undocumented)
+  createdBy: string;
+  expired: boolean;
+  expiresAt?: string;
+  // (undocumented)
+  id: string;
+  // (undocumented)
+  mode: ChatShareMode;
+  outputsUpToSeq?: number;
+  subjectRef: string;
+  upToSeq?: number;
+}
+
+// @public
+export interface ChatShareList {
+  // (undocumented)
+  items: ChatShare[];
+}
+
+// @public
+export type ChatShareMode = 'snapshot' | 'live';
+
+// @public
 export interface ChatTool {
   description: string;
   id: string;
@@ -384,6 +412,16 @@ export interface CreateChatSessionRequest {
   entityRef?: string;
   // (undocumented)
   title?: string;
+}
+
+// @public
+export interface CreateChatShareRequest {
+  hours?: number;
+  includeLaterToolOutputs?: boolean;
+  includeToolOutputs?: boolean;
+  mode?: ChatShareMode;
+  // (undocumented)
+  subjectRef: string;
 }
 
 // @public
@@ -467,6 +505,15 @@ export interface UpdateChatSessionRequest {
   pinned?: boolean;
   // (undocumented)
   title?: string | null;
+}
+
+// @public
+export interface UpdateChatShareRequest {
+  hours?: number;
+  includeLaterToolOutputs?: boolean;
+  // (undocumented)
+  includeToolOutputs?: boolean;
+  refresh?: true;
 }
 
 // @public

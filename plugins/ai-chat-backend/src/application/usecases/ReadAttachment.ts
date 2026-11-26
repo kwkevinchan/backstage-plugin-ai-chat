@@ -14,23 +14,42 @@
  * limitations under the License.
  */
 
-import { assertOwner, type AttachmentMeta, type Principal } from '../../domain';
-import type { AttachmentStore, SessionRepository } from '../ports';
+import type { Clock, ItemLog } from '@kwkevinchan/ai-chat-harness';
+import {
+  AttachmentNotFound,
+  type AttachmentMeta,
+  type Principal,
+} from '../../domain';
+import type {
+  AccessControl,
+  AttachmentStore,
+  SessionRepository,
+  ShareRepository,
+} from '../ports';
+import { authorizeRead, shareeView } from '../sessionRead';
 
-/** The owner reads an image of the session (IN-03, IN-08). */
+/**
+ * The owner, or a sharee who sees a message with it, reads an image of the
+ * session (IN-03, IN-08, IN-19).
+ */
 export class ReadAttachment {
   constructor(
     private readonly deps: {
       sessions: SessionRepository;
       attachments: AttachmentStore;
+      shares: ShareRepository;
+      access: AccessControl;
+      items: ItemLog;
+      clock: Clock;
     },
   ) {}
 
   /**
-   * Throws `NotSessionOwner` or `AttachmentNotFound` (a missing image, or
-   * one of another session). With `ifNoneMatch` equal to the `ETag` of the
-   * image, the bytes are not read and the answer is `notModified`. The check
-   * of the owner and of the existence comes first, so a deleted image is
+   * Throws `NotSessionOwner` or `AttachmentNotFound` (a missing image, one
+   * of another session, or one the sharee does not see). With `ifNoneMatch`
+   * equal to the `ETag` of the image, the bytes are not read and the answer
+   * is `notModified`. The check of the reader and of the existence comes
+   * first, so a deleted image is
    * `AttachmentNotFound` whatever the client has cached.
    */
   async execute(input: {
@@ -42,9 +61,30 @@ export class ReadAttachment {
     | { notModified: true; meta: AttachmentMeta }
     | { notModified: false; meta: AttachmentMeta; bytes: Uint8Array }
   > {
-    const { sessions, attachments } = this.deps;
-    const session = await sessions.get(input.sessionId);
-    assertOwner(session, input.principal);
+    const { attachments } = this.deps;
+    const reader = await authorizeRead(
+      this.deps,
+      input.sessionId,
+      input.principal,
+    );
+    const { session } = reader;
+    if (!reader.isOwner) {
+      // IN-19: an image is the sharee's to read when a message they see has
+      // it, so its `used_seq` is within the share. Anything else is answered
+      // like an image that does not exist.
+      const { visible } = await shareeView(
+        this.deps,
+        session,
+        input.principal,
+        reader.shares,
+      );
+      const seen = visible.some(
+        item =>
+          item.kind === 'user_message' &&
+          (item.attachments ?? []).some(ref => ref.id === input.attachmentId),
+      );
+      if (!seen) throw new AttachmentNotFound(input.attachmentId);
+    }
     const [meta] = await attachments.describe(session.id, [input.attachmentId]);
     if (
       input.ifNoneMatch !== undefined &&

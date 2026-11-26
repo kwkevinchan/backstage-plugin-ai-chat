@@ -22,12 +22,7 @@ import {
   type ItemLog,
 } from '@kwkevinchan/ai-chat-harness';
 import {
-  NotSessionOwner,
   callsAwaitingDecision,
-  effectiveShare,
-  isSessionOwner,
-  shareGrantsRead,
-  visibleItems,
   type Principal,
   type Run,
   type Session,
@@ -40,6 +35,7 @@ import type {
   SessionRepository,
   ShareRepository,
 } from '../ports';
+import { authorizeRead, shareeView } from '../sessionRead';
 import { queueViewOf, type QueueView } from './ListQueue';
 
 /** What a screen needs to show a session. */
@@ -93,16 +89,19 @@ export class GetSession {
     afterSeq?: number;
   }): Promise<SessionView> {
     const { runs, items } = this.deps;
-    const session = await this.deps.sessions.get(input.sessionId);
-    const shares = await this.deps.shares.listBySession(session.id);
-    const allowed = await this.deps.access.canReadSession({
-      session,
-      principal: input.principal,
-      shares,
-    });
-    if (!allowed) throw new NotSessionOwner(session.id);
-    if (!isSessionOwner(session, input.principal.userRef)) {
-      return this.forSharee(session, input.principal, shares, input.afterSeq);
+    const reader = await authorizeRead(
+      this.deps,
+      input.sessionId,
+      input.principal,
+    );
+    const { session } = reader;
+    if (!reader.isOwner) {
+      return this.forSharee(
+        session,
+        input.principal,
+        reader.shares,
+        input.afterSeq,
+      );
     }
     const run = await runs.findActive(session.id);
     const list = await items.read(session.id, { afterSeq: input.afterSeq });
@@ -168,15 +167,12 @@ export class GetSession {
     shares: readonly Share[],
     afterSeq?: number,
   ): Promise<SessionView> {
-    const now = this.deps.clock.now().toISOString();
-    const all = await this.deps.items.read(session.id);
-    const share = effectiveShare(
-      shares.filter(one => shareGrantsRead(one, principal)),
-      all,
-      now,
+    const { share, visible } = await shareeView(
+      this.deps,
+      session,
+      principal,
+      shares,
     );
-    if (share === undefined) throw new NotSessionOwner(session.id);
-    const visible = visibleItems(all, { isOwner: false, share }, now);
     const list =
       afterSeq === undefined
         ? visible

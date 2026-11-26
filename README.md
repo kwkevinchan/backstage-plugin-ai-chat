@@ -289,7 +289,7 @@ aiChat:
       maxBytesPerInput: 20971520 # image bytes in one run and in one model call; default 20 MB, at least maxPerMessage times maxBytes
       maxPendingPerSession: 12 # uploaded images that are in no message yet; default 12
       tokensPerImage: 1600 # estimated tokens per image in the budget; default 1600
-  sharing: # read at startup; sharing a conversation is not in this version
+  sharing: # read at startup
     live:
       enabled: true # a share may keep updating; default true
       defaultHours: 24 # life of a live share when nobody picks one; default 24
@@ -317,17 +317,35 @@ supply them.
 **Sharing limits.** `aiChat.sharing.live` is read at startup. `enabled`
 (default true) is whether a share may keep updating. `defaultHours` (default 24) is how long a live share lasts when nobody picks a life, and `maxHours`
 (default 72) is the longest life. Leave `sharing` or `live` out and these
-defaults are used. `enabled: false` is stored as false. Both hour values must
-be positive integers, and `defaultHours` must not be greater than `maxHours`;
-otherwise the backend does not start. Creating or changing a share is not in
-this version, so the values are only checked and kept.
+defaults are used. With `enabled: false` the owner can still share a
+snapshot, but not make a live share or give one a new life. Both hour values
+must be positive integers, and `defaultHours` must not be greater than
+`maxHours`; otherwise the backend does not start.
+
+**Sharing.** The owner of a session shares it, read-only, with a user or a
+group through the routes `/sessions/{id}/shares` (the screen for it is not in
+this version). A **snapshot** (the default) shows the session up to the moment
+of the share; the owner refreshes it to move it on. A **live** share shows what
+comes next too, until it expires, and then stays as it was at that moment. The
+sharee sees the messages, the plan, the tools that were called with their
+input, the images of the messages they see, and the tool output, unless the
+owner leaves it out; in a live share the tool output written after the share is
+left out until the owner shows it. A tool result that is left out keeps its
+status with the text "not shared". **The sharee sees tool output that was read
+with the owner's permissions**, and a group share is seen by whoever is in the
+group when they open it. The sharee cannot send a message, decide an approval
+or change anything: every such request answers like a session that does not
+exist. Making, changing and cancelling a share are written to the auditor
+(`session-share`, `session-share-update`, `session-share-revoke`). A cancel
+stops every read at once.
 
 **Images.** With `aiChat.llm.images: true`, a user can attach PNG, JPEG, WebP
 or GIF images to a message. **The images are sent to the model server** as part
 of the message, so they leave your organization when the server is outside it.
 Leave `images` off (the default) when they must not. The backend stores the
-images in its database, per session; only the owner of the session reads them,
-and an image that no message uses is deleted after 24 hours.
+images in its database, per session; the owner of the session reads them, and
+so does a sharee who sees the message that has the image. An image that no
+message uses is deleted after 24 hours.
 
 `input.images.tokensPerImage` (default 1600) is how many tokens one image
 counts in the context budget. It is an estimate, and it has not been measured
@@ -370,7 +388,7 @@ exactly `days` ago is kept.
 | `toolOutput.<pattern>.redact`                            | Field names whose values become `"[redacted]"` in the output of the matching actions, at any depth, before the output is cut. The hidden values are not stored, streamed or sent to the model. An output nested deeper than 100 levels is not kept: the result is an error.                                                                          |
 | `toolOutput.<pattern>.maxOutputChars`                    | A lower limit than `maxToolOutputChars` for the matching actions (at least 100). When patterns overlap, the smallest limit and every field apply. `update_plan` and `load_skill` are not actions and keep `maxToolOutputChars`.                                                                                                                      |
 | `writesPerMinute`                                        | Most actions that are not read-only one user may run per minute, over all sessions and backends (1 to 10000; no limit when not set). A change over the limit does not run, even after the approval: the result is an error that says so, and the run goes on. Up to twice the limit can run around the turn of a minute.                             |
-| `sharing.live.enabled`                                   | Whether a share may keep updating. Default true. Creating or changing a share is not in this version, so this is only checked and kept.                                                                                                                                                                                                              |
+| `sharing.live.enabled`                                   | Whether a share may keep updating. Default true. `false` refuses a new live share and a new life for one.                                                                                                                                                                                                                                            |
 | `sharing.live.defaultHours`                              | Hours a live share lasts when nobody picks a life. Default 24. A positive integer, at most `maxHours`.                                                                                                                                                                                                                                               |
 | `sharing.live.maxHours`                                  | Longest life of a live share, in hours. Default 72. A positive integer, at least `defaultHours`.                                                                                                                                                                                                                                                     |
 | `retention.days`                                         | Days after the last change of a session before it is deleted, with its runs, messages, queued messages and images. Default 90. `0` keeps every session. A session with a run that has not ended is kept until the run ends. The audit log is kept.                                                                                                   |
@@ -803,18 +821,20 @@ with `workflowUrl`, which the chat shows as a link.
 The routes are under `/api/ai-chat`; the spec is
 [`openapi.yaml`](plugins/ai-chat-backend/src/schema/openapi.yaml).
 
-| Route                                            | Does                                                                                |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| `GET /sessions`, `POST /sessions`                | List, create                                                                        |
-| `GET /sessions/:id`                              | Read with the items, the run that has not ended, `awaitingDecision` and `resumable` |
-| `PATCH /sessions/:id`, `DELETE /sessions/:id`    | Change title, pin, archive or toolsets; delete                                      |
-| `POST /sessions/:id/runs`                        | Send a message and stream the run; `text/event-stream`                              |
-| `POST /sessions/:id/runs/:runId/cancel`          | Ask a run to stop (`202`)                                                           |
-| `POST /sessions/:id/tool-calls/:callId/decision` | Allow or deny a waiting call; JSON, or the stream when it was the last one          |
-| `POST /sessions/:id/resume`                      | Carry on a run whose decisions are all stored (`204` if none)                       |
-| `GET /sessions/:id/stream`                       | Join a run that is under way (`204` if none)                                        |
-| `GET /toolsets`                                  | The toolsets the user can switch on in a session                                    |
-| `GET /sessions/:id/tools`                        | The tools a session offers now: title, description, `readOnly` (the owner only)     |
+| Route                                                                         | Does                                                                                |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `GET /sessions`, `POST /sessions`                                             | List, create                                                                        |
+| `GET /sessions/:id`                                                           | Read with the items, the run that has not ended, `awaitingDecision` and `resumable` |
+| `PATCH /sessions/:id`, `DELETE /sessions/:id`                                 | Change title, pin, archive or toolsets; delete                                      |
+| `POST /sessions/:id/runs`                                                     | Send a message and stream the run; `text/event-stream`                              |
+| `POST /sessions/:id/runs/:runId/cancel`                                       | Ask a run to stop (`202`)                                                           |
+| `POST /sessions/:id/tool-calls/:callId/decision`                              | Allow or deny a waiting call; JSON, or the stream when it was the last one          |
+| `POST /sessions/:id/resume`                                                   | Carry on a run whose decisions are all stored (`204` if none)                       |
+| `GET /sessions/:id/stream`                                                    | Join a run that is under way (`204` if none)                                        |
+| `GET /sessions/:id/shares`, `POST /sessions/:id/shares`                       | List the shares that are not cancelled, share read-only (the owner only)            |
+| `PATCH /sessions/:id/shares/:shareId`, `DELETE /sessions/:id/shares/:shareId` | Refresh a snapshot, show or hide tool output, give a live share a new life; cancel  |
+| `GET /toolsets`                                                               | The toolsets the user can switch on in a session                                    |
+| `GET /sessions/:id/tools`                                                     | The tools a session offers now: title, description, `readOnly` (the owner only)     |
 
 The streams are the [AI SDK UI message stream](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol)
 (`ai@7`): a call that needs approval is a `tool-approval-request`, and the
@@ -835,8 +855,8 @@ Backstage upgrade can break this plugin until it is updated.
 
 An entity tab or sidebar widget (the backend lists the sessions of an entity),
 sessions shared with the user in the list of an entity, file uploads,
-several model providers at once, MCP servers outside Backstage, sharing a
-conversation, or an agent's model and limits (those
+several model providers at once, MCP servers outside Backstage, a screen to
+share a conversation or copy a shared one, or an agent's model and limits (those
 fields can be set, and a module can register them; the loop does not use them
 yet), and a session list that can search, pin or archive (the page still lists
 recent sessions; a title is stored after the first round ends normally).

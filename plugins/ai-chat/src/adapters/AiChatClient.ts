@@ -24,10 +24,12 @@ import {
   type ChatQueuedMessage,
   type ChatSession,
   type ChatSessionDetail,
+  type ChatShare,
   type ChatTool,
   type ChatToolset,
   type ChatUploadedAttachment,
   type CreateChatSessionRequest,
+  type CreateChatShareRequest,
   type DecideToolCallRequest,
   type InsertChatMessageRequest,
   type InsertQueuedMessageRequest,
@@ -36,6 +38,7 @@ import {
   type ResumeChatRunRequest,
   type SendChatMessageRequest,
   type UpdateChatSessionRequest,
+  type UpdateChatShareRequest,
   type UpdateQueuedMessageRequest,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { AiChatApi } from '../api';
@@ -105,6 +108,36 @@ export class AiChatClient implements AiChatApi {
 
   async deleteSession(id: string): Promise<void> {
     await this.request(chatPaths.session(id), { method: 'DELETE' });
+  }
+
+  async listShares(id: string): Promise<ChatShare[]> {
+    const response = await this.request(chatPaths.shares(id));
+    return (await response.json()).items;
+  }
+
+  async createShare(
+    id: string,
+    request: CreateChatShareRequest,
+  ): Promise<ChatShare> {
+    const response = await this.post(chatPaths.shares(id), request);
+    return (await response.json()) as ChatShare;
+  }
+
+  async updateShare(
+    id: string,
+    shareId: string,
+    request: UpdateChatShareRequest,
+  ): Promise<ChatShare> {
+    const response = await this.request(chatPaths.share(id, shareId), {
+      method: 'PATCH',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(request),
+    });
+    return (await response.json()) as ChatShare;
+  }
+
+  async revokeShare(id: string, shareId: string): Promise<void> {
+    await this.request(chatPaths.share(id, shareId), { method: 'DELETE' });
   }
 
   async listToolsets(): Promise<ChatToolset[]> {

@@ -22,10 +22,12 @@ import type {
   ChatQueuedMessage,
   ChatSession,
   ChatSessionDetail,
+  ChatShare,
   ChatTool,
   ChatToolset,
   ChatUploadedAttachment,
   CreateChatSessionRequest,
+  CreateChatShareRequest,
   DecideToolCallRequest,
   InsertChatMessageRequest,
   InsertQueuedMessageRequest,
@@ -34,6 +36,7 @@ import type {
   ResumeChatRunRequest,
   SendChatMessageRequest,
   UpdateChatSessionRequest,
+  UpdateChatShareRequest,
   UpdateQueuedMessageRequest,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 
@@ -58,6 +61,18 @@ export interface AiChatApi {
     request: UpdateChatSessionRequest,
   ): Promise<ChatSession>;
   deleteSession(id: string): Promise<void>;
+  /** The shares of a session that are not cancelled; only its owner lists them. */
+  listShares(id: string): Promise<ChatShare[]>;
+  /** Shares a session, read-only, with a user or a group. */
+  createShare(id: string, request: CreateChatShareRequest): Promise<ChatShare>;
+  /** Changes a share; 404 when it is cancelled. */
+  updateShare(
+    id: string,
+    shareId: string,
+    request: UpdateChatShareRequest,
+  ): Promise<ChatShare>;
+  /** Cancels a share; 404 when it is cancelled already. */
+  revokeShare(id: string, shareId: string): Promise<void>;
   listToolsets(): Promise<ChatToolset[]>;
   /** The tools the session offers now, to show a call with its title and what it does. */
   listSessionTools(id: string): Promise<ChatTool[]>;

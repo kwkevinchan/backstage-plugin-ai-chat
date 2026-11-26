@@ -380,7 +380,7 @@ flowchart LR
 | P2-01 | 列表管理和自動標題          | M    | SE-03、SE-04                                     | 搜尋、釘選、改名、封存。標題在第一輪結束後產生，產生失敗不影響對話                                                                                                                                                                                                               | #35 | 後端完成，畫面在 PU-05 |
 | P2-02 | 保存期限                    | S    | SE-05                                            | 定期工作刪除過期的 Session。稽核紀錄還在。多台同時跑不會重複刪。逐項驗收見下方 P2-02                                                                                                                                                                                             | #34 | 完成                   |
 | P2-03 | Permission 和分享的資料模型 | M    | SH-01、SH-05、SH-08、SH-09、SH-11                | `shares` 表。`visibleItems` 每一列規則一個測試。條件規則「是擁有者」「有分享給我或我的群組」                                                                                                                                                                                     | #36 | 完成                   |
-| P2-04 | 分享的 use case 和 API      | M    | SH-02、SH-03、SH-06、SH-10、SH-11、IN-19（讀取） | 被分享的人送訊息和核准都被拒絕。到期後變成快照。每個動作有稽核紀錄                                                                                                                                                                                                               |
+| P2-04 | 分享的 use case 和 API      | M    | SH-02、SH-03、SH-06、SH-10、SH-11、IN-19（讀取） | 被分享的人送訊息和核准都被拒絕。到期後變成快照。每個動作有稽核紀錄。逐項驗收見下方 P2-04                                                                                                                                                                                         | #62 | 完成                   |
 | P2-05 | 分享的畫面和複製            | M    | SH-04、SH-07、SH-10、SH-12、IN-19（複製）        | 分享對話框的說明文字。持續更新時上方的提示列。複製出來的 Session 沒有工具輸出                                                                                                                                                                                                    |
 | P2-06 | 斷線接回和即時狀態          | M    | A-07、B-05                                       | 斷線後接回：從目前 Run 的第一個 Item 重送再接新的，先送 `start`，未完成的文字補送 `text-start` 加已累積的文字（Run 在別台時等它完成再整段送），Item 不重複不遺漏。逐字輸出到一半時重新整理，畫面接得上。Run 在別台時，每秒查一次新的 Item（沒有逐字片段）。沒裝 Signals 也能運作 | #44 | 後端完成，畫面在 PU-05 |
 | P2-07 | 側邊面板和入口元件          | M    | B-02                                             | 新增 `ai-chat-react`。面板在換頁時保留。別的 plugin 用 `<AiChatLauncher>` 開啟對話。逐項驗收見下方 P2-07                                                                                                                                                                         | #46 | 完成                   |
@@ -426,7 +426,7 @@ flowchart LR
   - 重新整理、逐字到一半與 `liveActivity` 轉態：載入時 Run 是 `running`，接回串流含 `start`、已完成的內容、`text-start` 和已累積的文字，以及後面的 `text-delta`。畫面上的助理文字是接起來的全文，使用者訊息只有一則。開啟時已帶 `liveActivity: 'running'` 或串流中才變成 `'running'`，之後轉成 `waiting_approval` 再回到 `running` 時仍能再次接回。`useSessionChat.test.tsx` 的 `shows the text so far after a reload and continues it without duplicating the message`、`follows a run that becomes active while the session is open and idle`、`does not follow again a run that was already running when the page opened`、`follows when a run resumes after waiting_approval even if opened with liveActivity running`、`follows when liveActivity becomes running while the initial stream is active and later resumes`、`reloads once when an open run leaves running or waiting`。
   - Signals：Run 開始通知 `running`，進入等核准通知 `waiting_approval`，正常完成通知 `replied`；失敗、取消（包含取消等核准的 Run）、租約過期、以及啟動失敗都通知 `idle`。`SignalsNotifier` 用 `signalsServiceRef.publish`，頻道 `ai-chat`，收件人是擁有者。沒有 Signals 時不做事的 Notifier 成功返回、不丟錯。通知失敗不讓 Run 或 caller 失敗。`RunSupervisor.test.ts` 的 `tells the notifier when a run starts, waits, completes, or ends without a reply`；`hostFlows.test.ts` 的 `notifies idle when cancelling a waiting_approval run, expiring a stale run, or failing to start a run`；`SignalsNotifier.test.ts` 的 `publishes the activity to the owner on the ai-chat channel`、`swallows a failure of publish`、`resolves without a signals service`。
   - 清單：`GET /sessions` 的每一筆，有進行中的 Run 時帶 `activity`（`running` 或 `waiting_approval`），沒有就不帶。`ListSessions.test.ts` 的 `adds the activity of the active run`。
-- **分享的安全測試**（第 5 節那一條屬於這一項的）：持續更新的分享，被分享的人用接回的端點也只收到他能看的內容。現在不能測：這一項不實作 P2-04 的分享讀取，`FollowSession` 維持 `assertOwner`。P2-04 接上可見範圍時，接回要走同一條讀取路徑，並補上這條測試。
+- **分享的安全測試**（第 5 節那一條）：持續更新的分享，被分享的人用接回的端點也只收到他能看的內容。這一項的 `FollowSession` 只給擁有者；被分享的人的接回在 P2-04，走同一條讀取路徑，測試在 P2-04 的驗收。
 - **規格沒寫、實作選定的地方**（對齊程式架構的 `Notifier`、`SignalsNotifier`、`signalsServiceRef`，以及第 8 節接回只在 `running` 時串流）：
   - 跨 backend 的間隔是 1 秒；單次讀取失敗會記 warn 並重試，連續失敗 3 次才結束。測試注入等待，不真的等一秒。
   - 通知頻道是 `ai-chat`。訊息是 `{ sessionId, activity }`，`activity` 為 `running`（處理中）、`waiting_approval`（等核准）、`replied`（有新回覆，Run 是 `completed`）、`idle`（失敗、取消、過期）。只發給擁有者的 user entity ref。`idle` 沒有出現在規格的三個名稱裡；不送的話，只聽 Signals 的畫面會把狀態留在「處理中」。
@@ -523,7 +523,63 @@ flowchart LR
   - `defaultHours`、`maxHours` 必須是正整數，而且 `defaultHours` 不大於 `maxHours`。超過、零、小數都啟動失敗。
   - README（英文和繁中）的設定範例含這個區塊，`config.test.ts` 照既有方式接受它。
 - **第 5 節的安全測試，這一項測的**：超過 `up_to_seq` 的 Item 不在 `visibleItems`（也就是 `GetSession` 回給被分享的人的內容）。超過 `outputs_up_to_seq` 的工具輸出只有狀態。`summary` 同一條規則。不在群組、離開群組、`revoked_at` 已填，都讀不到。
-- **留給後面的安全測試**：被分享的人直接打 HTTP（含用序號把 Item 再讀一次）是 P2-04，這一項不加分享路由。附件位元組的 HTTP 讀取是 P2-04 的 IN-19，`ReadAttachment` 仍只允許擁有者。複製是 P2-05。接回端點是 P2-06，`FollowSession` 仍只允許擁有者。
+- **留給後面的安全測試**：被分享的人直接打 HTTP（含用序號把 Item 再讀一次）、附件位元組的讀取（IN-19）、接回端點，都在 P2-04。複製是 P2-05。
+
+### P2-04 分享的 use case 和 API
+
+- **範圍**：
+  - 共用套件：`ChatShare`、`ChatShareList`、`CreateChatShareRequest`、`UpdateChatShareRequest`，路徑 `chatPaths.shares`、`chatPaths.share`。
+  - 宿主：
+    - use case `ListShares`、`ShareSession`、`UpdateShare`、`RevokeShare`，只有擁有者能用。路由 `GET`／`POST /sessions/:id/shares`、`PATCH`／`DELETE /sessions/:id/shares/:shareId`，OpenAPI 同步。
+    - `ShareRepository` 加 `get`、`update`、`revoke`。`update` 和 `revoke` 只改還沒取消的列。`NewShare` 可以帶 `id`，稽核事件在寫入之前就有分享的 id。
+    - 讀取的共用路徑 `application/sessionRead.ts`：`authorizeRead`（問 `AccessControl`，帶上這段 Session 的分享）和 `shareeView`（有效分享的聯集、`visibleItems`）。`GetSession`、`ReadAttachment`、`FollowSession` 都用它。
+    - IN-19（讀取）：`ReadAttachment` 讓被分享的人讀他看得到的 `user_message` 用到的附件。
+    - `FollowSession`：被分享的人用接回端點時，只拿到他看得到的 Item。
+    - 稽核事件 `session-share`、`session-share-update`、`session-share-revoke`（SH-06）。
+    - 設定 `aiChat.sharing.live` 生效：`enabled: false` 時不能建立持續更新；`defaultHours`、`maxHours` 決定到期時間（SH-11）。
+  - 前端 client（不含畫面）：`AiChatApi` 和 `AiChatClient` 加 `listShares`、`createShare`、`updateShare`、`revokeShare`。
+  - 不做：分享對話框、持續更新的提示列、被分享的人的畫面（P2-05）；複製（`ForkSession`、SH-04、IN-19 的複製，P2-05）；「分享給我的」Session 列表；檢查分享對象在 catalog 裡存在；通知被分享的人。
+- **依賴**：P2-03（`shares`、`visibleItems`、`effectiveShare`、permission）、P2-06（`FollowSession` 的跨 backend 輪詢）、PI-05（附件）。
+- **API**：
+  - `POST /sessions/:id/shares`：`{ subjectRef, mode?, includeToolOutputs?, includeLaterToolOutputs?, hours? }`，回 201 和 `ChatShare`。`mode` 是 `snapshot`（預設）或 `live`。`includeToolOutputs` 預設真。`includeLaterToolOutputs`、`hours` 只給 `live`。
+  - `PATCH /sessions/:id/shares/:shareId`：`{ refresh?, includeToolOutputs?, includeLaterToolOutputs?, hours? }`，至少一項，回 `ChatShare`。`refresh: true` 只給快照。
+  - `DELETE /sessions/:id/shares/:shareId`：取消，回 204。
+  - `GET /sessions/:id/shares`：`{ items: ChatShare[] }`，沒有取消的分享，舊的在前。
+  - `ChatShare`：`id`、`subjectRef`、`mode`、`upToSeq`（快照）、`outputsUpToSeq`、`expiresAt`（持續更新）、`expired`、`createdBy`、`createdAt`。
+- **兩個序號怎麼來**（用 P2-03 的 `shareScope`；「現在的序號」是寫入當下紀錄的最後一筆，空的紀錄是 0）：
+
+  | 請求                                      | `up_to_seq` | `outputs_up_to_seq`  |
+  | ----------------------------------------- | ----------- | -------------------- |
+  | 快照，`includeToolOutputs` 真（預設）     | 現在的序號  | 空值（範圍內都給看） |
+  | 快照，`includeToolOutputs: false`         | 現在的序號  | 0                    |
+  | 持續更新，預設                            | 空值        | 現在的序號（SH-09）  |
+  | 持續更新，`includeLaterToolOutputs: true` | 空值        | 空值                 |
+  | 持續更新，`includeToolOutputs: false`     | 空值        | 0                    |
+
+  `PATCH` 的 `refresh` 把快照的 `up_to_seq` 移到現在的序號，`outputs_up_to_seq` 不變。`includeToolOutputs: false` 設成 0。`includeToolOutputs: true` 在快照設成空值，在持續更新設成現在的序號。`includeLaterToolOutputs: true` 設成空值，`false` 設成現在的序號。`hours` 把到期時間設成現在加上那麼多小時。
+
+- **驗收**：
+  - 建立（SH-01、SH-08）：擁有者把 Session 分享給 `user:…` 或 `group:…`，回 201，列表看得到。快照的 `upToSeq` 是建立當下的序號；之後寫入的 Item 被分享的人看不到，擁有者 `refresh` 之後才看得到。不合格的 `subjectRef`（不是 `user`、`group`，或缺名字）、分享給自己、快照帶 `hours` 或 `includeLaterToolOutputs`、`includeToolOutputs: false` 又帶 `includeLaterToolOutputs: true`，都是 400 `InvalidShare`，不寫入。`shareRoutes.test.ts` 的 `shares a snapshot that stops at that moment until the owner refreshes it (SH-01, SH-08)`、`refuses a request that does not fit, and stores nothing`、`matches a group written with capitals to the lower-case refs of its members`；`share.test.ts` 的 `normalizeSubjectRef`、`createShareScope`。
+  - 工具輸出（SH-02、SH-09）：預設的快照看得到範圍內的工具輸出。`includeToolOutputs: false` 時每一筆 `tool_result` 只有狀態，輸出是 `not shared`，`summary` 不在；`tool_call` 的工具和參數還在。預設的持續更新：分享之前的輸出看得到，之後的只有狀態；擁有者打開 `includeLaterToolOutputs` 之後看得到。`shareRoutes.test.ts` 的 `sees the tool output of a snapshot unless the owner leaves it out (SH-02)`、`hides the later tool output of a live share until the owner shows it (SH-09)`；`share.test.ts` 的 `updatedShareScope`。
+  - 不能操作（SH-03）：被分享的人（快照或持續更新）送訊息、核准或拒絕、接續、取消、插入、排隊、上傳附件、改 Session、刪 Session、管理分享，都是 404，回應和找不到一樣。之後紀錄裡沒有新的 Run、`user_message`、`approval`，沒有 `tool-call-approve` 的稽核，動作沒有執行，Session 沒變。`shareRoutes.test.ts` 的 `answers every change of a sharee of a %s share like a session that does not exist, and changes nothing`（快照和持續更新各一次，含排隊的改、刪、重排、插入）。Policy 回 DENY 時擁有者的讀取、附件、接回都是 404：`refuses the owner too, on every read, when the policy denies ai-chat.session.read`。
+  - 稽核（SH-06）：建立、修改、取消各寫一筆，`eventId` 依序是 `session-share`、`session-share-update`、`session-share-revoke`，`meta` 有操作的人、Session、分享的 id、對象、模式、兩個序號、到期時間。寫入失敗時那一筆是 `fail`。不是擁有者、不合格的請求、找不到的分享不寫。`shareRoutes.test.ts` 的 `writes each change to the auditor, and nothing for a refused request (SH-06)`；`shareChanges.test.ts`；`AuditorAuditLog.test.ts` 的 `puts the share as it is after the change in the meta, null for what it lacks`。
+  - 持續更新的對象（SH-10）：`GET /sessions/:id/shares` 列出每一筆沒有取消的分享（對象、模式、到期時間、`expired`），只有擁有者能列。取消之後不在列表裡。`shareRoutes.test.ts` 的 `lists the shares that are not cancelled for the owner only, and a stop takes one off (SH-10)`。
+  - 到期（SH-11）：沒帶 `hours` 時到期時間是現在加 `defaultHours`。`hours` 是 1 到 `maxHours` 的整數，其他是 400。`sharing.live.enabled: false` 時建立持續更新是 400 `LiveSharingDisabled`，快照照常。過了到期時間，被分享的人讀到的停在到期當下（之後寫入的 Item 不在），讀取還在；列表的 `expired` 是真。擁有者用 `hours` 延長之後又持續更新。`shareRoutes.test.ts` 的 `freezes a live share at its expiry, and a new life lets it go on`、`takes the default and the maximum life from the configuration, and refuses live shares when they are off`；`share.test.ts` 的 `liveShareExpiry`。
+  - 取消：取消後同一個網址（`GET /sessions/:id`、附件、接回）立刻 404，在另一台後端也是。已取消或不存在的分享，`PATCH`、`DELETE` 都是 404 `ShareNotFound`。同時取消兩次只有一次成功，只有一筆成功的稽核。`shareRoutes.test.ts` 的 `a cancelled share stops every read at once, and cannot be changed (section 5)`；`KnexShareRepository.test.ts` 的 `cancels a share once, and changes no cancelled share`。
+  - 直接打 API（第 5 節的安全測試）：被分享的人用 `afterSeq` 再讀一次，也只拿到範圍內的 Item；超過 `outputs_up_to_seq` 的輸出只有狀態。群組分享：不在群組的人讀不到，離開群組後讀不到。`shareRoutes.test.ts` 的 snapshot 那一條（`afterSeq`）和 `a group share is read by its members only, and not after one leaves (section 5)`。
+  - 附件（IN-19 讀取）：被分享的人讀得到他看得到的 `user_message` 用到的圖片，位元組和 `ETag` 跟擁有者讀到的一樣。`used_seq` 超過 `up_to_seq` 的附件、還沒進訊息的附件、排隊保留的附件，都是 404 `AttachmentNotFound`，跟不存在一樣。持續更新看得到所有已經進訊息的附件；到期之後只到停住的那一筆。`shareRoutes.test.ts` 的 `lets the sharee read the images of the messages the share shows, and no other`、`stops at the expiry of a live share`。
+  - 接回（第 5 節的安全測試）：持續更新的被分享的人用 `GET /sessions/:id/stream` 只收到他看得到的 Item：分享之後的工具輸出只有狀態，沒有逐字片段，最後等核准時沒有 `tool-approval-request`。分享是快照、或已經到期時，回 204。串流中分享被取消或到期，串流結束，之後的 Item 不送。`shareRoutes.test.ts` 的 `sends a live sharee only what the share shows, and no call to approve`；`FollowSession.test.ts` 的 `FollowSession for a sharee` 六條（含只讀游標之後的紀錄）。
+  - 兩台後端：A 建立分享，B 上被分享的人立刻讀得到；A 取消，B 立刻讀不到。PostgreSQL 上兩個取消同時進行，只有一個成功；取消和修改同時進行，結束時一定是取消的。`twoBackends.test.ts` 的 `made on A is read on B at once, and a cancel on A stops the reads on B at once`；`postgresConcurrency.test.ts` 的 `shares (SH-06)` 兩條（只在 PostgreSQL 跑）。
+- **規格沒寫、實作選定的地方**：
+  - 被分享的人做任何寫入都是 404，跟沒有權限一樣，不另外用 403：寫入的 use case 仍只查擁有者（`assertOwner`），分享不會變成寫入的權限。
+  - 讀取的路徑全部經過 `AccessControl`（SH-05 的 `ai-chat.session.read`）。所以 permission policy 回 DENY 時，擁有者的接回和附件讀取也被拒絕，跟 `GetSession` 一樣。
+  - 快照沒有到期時間：SH-11 只寫持續更新。持續更新的到期時間可以用 `hours` 延長，上限一樣是 `maxHours`，從延長的那一刻算起。
+  - `includeToolOutputs` 用一個布林值，對應規格的「包含工具輸出」；持續更新另外用 `includeLaterToolOutputs` 表示「之後的工具輸出也給看」。
+  - `subjectRef` 要寫成 `user:<namespace>/<name>` 或 `group:<namespace>/<name>`；沒寫 namespace 時用 `default`。整串轉成小寫，和 `normalizeEntityRef` 一樣：使用者和他的群組的 ref（`ownershipRefs`）是小寫，分享用字串比對。補上 `default` 之後超過 255 字元是 400 `InvalidShare`。不查 catalog。
+  - 同一個對象可以有多筆分享，被分享的人看到的是聯集（P2-03 的規則）。
+  - 已取消的分享不能再改或再取消，回 404。取消時先寫稽核，再寫入；寫入時發現已經被取消，那一筆是 `fail`，回 404。
+  - 接回時被分享的人一律走輪詢（每秒讀一次游標之後的紀錄，套一次 `visibleItems`；有一筆分享已經到期時讀完整紀錄，因為到期的分享停在哪一筆要看之前每一筆的時間），即使 Run 在同一台：這一台的事件裡有沒遮的工具輸出和逐字片段。每次讀取重新讀分享，所以取消、到期在一秒內生效。Permission policy 和群組在接回開始時檢查一次，串流中途不再問。
+  - 被分享的人讀到的 Run 停在等核准時，結束的事件不帶要核准的呼叫：核准是擁有者的操作。
 
 ### P2-06 斷線接回和即時狀態
 
@@ -1402,3 +1458,5 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-26 | 1.2  | P3-08 完成（T-08、T-09、T-10，#59）：permission `ai-chat.toolset.use` 和條件 `IS_TOOLSET` 決定誰能用哪個 Toolset，送給模型的是 Session 開啟的、Agent 的 `toolsets` 列的、使用者能用的 Toolset 的交集；`aiChat.toolOutput` 依 action ID 樣式設輸出上限和要遮蔽的欄位，先遮蔽再裁切，`afterToolCall` 之後再做一次，遮蔽失敗時不存輸出；`aiChat.writesPerMinute` 是每人每分鐘的寫入次數，所有後端共用（`write_quota_windows`），超過時不執行。逐項驗收見 P3-08                                                                                                                                                                                                                                          |
 | 2026-11-26 | 1.2  | P3-09 完成（O-01，#60）：核心的 `RunObserver` 收每次模型呼叫和每個工具結果的量測，`ModelChunk` 加 `usage`；宿主寫 `Model call`、`Tool call`、`Run ended` 三種 log，並用 Backstage 的 `metricsServiceRef` 記 `ai_chat.*` metric。只有數字、id 和固定的分類詞。模型、Hook、context provider 失敗的 log 只記錯誤的名稱（模型另有 HTTP 狀態碼）。新設定 `reportUsage`。不做 trace                                                                                                                                                                                                                                                                                                                        |
 | 2026-11-26 | 1.2  | P3-10 完成（B-03，#61）：`ai-chat-react` 公開結果顯示元件的型別、`aiChatToolResultsApiRef`、`AiChatSafeLink`，`/alpha` 有 `AiChatToolResultBlueprint`；舊前端系統由 app 用 `createAiChatToolResultsApi` 覆蓋這個 API。元件畫在內建的列或核准卡片下面，先註冊的有效，內建工具不能被覆蓋，元件出錯時退回預設。逐項驗收見 P3-10                                                                                                                                                                                                                                                                                                                                                                         |
+| 2026-11-26 | 1.2  | P2-04 驗收清單（SH-02、SH-03、SH-06、SH-10、SH-11、IN-19 的讀取）：分享的 API 和兩個序號的對應；被分享的人的寫入一律 404；讀取（`GetSession`、附件、接回）都經過 `AccessControl` 和同一份可見範圍；接回時被分享的人一律輪詢；快照沒有到期時間；稽核先記再寫                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 2026-11-26 | 1.2  | P2-04 完成（SH-02、SH-03、SH-11，SH-06 和 SH-10 的後端，IN-19 的讀取，#62）：`/sessions/{id}/shares` 建立、修改、取消、列出唯讀的分享，先寫稽核再寫入；被分享的人的寫入一律 404；`GetSession`、附件、接回都經過 `AccessControl` 和同一份可見範圍；接回時被分享的人只輪詢游標之後的紀錄；分享對象整串小寫。逐項驗收見 P2-04                                                                                                                                                                                                                                                                                                                                                                           |
