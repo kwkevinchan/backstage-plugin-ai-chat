@@ -21,6 +21,7 @@ import {
   assertOwner,
   createShareScope,
   liveShareExpiry,
+  MAX_SUBJECT_REF_LENGTH,
   normalizeSubjectRef,
   type LiveShareLimits,
   type NewShare,
@@ -72,6 +73,11 @@ export class ShareSession {
     if (subjectRef === undefined) {
       throw new InvalidShare(
         'subjectRef must be a user or a group, like user:default/name',
+      );
+    }
+    if (subjectRef.length > MAX_SUBJECT_REF_LENGTH) {
+      throw new InvalidShare(
+        `subjectRef must be at most ${MAX_SUBJECT_REF_LENGTH} characters`,
       );
     }
     if (subjectRef === session.ownerRef) {

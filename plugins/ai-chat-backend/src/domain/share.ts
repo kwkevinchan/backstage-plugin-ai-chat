@@ -146,16 +146,19 @@ const SUBJECT_REF = /^(user|group):(?:([^:/\s]+)\/)?([^:/\s]+)$/i;
 
 /**
  * `user:<namespace>/<name>` or `group:<namespace>/<name>`, with `default`
- * when the namespace is left out. The kind and the namespace are lower case
- * and the name keeps its case, as `stringifyEntityRef` writes it. Anything
- * else is `undefined`.
+ * when the namespace is left out, all in lower case like `normalizeEntityRef`:
+ * the refs of the user and of their groups (`ownershipRefs`) come lower case,
+ * and a share matches them as strings. Anything else is `undefined`.
  */
 export function normalizeSubjectRef(ref: string): string | undefined {
   const match = SUBJECT_REF.exec(ref.trim());
   if (!match) return undefined;
   const [, kind, namespace = 'default', name] = match;
-  return `${kind.toLowerCase()}:${namespace.toLowerCase()}/${name}`;
+  return `${kind}:${namespace}/${name}`.toLowerCase();
 }
+
+/** The longest subject ref a share stores, after it is normalized. */
+export const MAX_SUBJECT_REF_LENGTH = 255;
 
 /** What the owner asks for when sharing. */
 export type ShareRequest = {

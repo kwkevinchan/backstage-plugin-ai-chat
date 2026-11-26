@@ -349,7 +349,7 @@ export interface CreateChatShareRequest {
  */
 export interface UpdateChatShareRequest {
   /** Snapshot only: the sharee sees the session up to now. */
-  refresh?: boolean;
+  refresh?: true;
   includeToolOutputs?: boolean;
   /** Live only. */
   includeLaterToolOutputs?: boolean;

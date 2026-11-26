@@ -84,6 +84,7 @@ export {
   DEFAULT_LIVE_SHARE_LIMITS,
   isShareExpired,
   liveShareExpiry,
+  MAX_SUBJECT_REF_LENGTH,
   normalizeSubjectRef,
   shareGrantsRead,
   shareModeOf,

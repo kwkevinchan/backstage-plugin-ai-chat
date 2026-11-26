@@ -1430,7 +1430,7 @@ Session 列表（`threadListAdapter`，實作 `RemoteThreadListAdapter`）。
 | Use case                 | 做什麼                                                                                                | 用到的 port                                                                                      | 規格                |
 | ------------------------ | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------- |
 | `UploadAttachment`       | 檢查擁有者和檔案，存成附件                                                                            | SessionRepository、AttachmentStore                                                               | IN-01 到 IN-04      |
-| `ReadAttachment`         | 檢查擁有者，回傳位元組和型別                                                                          | SessionRepository、AttachmentStore                                                               | IN-03、IN-08        |
+| `ReadAttachment`         | 檢查讀取權限（擁有者，以及看得到那則訊息的被分享的人），回傳位元組和型別                              | SessionRepository、AttachmentStore                                                               | IN-03、IN-08        |
 | `InsertMessage`          | 檢查訊息，寫入 `delivery: inserted` 的 `user_message`。不建立 Run，不啟動迴圈                         | SessionRepository、ItemLog、AttachmentStore                                                      | IN-10、IN-11、IN-17 |
 | `QueueMessage`           | 檢查訊息，加進佇列                                                                                    | SessionRepository、QueuedMessageRepository、AttachmentStore                                      | IN-13               |
 | `UpdateQueuedMessage`    | 改文字、附件、頁面                                                                                    | SessionRepository、QueuedMessageRepository                                                       | IN-13               |
@@ -1706,7 +1706,7 @@ controller 依序做（`controllers/attachments.ts`；`route()` 先取出身分�
 
 **讀取**
 
-`GET /sessions/:id/attachments/:attachmentId`。`ReadAttachment` 做擁有者檢查；附件不屬於這段 Session 回 404。回應標頭：
+`GET /sessions/:id/attachments/:attachmentId`。`ReadAttachment` 檢查讀取權限：擁有者，以及看得到那則訊息的被分享的人（13.5）；附件不屬於這段 Session、或被分享的人看不到，回 404。回應標頭：
 
 - `Content-Type`：存下的型別。
 - `X-Content-Type-Options: nosniff`、`Content-Disposition: inline`。

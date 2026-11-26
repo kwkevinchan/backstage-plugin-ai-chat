@@ -179,8 +179,8 @@ describe('normalizeSubjectRef', () => {
     ['user:default/bob', 'user:default/bob'],
     ['group:default/team', 'group:default/team'],
     ['user:bob', 'user:default/bob'],
-    ['User:Default/Bob', 'user:default/Bob'],
-    ['  group:ops/SRE  ', 'group:ops/SRE'],
+    ['User:Default/Bob', 'user:default/bob'],
+    ['  group:ops/SRE  ', 'group:ops/sre'],
   ])('reads %p as %p', (ref, normalized) => {
     expect(normalizeSubjectRef(ref)).toBe(normalized);
   });

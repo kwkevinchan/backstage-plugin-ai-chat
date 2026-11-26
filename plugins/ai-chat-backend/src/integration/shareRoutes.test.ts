@@ -272,6 +272,8 @@ describe('sharing a session', () => {
       };
       await refused({ subjectRef: 'component:default/x' });
       await refused({ subjectRef: 'user:default/a/b' });
+      // 255 characters as sent, longer once the namespace is added.
+      await refused({ subjectRef: `user:${'a'.repeat(250)}` });
       await refused({ subjectRef: 'user:default/jane' });
       await refused({ subjectRef: 'user:bob', hours: 2 });
       await refused({ subjectRef: 'user:bob', includeLaterToolOutputs: true });
@@ -390,6 +392,18 @@ describe('sharing a session', () => {
       expect(await statusFor('cara')).toBe(404);
     });
 
+    it('matches a group written with capitals to the lower-case refs of its members', async () => {
+      const b = await start([]);
+      const id = await newSession(b);
+      groups.set('cara', ['group:default/sre']);
+      const made = await share(b, id, {
+        subjectRef: 'group:default/SRE',
+      }).expect(201);
+      expect(made.body.subjectRef).toBe('group:default/sre');
+      const res = await as('cara', request(b.app).get(`/sessions/${id}`));
+      expect(res.status).toBe(200);
+    });
+
     it('a cancelled share stops every read at once, and cannot be changed (section 5)', async () => {
       const b = await start([[say('hi')]]);
       const id = await newSession(b);
@@ -432,129 +446,190 @@ describe('sharing a session', () => {
   });
 
   describe('the sharee cannot act (SH-03)', () => {
-    it('answers every change of a sharee like a session that does not exist, and changes nothing', async () => {
-      const b = await start([write(), [say('never')]]);
+    it.each([
+      ['live', { mode: 'live', includeLaterToolOutputs: true }],
+      ['snapshot', {}],
+    ])(
+      'answers every change of a sharee of a %s share like a session that does not exist, and changes nothing',
+      async (_mode, shape) => {
+        const b = await start([write(), [say('never')]]);
+        const id = await newSession(b);
+        await send(b, id, 'change it');
+        const owner = await as(
+          'jane',
+          request(b.app).get(`/sessions/${id}`),
+        ).expect(200);
+        const run = owner.body.run;
+        const [callId] = owner.body.awaitingDecision;
+        expect(run.status).toBe('waiting_approval');
+        const queued = await as(
+          'jane',
+          request(b.app).post(`/sessions/${id}/queue`),
+        )
+          .send({ text: 'later' })
+          .expect(201);
+        const queuedId = queued.body.id;
+        const created = await share(b, id, {
+          subjectRef: 'user:default/bob',
+          ...shape,
+        }).expect(201);
+        const image = await upload(b, id, 'image/png');
+        const runCount = await world.runCount();
+        const before = await items(b, id, 'jane');
+
+        const sharee = await as(
+          'bob',
+          request(b.app).get(`/sessions/${id}`),
+        ).expect(200);
+        expect(sharee.body.run).toMatchObject({ id: run.id });
+        expect(sharee.body.awaitingDecision).toEqual([]);
+        expect(sharee.body.resumable).toBe(false);
+
+        const attempts: [string, request.Test][] = [
+          [
+            'send',
+            request(b.app).post(`/sessions/${id}/runs`).send({ text: 'x' }),
+          ],
+          [
+            'approve',
+            request(b.app)
+              .post(`/sessions/${id}/tool-calls/${callId}/decision`)
+              .send({ approved: true }),
+          ],
+          [
+            'deny',
+            request(b.app)
+              .post(`/sessions/${id}/tool-calls/${callId}/decision`)
+              .send({ approved: false }),
+          ],
+          ['resume', request(b.app).post(`/sessions/${id}/resume`).send({})],
+          [
+            'cancel',
+            request(b.app).post(`/sessions/${id}/runs/${run.id}/cancel`),
+          ],
+          [
+            'insert',
+            request(b.app)
+              .post(`/sessions/${id}/runs/${run.id}/messages`)
+              .send({ text: 'x' }),
+          ],
+          [
+            'queue',
+            request(b.app).post(`/sessions/${id}/queue`).send({ text: 'x' }),
+          ],
+          ['list queue', request(b.app).get(`/sessions/${id}/queue`)],
+          ['resume queue', request(b.app).post(`/sessions/${id}/queue/resume`)],
+          [
+            'change queued',
+            request(b.app)
+              .patch(`/sessions/${id}/queue/${queuedId}`)
+              .send({ text: 'mine' }),
+          ],
+          [
+            'delete queued',
+            request(b.app).delete(`/sessions/${id}/queue/${queuedId}`),
+          ],
+          [
+            'reorder queue',
+            request(b.app)
+              .put(`/sessions/${id}/queue/order`)
+              .send({ ids: [queuedId] }),
+          ],
+          [
+            'insert queued',
+            request(b.app)
+              .post(`/sessions/${id}/queue/${queuedId}/insert`)
+              .send({ runId: run.id }),
+          ],
+          [
+            'upload',
+            request(b.app)
+              .post(`/sessions/${id}/attachments`)
+              .query({ name: 'a' })
+              .set('Content-Type', 'image/png')
+              .send(IMAGES['image/png']),
+          ],
+          [
+            'rename',
+            request(b.app).patch(`/sessions/${id}`).send({ title: 'x' }),
+          ],
+          ['delete', request(b.app).delete(`/sessions/${id}`)],
+          ['tools', request(b.app).get(`/sessions/${id}/tools`)],
+          ['list shares', request(b.app).get(`/sessions/${id}/shares`)],
+          [
+            'share',
+            request(b.app)
+              .post(`/sessions/${id}/shares`)
+              .send({ subjectRef: 'user:default/cara' }),
+          ],
+          [
+            'change share',
+            request(b.app)
+              .patch(`/sessions/${id}/shares/${created.body.id}`)
+              .send({ includeToolOutputs: false }),
+          ],
+          [
+            'cancel share',
+            request(b.app).delete(`/sessions/${id}/shares/${created.body.id}`),
+          ],
+        ];
+        for (const [name, attempt] of attempts) {
+          const res = await as('bob', attempt);
+          expect({ name, status: res.status }).toEqual({ name, status: 404 });
+        }
+
+        expect(await world.runCount()).toBe(runCount);
+        expect(await items(b, id, 'jane')).toEqual(before);
+        expect(world.actions.count('demo:write')).toBe(0);
+        expect(world.audit.ids()).not.toContain('tool-call-approve');
+        expect(world.audit.ids()).not.toContain('tool-call-deny');
+        const after = await as(
+          'jane',
+          request(b.app).get(`/sessions/${id}`),
+        ).expect(200);
+        expect(after.body.session).toEqual(owner.body.session);
+        expect(after.body.run).toMatchObject({ status: 'waiting_approval' });
+        expect(after.body.awaitingDecision).toEqual([callId]);
+        await as(
+          'jane',
+          request(b.app).get(`/sessions/${id}/attachments/${image}`),
+        ).expect(200);
+        const shares = await as(
+          'jane',
+          request(b.app).get(`/sessions/${id}/shares`),
+        ).expect(200);
+        expect(shares.body.items).toEqual([created.body]);
+        const queue = await as(
+          'jane',
+          request(b.app).get(`/sessions/${id}/queue`),
+        ).expect(200);
+        expect(queue.body.items.map((m: any) => [m.id, m.text])).toEqual([
+          [queuedId, 'later'],
+        ]);
+        expect(shareEvents().map(event => event.eventId)).toEqual([
+          'session-share',
+        ]);
+      },
+    );
+
+    it('refuses the owner too, on every read, when the policy denies ai-chat.session.read', async () => {
+      const b = await start([[say('hi')]], {
+        access: {
+          canReadSession: async () => false,
+          usableToolsets: async ({ toolsetIds }) => [...toolsetIds],
+        },
+      });
       const id = await newSession(b);
-      await send(b, id, 'change it');
-      const owner = await as(
-        'jane',
-        request(b.app).get(`/sessions/${id}`),
-      ).expect(200);
-      const run = owner.body.run;
-      const [callId] = owner.body.awaitingDecision;
-      expect(run.status).toBe('waiting_approval');
-      const created = await share(b, id, {
-        subjectRef: 'user:default/bob',
-        mode: 'live',
-        includeLaterToolOutputs: true,
-      }).expect(201);
       const image = await upload(b, id, 'image/png');
-      const runCount = await world.runCount();
-      const before = await items(b, id, 'jane');
-
-      const sharee = await as(
-        'bob',
-        request(b.app).get(`/sessions/${id}`),
-      ).expect(200);
-      expect(sharee.body.run).toMatchObject({ id: run.id });
-      expect(sharee.body.awaitingDecision).toEqual([]);
-      expect(sharee.body.resumable).toBe(false);
-
-      const attempts: [string, request.Test][] = [
-        [
-          'send',
-          request(b.app).post(`/sessions/${id}/runs`).send({ text: 'x' }),
-        ],
-        [
-          'approve',
-          request(b.app)
-            .post(`/sessions/${id}/tool-calls/${callId}/decision`)
-            .send({ approved: true }),
-        ],
-        [
-          'deny',
-          request(b.app)
-            .post(`/sessions/${id}/tool-calls/${callId}/decision`)
-            .send({ approved: false }),
-        ],
-        ['resume', request(b.app).post(`/sessions/${id}/resume`).send({})],
-        [
-          'cancel',
-          request(b.app).post(`/sessions/${id}/runs/${run.id}/cancel`),
-        ],
-        [
-          'insert',
-          request(b.app)
-            .post(`/sessions/${id}/runs/${run.id}/messages`)
-            .send({ text: 'x' }),
-        ],
-        [
-          'queue',
-          request(b.app).post(`/sessions/${id}/queue`).send({ text: 'x' }),
-        ],
-        ['list queue', request(b.app).get(`/sessions/${id}/queue`)],
-        ['resume queue', request(b.app).post(`/sessions/${id}/queue/resume`)],
-        [
-          'upload',
-          request(b.app)
-            .post(`/sessions/${id}/attachments`)
-            .query({ name: 'a' })
-            .set('Content-Type', 'image/png')
-            .send(IMAGES['image/png']),
-        ],
-        [
-          'rename',
-          request(b.app).patch(`/sessions/${id}`).send({ title: 'x' }),
-        ],
-        ['delete', request(b.app).delete(`/sessions/${id}`)],
-        ['tools', request(b.app).get(`/sessions/${id}/tools`)],
-        ['list shares', request(b.app).get(`/sessions/${id}/shares`)],
-        [
-          'share',
-          request(b.app)
-            .post(`/sessions/${id}/shares`)
-            .send({ subjectRef: 'user:default/cara' }),
-        ],
-        [
-          'change share',
-          request(b.app)
-            .patch(`/sessions/${id}/shares/${created.body.id}`)
-            .send({ includeToolOutputs: false }),
-        ],
-        [
-          'cancel share',
-          request(b.app).delete(`/sessions/${id}/shares/${created.body.id}`),
-        ],
-      ];
-      for (const [name, attempt] of attempts) {
-        const res = await as('bob', attempt);
-        expect({ name, status: res.status }).toEqual({ name, status: 404 });
+      await send(b, id, 'look', { attachmentIds: [image] });
+      for (const path of [
+        `/sessions/${id}`,
+        `/sessions/${id}/attachments/${image}`,
+        `/sessions/${id}/stream`,
+      ]) {
+        const res = await as('jane', request(b.app).get(path));
+        expect({ path, status: res.status }).toEqual({ path, status: 404 });
       }
-
-      expect(await world.runCount()).toBe(runCount);
-      expect(await items(b, id, 'jane')).toEqual(before);
-      expect(world.actions.count('demo:write')).toBe(0);
-      expect(world.audit.ids()).not.toContain('tool-call-approve');
-      expect(world.audit.ids()).not.toContain('tool-call-deny');
-      const after = await as(
-        'jane',
-        request(b.app).get(`/sessions/${id}`),
-      ).expect(200);
-      expect(after.body.session).toEqual(owner.body.session);
-      expect(after.body.run).toMatchObject({ status: 'waiting_approval' });
-      expect(after.body.awaitingDecision).toEqual([callId]);
-      await as(
-        'jane',
-        request(b.app).get(`/sessions/${id}/attachments/${image}`),
-      ).expect(200);
-      const shares = await as(
-        'jane',
-        request(b.app).get(`/sessions/${id}/shares`),
-      ).expect(200);
-      expect(shares.body.items).toEqual([created.body]);
-      expect(shareEvents().map(event => event.eventId)).toEqual([
-        'session-share',
-      ]);
     });
   });
 

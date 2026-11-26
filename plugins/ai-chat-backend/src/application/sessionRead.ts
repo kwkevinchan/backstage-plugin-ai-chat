@@ -19,6 +19,7 @@ import {
   NotSessionOwner,
   effectiveShare,
   isSessionOwner,
+  isShareExpired,
   shareGrantsRead,
   visibleItems,
   type Principal,
@@ -70,7 +71,7 @@ export async function authorizeRead(
 export type ShareeView = {
   /** The union of the shares that name the principal and are not cancelled. */
   share: Share;
-  /** The whole log, for rules that need what is hidden (never sent out). */
+  /** The log that was read, for rules that need what is hidden (never sent out). */
   all: Item[];
   /** The items the share shows, tool output past its bound reduced to a status. */
   visible: VisibleItem[];
@@ -78,26 +79,38 @@ export type ShareeView = {
 
 /**
  * The items a sharee may see now: the shares that name the principal and
- * are not cancelled, joined into one, applied to the whole log. Throws
+ * are not cancelled, joined into one, applied to the log. Throws
  * `NotSessionOwner` when none is left (a policy that allows without a share).
+ *
+ * With `afterSeq`, only the items after it are read and returned, unless one
+ * of those shares is past its expiry: where a frozen share stops depends on
+ * the `createdAt` of the items before it, so then the whole log is read. The
+ * other rules look at one item at a time.
  */
 export async function shareeView(
   deps: { items: ItemLog; clock: Clock },
   session: Pick<Session, 'id'>,
   principal: Principal,
   shares: readonly Share[],
+  opts: { afterSeq?: number } = {},
 ): Promise<ShareeView> {
   const now = deps.clock.now().toISOString();
-  const all = await deps.items.read(session.id);
-  const share = effectiveShare(
-    shares.filter(one => shareGrantsRead(one, principal)),
-    all,
-    now,
-  );
+  const granted = shares.filter(one => shareGrantsRead(one, principal));
+  const partial =
+    opts.afterSeq !== undefined &&
+    !granted.some(one => isShareExpired(one, now));
+  const all = partial
+    ? await deps.items.read(session.id, { afterSeq: opts.afterSeq })
+    : await deps.items.read(session.id);
+  const share = effectiveShare(granted, all, now);
   if (share === undefined) throw new NotSessionOwner(session.id);
+  const visible = visibleItems(all, { isOwner: false, share }, now);
   return {
     share,
     all,
-    visible: visibleItems(all, { isOwner: false, share }, now),
+    visible:
+      opts.afterSeq === undefined
+        ? visible
+        : visible.filter(item => item.seq > opts.afterSeq!),
   };
 }

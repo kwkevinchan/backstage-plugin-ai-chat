@@ -177,7 +177,8 @@ export class FollowSession {
    * snapshot does not move. The sharee always gets the poll, even when the
    * loop is on this backend, because the events of the loop carry tool
    * output and text fragments the share may not show. Each read takes the
-   * shares again, so a cancel or an expiry ends the stream within one
+   * shares again and reads the log after the cursor only (the whole log
+   * when a share is past its expiry), so a cancel or an expiry ends the stream within one
    * interval; the policy and the groups are checked once, at the start.
    */
   private async followAsSharee(
@@ -198,7 +199,9 @@ export class FollowSession {
       const now = await this.deps.shares.listBySession(session.id);
       let seen;
       try {
-        seen = await shareeView(this.deps, session, principal, now);
+        seen = await shareeView(this.deps, session, principal, now, {
+          afterSeq: cursor,
+        });
       } catch (error) {
         if (error instanceof NotSessionOwner) return undefined;
         throw error;

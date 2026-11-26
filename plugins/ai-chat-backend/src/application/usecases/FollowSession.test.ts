@@ -759,7 +759,12 @@ describe('FollowSession for a sharee', () => {
     ...partial,
   });
 
-  function world(options: { shares: object[]; status?: string }) {
+  function world(options: {
+    shares: object[];
+    status?: string;
+    /** Runs before each poll, in order. */
+    beforePolls?: (() => void)[];
+  }) {
     const log: Item[] = [user(1), call(2, 'c1', 'demo:read'), result(3, 'c1')];
     const state = {
       log,
@@ -768,6 +773,8 @@ describe('FollowSession for a sharee', () => {
       now: '2026-01-01T12:00:00.000Z',
     };
     const subscribe = jest.fn();
+    const reads: (number | undefined)[] = [];
+    const beforePolls = options.beforePolls ?? [];
     const useCase = new FollowSession({
       sessions: {
         get: async () => ({ id: 's1', ownerRef: 'user:default/jane' }),
@@ -780,14 +787,16 @@ describe('FollowSession for a sharee', () => {
         get: async () => ({ id: 'r1', status: state.status }),
       } as any,
       items: {
-        read: async (_id: string, opts?: { afterSeq?: number }) =>
-          state.log.filter(item => item.seq > (opts?.afterSeq ?? 0)),
+        read: async (_id: string, opts?: { afterSeq?: number }) => {
+          reads.push(opts?.afterSeq);
+          return state.log.filter(item => item.seq > (opts?.afterSeq ?? 0));
+        },
       } as any,
       // The loop is on this backend: a sharee still gets the poll.
       supervisor: { subscribe, openDraft: jest.fn() } as any,
-      sleep: async () => undefined,
+      sleep: async () => beforePolls.shift()?.(),
     });
-    return { state, subscribe, useCase };
+    return { state, subscribe, useCase, reads };
   }
 
   async function collect(events: AsyncIterable<any>) {
@@ -864,6 +873,40 @@ describe('FollowSession for a sharee', () => {
       state.log.push(call(4, 'c2', 'demo:read'));
       expect(await collect(followed!.events)).toEqual([]);
     }
+  });
+
+  it('reads only the log after the cursor while no share has expired, and the whole log once one has', async () => {
+    const steps: (() => void)[] = [];
+    const { state, useCase, reads } = world({
+      shares: [
+        liveShare(),
+        liveShare({ id: 'sh2', expiresAt: '2026-01-01T13:00:00.000Z' }),
+      ],
+      beforePolls: steps,
+    });
+    steps.push(
+      () => state.log.push(call(4, 'c2', 'demo:read')),
+      () => {
+        // sh2 is past its expiry now; sh1 still keeps updating.
+        state.now = '2026-01-01T14:00:00.000Z';
+        state.log.push(result(5, 'c2'));
+      },
+      () => {
+        state.status = 'completed';
+      },
+    );
+    const followed = await useCase.execute({ principal: bob, sessionId: 's1' });
+    const events = await collect(followed!.events);
+    expect(reads).toEqual([undefined, 3, undefined, undefined]);
+    expect(
+      events
+        .filter(event => event.type === 'item.completed')
+        .map(event => [event.item.seq, event.item.output]),
+    ).toEqual([
+      [4, undefined],
+      [5, 'not shared'],
+    ]);
+    expect(events[events.length - 1].type).toBe('run.ended');
   });
 
   it('refuses someone no share names', async () => {
