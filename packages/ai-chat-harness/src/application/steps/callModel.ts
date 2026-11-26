@@ -87,7 +87,9 @@ type RequestedCall = {
  *   for an unknown tool, for input that is not an object, or for input that
  *   fails the schema (T-05; no approval is asked); `denied` when the policy
  *   says deny, and `denied` with the message "tool call limit" for every call
- *   beyond the calls the run may still make (H-05). A call that has its result
+ *   beyond the calls the run may still make (H-05), or "tool call limit per
+ *   step" for every call beyond `maxToolCallsPerStep` (P-05). Both count as
+ *   requested calls of the run. A call that has its result
  *   at once is stored with policy `ask` when it was refused, as the item type
  *   has no `deny`; the result closes it.
  * - A model call with neither text nor calls writes nothing and fails the
@@ -148,7 +150,7 @@ export async function* callModel(
   const extra = {
     context: loadSkillOffered ? [skillsContextBlock(activeSkills)] : [],
     tools: offered,
-    images: deps.model.capabilities.images,
+    images: req.model.capabilities.images,
   };
 
   let current = items;
@@ -206,7 +208,7 @@ export async function* callModel(
   let textDraftId: string | undefined;
   const requested: RequestedCall[] = [];
   try {
-    for await (const chunk of deps.model.stream(input, {
+    for await (const chunk of req.model.stream(input, {
       signal: req.signal,
       sessionId: req.ctx.sessionId,
     })) {
@@ -281,7 +283,12 @@ export async function* callModel(
       activeSkills,
       step,
       position,
-      overLimit: position >= remaining,
+      overLimit:
+        position >= remaining
+          ? 'tool call limit'
+          : position >= req.limits.maxToolCallsPerStep
+          ? 'tool call limit per step'
+          : undefined,
       stepCtx,
     });
     if (classified.aborted) {
@@ -335,7 +342,8 @@ async function classify(
     activeSkills: readonly Skill[];
     step: number;
     position: number;
-    overLimit: boolean;
+    /** The message of the limit the call is beyond, if any. */
+    overLimit?: string;
     stepCtx: StepContext;
   },
 ): Promise<
@@ -385,8 +393,8 @@ async function classify(
   };
   const policy = decidePolicy(descriptor, req.policy);
 
-  if (overLimit) {
-    return refuse('denied', 'tool call limit', {
+  if (overLimit !== undefined) {
+    return refuse('denied', overLimit, {
       ...fields,
       policy: policy === 'allow' ? 'allow' : 'ask',
     });

@@ -47,6 +47,9 @@ export const defaultLimits: Limits = {
   maxSteps: 10,
   maxToolCallsPerRun: 30,
   runTimeoutSeconds: 300,
+  maxToolCallsPerStep: 8,
+  readConcurrency: 4,
+  toolTimeoutSeconds: 60,
 };
 
 export async function kit(options: {
@@ -73,7 +76,6 @@ export async function kit(options: {
   const limits = { ...defaultLimits, ...options.limits };
   const loop = new AdvanceRun({
     items,
-    model,
     tools,
     run,
     clock,
@@ -96,6 +98,7 @@ export async function kit(options: {
     runFence: RunFence = fence,
   ): AdvanceRunRequest => ({
     agent: { id: 'default', systemPrompt: 'You are a helpful agent.' },
+    model,
     limits,
     budget: options.budget ?? { tokenBudget: 24000, keepRecentSteps: 6 },
     policy: options.policy ?? {},

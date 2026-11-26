@@ -55,7 +55,7 @@ export async function* summarize(
 
   let text = '';
   try {
-    for await (const chunk of deps.model.stream(
+    for await (const chunk of req.model.stream(
       buildSummaryInput(plan, req.budget),
       { signal: req.signal, sessionId: req.ctx.sessionId },
     )) {

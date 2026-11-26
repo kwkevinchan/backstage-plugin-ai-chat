@@ -1039,7 +1039,6 @@ describe('executeTools: agreement 5', () => {
     const generator = executeTools(
       {
         items: t.items,
-        model: t.model,
         tools: t.tools,
         run: t.run,
         clock: t.clock,
@@ -1577,7 +1576,6 @@ describe('AdvanceRun: follow-ups of the review', () => {
       // The host takes one event and drops the generator.
       const generator = new AdvanceRun({
         items: t.items,
-        model: t.model,
         tools: t.tools,
         run: t.run,
         clock: t.clock,

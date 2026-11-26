@@ -39,7 +39,12 @@ export {
 } from './steps/skills';
 export type { IdGenerator } from './ports/IdGenerator';
 export type { ItemDraft, ItemLog, RunFence } from './ports/ItemLog';
-export type { ModelChunk, ModelClient } from './ports/ModelClient';
+export type {
+  ModelChunk,
+  ModelClient,
+  ModelImageData,
+  ModelStreamOptions,
+} from './ports/ModelClient';
 export type { RunControl } from './ports/RunControl';
 export type {
   CallContext,

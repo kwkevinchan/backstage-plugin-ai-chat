@@ -78,4 +78,18 @@ export type Limits = {
   maxToolCallsPerRun: number;
   /** Seconds of working time, shorter than the lifetime of the user token. */
   runTimeoutSeconds: number;
+  /**
+   * Tool calls the model may request in one step (P-05). `callModel` writes
+   * a call beyond it with a `denied` result (message "tool call limit per
+   * step"); it still counts toward `maxToolCallsPerRun`.
+   */
+  maxToolCallsPerStep: number;
+  /** Read-only calls of one step that run at the same time (P-01). */
+  readConcurrency: number;
+  /**
+   * Seconds one tool call may take (P-02). A call that takes longer gets a
+   * `timeout` result and the run goes on. The deadline of the run
+   * (`runTimeoutSeconds`) still ends the run, also during a call.
+   */
+  toolTimeoutSeconds: number;
 };

@@ -15,6 +15,7 @@
  */
 
 import type { AgentDefinition, JsonObject, RunUsage } from '../../domain';
+import type { ModelClient } from './ModelClient';
 import type { CallContext, ToolOutput } from './ToolGateway';
 
 /**
@@ -186,14 +187,20 @@ export interface Skill {
 }
 
 /**
- * What a backend module can add (X-02). Context providers (P3-02) and a model
- * client (P3-07) are added on those later items, together with the loop
- * calling them.
+ * What a backend module can add (X-02). Context providers (P3-02) are added
+ * on that later item, together with the loop calling them.
  *
  * @public
  */
 export interface AiChatHarnessExtensionPoint {
   addAgent(agent: AgentDefinition): void;
+  /**
+   * Adds the client of the model `id` (X-09). An agent names it with its
+   * `model`. It adds a model and never replaces one: an id that the
+   * configuration has (`default`, or a key of `aiChat.models`) or that was
+   * added before stops the backend.
+   */
+  addModelClient(id: string, client: ModelClient): void;
   /**
    * Adds a hook of the kind `name`. An unknown name, or a hook that is not a
    * function, stops the backend.
