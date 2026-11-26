@@ -23,7 +23,8 @@ import {
 import type { AccessControl } from './ports';
 
 /**
- * The owner, or someone a share names. The permission framework is not asked.
+ * The owner, or someone a share names, reads a session; everyone uses every
+ * toolset. The permission framework is not asked.
  * Tests and the integration host use this; the plugin uses
  * `PermissionAccessControl`, which falls back to the same rule.
  */
@@ -36,5 +37,12 @@ export class OwnerOrShareAccessControl implements AccessControl {
     return Promise.resolve(
       allowsSessionRead(input.session, input.principal, input.shares),
     );
+  }
+
+  usableToolsets(input: {
+    principal: Principal;
+    toolsetIds: readonly string[];
+  }): Promise<string[]> {
+    return Promise.resolve([...input.toolsetIds]);
   }
 }

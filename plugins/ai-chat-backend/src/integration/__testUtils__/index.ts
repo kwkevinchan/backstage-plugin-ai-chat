@@ -46,11 +46,13 @@ import {
   CreateSession,
   OwnerOrShareAccessControl,
   TITLE_PROMPT_MARK,
+  ToolsetScope,
   type HostEvent,
   type ImageSettings,
   type RunHandle,
 } from '../../application';
 import type {
+  AccessControl,
   AuditEvent,
   AuditLog,
   EntityReader,
@@ -263,6 +265,10 @@ export async function createWorld(
     runsPerUser?: number;
     /** The catalog the sessions are bound with; empty by default. */
     entities?: EntityReader;
+    /** `aiChat.toolsets`; one `demo` toolset with every action by default. */
+    toolsets?: JsonObject;
+    /** Who may use which toolset; everyone may use every toolset by default. */
+    access?: AccessControl;
   } = {},
 ) {
   const entities = options.entities ?? new FakeEntityReader();
@@ -290,7 +296,9 @@ export async function createWorld(
     mockServices.rootConfig({
       data: {
         aiChat: {
-          toolsets: { demo: { actions: ['demo:*'], default: true } },
+          toolsets: options.toolsets ?? {
+            demo: { actions: ['demo:*'], default: true },
+          },
           ...(options.agents && { agents: options.agents }),
           ...(options.policy && { policy: options.policy }),
         },
@@ -298,6 +306,8 @@ export async function createWorld(
     }),
     mockServices.logger.mock(),
   );
+  const access = options.access ?? new OwnerOrShareAccessControl();
+  const toolsetScope = new ToolsetScope({ sessions, agents: catalog, access });
   const limits: Limits = {
     maxSteps: 10,
     maxToolCallsPerRun: 30,
@@ -360,7 +370,7 @@ export async function createWorld(
       queue,
       attachments,
       shares: new KnexShareRepository(knex, clock, ids),
-      access: new OwnerOrShareAccessControl(),
+      access,
       entities,
       images,
       insertMaxPerRun: options.insertMaxPerRun,
@@ -369,8 +379,11 @@ export async function createWorld(
         actions,
         catalog,
         logger,
-        enabledToolsets: async ctx =>
-          (await sessions.get(ctx.sessionId)).enabledToolsets,
+        enabledToolsets: ctx =>
+          toolsetScope.offered({
+            sessionId: ctx.sessionId,
+            principal: ctx.principal as Principal,
+          }),
         maxOutputChars: 20000,
       }),
       model: extra.model ?? modelForHost,
@@ -406,6 +419,7 @@ export async function createWorld(
         sessions,
         agents: catalog,
         entities,
+        access,
       }).execute({
         principal,
         ...(agentId !== undefined && { agentId }),

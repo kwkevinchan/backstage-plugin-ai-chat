@@ -33,6 +33,7 @@ import { ConfigAgentCatalog } from './adapters/backstage/ConfigAgentCatalog';
 import { PermissionAccessControl } from './adapters/backstage/PermissionAccessControl';
 import { principalFromRequest } from './adapters/backstage/principalFromRequest';
 import { registerSessionAccess } from './adapters/backstage/sessionAccess';
+import { registerToolsetAccess } from './adapters/backstage/toolsetAccess';
 import { createRouter } from './adapters/http';
 import { inputConfigOf } from './adapters/http/controllers/attachments';
 import { OpenAiCompatibleClient } from './adapters/model/OpenAiCompatibleClient';
@@ -51,14 +52,17 @@ import {
   KnexRunRepository,
   KnexSessionRepository,
   KnexShareRepository,
+  KnexWriteQuota,
 } from './adapters/persistence';
 import { SystemClock, UuidGenerator } from './adapters/system';
 import { readAiChatConfig, type ModelSettings } from './config';
 import {
   DEFAULT_MODEL_ID,
+  ToolsetScope,
   entityContextProvider,
   userContextProvider,
 } from './application';
+import type { Principal } from './domain';
 import { DelegatingNotifier } from './application/ports';
 import { createHost } from './host';
 import { aiChatSignalsExtensionPoint } from './signals';
@@ -207,6 +211,18 @@ export const aiChatPlugin = createBackendPlugin({
           sessions,
           shares,
         });
+        const access = new PermissionAccessControl({
+          permissions,
+          authorizer,
+          toolsetAuthorizer: registerToolsetAccess(permissionsRegistry, {
+            agents: catalog,
+          }),
+        });
+        const toolsetScope = new ToolsetScope({
+          sessions,
+          agents: catalog,
+          access,
+        });
         const clientOf = (settings: ModelSettings): ModelClient =>
           new OpenAiCompatibleModelClient(
             new OpenAiCompatibleClient(settings),
@@ -233,7 +249,7 @@ export const aiChatPlugin = createBackendPlugin({
             runsPerUser: aiChat.runsPerUser,
           }),
           shares,
-          access: new PermissionAccessControl({ permissions, authorizer }),
+          access,
           attachments,
           entities,
           agents: catalog,
@@ -241,10 +257,20 @@ export const aiChatPlugin = createBackendPlugin({
             actions,
             catalog,
             logger,
-            // A session always stores its toolsets (CreateSession).
-            enabledToolsets: async ctx =>
-              (await sessions.get(ctx.sessionId)).enabledToolsets,
+            enabledToolsets: ctx =>
+              toolsetScope.offered({
+                sessionId: ctx.sessionId,
+                principal: ctx.principal as Principal,
+              }),
             maxOutputChars: aiChat.maxToolOutputChars,
+            toolOutput: aiChat.toolOutput,
+            ...(aiChat.writesPerMinute !== undefined && {
+              writeQuota: {
+                quota: new KnexWriteQuota(db),
+                perMinute: aiChat.writesPerMinute,
+                clock,
+              },
+            }),
           }),
           model: clientOf(aiChat.llm),
           models: new Map([
@@ -289,6 +315,7 @@ export const aiChatPlugin = createBackendPlugin({
                 entityContextProvider(entities),
                 planContextProvider(items),
               ],
+              toolOutput: aiChat.toolOutput,
             }),
             skills,
           },

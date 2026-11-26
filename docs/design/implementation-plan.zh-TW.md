@@ -1067,7 +1067,7 @@ flowchart LR
 ### P3-08 Toolset 的權限、輸出上限和遮蔽、寫入配額
 
 - **範圍**：
-  - 共用套件（`@kwkevinchan/backstage-plugin-ai-chat-common`）：permission `aiChatToolsetUsePermission`（`ai-chat.toolset.use`，`resourceType: 'ai-chat-toolset'`，`attributes: { action: 'use' }`）。
+  - 共用套件（`@kwkevinchan/backstage-plugin-ai-chat-common`）：permission `aiChatToolsetUsePermission`（`ai-chat.toolset.use`，`resourceType: 'ai-chat-toolset'`，`attributes` 是空的：Backstage 的 `action` 只有 create、read、update、delete）。
   - 宿主（`@kwkevinchan/backstage-plugin-ai-chat-backend`）：
     - T-08：`adapters/backstage/toolsetAccess.ts` 註冊 resource type `ai-chat-toolset`（resource 是 `{ id }`）、規則 `IS_TOOLSET`（參數 `{ toolsetIds }`），匯出 `aiChatToolsetConditions`、`createAiChatToolsetConditionalDecision`。`AccessControl` port 加 `usableToolsets`：`PermissionAccessControl` 問 permission framework，`OwnerOrShareAccessControl` 全部允許。`application/ToolsetScope.ts` 算出一段 Session 給模型的 Toolset：Session 開啟的 ∩ Agent 的 `toolsets`（沒寫就不限）∩ 使用者能用的。`ActionsToolGateway` 用它過濾工具。`GET /toolsets` 只列使用者能用的；`CreateSession`、`UpdateSession` 不收使用者不能用的 Toolset。
     - T-09：設定 `aiChat.toolOutput`：鍵是 action id 樣式，值有 `maxOutputChars`、`redact`。`domain/toolOutput.ts` 算出一個 action 的規則，並遮蔽輸出。`ActionsToolGateway.execute` 先遮蔽、再裁切。`AiChatHarnessRegistry.extensions` 在最後一個 `afterToolCall` 之後，照同一個 action 的規則再遮蔽、再裁切。

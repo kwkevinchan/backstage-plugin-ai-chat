@@ -21,7 +21,8 @@ import {
   type Session,
   type SessionPatch,
 } from '../../domain';
-import type { AgentCatalog, SessionRepository } from '../ports';
+import type { AccessControl, AgentCatalog, SessionRepository } from '../ports';
+import { usableToolsets } from '../ToolsetScope';
 
 /** Renames, pins or archives a session, or switches its toolsets (SE-03, T-11). */
 export class UpdateSession {
@@ -29,6 +30,7 @@ export class UpdateSession {
     private readonly deps: {
       sessions: SessionRepository;
       agents: AgentCatalog;
+      access: Pick<AccessControl, 'usableToolsets'>;
     },
   ) {}
 
@@ -38,12 +40,21 @@ export class UpdateSession {
     patch: SessionPatch;
   }): Promise<Session> {
     const { sessions, agents } = this.deps;
-    assertOwner(await sessions.get(input.sessionId), input.principal);
+    const session = await sessions.get(input.sessionId);
+    assertOwner(session, input.principal);
     if (input.patch.enabledToolsets !== undefined) {
       // The user chooses among the toolsets the administrator defined, no more.
       const known = await agents.toolsets();
+      // A toolset added now must be one the user may use (T-08). One the
+      // session already has stays: it gives no tools while the user may not
+      // use it, and gives them again when the user may.
+      const usable = await usableToolsets(this.deps, input.principal);
       for (const id of input.patch.enabledToolsets) {
-        if (!known.some(toolset => toolset.id === id)) {
+        const added = !session.enabledToolsets.includes(id);
+        if (
+          !known.some(toolset => toolset.id === id) ||
+          (added && !usable.some(toolset => toolset.id === id))
+        ) {
           throw new UnknownToolset(id);
         }
       }

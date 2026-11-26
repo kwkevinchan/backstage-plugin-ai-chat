@@ -26,6 +26,7 @@ export type {
 export type { EntityReader } from './EntityReader';
 export type { Logger } from './Logger';
 export type { ModelCallLimiter } from './ModelCallLimiter';
+export type { WriteQuota } from './WriteQuota';
 export type { Notifier, SessionActivity } from './Notifier';
 export { DelegatingNotifier, NoopNotifier } from './Notifier';
 export type { QueuedMessageRepository } from './QueuedMessageRepository';
