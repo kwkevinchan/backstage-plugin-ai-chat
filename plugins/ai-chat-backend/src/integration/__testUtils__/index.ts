@@ -50,8 +50,18 @@ import {
   type ImageSettings,
   type RunHandle,
 } from '../../application';
-import type { AuditEvent, AuditLog, Notifier } from '../../application/ports';
-import { DEFAULT_IMAGE_LIMITS, type Principal, type Run } from '../../domain';
+import type {
+  AuditEvent,
+  AuditLog,
+  EntityReader,
+  Notifier,
+} from '../../application/ports';
+import {
+  DEFAULT_IMAGE_LIMITS,
+  type EntityFacts,
+  type Principal,
+  type Run,
+} from '../../domain';
 import { createHost, type HostPorts } from '../../host';
 import { createMigratedDb } from '../../__testUtils__';
 
@@ -142,6 +152,42 @@ export class RecordingAuditLog implements AuditLog {
   }
 }
 
+/**
+ * A catalog for the tests: the entities by their normalized ref, each one
+ * readable by everyone or only by the users in `readers`. With `failing`,
+ * every read throws, as a catalog that cannot be reached does.
+ */
+export class FakeEntityReader implements EntityReader {
+  failing = false;
+  readonly reads: { entityRef: string; principal: Principal }[] = [];
+
+  constructor(
+    private readonly entities: {
+      ref: string;
+      facts?: Partial<EntityFacts>;
+      readers?: string[];
+    }[] = [],
+  ) {}
+
+  async read(
+    entityRef: string,
+    principal: Principal,
+  ): Promise<EntityFacts | undefined> {
+    this.reads.push({ entityRef, principal });
+    if (this.failing) {
+      throw new Error('catalog at http://catalog.internal is down');
+    }
+    const found = this.entities.find(entity => entity.ref === entityRef);
+    if (!found) return undefined;
+    if (found.readers && !found.readers.includes(principal.userRef)) {
+      return undefined;
+    }
+    const [kind, rest] = entityRef.split(':');
+    const [namespace, name] = rest.split('/');
+    return { kind, namespace, name, ...found.facts };
+  }
+}
+
 export const jane: Principal = {
   userRef: 'user:default/jane',
   ownershipRefs: ['user:default/jane'],
@@ -204,8 +250,11 @@ export async function createWorld(
     policy?: JsonObject;
     /** `aiChat.runsPerUser`; 3 by default. */
     runsPerUser?: number;
+    /** The catalog the sessions are bound with; empty by default. */
+    entities?: EntityReader;
   } = {},
 ) {
+  const entities = options.entities ?? new FakeEntityReader();
   const knex = await createMigratedDb();
   const clock = new FakeClock();
   const ids = new SequentialIdGenerator('id');
@@ -301,6 +350,7 @@ export async function createWorld(
       attachments,
       shares: new KnexShareRepository(knex, clock, ids),
       access: new OwnerOrShareAccessControl(),
+      entities,
       images,
       insertMaxPerRun: options.insertMaxPerRun,
       agents: catalog,
@@ -341,7 +391,11 @@ export async function createWorld(
     audit,
     backend,
     async newSession(principal: Principal = jane, agentId?: string) {
-      return new CreateSession({ sessions, agents: catalog }).execute({
+      return new CreateSession({
+        sessions,
+        agents: catalog,
+        entities,
+      }).execute({
         principal,
         ...(agentId !== undefined && { agentId }),
       });

@@ -31,8 +31,16 @@ an id of the configuration (`default`, or a key of `aiChat.models`) or of
 another module stops the backend. The rate limit of `requestsPerMinute`
 applies to the models of the configuration only.
 
-Context providers are added on a later item, together with the loop calling
-them.
+`addContextProvider` registers a context provider: before every model call,
+`provide(ctx)` returns text for the context of that step, or `undefined`. The
+model gets the text as untrusted data, not as instructions, after the text of
+the built-in providers `user`, `entity` and `plan`, in the order the modules
+registered theirs. Each text is cut to 8000 characters, and all of them
+together to 16000. The loop waits at most 5 seconds for a provider; when it
+throws or does not answer in time, the model is told that this context is not
+available and the run goes on. `ctx.sessionEntityRef` is the entity the
+session is bound to. A repeated id, or one of the built-in ids, stops the
+backend.
 
 ```ts
 import { createBackendModule } from '@backstage/backend-plugin-api';
@@ -54,6 +62,10 @@ export default createBackendModule({
           id: 'getting-started',
           description: 'Walks new readers through docs on example.com.',
           load: async () => 'Start with the docs index on example.com.',
+        });
+        harness.addContextProvider({
+          id: 'docs-site',
+          provide: async () => 'The documentation is at https://example.com/docs.',
         });
       },
     });

@@ -48,6 +48,7 @@ import {
   ToolCallNotWaiting,
   TooManyActiveRuns,
   UnknownAttachment,
+  UnknownEntity,
   UnknownToolset,
   UnsupportedAttachmentType,
 } from '../../domain';
@@ -157,7 +158,11 @@ export function toHttpError(
   if (error instanceof TooManyPendingAttachments) {
     return new NamedHttpError(error.name, 409, error.message);
   }
-  if (error instanceof UnknownToolset || error instanceof AgentNotFound) {
+  if (
+    error instanceof UnknownToolset ||
+    error instanceof AgentNotFound ||
+    error instanceof UnknownEntity
+  ) {
     return new InputError(error.message);
   }
   if (error instanceof ShuttingDown) {

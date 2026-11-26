@@ -22,10 +22,13 @@ import {
 import { actionsServiceRef } from '@backstage/backend-plugin-api/alpha';
 import { InputError } from '@backstage/errors';
 import type { ModelClient } from '@kwkevinchan/ai-chat-harness';
+import { catalogServiceRef } from '@backstage/plugin-catalog-node';
+import { planContextProvider } from '@kwkevinchan/ai-chat-harness';
 import { aiChatHarnessExtensionPoint } from '@kwkevinchan/backstage-plugin-ai-chat-node';
 import { ActionsToolGateway } from './adapters/backstage/ActionsToolGateway';
 import { AiChatHarnessRegistry } from './adapters/backstage/AiChatHarnessRegistry';
 import { AuditorAuditLog } from './adapters/backstage/AuditorAuditLog';
+import { CatalogEntityReader } from './adapters/backstage/CatalogEntityReader';
 import { ConfigAgentCatalog } from './adapters/backstage/ConfigAgentCatalog';
 import { PermissionAccessControl } from './adapters/backstage/PermissionAccessControl';
 import { principalFromRequest } from './adapters/backstage/principalFromRequest';
@@ -51,7 +54,11 @@ import {
 } from './adapters/persistence';
 import { SystemClock, UuidGenerator } from './adapters/system';
 import { readAiChatConfig, type ModelSettings } from './config';
-import { DEFAULT_MODEL_ID } from './application';
+import {
+  DEFAULT_MODEL_ID,
+  entityContextProvider,
+  userContextProvider,
+} from './application';
 import { DelegatingNotifier } from './application/ports';
 import { createHost } from './host';
 import { aiChatSignalsExtensionPoint } from './signals';
@@ -104,6 +111,7 @@ export const aiChatPlugin = createBackendPlugin({
         lifecycle: coreServices.lifecycle,
         scheduler: coreServices.scheduler,
         actions: actionsServiceRef,
+        catalogService: catalogServiceRef,
         permissions: coreServices.permissions,
         permissionsRegistry: coreServices.permissionsRegistry,
       },
@@ -119,6 +127,7 @@ export const aiChatPlugin = createBackendPlugin({
         lifecycle,
         scheduler,
         actions,
+        catalogService,
         permissions,
         permissionsRegistry,
       }) {
@@ -163,7 +172,7 @@ export const aiChatPlugin = createBackendPlugin({
             harnessExtensions.agents().length
           } agent(s), ${harnessExtensions.hookCount()} hook(s), ${
             skills.length
-          } skill(s), ${moduleModels.size} model client(s)`,
+          } skill(s), ${moduleModels.size} model client(s), ${harnessExtensions.contextProviderCount()} context provider(s)`,
         );
         const toolsets = await catalog.toolsets();
         logger.info(
@@ -189,6 +198,7 @@ export const aiChatPlugin = createBackendPlugin({
           maxImageBytesPerInput: aiChat.input.images.maxBytesPerInput,
         });
         const attachments = new KnexAttachmentStore(db, clock, ids);
+        const entities = new CatalogEntityReader(catalogService);
         const sessions = new KnexSessionRepository(db, clock, ids);
         const shares = new KnexShareRepository(db, clock, ids);
         const authorizer = registerSessionAccess(permissionsRegistry, {
@@ -223,6 +233,7 @@ export const aiChatPlugin = createBackendPlugin({
           shares,
           access: new PermissionAccessControl({ permissions, authorizer }),
           attachments,
+          entities,
           agents: catalog,
           tools: new ActionsToolGateway({
             actions,
@@ -271,6 +282,11 @@ export const aiChatPlugin = createBackendPlugin({
             ...harnessExtensions.extensions({
               logger,
               maxToolOutputChars: aiChat.maxToolOutputChars,
+              builtInContextProviders: [
+                userContextProvider(),
+                entityContextProvider(entities),
+                planContextProvider(items),
+              ],
             }),
             skills,
           },

@@ -92,12 +92,20 @@ export class KnexSessionRepository implements SessionRepository {
 
   async listByOwner(
     ownerRef: string,
-    opts: { includeArchived?: boolean; limit?: number; query?: string } = {},
+    opts: {
+      includeArchived?: boolean;
+      limit?: number;
+      query?: string;
+      entityRef?: string;
+    } = {},
   ): Promise<Session[]> {
     const query = this.knex<SessionRow>('sessions').where({
       owner_ref: ownerRef,
     });
     if (!opts.includeArchived) query.whereNull('archived_at');
+    if (opts.entityRef !== undefined) {
+      query.where({ entity_ref: opts.entityRef });
+    }
     // JS only trims the query. Both sides of LIKE use SQL lower(), so
     // SQLite and PostgreSQL apply the same function. `%` and `_` in the
     // query are ordinary characters.
@@ -131,6 +139,18 @@ export class KnexSessionRepository implements SessionRepository {
       .update(changes);
     if (count === 0) throw new SessionNotFound(sessionId);
     return this.get(sessionId);
+  }
+
+  async bindEntityIfUnbound(
+    sessionId: string,
+    entityRef: string,
+  ): Promise<boolean> {
+    const now = this.clock.now().toISOString();
+    const count = await this.knex('sessions')
+      .where({ id: sessionId })
+      .whereNull('entity_ref')
+      .update({ entity_ref: entityRef, updated_at: now });
+    return count > 0;
   }
 
   async setTitleIfAbsent(sessionId: string, title: string): Promise<boolean> {

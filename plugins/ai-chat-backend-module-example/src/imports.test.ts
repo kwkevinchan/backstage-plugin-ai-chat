@@ -20,6 +20,7 @@ import {
   aiChatHarnessExtensionPoint,
   type AgentDefinition,
   type ModelClient,
+  type ContextProvider,
   type Skill,
 } from '@kwkevinchan/backstage-plugin-ai-chat-node';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -74,10 +75,11 @@ describe('the example module', () => {
     expect(outside).toEqual([]);
   });
 
-  it('registers an agent and a skill for example.com', async () => {
+  it('registers an agent, a skill and a context provider for example.com', async () => {
     const agents: AgentDefinition[] = [];
     const skills: Skill[] = [];
     const models = new Map<string, ModelClient>();
+    const providers: ContextProvider[] = [];
     const stub = createBackendPlugin({
       pluginId: 'ai-chat',
       register(env) {
@@ -91,6 +93,9 @@ describe('the example module', () => {
           },
           addModelClient(id, client) {
             models.set(id, client);
+          },
+          addContextProvider(provider) {
+            providers.push(provider);
           },
         });
         // A plugin has to register an init, even when the module does the work.
@@ -148,5 +153,16 @@ describe('the example module', () => {
         text: 'You wrote: hello\nImage 1: 3 bytes\nImage 2: not available',
       },
     ]);
+    expect(providers.map(provider => provider.id)).toEqual(['docs-site']);
+    expect(
+      await providers[0].provide({
+        sessionId: 's',
+        runId: 'r',
+        principal: undefined,
+        agentId: 'guide',
+        step: 1,
+        signal: new AbortController().signal,
+      }),
+    ).toContain('example.com');
   });
 });

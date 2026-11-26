@@ -62,7 +62,7 @@ export class SessionsController {
   constructor(private readonly useCases: SessionUseCases) {}
 
   async list(principal: Principal, query: unknown): Promise<ChatSessionList> {
-    const { includeArchived, limit, q } = parse(listQuery, query);
+    const { includeArchived, limit, q, entityRef } = parse(listQuery, query);
     const sessions = await this.useCases.listSessions.execute({
       principal,
       ...(includeArchived !== undefined && {
@@ -70,6 +70,7 @@ export class SessionsController {
       }),
       ...(limit !== undefined && { limit }),
       ...(q && { query: q }),
+      ...(entityRef !== undefined && { entityRef }),
     });
     return {
       items: sessions.map(session => toChatSession(session, session.activity)),

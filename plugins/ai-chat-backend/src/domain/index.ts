@@ -53,10 +53,12 @@ export {
   ToolCallNotFound,
   ToolCallNotWaiting,
   UnknownAttachment,
+  UnknownEntity,
   UnknownToolset,
   UnsupportedAttachmentType,
   UnreadMessages,
 } from './errors';
+export { normalizeEntityRef, type EntityFacts } from './entity';
 export type { Principal } from './principal';
 export {
   canAutoStart,

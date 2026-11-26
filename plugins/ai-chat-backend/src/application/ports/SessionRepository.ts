@@ -29,12 +29,26 @@ export interface SessionRepository {
    * updated, then `id`. Archived ones are left out unless `includeArchived`
    * is set. `query` keeps the sessions whose title contains it, with both
    * sides of the match passed through SQL `lower()`. A session with no title
-   * is left out. `%` and `_` match themselves.
+   * is left out. `%` and `_` match themselves. `entityRef` keeps the
+   * sessions bound to that entity, compared as stored (normalized, see
+   * `normalizeEntityRef`).
    */
   listByOwner(
     ownerRef: string,
-    opts?: { includeArchived?: boolean; limit?: number; query?: string },
+    opts?: {
+      includeArchived?: boolean;
+      limit?: number;
+      query?: string;
+      entityRef?: string;
+    },
   ): Promise<Session[]>;
+
+  /**
+   * Binds the session to the entity, only while it is bound to none (SE-02):
+   * a binding never changes. Returns whether this call wrote it; of two calls
+   * at the same time, one does. A session that does not exist returns false.
+   */
+  bindEntityIfUnbound(sessionId: string, entityRef: string): Promise<boolean>;
 
   /** Throws `SessionNotFound` when there is none. */
   update(sessionId: string, patch: SessionPatch): Promise<Session>;

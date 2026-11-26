@@ -19,6 +19,7 @@ import {
   aiChatHarnessExtensionPoint,
   type AgentDefinition,
   type ModelClient,
+  type ContextProvider,
   type Skill,
 } from '@kwkevinchan/backstage-plugin-ai-chat-node';
 
@@ -41,6 +42,14 @@ const gettingStartedSkill: Skill = {
       '1. Search the Software Catalog to locate the service owner and repository.',
       '2. Check the documentation on example.com for runbooks and architecture notes.',
     ].join('\n'),
+};
+
+// Runs before every model call. The text is data for the model, not an
+// instruction, and must stay short: it is cut to 8000 characters.
+const docsSiteProvider: ContextProvider = {
+  id: 'docs-site',
+  provide: () =>
+    'The documentation of this organization is at https://example.com/docs.',
 };
 
 /**
@@ -75,8 +84,9 @@ const echoModel: ModelClient = {
 };
 
 /**
- * Registers one agent, one skill and one model client (`example-echo`; no
- * agent of this module uses it). The text mentions `example.com` only.
+ * Registers one agent, one skill, one model client (`example-echo`; no agent
+ * of this module uses it) and one context provider. The text mentions
+ * `example.com` only.
  * This package is a private example in the repository, to copy from, not to
  * install.
  *
@@ -92,6 +102,7 @@ export const aiChatExampleModule = createBackendModule({
         harness.addAgent(guide);
         harness.addSkill(gettingStartedSkill);
         harness.addModelClient('example-echo', echoModel);
+        harness.addContextProvider(docsSiteProvider);
       },
     });
   },
