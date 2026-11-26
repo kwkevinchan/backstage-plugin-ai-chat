@@ -21,6 +21,8 @@ import {
   usedTokens,
 } from '@kwkevinchan/ai-chat-harness/testing';
 import type { Extensions, ModelClient } from '@kwkevinchan/ai-chat-harness';
+import { mockServices } from '@backstage/backend-test-utils';
+import { AiChatHarnessRegistry } from '../adapters/backstage/AiChatHarnessRegistry';
 import { TITLE_PROMPT_MARK } from '../application';
 import type { Metrics } from '../application/ports';
 import {
@@ -269,6 +271,73 @@ describe('observability of the runs (O-01)', () => {
     for (const { name } of metrics.instruments) {
       expect(ALLOWED_ATTRIBUTES[name]).toBeDefined();
     }
+  });
+
+  it('logs a hook and a context provider of a module that throw with the name of the error, not its text', async () => {
+    const registryLogger = mockServices.logger.mock();
+    const registry = new AiChatHarnessRegistry();
+    registry.addHook('beforeToolCall', () => {
+      throw new Error(`hook failed reading ${CANARY}`);
+    });
+    registry.addHook('afterToolCall', () => {
+      throw new Error(`after hook failed with ${CANARY}`);
+    });
+    registry.addContextProvider({
+      id: 'oncall',
+      provide: () => {
+        throw new Error(`provider failed reading ${CANARY}`);
+      },
+    });
+    const b = backend(
+      [
+        [
+          callTool('m1', 'demo:read', { name: 'a' }),
+          callTool('m2', 'demo:read', { name: 'b' }),
+        ],
+        [say('Done.')],
+      ],
+      {
+        extensions: registry.extensions({
+          logger: registryLogger,
+          maxToolOutputChars: 20000,
+        }),
+        metrics: new RecordingMetrics(),
+      },
+    );
+    const session = await world.newSession();
+    const events = await drain(
+      await b.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'Look',
+      }),
+    );
+    expect(events[events.length - 1]).toMatchObject({
+      type: 'run.ended',
+      outcome: { status: 'completed' },
+    });
+
+    const registryLines = logCalls(registryLogger as never);
+    expect(registryLines.map(c => c.args[0])).toEqual(
+      expect.arrayContaining([
+        'An AI chat beforeToolCall hook failed',
+        'An AI chat context provider failed',
+      ]),
+    );
+    expect(
+      registryLines.find(
+        c => c.args[0] === 'An AI chat context provider failed',
+      )?.args[1],
+    ).toEqual({
+      contextProvider: 'oncall',
+      runId: expect.any(String),
+      errorName: 'Error',
+    });
+    const all = JSON.stringify([
+      ...registryLines,
+      ...logCalls(b.logger as never),
+    ]);
+    expect(all).not.toContain(CANARY);
   });
 
   it('records each run once when it ends, without onRunEnd hooks, and not while it waits for an approval', async () => {

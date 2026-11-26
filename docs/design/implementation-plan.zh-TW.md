@@ -1078,6 +1078,7 @@ flowchart LR
     - `createRunEnded` 在 Run 寫入終態時交給 `RunTelemetry`，沒有 `onRunEnd` Hook 時也一樣。`HostModelClient` 記限流等待。`NameSession` 記自動標題的模型呼叫。`buildRunRequest` 給 `modelId`。
     - `OpenAiCompatibleClient`：串流的請求帶 `stream_options: { include_usage: true }`，讀回答裡的 `usage`。設定 `aiChat.llm.reportUsage`、`aiChat.models.<id>.reportUsage`（預設 `true`）；`false` 時不帶這個欄位。
     - 模型呼叫失敗的 log（`A run failed`、`A summary could not be made`、`Could not name the session`）只記錯誤的 `name` 和 HTTP 狀態碼，不記錯誤的訊息：模型伺服器的錯誤訊息可能帶回使用者的內容。
+    - `AiChatHarnessRegistry`：module 的 Hook 或 context provider 丟例外時，log 只記錯誤的 `name` 和既有的 id（Hook 名稱、provider id、`runId`、`callId`），不記錯誤的訊息：module 的程式可能把讀到的內容放進訊息。
   - 文件：規格 O-01；架構文件的 port、adapter 和觀測一節；backend README（中英）列出 log、metric 和屬性。
   - 不做：trace（span）；把 token 用量存進資料庫、`RunUsage` 或 `RunSummary`；稽核（O-02）的改動；擴充點上的 observer；畫面和用量頁面；送出訊息被每人 Run 數擋下的計數。
 - **依賴**：P3-02（provider 的狀態）、P3-05（`createRunEnded`）、P3-07（`HostModelClient`、`modelId`）。
@@ -1125,6 +1126,7 @@ flowchart LR
   - 錯誤：模型呼叫失敗時 `outcome` 是 `failed`；錯誤有 100 到 599 的整數 `status` 時 `errorStatus` 是它。沒有回答是 `empty`。`beforeModelCall` 丟例外時沒有模型呼叫的紀錄。
   - Run：每個 Run 寫入終態時記一筆 `Run ended` 和三個 Run 的 metric，觸發的地方和 `onRunEnd` 相同，沒有註冊 Hook 時也記。等核准不記。`onRunEnd` 收到的 `RunSummary` 不變。
   - 不能出現的內容：同一段字串放進使用者訊息、頁面、Session 標題、系統提示、Skill 內容、provider 的輸出、模型的回答和呼叫參數、工具的輸出和錯誤訊息、Hook 的拒絕理由、`afterToolCall` 的輸出、模型伺服器的錯誤訊息、使用者的 token：這段字串不在任何 log 的 meta 和訊息裡，也不在 metric 的名稱、選項、值和屬性裡。metric 的屬性只有上表的鍵，沒有 `sessionId`、`runId`、`callId` 和使用者。
+  - 經過 `AiChatHarnessRegistry` 的 Hook 和 context provider 丟出訊息含那段字串的例外：log 有 Hook 名稱或 provider id 和 `errorName`，沒有那段字串。
   - 沒有 exporter：沒有給 `observer` 時，迴圈的紀錄、事件和結果不變。observer 丟例外時也不變。`RunTelemetry` 的 metric 丟例外時 Run 照常，只記一次警告。沒有安裝 OpenTelemetry SDK（Backstage 預設的 `metricsServiceFactory`）時，對話、工具和核准照常，觀測沒有警告。
 - **規格沒寫、實作選定的地方**：
   - 不做 trace：Backstage 的 `TracingService` 只有 `startActiveSpan(name, fn)`，span 在 `fn` 結束時結束。迴圈是 `AsyncGenerator`，一步之內要交出事件，Run 又會因為等核准分成幾次呼叫，甚至換一台後端，做不成一個 span。`fn` 丟例外時，預設的實作把錯誤訊息寫進 span，模型伺服器的錯誤訊息會外流。
@@ -1138,6 +1140,7 @@ flowchart LR
   - Run 的截止時間：迴圈用 `TimeoutError` 中止 signal，用它分辨截止時間（`timeout`）和停止（`cancelled`）。
   - `reportUsage` 預設 `true`：大多數 OpenAI 相容的伺服器接受 `stream_options`。不接受的伺服器，管理員設成 `false`。
   - Token 用量只記在每次模型呼叫。每個 Run 的合計用 metric 或 log 加總，不存進資料庫。
+  - 不改的兩條 log：`AuditedToolGateway` 在結束稽核紀錄失敗時記 auditor 的錯誤訊息，`afterRun` 在佇列送不出下一則訊息時記錯誤訊息。這兩個錯誤來自 Backstage 的 auditor 和這個外掛的資料庫，不是模型、工具或 module 的輸出，不會帶回對話的內容。
 
 ### P4：擴大
 

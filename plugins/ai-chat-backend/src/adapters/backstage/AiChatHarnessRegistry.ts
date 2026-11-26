@@ -200,6 +200,14 @@ export class AiChatHarnessRegistry implements AiChatHarnessExtensionPoint {
   }
 }
 
+/**
+ * What the log says of an error of a hook or a context provider: its name.
+ * Not its message: the code of a module may put what it read in it.
+ */
+function errorNameOf(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
+}
+
 function loggedProvider(
   provider: ContextProvider,
   logger: Logger,
@@ -213,7 +221,7 @@ function loggedProvider(
         logger.warn('An AI chat context provider failed', {
           contextProvider: provider.id,
           runId: ctx.runId,
-          error: error instanceof Error ? error.message : String(error),
+          errorName: errorNameOf(error),
         });
         throw error;
       }
@@ -234,7 +242,7 @@ function logged<K extends HookName>(
       logger.warn(`An AI chat ${name} hook failed`, {
         hook: name,
         ...definedOf(whereOf(name, args)),
-        error: error instanceof Error ? error.message : String(error),
+        errorName: errorNameOf(error),
       });
       throw error;
     }

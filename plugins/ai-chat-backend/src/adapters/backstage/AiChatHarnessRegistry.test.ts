@@ -181,13 +181,16 @@ describe('AiChatHarnessRegistry', () => {
       { runId: 'r' },
     ],
   ])(
-    'logs a %s hook that throws with its name, and throws again',
+    'logs a %s hook that throws with its name and the name of the error, not its text, and throws again',
     async (name, run, where) => {
       const registry = new AiChatHarnessRegistry();
       await expect(run(registry)).rejects.toThrow('quota service down');
+      expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(
+        'quota service down',
+      );
       expect(logger.warn).toHaveBeenCalledWith(
         `An AI chat ${name} hook failed`,
-        { hook: name, ...where, error: 'quota service down' },
+        { hook: name, ...where, errorName: 'Error' },
       );
     },
   );
@@ -412,7 +415,7 @@ describe('AiChatHarnessRegistry', () => {
       expect(await only.provide(stepContext)).toBe('first');
     });
 
-    it('logs a provider that throws with its id and run, without its text, and throws again', async () => {
+    it('logs a provider that throws with its id, its run and the name of the error, not the text of the error, and throws again', async () => {
       const warn = mockServices.logger.mock();
       const registry = new AiChatHarnessRegistry();
       registry.addContextProvider({
@@ -433,8 +436,11 @@ describe('AiChatHarnessRegistry', () => {
         {
           contextProvider: 'oncall',
           runId: 'r',
-          error: 'pager service is down',
+          errorName: 'Error',
         },
+      );
+      expect(JSON.stringify(warn.warn.mock.calls)).not.toContain(
+        'pager service',
       );
     });
   });
