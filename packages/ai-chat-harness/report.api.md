@@ -149,9 +149,6 @@ export type ContextBudget = {
 };
 
 // @public
-export function currentPlan(items: readonly Item[]): Plan | undefined;
-
-// @public
 export function decideNextAction(
   items: readonly Item[],
   run: RunUsage,

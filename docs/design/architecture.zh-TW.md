@@ -104,7 +104,7 @@ packages/ai-chat-harness/src/
     tool.ts                    ToolDescriptor、ToolCall、ToolResult
     policy.ts                  decidePolicy()、needsApproval()
     agent.ts                   AgentDefinition、Limits
-    plan.ts                    Plan、currentPlan()
+    plan.ts                    Plan、PlanItem
     nextAction.ts              decideNextAction()：從紀錄算出下一步
     modelInput.ts              buildModelInput()、planSummary()、buildSummaryInput()、estimateTokens()：從紀錄算出送給模型的內容，套用 token 預算
     errors.ts

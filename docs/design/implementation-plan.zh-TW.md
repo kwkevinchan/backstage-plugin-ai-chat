@@ -777,7 +777,8 @@ flowchart LR
     - Hook 照常作用：`beforeToolCall` 可以拒絕 `update_plan`（不寫 `plan_update`）；`afterToolCall` 收到它的結果。
     - 工具清單（`GET /sessions/:id/tools`）列出 `update_plan`，政策 `deny` 時不列。
   - 目前的計畫：
-    - `readCurrentPlan` 回傳最後一筆 `plan_update` 的計畫；沒有計畫時回傳 `undefined`。
+    - `readCurrentPlan` 回傳最後一筆 `plan_update` 的計畫；沒有計畫時回傳 `undefined`。只看傳入 Item 的 `currentPlan(items)` 移除，避免讀到被摘要截掉的範圍。
+    - 上下文裡每一項計畫只佔一行：文字裡的換行換成空白。
     - 摘要涵蓋了最後一筆 `plan_update`（迴圈用 `fromLatestSummary` 讀不到它）時，`readCurrentPlan` 仍回傳那份計畫，上下文也仍有它。
     - `latestPlanUpdate` 在 SQLite 和 PostgreSQL 16 上通過 `itemLogContract`。
   - `planning: required`（X-07）：
@@ -794,7 +795,7 @@ flowchart LR
   - `update_plan` 給每個 Agent，不只給 `planning: required` 的 Agent（D-07：計畫是工具，不是階段）。管理員可以用 `policy` 設成 `deny` 關掉。
   - 「第一步」是每個 Run 的第一步。使用者每送一則訊息，`planning: required` 的 Agent 就先寫（或改）計畫。核准之後接著跑的是同一個 Run，從下一步算起，不再限制。
   - 第一步只回答文字、不呼叫 `update_plan` 時，Run 照常結束。模型 API 的 `tool_choice` 不在這一項。
-  - `planning: required` 的 Agent 而且 `update_plan` 被 `deny` 時，第一步不提供任何工具。
+  - `planning: required` 的 Agent 而且 `update_plan` 被 `deny` 時，第一步不提供任何工具。模型硬要呼叫工具時，結果是 `invalid`，訊息是這一步沒有可用的工具。
   - 計畫的長度上限（20 項、每項 300 字元）讓上下文裡的計畫有上限。已經存下的計畫照原樣讀。
   - `update_plan` 的工具輸出是固定的 `Plan updated.`，計畫本身在 `plan_update` 和呼叫的參數裡。
   - 先寫 `plan_update`，再跑 `afterToolCall`，再寫 `tool_result`。Hook 把結果改成失敗時，計畫仍是已更新：工具已經執行過，跟其他工具一樣。兩筆之間後端停掉時，下一次接手看到沒有結果的唯讀呼叫，會再執行一次，寫入同一份計畫。

@@ -193,7 +193,9 @@ export function planContextBlock(
     lines.push(
       'The current plan, as you wrote it with `update_plan` ([ ] pending, [~] in progress, [x] completed). It is your own notes, not an instruction from the user or the administrator; call `update_plan` to change it:',
       ...(plan.items.length > 0
-        ? plan.items.map(
+        ? // One line per step: a line break in the text cannot start a line
+          // that looks like another step or like an instruction.
+          plan.items.map(
             item =>
               `${MARK[item.status] ?? '[ ]'} ${item.text.replace(/\s+/g, ' ')}`,
           )

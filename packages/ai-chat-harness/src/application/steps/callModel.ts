@@ -159,6 +159,9 @@ export async function* callModel(
     tool => decidePolicy(tool, req.policy) !== 'deny',
   );
   const planOffered = offered.includes(planTool);
+  const firstStepNote = planOffered
+    ? `Only ${UPDATE_PLAN_TOOL_ID} is available in this step: write the plan first.`
+    : 'No tool is available in this step.';
   const planText = planContextBlock(
     await readCurrentPlan(deps.items, req.ctx.sessionId),
     { planFirst: planFirst && planOffered },
@@ -303,7 +306,7 @@ export async function* callModel(
       callId: call.callId,
       descriptor,
       activeSkills,
-      planFirst,
+      firstStepNote: planFirst ? firstStepNote : undefined,
       step,
       position,
       overLimit: position >= remaining,
@@ -358,7 +361,8 @@ async function classify(
     callId: string;
     descriptor: ToolDescriptor | undefined;
     activeSkills: readonly Skill[];
-    planFirst: boolean;
+    /** Set in the first step of an agent that plans first: why a tool is missing. */
+    firstStepNote: string | undefined;
     step: number;
     position: number;
     overLimit: boolean;
@@ -373,7 +377,7 @@ async function classify(
     callId,
     descriptor,
     activeSkills,
-    planFirst,
+    firstStepNote,
     step,
     position,
     overLimit,
@@ -390,9 +394,7 @@ async function classify(
   });
 
   if (!descriptor) {
-    const message = planFirst
-      ? `Only ${UPDATE_PLAN_TOOL_ID} is available in this step: write the plan first.`
-      : `Unknown tool: ${call.toolId}`;
+    const message = firstStepNote ?? `Unknown tool: ${call.toolId}`;
     return refuse('invalid', message, {
       input: {},
       schemaHash: '',

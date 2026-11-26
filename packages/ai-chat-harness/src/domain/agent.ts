@@ -15,9 +15,8 @@
  */
 
 /**
- * `required`: the first step of a run offers only `update_plan` (X-07). The
- * loop does not enforce that yet (P3-03). Absent means the agent does not
- * require a plan.
+ * `required`: the first step of a run offers only `update_plan` (X-07).
+ * Absent means the agent does not require a plan.
  *
  * @public
  */
@@ -40,9 +39,9 @@ export type AgentLimits = {
 };
 
 /**
- * One agent (X-01). `toolsets`, `skills`, `model`, `limits` and `planning`
- * are recorded here. The loop reads `systemPrompt` only; the rest is applied
- * by later work (P3-02 to P3-07).
+ * One agent (X-01). The loop applies `systemPrompt`, `skills` (which skills
+ * `load_skill` offers) and `planning`. `toolsets`, `model` and `limits` are
+ * recorded here; applying them is later work (P3-02 to P3-07).
  *
  * @public
  */

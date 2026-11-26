@@ -209,10 +209,11 @@ export interface Config {
      *
      * `skills` chooses which configured and module-registered skills the
      * agent offers through `load_skill` (omitting it offers all registered
-     * skills; an empty list offers none). `toolsets`, `model`, `limits` and
-     * `planning` are recorded. The loop still uses the limits of the
+     * skills; an empty list offers none). `planning: required` gives the
+     * agent only `update_plan` in the first step of every run. `toolsets`,
+     * `model` and `limits` are recorded. The loop still uses the limits of the
      * installation and its one model client, and does not filter tools by the
-     * agent's toolsets, require a plan, or call another model client yet. A value that is not
+     * agent's toolsets or call another model client yet. A value that is not
      * valid stops the backend at startup.
      *
      * A backend module can register further agents and skills through
@@ -241,8 +242,8 @@ export interface Config {
         /** Id of a model. The client for it is not selected yet. */
         model?: string;
         /**
-         * `required`: a run of this agent is meant to plan first. That is not
-         * enforced yet.
+         * `required`: the first step of every run of this agent offers only
+         * `update_plan`, so the agent writes a plan first.
          */
         planning?: 'required';
         /**
