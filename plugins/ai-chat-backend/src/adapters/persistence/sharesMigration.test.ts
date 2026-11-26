@@ -144,6 +144,8 @@ describe('the migration of the shares', () => {
     await knex.migrate.latest(config);
     await session();
     await knex('shares').insert(row('sh1'));
+    // The migration of the model calls comes after this one.
+    await knex.migrate.down(config);
     await knex.migrate.down(config);
     expect(await knex.schema.hasTable('shares')).toBe(false);
     expect(await knex.schema.hasTable('sessions')).toBe(true);

@@ -36,9 +36,15 @@ describe('readAiChatConfig', () => {
         model: 'm',
         timeoutMs: 120000,
         images: false,
+        parallelToolCalls: false,
       },
+      models: new Map(),
       maxTurns: 10,
       maxToolCallsPerRun: 30,
+      maxToolCallsPerStep: 8,
+      readConcurrency: 4,
+      toolTimeoutSeconds: 60,
+      runsPerUser: 3,
       runTimeoutSeconds: 300,
       context: { tokenBudget: 100000, keepRecentSteps: 6 },
       input: {
@@ -59,6 +65,98 @@ describe('readAiChatConfig', () => {
       retentionDays: 90,
       skills: { directories: [] },
     });
+  });
+
+  it('reads the models (X-09): llm is default, models are the others, with their capabilities and rate limits', () => {
+    const config = readAiChatConfig(
+      mockServices.rootConfig({
+        data: {
+          aiChat: {
+            llm: { ...llm, parallelToolCalls: true, requestsPerMinute: 30 },
+            models: {
+              small: {
+                baseUrl: 'https://small.test/v1/',
+                apiKey: 'k',
+                model: 's',
+                images: true,
+                timeoutSeconds: 10,
+              },
+            },
+          },
+        },
+      }),
+    );
+    expect(config.llm).toMatchObject({
+      parallelToolCalls: true,
+      requestsPerMinute: 30,
+    });
+    expect([...config.models]).toEqual([
+      [
+        'small',
+        {
+          baseUrl: 'https://small.test/v1',
+          apiKey: 'k',
+          model: 's',
+          timeoutMs: 10000,
+          images: true,
+          parallelToolCalls: false,
+        },
+      ],
+    ]);
+  });
+
+  it('refuses aiChat.models.default, a bad model id, a bad baseUrl and a requestsPerMinute that is not a positive integer', () => {
+    const read = (aiChat: Record<string, unknown>) => () =>
+      readAiChatConfig(
+        mockServices.rootConfig({ data: { aiChat: { llm, ...aiChat } } }),
+      );
+    expect(read({ models: { default: llm } })).toThrow(
+      'aiChat.models.default: the model default is aiChat.llm; use another id',
+    );
+    expect(read({ models: { '1x': llm } })).toThrow(
+      'aiChat.models.1x: the id must start with a letter',
+    );
+    expect(read({ models: { small: { ...llm, baseUrl: 'ftp://x' } } })).toThrow(
+      'aiChat.models.small.baseUrl must start with http:// or https://',
+    );
+    expect(
+      read({ models: { small: { ...llm, requestsPerMinute: 0 } } }),
+    ).toThrow('models.small.requestsPerMinute must be a positive integer');
+    expect(read({ llm: { ...llm, requestsPerMinute: 1.5 } })).toThrow(
+      'llm.requestsPerMinute must be a positive integer',
+    );
+  });
+
+  it('reads the limits of a step, of the tool calls and of the runs of a user (P-02, P-05)', () => {
+    const read = (aiChat: Record<string, unknown>) =>
+      readAiChatConfig(
+        mockServices.rootConfig({ data: { aiChat: { llm, ...aiChat } } }),
+      );
+    expect(
+      read({
+        maxToolCallsPerStep: 2,
+        readConcurrency: 1,
+        toolTimeoutSeconds: 600,
+        runsPerUser: 1,
+      }),
+    ).toMatchObject({
+      maxToolCallsPerStep: 2,
+      readConcurrency: 1,
+      toolTimeoutSeconds: 600,
+      runsPerUser: 1,
+    });
+    expect(() => read({ maxToolCallsPerStep: 0 })).toThrow(
+      'maxToolCallsPerStep must be a positive integer',
+    );
+    expect(() => read({ readConcurrency: 0 })).toThrow(
+      'readConcurrency must be a positive integer',
+    );
+    expect(() => read({ toolTimeoutSeconds: 601 })).toThrow(
+      'toolTimeoutSeconds must be at most 600',
+    );
+    expect(() => read({ runsPerUser: -1 })).toThrow(
+      'runsPerUser must be a positive integer',
+    );
   });
 
   it('reads sharing.live and refuses a life that is not a positive integer or longer than the maximum', () => {

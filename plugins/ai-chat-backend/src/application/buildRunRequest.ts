@@ -25,6 +25,7 @@ import {
   type Principal,
   type Session,
 } from '../domain';
+import type { ModelCatalog } from './models';
 import type { LaunchRequest } from './RunSupervisor';
 import type { AgentCatalog } from './ports';
 
@@ -42,7 +43,12 @@ export type RunSettings = {
  * in it.
  */
 export async function buildRunRequest(
-  deps: { agents: AgentCatalog; clock: Clock; settings: RunSettings },
+  deps: {
+    agents: AgentCatalog;
+    models: ModelCatalog;
+    clock: Clock;
+    settings: RunSettings;
+  },
   input: {
     session: Session;
     run: LeasedRun;
@@ -51,8 +57,10 @@ export async function buildRunRequest(
   },
 ): Promise<LaunchRequest> {
   const { session, run, principal, page } = input;
+  const agent = await deps.agents.agent(session.agentId);
   return {
-    agent: await deps.agents.agent(session.agentId),
+    agent,
+    model: deps.models.forAgent(agent),
     limits: runLimits(
       deps.settings.limits,
       run.usage,

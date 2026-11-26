@@ -774,7 +774,7 @@ paths:
       operationId: sendMessage
       tags: [Runs]
       summary: Send a message, start a run and stream it.
-      description: 409 while a run of the session has not ended (also one that waits for an approval), 503 while the backend shuts down. A message that is refused is not stored. A client that goes away does not stop the run. Empty text is accepted when attachmentIds has at least one image; a message with no text and no image is 400.
+      description: 409 while a run of the session has not ended (also one that waits for an approval), 429 (`TooManyActiveRuns`) while the user has `aiChat.runsPerUser` runs going on in other sessions, 503 while the backend shuts down. A message that is refused is not stored. A client that goes away does not stop the run. Empty text is accepted when attachmentIds has at least one image; a message with no text and no image is 400.
       requestBody:
         required: true
         content:
@@ -805,6 +805,8 @@ paths:
         '404':
           $ref: '#/components/responses/Error'
         '409':
+          $ref: '#/components/responses/Error'
+        '429':
           $ref: '#/components/responses/Error'
         '503':
           $ref: '#/components/responses/Error'
@@ -976,7 +978,7 @@ paths:
       operationId: resumeQueue
       tags: [Queue]
       summary: Send the first queued message now and stream its run.
-      description: For a queue that is paused (`paused` of the queue). The run uses the credentials of this request; their remaining time is not checked. 204 when the queue is empty or the session has a run that has not ended. 503 while the backend shuts down.
+      description: For a queue that is paused (`paused` of the queue). The run uses the credentials of this request; their remaining time is not checked. 204 when the queue is empty or the session has a run that has not ended. 429 (`TooManyActiveRuns`) while the user has `aiChat.runsPerUser` runs going on in other sessions; the queue is not changed. 503 while the backend shuts down.
       responses:
         '200':
           $ref: '#/components/responses/Stream'
@@ -985,6 +987,8 @@ paths:
         '403':
           $ref: '#/components/responses/Error'
         '404':
+          $ref: '#/components/responses/Error'
+        '429':
           $ref: '#/components/responses/Error'
         '503':
           $ref: '#/components/responses/Error'

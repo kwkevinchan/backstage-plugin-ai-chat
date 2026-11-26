@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import type { ModelCatalog } from './models';
 import type { Clock, ItemLog } from '@kwkevinchan/ai-chat-harness';
 import {
   callsAwaitingDecision,
@@ -44,6 +45,7 @@ export async function resumeIfDecided(
     items: ItemLog;
     supervisor: RunSupervisor;
     agents: AgentCatalog;
+    models: ModelCatalog;
     clock: Clock;
     settings: RunSettings;
     notify?: ActivityNotifier;
@@ -57,7 +59,7 @@ export async function resumeIfDecided(
     page?: { path: string; entityRef?: string };
   },
 ): Promise<RunHandle | undefined> {
-  const { runs, items, supervisor, agents, clock, settings } = deps;
+  const { runs, items, supervisor, agents, models, clock, settings } = deps;
   const { session, run, principal, page } = input;
   if (run.status !== 'waiting_approval') return undefined;
   const log = await items.read(session.id);
@@ -68,7 +70,7 @@ export async function resumeIfDecided(
   if (!leased) return undefined;
   try {
     const request = await buildRunRequest(
-      { agents, clock, settings },
+      { agents, models, clock, settings },
       { session, run: leased, principal, page },
     );
     const initialSeq = log

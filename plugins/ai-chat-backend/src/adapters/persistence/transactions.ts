@@ -26,6 +26,7 @@ import {
 import type { Knex } from 'knex';
 import {
   InsertLimitReached,
+  TooManyActiveRuns,
   TooManyImageBytes,
   UnknownAttachment,
   type AttachmentMeta,
@@ -97,6 +98,49 @@ export function newRunRow(
     started_at: now.toISOString(),
     ended_at: null,
   };
+}
+
+/** Runs one user may have going on at the same time, by default (P-05). */
+export const DEFAULT_RUNS_PER_USER = 3;
+
+/**
+ * Inserts the row of a new run, in the transaction of the caller, once the
+ * owner of its session has fewer than `runsPerUser` active runs in other
+ * sessions (P-05). A run of the same session is left to the unique index on
+ * `active_session_id` (`RunAlreadyActive`). Throws `TooManyActiveRuns`.
+ *
+ * Two transactions that start runs of one user at the same time must count
+ * one after the other. PostgreSQL takes a transaction advisory lock on the
+ * owner first: it is the first lock of the transaction, and no other
+ * transaction takes it, so it adds no cycle to the order of the row locks.
+ * SQLite has one connection, so its transactions already go one at a time.
+ */
+export async function insertRun(
+  trx: Knex.Transaction,
+  row: RunRow,
+  runsPerUser: number,
+): Promise<void> {
+  const session = await trx('sessions')
+    .where({ id: row.session_id })
+    .first<{ owner_ref: string } | undefined>('owner_ref');
+  if (session) {
+    if (String(trx.client.config.client ?? '') === 'pg') {
+      await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+        `ai-chat:runs:${session.owner_ref}`,
+      ]);
+    }
+    const [{ count }] = await trx('runs')
+      .join('sessions', 'sessions.id', 'runs.session_id')
+      .where('sessions.owner_ref', session.owner_ref)
+      .whereNot('runs.session_id', row.session_id)
+      .whereNull('runs.parent_run_id')
+      .whereIn('runs.status', ['running', 'waiting_approval'])
+      .count<{ count: number | string }[]>({ count: '*' });
+    if (Number(count) >= runsPerUser) {
+      throw new TooManyActiveRuns(runsPerUser);
+    }
+  }
+  await trx('runs').insert(row);
 }
 
 export function leaseEnd(from: Date, leaseSeconds: number): string {

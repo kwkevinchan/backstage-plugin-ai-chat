@@ -16,6 +16,7 @@
 
 import { Config } from '@backstage/config';
 import { InputError } from '@backstage/errors';
+import { DEFAULT_MODEL_ID } from './application';
 import {
   DEFAULT_IMAGE_LIMITS,
   DEFAULT_INSERT_MAX_PER_RUN,
@@ -24,18 +25,36 @@ import {
   type ImageLimits,
 } from './domain';
 
+/** One model server (X-09): `aiChat.llm`, or an entry of `aiChat.models`. */
+export interface ModelSettings {
+  baseUrl: string;
+  apiKey?: string;
+  model: string;
+  timeoutMs: number;
+  /** The model reads images (IN-05). */
+  images: boolean;
+  /** The model may ask for more than one tool in one answer. */
+  parallelToolCalls: boolean;
+  /** Model calls per minute, over all backends (P-06). No limit when absent. */
+  requestsPerMinute?: number;
+}
+
 export interface AiChatConfig {
-  llm: {
-    baseUrl: string;
-    apiKey?: string;
-    model: string;
-    timeoutMs: number;
-    /** The model reads images (IN-05). */
-    images: boolean;
-  };
+  /** The model `default`. */
+  llm: ModelSettings;
+  /** The models of `aiChat.models`, by id; `default` is not among them. */
+  models: ReadonlyMap<string, ModelSettings>;
   maxTurns: number;
   /** Most tool calls the model requests in one run. */
   maxToolCallsPerRun: number;
+  /** Most tool calls the model requests in one step (P-05). */
+  maxToolCallsPerStep: number;
+  /** Read-only calls of one step that run at the same time (P-01). */
+  readConcurrency: number;
+  /** Seconds one tool call may take (P-02). */
+  toolTimeoutSeconds: number;
+  /** Runs one user may have going on at the same time (P-05). */
+  runsPerUser: number;
   /** Seconds of working time of one run, without the wait for approvals. */
   runTimeoutSeconds: number;
   /** How much the model gets of a long session (H-09). */
@@ -91,6 +110,12 @@ const DEFAULT_CONTEXT_TOKEN_BUDGET = 100_000;
 const DEFAULT_KEEP_RECENT_STEPS = 6;
 const DEFAULT_MAX_TOOL_CALLS_PER_RUN = 30;
 const DEFAULT_RUN_TIMEOUT_SECONDS = 300;
+const DEFAULT_MAX_TOOL_CALLS_PER_STEP = 8;
+const DEFAULT_READ_CONCURRENCY = 4;
+const DEFAULT_TOOL_TIMEOUT_SECONDS = 60;
+const DEFAULT_RUNS_PER_USER = 3;
+/** The rule of the other ids of the plugin: agents, toolsets, skills. */
+const MODEL_ID = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/i;
 /**
  * The shortest life that `auth.backstageTokenExpiration` allows for the token
  * of a user. A run works with the token of the request that started it or
@@ -210,32 +235,95 @@ function readSkillsConfig(config: Config): AiChatConfig['skills'] {
   return { directories };
 }
 
+/**
+ * One model server, at `key` of the `aiChat` section: `llm`, or
+ * `models.<id>`.
+ */
+function readModel(config: Config, key: string): ModelSettings {
+  const baseUrl = config.getString(`${key}.baseUrl`).replace(/\/+$/, '');
+  if (!/^https?:\/\//.test(baseUrl)) {
+    throw new InputError(
+      `aiChat.${key}.baseUrl must start with http:// or https://`,
+    );
+  }
+  const rateKey = `${key}.requestsPerMinute`;
+  return {
+    baseUrl,
+    apiKey: config.getOptionalString(`${key}.apiKey`),
+    model: config.getString(`${key}.model`),
+    timeoutMs:
+      positiveInt(config, `${key}.timeoutSeconds`, DEFAULT_TIMEOUT_SECONDS) *
+      1000,
+    images: config.getOptionalBoolean(`${key}.images`) ?? false,
+    parallelToolCalls:
+      config.getOptionalBoolean(`${key}.parallelToolCalls`) ?? false,
+    ...(config.getOptional(rateKey) !== undefined && {
+      requestsPerMinute: positiveInt(config, rateKey, 1),
+    }),
+  };
+}
+
+/**
+ * `aiChat.models`: the models besides `aiChat.llm`, which is `default`. An id
+ * follows the rule of the other ids; `default` is a duplicate.
+ */
+function readModels(config: Config): Map<string, ModelSettings> {
+  const models = new Map<string, ModelSettings>();
+  const block = config.getOptionalConfig('models');
+  for (const id of block?.keys() ?? []) {
+    const path = `aiChat.models.${id}`;
+    if (!MODEL_ID.test(id)) {
+      throw new InputError(
+        `${path}: the id must start with a letter and may only have letters, digits, - and _ between them`,
+      );
+    }
+    if (id === DEFAULT_MODEL_ID) {
+      throw new InputError(
+        `${path}: the model default is aiChat.llm; use another id`,
+      );
+    }
+    models.set(id, readModel(config, `models.${id}`));
+  }
+  return models;
+}
+
 /** Reads and checks the `aiChat` section of the configuration. */
 export function readAiChatConfig(root: Config): AiChatConfig {
   const config = root.getConfig('aiChat');
-  const baseUrl = config.getString('llm.baseUrl').replace(/\/+$/, '');
-  if (!/^https?:\/\//.test(baseUrl)) {
-    throw new InputError(
-      'aiChat.llm.baseUrl must start with http:// or https://',
-    );
-  }
-  const apiKey = config.getOptionalString('llm.apiKey');
+  const runTimeoutSeconds = positiveInt(
+    config,
+    'runTimeoutSeconds',
+    DEFAULT_RUN_TIMEOUT_SECONDS,
+    1,
+    MAX_RUN_TIMEOUT_SECONDS,
+  );
   return {
-    llm: {
-      baseUrl,
-      apiKey,
-      model: config.getString('llm.model'),
-      timeoutMs:
-        positiveInt(config, 'llm.timeoutSeconds', DEFAULT_TIMEOUT_SECONDS) *
-        1000,
-      images: config.getOptionalBoolean('llm.images') ?? false,
-    },
+    llm: readModel(config, 'llm'),
+    models: readModels(config),
     maxTurns: positiveInt(config, 'maxTurns', DEFAULT_MAX_TURNS),
     maxToolCallsPerRun: positiveInt(
       config,
       'maxToolCallsPerRun',
       DEFAULT_MAX_TOOL_CALLS_PER_RUN,
     ),
+    maxToolCallsPerStep: positiveInt(
+      config,
+      'maxToolCallsPerStep',
+      DEFAULT_MAX_TOOL_CALLS_PER_STEP,
+    ),
+    readConcurrency: positiveInt(
+      config,
+      'readConcurrency',
+      DEFAULT_READ_CONCURRENCY,
+    ),
+    toolTimeoutSeconds: positiveInt(
+      config,
+      'toolTimeoutSeconds',
+      DEFAULT_TOOL_TIMEOUT_SECONDS,
+      1,
+      MAX_RUN_TIMEOUT_SECONDS,
+    ),
+    runsPerUser: positiveInt(config, 'runsPerUser', DEFAULT_RUNS_PER_USER),
     context: {
       tokenBudget: positiveInt(
         config,
@@ -248,13 +336,7 @@ export function readAiChatConfig(root: Config): AiChatConfig {
         DEFAULT_KEEP_RECENT_STEPS,
       ),
     },
-    runTimeoutSeconds: positiveInt(
-      config,
-      'runTimeoutSeconds',
-      DEFAULT_RUN_TIMEOUT_SECONDS,
-      1,
-      MAX_RUN_TIMEOUT_SECONDS,
-    ),
+    runTimeoutSeconds,
     input: {
       insertMaxPerRun: positiveInt(
         config,

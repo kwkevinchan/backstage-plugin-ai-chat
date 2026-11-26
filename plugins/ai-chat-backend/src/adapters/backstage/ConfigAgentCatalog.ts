@@ -28,6 +28,7 @@ import { buildSystemPrompt } from '../../domain/systemPrompt';
 import type { Toolset } from '../../domain/toolset';
 import {
   assertExtensionId,
+  assertKnownModel,
   assertKnownSkills,
   assertKnownToolsets,
   definitionFrom,
@@ -56,8 +57,10 @@ const POLICY_NAMES: readonly string[] = ['allow', 'ask', 'deny'];
  *
  * `skills` chooses which registered skills the agent offers through
  * `load_skill`: all of them when it is omitted, none when it is empty. An id
- * that no skill has stops the backend. `toolsets`, `model`, `limits` and
- * `planning` are recorded; the loop does not apply them yet.
+ * that no skill has stops the backend. `model` names the model of the agent's
+ * runs; an id that is not a model of the installation stops the backend.
+ * `toolsets`, `limits` and `planning` are recorded; the loop does not apply
+ * them yet.
  *
  * Without `aiChat.toolsets` it builds one toolset, `default`, switched on for
  * every session, from the deprecated `aiChat.actions.include` and
@@ -74,6 +77,7 @@ export class ConfigAgentCatalog implements AgentCatalog {
     logger: LoggerService,
     registeredAgents: readonly AgentDefinition[] = [],
     knownSkills?: ReadonlySet<string>,
+    knownModels?: ReadonlySet<string>,
   ) {
     const config = root.getOptionalConfig('aiChat');
     const include = config?.getOptionalStringArray('actions.include') ?? [];
@@ -107,6 +111,7 @@ export class ConfigAgentCatalog implements AgentCatalog {
       config,
       knownToolsets,
       knownSkills,
+      knownModels,
       globalPrompt,
     )) {
       this.agents.set(agent.id, agent);
@@ -122,6 +127,9 @@ export class ConfigAgentCatalog implements AgentCatalog {
       assertKnownToolsets(agent.toolsets, knownToolsets, `agent ${agent.id}`);
       if (knownSkills) {
         assertKnownSkills(agent.skills, knownSkills, `agent ${agent.id}`);
+      }
+      if (knownModels) {
+        assertKnownModel(agent.model, knownModels, `agent ${agent.id}`);
       }
       if (this.agents.has(agent.id)) {
         throw new InputError(`agent ${agent.id} is already defined`);
@@ -161,6 +169,7 @@ function readConfiguredAgents(
   config: Config | undefined,
   knownToolsets: ReadonlySet<string>,
   knownSkills: ReadonlySet<string> | undefined,
+  knownModels: ReadonlySet<string> | undefined,
   globalPrompt: string | undefined,
 ): AgentDefinition[] {
   if (!config) return [];
@@ -179,6 +188,9 @@ function readConfiguredAgents(
     assertKnownToolsets(body.toolsets, knownToolsets, `aiChat.agents.${id}`);
     if (knownSkills) {
       assertKnownSkills(body.skills, knownSkills, `aiChat.agents.${id}`);
+    }
+    if (knownModels) {
+      assertKnownModel(body.model, knownModels, `aiChat.agents.${id}`);
     }
     return definitionFrom(
       id,

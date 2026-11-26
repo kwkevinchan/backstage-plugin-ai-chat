@@ -40,6 +40,8 @@ import {
 import {
   checkImageBytes,
   checkInsertLimit,
+  DEFAULT_RUNS_PER_USER,
+  insertRun,
   leased,
   lockAttachments,
   markAttachmentsUsed,
@@ -84,15 +86,22 @@ class NothingToStart extends Error {}
  */
 export class KnexQueuedMessageRepository implements QueuedMessageRepository {
   private readonly leaseSeconds: number;
+  private readonly runsPerUser: number;
 
-  /** @param options.leaseSeconds - The lease of the run `startNext` makes; 30 by default, as in `KnexRunRepository`. */
+  /**
+   * @param options.leaseSeconds - The lease of the run `startNext` makes; 30
+   * by default, as in `KnexRunRepository`.
+   * @param options.runsPerUser - Runs one user may have going on (P-05); 3 by
+   * default, as in `KnexRunRepository`.
+   */
   constructor(
     private readonly knex: Knex,
     private readonly clock: Clock,
     private readonly ids: IdGenerator,
-    options: { leaseSeconds?: number } = {},
+    options: { leaseSeconds?: number; runsPerUser?: number } = {},
   ) {
     this.leaseSeconds = options.leaseSeconds ?? 30;
+    this.runsPerUser = options.runsPerUser ?? DEFAULT_RUNS_PER_USER;
   }
 
   async list(sessionId: string): Promise<QueuedMessage[]> {
@@ -234,9 +243,10 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
   ): Promise<{ run: LeasedRun; message: QueuedMessage } | undefined> {
     try {
       return await this.knex.transaction(async trx => {
-        // The run first. Its unique index on `active_session_id` is what stops
-        // a second start: of two transactions that insert at the same time,
-        // the second waits for the first and then fails.
+        // The run first, within the runs of the user (`insertRun`). Its unique
+        // index on `active_session_id` is what stops a second start: of two
+        // transactions that insert at the same time, the second waits for the
+        // first and then fails.
         const row = newRunRow(
           {
             clock: this.clock,
@@ -245,7 +255,7 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
           },
           sessionId,
         );
-        await trx('runs').insert(row);
+        await insertRun(trx, row, this.runsPerUser);
         await this.lockSession(trx, sessionId);
         const first = await trx<QueuedRow>('queued_messages')
           .where({ session_id: sessionId })

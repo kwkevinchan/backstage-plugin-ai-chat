@@ -239,6 +239,9 @@ export async function createWorld(
     maxSteps: 10,
     maxToolCallsPerRun: 30,
     runTimeoutSeconds: 300,
+    maxToolCallsPerStep: 8,
+    readConcurrency: 4,
+    toolTimeoutSeconds: 60,
     ...options.limits,
   };
 

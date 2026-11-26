@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import type { ModelCatalog } from '../models';
 import type { Clock, ItemLog } from '@kwkevinchan/ai-chat-harness';
 import { assertOwner, ShuttingDown, type Principal } from '../../domain';
 import { abandonRun } from '../abandonRun';
@@ -45,6 +46,7 @@ export class SendMessage {
       items: ItemLog;
       supervisor: RunSupervisor;
       agents: AgentCatalog;
+      models: ModelCatalog;
       clock: Clock;
       settings: RunSettings;
       attachments: AttachmentStore;
@@ -69,8 +71,16 @@ export class SendMessage {
     attachmentIds?: string[];
     page?: { path: string; entityRef?: string };
   }): Promise<RunHandle> {
-    const { sessions, runs, items, supervisor, agents, clock, settings } =
-      this.deps;
+    const {
+      sessions,
+      runs,
+      items,
+      supervisor,
+      agents,
+      models,
+      clock,
+      settings,
+    } = this.deps;
     const session = await sessions.get(input.sessionId);
     assertOwner(session, input.principal);
     if (!supervisor.accepting) throw new ShuttingDown();
@@ -83,7 +93,7 @@ export class SendMessage {
     const run = await runs.start(session.id);
     try {
       const request = await buildRunRequest(
-        { agents, clock, settings },
+        { agents, models, clock, settings },
         { session, run, principal: input.principal, page: input.page },
       );
       await items.append(

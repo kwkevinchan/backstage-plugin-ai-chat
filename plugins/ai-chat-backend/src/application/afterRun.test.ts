@@ -25,7 +25,14 @@ import { createAfterRun } from './afterRun';
 
 const clock = new FakeClock(new Date('2026-01-01T00:00:00.000Z'));
 const settings = {
-  limits: { maxSteps: 10, maxToolCallsPerRun: 30, runTimeoutSeconds: 300 },
+  limits: {
+    maxSteps: 10,
+    maxToolCallsPerRun: 30,
+    runTimeoutSeconds: 300,
+    maxToolCallsPerStep: 8,
+    readConcurrency: 4,
+    toolTimeoutSeconds: 60,
+  },
   budget: { tokenBudget: 1000, keepRecentSteps: 6 },
 };
 const message = (id: string): QueuedMessage => ({

@@ -24,6 +24,7 @@ export type {
   ToolAuditEvent,
 } from './AuditLog';
 export type { Logger } from './Logger';
+export type { ModelCallLimiter } from './ModelCallLimiter';
 export type { Notifier, SessionActivity } from './Notifier';
 export { DelegatingNotifier, NoopNotifier } from './Notifier';
 export type { QueuedMessageRepository } from './QueuedMessageRepository';

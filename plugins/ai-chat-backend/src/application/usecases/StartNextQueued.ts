@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import type { ModelCatalog } from '../models';
 import {
   assertOwner,
   ShuttingDown,
@@ -47,6 +48,7 @@ export class StartNextQueued {
       queue: QueuedMessageRepository;
       supervisor: RunSupervisor;
       agents: AgentCatalog;
+      models: ModelCatalog;
       audit: AuditLog;
       clock: Clock;
       settings: RunSettings;
@@ -77,6 +79,7 @@ export class StartNextQueued {
       queue,
       supervisor,
       agents,
+      models,
       audit,
       clock,
       settings,
@@ -90,7 +93,7 @@ export class StartNextQueued {
     const { run, message } = started;
     try {
       const request = await buildRunRequest(
-        { agents, clock, settings },
+        { agents, models, clock, settings },
         {
           session,
           run,

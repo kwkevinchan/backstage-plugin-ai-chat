@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import type { ModelCatalog } from '../models';
 import { assertOwner, type Principal } from '../../domain';
 import type { RunSettings } from '../buildRunRequest';
 import type { ActivityNotifier } from '../notifyActivity';
@@ -42,6 +43,7 @@ export class ResumeRun {
       items: ItemLog;
       supervisor: RunSupervisor;
       agents: AgentCatalog;
+      models: ModelCatalog;
       clock: Clock;
       settings: RunSettings;
       notify?: ActivityNotifier;

@@ -67,7 +67,9 @@ export interface QueuedMessageRepository {
    * queue and writes it as the first message of the run (`delivery: queued`).
    * The attachments of the message get `used_seq` in the same transaction.
    * Returns `undefined`, with nothing changed, when the queue is empty or the
-   * session has a run that has not ended already.
+   * session has a run that has not ended already. Throws `TooManyActiveRuns`,
+   * with nothing changed, when the user has `runsPerUser` runs going on in
+   * other sessions (P-05).
    */
   startNext(
     sessionId: string,

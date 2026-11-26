@@ -37,6 +37,8 @@ import {
   type Run,
 } from '../../domain';
 import {
+  DEFAULT_RUNS_PER_USER,
+  insertRun,
   leased,
   leaseEnd,
   newRunRow,
@@ -61,18 +63,22 @@ const ACTIVE: RunStatus[] = ['running', 'waiting_approval'];
  */
 export class KnexRunRepository implements RunRepository {
   private readonly leaseSeconds: number;
+  private readonly runsPerUser: number;
 
   /**
    * @param options.leaseSeconds - How long a lease or a heartbeat lasts. 30
+   * by default.
+   * @param options.runsPerUser - Runs one user may have going on (P-05). 3
    * by default.
    */
   constructor(
     private readonly knex: Knex,
     private readonly clock: Clock,
     private readonly ids: IdGenerator,
-    options: { leaseSeconds?: number } = {},
+    options: { leaseSeconds?: number; runsPerUser?: number } = {},
   ) {
     this.leaseSeconds = options.leaseSeconds ?? 30;
+    this.runsPerUser = options.runsPerUser ?? DEFAULT_RUNS_PER_USER;
   }
 
   async start(
@@ -81,7 +87,7 @@ export class KnexRunRepository implements RunRepository {
   ): Promise<LeasedRun> {
     const row = newRunRow(this.timing(), sessionId, opts.parentRunId);
     try {
-      await this.knex('runs').insert(row);
+      await this.knex.transaction(trx => insertRun(trx, row, this.runsPerUser));
     } catch (error) {
       if (isUniqueViolation(error, 'active_session_id')) {
         throw new RunAlreadyActive(sessionId);

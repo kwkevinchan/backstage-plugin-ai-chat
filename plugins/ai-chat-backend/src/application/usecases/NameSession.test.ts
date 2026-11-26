@@ -126,7 +126,8 @@ function setup(
     sessions,
     runs,
     items,
-    model,
+    agents: { agent: async agentId => ({ id: agentId, systemPrompt: '' }) },
+    models: { forAgent: () => model },
     logger,
     ...(over.timeoutMs !== undefined && { timeoutMs: over.timeoutMs }),
   });

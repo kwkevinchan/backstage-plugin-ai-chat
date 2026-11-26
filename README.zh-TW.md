@@ -66,6 +66,13 @@ aiChat:
     apiKey: ${AI_CHAT_API_KEY}
     model: gpt-4o-mini
     images: false # 模型能讀圖片；預設 false。圖片會送到模型伺服器，見下方說明
+    parallelToolCalls: false # 請伺服器允許一次多個工具呼叫；預設 false
+    requestsPerMinute: 60 # 選填；所有後端合計每分鐘的呼叫數
+  models: # 選填；Agent 用 `model` 指定的其他模型，欄位和 llm 相同。llm 就是 default
+    small:
+      baseUrl: https://llm.example.com/v1
+      apiKey: ${AI_CHAT_SMALL_API_KEY}
+      model: some-small-model
   toolsets: # 工具分組
     catalog:
       title: Catalog
@@ -96,6 +103,10 @@ aiChat:
   maxTurns: 10 # 一次 Run 的模型呼叫數；預設 10
   maxToolCallsPerRun: 30 # 一次 Run 的工具呼叫數；預設 30
   runTimeoutSeconds: 300 # 一次 Run 的工作時間（不含等核准）；預設 300，最大 600
+  maxToolCallsPerStep: 8 # 模型一次回答的工具呼叫數，超過的被拒絕；預設 8
+  readConcurrency: 4 # 同時執行的唯讀呼叫數；不是唯讀的一次一個，仍要核准；預設 4
+  toolTimeoutSeconds: 60 # 一個工具呼叫的時間，超過時結果是逾時，Run 繼續；預設 60，最大 600
+  runsPerUser: 3 # 一個使用者同時進行的 Run 數（含等核准），超過回 429；預設 3
   context:
     tokenBudget: 100000 # 送給模型的內容的 token 預算（估計值）；預設 100000
     keepRecentSteps: 6 # 最近幾步一律保留；預設 6
@@ -203,7 +214,7 @@ aiChat:
   `mailto` 的網址做成連結，所以上面的系統提示請模型寫成完整的網址。`search.collators.techdocs.locationTemplate` 保留預設：
   它套用在整個搜尋索引，TechDocs 閱讀頁的搜尋框會把 `location` 當成 app 裡的路徑去換頁。
 - 這個 action 的 input schema 有遞迴的 `$ref`（在 `filters`）。不接受工具 schema 裡有 `$ref` 的模型伺服器會拒絕請求。
-- 搜尋失敗時，模型收到 `Request failed with <狀態碼> <狀態文字>`，不含搜尋引擎的錯誤內容。搜尋不回應時，Run 到 `runTimeoutSeconds` 結束。
+- 搜尋失敗時，模型收到 `Request failed with <狀態碼> <狀態文字>`，不含搜尋引擎的錯誤內容。搜尋不回應時，過了 `toolTimeoutSeconds` 結果是逾時；`runTimeoutSeconds` 先到就結束 Run。
 - 輸出算在 `maxToolOutputChars` 裡。action 預設回傳 10 筆（`pageLimit`）；輸出被裁掉時，最後幾筆結果和它們的連結會不見，所以像上面一樣請模型少拿幾筆。
 
 ## 核准的規則

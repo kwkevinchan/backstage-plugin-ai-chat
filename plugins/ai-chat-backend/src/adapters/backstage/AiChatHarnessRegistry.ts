@@ -21,12 +21,13 @@ import type {
   Extensions,
   HookName,
   Hooks,
+  ModelClient,
   Skill,
   ToolResult,
 } from '@kwkevinchan/ai-chat-harness';
 import type { Logger } from '../../application/ports';
 import { limitToolResult } from './ActionsToolGateway';
-import { readExtensionAgent } from './agentShape';
+import { assertExtensionId, readExtensionAgent } from './agentShape';
 import { readExtensionSkill } from './skillShape';
 
 const HOOK_NAMES: readonly HookName[] = [
@@ -43,12 +44,14 @@ function isHookName(value: unknown): value is HookName {
 /**
  * What backend modules add through `aiChatHarnessExtensionPoint` (X-02).
  * The plugin registers this object before the modules run, then reads the
- * agents, hooks and skills when it builds the catalog and the host. A
- * repeated agent or skill id is refused and the first registration stays.
+ * agents, hooks, skills and model clients when it builds the catalog and the
+ * host. A repeated agent, skill or model id is refused and the first
+ * registration stays.
  */
 export class AiChatHarnessRegistry implements AiChatHarnessExtensionPoint {
   private readonly agentList: AgentDefinition[] = [];
   private readonly skillList: Skill[] = [];
+  private readonly modelClientMap = new Map<string, ModelClient>();
   private readonly hookLists: {
     [K in HookName]: Hooks[K][];
   } = {
@@ -84,12 +87,47 @@ export class AiChatHarnessRegistry implements AiChatHarnessExtensionPoint {
     this.skillList.push(checked);
   }
 
+  /**
+   * Checks the id and the shape of the client: `stream` is a function, and
+   * `capabilities` has booleans `parallelToolCalls` and `images`. Whether the
+   * id is also a configured model is checked by the plugin at startup.
+   */
+  addModelClient(id: string, client: ModelClient): void {
+    if (typeof id !== 'string') {
+      throw new InputError('a model client needs a string id');
+    }
+    assertExtensionId(id, `model client ${id}`);
+    const shape = client as Partial<ModelClient> | null | undefined;
+    const capabilities = shape?.capabilities as
+      | Partial<ModelClient['capabilities']>
+      | undefined;
+    if (
+      typeof shape?.stream !== 'function' ||
+      typeof capabilities !== 'object' ||
+      capabilities === null ||
+      typeof capabilities.parallelToolCalls !== 'boolean' ||
+      typeof capabilities.images !== 'boolean'
+    ) {
+      throw new InputError(
+        `model client ${id} must have a stream function and boolean capabilities parallelToolCalls and images`,
+      );
+    }
+    if (this.modelClientMap.has(id)) {
+      throw new InputError(`model client ${id} is already registered`);
+    }
+    this.modelClientMap.set(id, client);
+  }
+
   agents(): readonly AgentDefinition[] {
     return [...this.agentList];
   }
 
   skills(): readonly Skill[] {
     return [...this.skillList];
+  }
+
+  modelClients(): ReadonlyMap<string, ModelClient> {
+    return new Map(this.modelClientMap);
   }
 
   hookCount(): number {
