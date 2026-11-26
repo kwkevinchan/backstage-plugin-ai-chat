@@ -18,6 +18,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -311,6 +312,7 @@ export function ThreadListSidebar(props: ThreadListSidebarProps) {
   } = props;
   const loadError = useAuiState(s => s.threads.loadError);
   const archivedCount = useAuiState(s => s.threads.archivedThreadIds.length);
+  const archivedToggleId = useId();
   const errorText =
     actionError ?? (loadError ? describeError(loadError) : undefined);
 
@@ -349,8 +351,9 @@ export function ThreadListSidebar(props: ThreadListSidebarProps) {
             onSearchChange(e.target.value);
           }}
         />
-        <label className={cx('chat-sidebar-toggle')}>
+        <div className={cx('chat-sidebar-toggle')}>
           <input
+            id={archivedToggleId}
             type="checkbox"
             checked={showArchived}
             onChange={e => {
@@ -358,8 +361,8 @@ export function ThreadListSidebar(props: ThreadListSidebarProps) {
               onShowArchivedChange(e.target.checked);
             }}
           />
-          <span>Show archived</span>
-        </label>
+          <label htmlFor={archivedToggleId}>Show archived</label>
+        </div>
         {errorText && (
           <div className={cx('chat-error')} role="alert">
             {errorText}
