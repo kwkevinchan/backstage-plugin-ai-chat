@@ -15,7 +15,11 @@
  */
 
 import type { ModelCatalog } from '../models';
-import type { Clock, ItemLog } from '@kwkevinchan/ai-chat-harness';
+import {
+  CONTEXT_PROVIDER_TIMEOUT_MS,
+  type Clock,
+  type ItemLog,
+} from '@kwkevinchan/ai-chat-harness';
 import {
   assertOwner,
   ShuttingDown,
@@ -143,7 +147,9 @@ export class SendMessage {
   /**
    * The entity the session is bound to after this call: the page binds a
    * session that is bound to none and has nothing in its log yet. A failure
-   * of the catalog leaves the session unbound and the message goes on.
+   * of the catalog leaves the session unbound and the message goes on. The
+   * run holds its lease meanwhile, so a catalog that does not answer in
+   * `CONTEXT_PROVIDER_TIMEOUT_MS` counts as a failure.
    */
   private async bindToPage(
     session: Session,
@@ -157,7 +163,10 @@ export class SendMessage {
     try {
       const log = await items.read(session.id, { fromLatestSummary: true });
       if (log.length > 0) return undefined;
-      const ref = await readableEntityRef(entities, wanted, input.principal);
+      const ref = await withTimeout(
+        readableEntityRef(entities, wanted, input.principal),
+        CONTEXT_PROVIDER_TIMEOUT_MS,
+      );
       if (ref === undefined) return undefined;
       if (await sessions.bindEntityIfUnbound(session.id, ref)) return ref;
       return (await sessions.get(session.id)).entityRef;
@@ -171,5 +180,23 @@ export class SendMessage {
       );
       return undefined;
     }
+  }
+}
+
+/** `promise`, or a rejection once `ms` passed first. */
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`no answer within ${ms} ms`)),
+          ms,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }

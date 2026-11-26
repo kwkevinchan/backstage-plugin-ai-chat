@@ -172,7 +172,9 @@ export const aiChatPlugin = createBackendPlugin({
             harnessExtensions.agents().length
           } agent(s), ${harnessExtensions.hookCount()} hook(s), ${
             skills.length
-          } skill(s), ${moduleModels.size} model client(s), ${harnessExtensions.contextProviderCount()} context provider(s)`,
+          } skill(s), ${
+            moduleModels.size
+          } model client(s), ${harnessExtensions.contextProviderCount()} context provider(s)`,
         );
         const toolsets = await catalog.toolsets();
         logger.info(

@@ -706,7 +706,7 @@ flowchart LR
 | 編號  | 工作項目                                                | 大小 | 完成的需求                         | PR  | 狀態 |
 | ----- | ------------------------------------------------------- | ---- | ---------------------------------- | --- | ---- |
 | P3-01 | `ai-chat-node`、擴充點、設定檔裡的 Agent                | M    | X-01、X-02                         | #39 | 完成 |
-| P3-02 | Context provider 和 entity 綁定                         | M    | X-03、SE-02、SE-06                 |
+| P3-02 | Context provider 和 entity 綁定                         | M    | X-03、SE-02、SE-06                 | #58 | 完成 |
 | P3-03 | 計畫：`update_plan`、`planning: required`、畫面上的清單 | M    | X-06、X-07、D-07                   | #56 | 完成 |
 | P3-04 | Skills：讀 `SKILL.md`、`load_skill`                     | M    | X-04、D-22                         | #53 | 完成 |
 | P3-05 | Hooks                                                   | M    | X-05                               | #52 | 完成 |
@@ -767,7 +767,7 @@ flowchart LR
     - 內建的 `user`、`entity` 兩個 provider。`entity` 用 catalog（`catalogServiceRef`，`@backstage/plugin-catalog-node`），以使用者的 credentials 讀取。`plugin.ts` 把三個內建的排在 module 的前面。
     - Session 綁定：`POST /sessions` 的 `entityRef` 正規化並檢查讀取權限；沒有綁定的 Session，第一則訊息的 `page.entityRef` 自動綁定（SE-02）。
     - `GET /sessions?entityRef=`：列出自己的、綁定這個 entity 的 Session（SE-06 的後端）。
-  - 共用型別（`@kwkevinchan/backstage-plugin-ai-chat-common`）：列表查詢參數的 `entityRef`。
+  - 共用型別（`@kwkevinchan/backstage-plugin-ai-chat-common`）：`ChatSession.entityRef` 的說明。
   - 前端的 client（`@kwkevinchan/backstage-plugin-ai-chat`）：`AiChatClient.listSessions({ entityRef })`。不改畫面。
   - 範例 module：示範 `addContextProvider`。
   - 不做：entity 頁面的 Session 分頁（SE-06 的畫面，另一項）；分享給自己的 Session 出現在 entity 的列表（P2-04 之後）；每個 Agent 選用哪些 provider；改變 Session 的綁定；provider 上限的設定。
@@ -811,6 +811,7 @@ flowchart LR
     - 重複的 id、保留的 id（`user`、`entity`、`plan`）、`id` 寫法不對、`provide` 不是函式：`InputError`，後端無法啟動，第一個註冊的留著。
     - 只依賴 `ai-chat-node` 的 module 註冊的 provider，內容出現在送給模型的系統提示。`aiChatPlugin` 的 log 有 provider 的數量。
 - **規格沒寫、實作選定的地方**：
+
   - 放在系統提示：Skill 清單和計畫已經在那裡（`extra.context`）。每行加 `> `，provider 的文字就不能假造另一段的標頭。
   - 上限是固定值，不加設定：每個 8000、全部 16000 字元。P3-03 的計畫最多 20 項、每項 300 字元，放得進一段；全部約 4000 token，在預設預算 24000 以內。內建的排在前面，module 的輸出擠不掉它們。
   - 失敗時 Run 繼續：provider 只加資訊，少了它不會讓工具多執行或跳過核准。這和 `beforeModelCall` 不同，它是關卡，失敗時 Run 是 `failed`。
@@ -823,6 +824,8 @@ flowchart LR
   - 自動綁定看第一則訊息的 `page.entityRef`：前端在 entity 頁面已經帶它（B-01、`<AiChatLauncher entityRef>`），所以只要後端。
   - 綁定不能改：它決定 Session 屬於哪個 entity、`entity` provider 讀哪一個。換了，前面的回答會對不上；要問別的 entity 就開新的 Session。
   - 內建的三個一律開著，module 不能用它們的 id。`plan` provider 由宿主放進清單：三個內建走同一條路。只用核心的人要自己加 `planContextProvider`。
+
+- **已知限制**：不理 `signal` 的 provider 逾時時，那一步多等 5 秒，宿主不另記 log（只記丟例外的 provider）。
 
 ### P3-03 計畫：`update_plan`、`planning: required`、畫面上的清單
 
@@ -1207,3 +1210,4 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-25 | 1.2  | P3-06 完成（X-08，#54）：V-05 確認 Backstage 1.56.2 有官方的 `search:query`（`@backstage/plugin-search-backend` 2.1.8），直接用，不另外寫 action。新增整合測試（真的 search backend、actions registry 與 permission 過濾）和 README 的設定說明                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | 2026-11-26 | 1.2  | P3-03 完成（X-06、X-07、D-07，#56）：內建 `update_plan`（`readOnly: true`，預設 `allow`）、`planning: required` 的第一步只提供 `update_plan`、`readCurrentPlan` 和 `ItemLog.latestPlanUpdate`（摘要涵蓋舊的 `plan_update` 也讀得到）、畫面用 assistant-ui 的工具畫面把計畫顯示成清單。逐項驗收見 P3-03                                                                                                                                                                                                                                                                                                                                                                                               |
 | 2026-11-26 | 1.2  | P3-07 完成（P-01、P-02、P-03、P-05、P-06、X-09，#57）：唯讀呼叫同時執行（`readConcurrency`）、結果照順序寫入；每個工具呼叫的逾時（`toolTimeoutSeconds`），寫入逾時後這一步後面的寫入不執行；`maxToolCallsPerStep`、`runsPerUser`（429）；`aiChat.models` 與擴充點 `addModelClient`（只新增），模組用 `readImage` 讀圖片；`requestsPerMinute` 的限流由所有後端共用（`model_call_windows`）                                                                                                                                                                                                                                                                                                            |
+| 2026-11-26 | 1.2  | P3-02 完成（X-03、SE-02、SE-06 的後端，#58）：擴充點加入 `addContextProvider`；每一步呼叫內建的 `user`、`entity`、`plan` 和 module 的 provider，輸出放在系統提示、標成不可信的資料，每個 8000、全部 16000 字元，逾時 5 秒，失敗時 Run 繼續。Session 可以綁定一個 entity（建立時或第一則訊息的頁面，要讀得到，綁定不改），`GET /sessions?entityRef=` 列出自己綁定那個 entity 的 Session。逐項驗收見 P3-02                                                                                                                                                                                                                                                                                             |

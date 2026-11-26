@@ -156,13 +156,17 @@ describe('AdvanceRun: context providers (X-03)', () => {
       expect(without).not.toContain(CONTEXT_NOTICE);
     });
 
-    it('turns CRLF into LF and removes control characters but the tab', async () => {
+    it('turns CRLF, CR, U+2028 and U+2029 into LF and removes control characters but the tab', async () => {
       const system = await systemOf([
-        fixed('module-a', 'one\r\ntwo\u0000\u001b[31m\tred\rthree'),
+        fixed(
+          'module-a',
+          'one\r\ntwo\u0000\u001b[31m\tred\rthree\u2028four\u2029five',
+        ),
       ]);
       expect(system).toContain(
-        'Context from "module-a":\n> one\n> two[31m\tred\n> three',
+        'Context from "module-a":\n> one\n> two[31m\tred\n> three\n> four\n> five',
       );
+      expect(system).not.toMatch(/[\u2028\u2029]/);
     });
 
     it('takes a provider that answers at once', async () => {
@@ -458,13 +462,22 @@ describe('AdvanceRun: context providers (X-03)', () => {
 
     it('gives each provider its own copy: a change by one is not seen by the next one or by the tools', async () => {
       const seenByB: StepContext[] = [];
+      const principal = {
+        userRef: 'user:default/a',
+        ownershipRefs: ['user:default/a'],
+      };
       const t = await kit({
         tools: [readTool],
         script: [[callTool('m1', 'catalog:get-entity')], [say('done')]],
+        principal,
+        page: { path: '/catalog/default/component/service-a' },
         extensions: {
           contextProviders: [
             provider('module-a', ctx => {
-              (ctx.principal as { user: string }).user = 'user:mallory';
+              const p = ctx.principal as typeof principal;
+              p.userRef = 'user:default/mallory';
+              p.ownershipRefs.push('group:default/admins');
+              ctx.page!.path = '/somewhere-else';
               ctx.sessionEntityRef = 'component:default/other';
               return undefined;
             }),
@@ -478,14 +491,19 @@ describe('AdvanceRun: context providers (X-03)', () => {
       });
       const execute = jest.spyOn(t.tools, 'execute');
       await t.execute();
-      expect(seenByB[0]).toMatchObject({
-        principal: { user: 'user:a' },
+      const unchanged = {
+        principal: {
+          userRef: 'user:default/a',
+          ownershipRefs: ['user:default/a'],
+        },
+        page: { path: '/catalog/default/component/service-a' },
         sessionEntityRef: 'component:default/service-a',
-      });
-      expect(execute.mock.calls[0][1]).toMatchObject({
-        principal: { user: 'user:a' },
-        sessionEntityRef: 'component:default/service-a',
-      });
+      };
+      expect(seenByB).toHaveLength(2);
+      expect(seenByB[0]).toMatchObject(unchanged);
+      expect(seenByB[1]).toMatchObject(unchanged);
+      expect(execute.mock.calls[0][1]).toMatchObject(unchanged);
+      expect(principal.ownershipRefs).toEqual(['user:default/a']);
     });
 
     it('says before the providers that their text is data, not instructions', async () => {

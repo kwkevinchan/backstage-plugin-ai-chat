@@ -16,7 +16,10 @@
 
 import { MiddlewareFactory } from '@backstage/backend-defaults/rootHttpRouter';
 import { mockCredentials, mockServices } from '@backstage/backend-test-utils';
-import type { ContextProvider } from '@kwkevinchan/ai-chat-harness';
+import {
+  CONTEXT_PROVIDER_TIMEOUT_MS,
+  type ContextProvider,
+} from '@kwkevinchan/ai-chat-harness';
 import { say } from '@kwkevinchan/ai-chat-harness/testing';
 import express from 'express';
 import request from 'supertest';
@@ -263,6 +266,36 @@ describe('sessions bound to an entity', () => {
         expect(b.model.inputs[0].system).not.toContain('security team');
       },
     );
+  });
+
+  it('leaves the session unbound when the catalog does not answer in time, and the message goes on', async () => {
+    jest.useFakeTimers({
+      doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'],
+    });
+    try {
+      const b = backend([[say('answer')]]);
+      const { body } = await create(b).expect(201);
+      entities.hanging = true;
+      const pending = send(b, body.id, { page: SHOP_PAGE }).then(res => res);
+      for (let i = 0; i < 100 && entities.reads.length === 0; i++) {
+        await jest.advanceTimersByTimeAsync(0);
+      }
+      expect(entities.reads).toHaveLength(1);
+      await jest.advanceTimersByTimeAsync(CONTEXT_PROVIDER_TIMEOUT_MS - 1);
+      expect(b.model.inputs).toHaveLength(0);
+      await jest.advanceTimersByTimeAsync(1);
+      entities.hanging = false;
+      const res = await pending;
+      expect(res.status).toBe(200);
+      expect(res.text).toContain('answer');
+      expect(await entityOf(b, body.id)).toBeUndefined();
+      expect(b.logger.warn).toHaveBeenCalledWith(
+        'AI chat could not bind the session to the entity of the page',
+        expect.objectContaining({ sessionId: body.id }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   describe('the provider entity at every step', () => {

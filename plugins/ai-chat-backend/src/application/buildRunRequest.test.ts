@@ -17,17 +17,30 @@
 import { FakeClock } from '@kwkevinchan/ai-chat-harness/testing';
 import type { LeasedRun, Principal, Session } from '../domain';
 import { buildRunRequest } from './buildRunRequest';
+import { DEFAULT_MODEL_ID, ModelCatalog } from './models';
 import type { AgentCatalog } from './ports';
 
 const agents = {
   agent: async (id: string) => ({ id, systemPrompt: 'Rules.' }),
   policy: async () => ({}),
 } as unknown as AgentCatalog;
+const model = {
+  capabilities: { parallelToolCalls: false, images: false },
+  async *stream() {},
+};
 const deps = {
   agents,
+  models: new ModelCatalog(new Map([[DEFAULT_MODEL_ID, model]])),
   clock: new FakeClock(),
   settings: {
-    limits: { maxSteps: 10, maxToolCallsPerRun: 30, runTimeoutSeconds: 300 },
+    limits: {
+      maxSteps: 10,
+      maxToolCallsPerRun: 30,
+      runTimeoutSeconds: 300,
+      maxToolCallsPerStep: 8,
+      readConcurrency: 4,
+      toolTimeoutSeconds: 60,
+    },
     budget: { tokenBudget: 1000, keepRecentSteps: 6 },
   },
 };

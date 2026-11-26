@@ -85,14 +85,19 @@ async function callProvider(
 }
 
 /**
- * The text of a provider as it goes into the context: LF line breaks, no
- * control character but the line break and the tab, no blank at the ends.
+ * The text of a provider as it goes into the context: LF line breaks (also for
+ * U+2028 and U+2029), no control character but the line break and the tab, no
+ * blank at the ends.
  */
 export function normalizeProvidedText(text: string): string {
-  return text
-    .replace(/\r\n?/g, '\n')
-    .replace(/[^\P{Cc}\n\t]/gu, '')
-    .trim();
+  return (
+    text
+      .replace(/\r\n?/g, '\n')
+      // A line or paragraph separator would start a line without its `> `.
+      .replace(/[\u2028\u2029]/g, '\n')
+      .replace(/[^\P{Cc}\n\t]/gu, '')
+      .trim()
+  );
 }
 
 /**

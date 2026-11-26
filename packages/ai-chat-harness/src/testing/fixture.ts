@@ -72,6 +72,9 @@ export async function kit(options: {
   agent?: AgentDefinition;
   /** The entity the session is bound to. */
   sessionEntityRef?: string;
+  /** The principal and the page of the request; `{ user: 'user:a' }` and none by default. */
+  principal?: unknown;
+  page?: { path: string; entityRef?: string };
 }) {
   const clock = new FakeClock();
   const items = new InMemoryItemLog({ clock });
@@ -124,7 +127,8 @@ export async function kit(options: {
     ctx: {
       sessionId,
       runId: runFence.runId,
-      principal: { user: 'user:a' },
+      principal: options.principal ?? { user: 'user:a' },
+      ...(options.page !== undefined && { page: options.page }),
       ...(options.sessionEntityRef !== undefined && {
         sessionEntityRef: options.sessionEntityRef,
       }),
