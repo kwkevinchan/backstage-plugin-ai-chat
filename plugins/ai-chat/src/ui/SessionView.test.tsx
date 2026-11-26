@@ -31,7 +31,16 @@ import {
   streamResponse,
   user,
 } from '../testData';
-import { PAUSED_TEXT, QUEUE_FIRST_NOTE } from './QueuePanel';
+import {
+  PAUSED_TEXT,
+  QUEUE_FIRST_NOTE,
+  WAITING_TEXT,
+  queueFullText,
+} from './ComposerQueue';
+import {
+  INSERT_LIMIT_TEXT,
+  RUN_NOT_RUNNING_TEXT,
+} from '../application/useSessionChat';
 import { UNREAD_TEXT } from './MessageList';
 import { SessionView } from './SessionView';
 
@@ -354,6 +363,184 @@ describe('the queue list', () => {
     expect(
       await screen.findByText(PAUSED_TEXT.credentials),
     ).toBeInTheDocument();
+  });
+});
+
+describe('the queue while a run is running', () => {
+  const runningWithQueue = (...texts: string[]) =>
+    detail({
+      run: run('running'),
+      items: items(
+        user('start the work'),
+        inserted('look at search', 'pending'),
+      ),
+      queue: {
+        items: texts.map((text, i) => queued(`q${i + 1}`, text, i + 1)),
+        paused: false,
+      },
+    });
+  const queueRegion = () => screen.getByRole('region', { name: 'Queue' });
+  const row = (text: string) =>
+    within(queueRegion())
+      .getAllByRole('listitem')
+      .find(item => item.textContent?.includes(text))!;
+
+  it('shows an inserted message without Delete or Send now, and a queued one with all its actions', async () => {
+    const api = mockApi();
+    await open(api, runningWithQueue('later'));
+
+    const waitingList = screen.getByRole('list', {
+      name: 'Waiting to be read',
+    });
+    expect(waitingList).toHaveTextContent('look at search');
+    expect(waitingList).toHaveTextContent(WAITING_TEXT);
+    expect(within(waitingList).queryAllByRole('button')).toHaveLength(0);
+
+    const actions = within(row('later'))
+      .getAllByRole('button')
+      .map(button => button.getAttribute('aria-label'));
+    expect(actions).toEqual([
+      'Move up',
+      'Move down',
+      'Edit',
+      'Delete',
+      'Send now',
+    ]);
+    expect(
+      within(row('later')).getByRole('button', { name: 'Send now' }),
+    ).toBeEnabled();
+  });
+
+  it('Send now moves the queued message into the run: it leaves the queue and waits to be read', async () => {
+    const api = mockApi();
+    api.getQueue.mockResolvedValue({
+      items: [queued('q1', 'first'), queued('q2', 'second', 2)],
+      paused: false,
+    });
+    api.insertQueuedMessage.mockResolvedValue(insertedItem(5, 'second'));
+    await open(api, runningWithQueue('first', 'second'));
+
+    await userEvent.click(
+      within(row('second')).getByRole('button', { name: 'Send now' }),
+    );
+
+    await waitFor(() =>
+      expect(api.insertQueuedMessage).toHaveBeenCalledWith('s-1', 'q2', {
+        runId: 'r-1',
+      }),
+    );
+    await waitFor(() =>
+      expect(within(queueRegion()).getAllByRole('listitem')).toHaveLength(1),
+    );
+    expect(queueRegion()).not.toHaveTextContent('second');
+    expect(
+      screen.getByRole('list', { name: 'Waiting to be read' }),
+    ).toHaveTextContent('second');
+  });
+
+  it('sends now once: the button is off while the request is on its way', async () => {
+    const api = mockApi();
+    api.getQueue.mockResolvedValue({
+      items: [queued('q1', 'later')],
+      paused: false,
+    });
+    let respond!: (item: ReturnType<typeof insertedItem>) => void;
+    api.insertQueuedMessage.mockReturnValue(
+      new Promise(resolve => {
+        respond = resolve;
+      }),
+    );
+    await open(api, runningWithQueue('later'));
+    const sendNow = () =>
+      within(row('later')).getByRole('button', { name: 'Send now' });
+
+    await userEvent.click(sendNow());
+    await waitFor(() => expect(api.insertQueuedMessage).toHaveBeenCalled());
+    expect(sendNow()).toBeDisabled();
+    await userEvent.click(sendNow());
+    expect(api.insertQueuedMessage).toHaveBeenCalledTimes(1);
+
+    respond(insertedItem(5, 'later'));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('list', { name: 'Waiting to be read' }),
+      ).toHaveTextContent('later'),
+    );
+  });
+
+  it('has Send now off while the run waits for a decision', async () => {
+    const api = mockApi();
+    await open(
+      api,
+      detail({
+        run: run('waiting_approval'),
+        awaitingDecision: ['c1'],
+        items: items(user('go'), call('c1')),
+        queue: { items: [queued('q1', 'later')], paused: false },
+      }),
+    );
+    expect(
+      within(row('later')).getByRole('button', { name: 'Send now' }),
+    ).toBeDisabled();
+  });
+
+  it('says why Send now did not move the message (409)', async () => {
+    const api = mockApi();
+    api.getQueue.mockResolvedValue({
+      items: [queued('q1', 'later')],
+      paused: false,
+    });
+    api.insertQueuedMessage.mockRejectedValueOnce(
+      await refusal(409, 'InsertLimitReached'),
+    );
+    await open(api, runningWithQueue('later'));
+
+    await userEvent.click(
+      within(row('later')).getByRole('button', { name: 'Send now' }),
+    );
+    expect(
+      await within(queueRegion()).findByText(INSERT_LIMIT_TEXT),
+    ).toBeInTheDocument();
+    expect(row('later')).toBeDefined();
+
+    api.insertQueuedMessage.mockRejectedValueOnce(
+      await refusal(409, 'RunNotRunning'),
+    );
+    api.getSession.mockResolvedValue(
+      detail({
+        items: items(user('start the work'), answer('done', 2)),
+        queue: { items: [queued('q1', 'later')], paused: true },
+      }),
+    );
+    await userEvent.click(
+      within(row('later')).getByRole('button', { name: 'Send now' }),
+    );
+    expect(
+      await within(queueRegion()).findByText(RUN_NOT_RUNNING_TEXT),
+    ).toBeInTheDocument();
+    expect(api.getSession).toHaveBeenCalledWith('s-1');
+  });
+
+  it('says when the queue is full, and shows how many images a queued message has', async () => {
+    const api = mockApi();
+    const d = runningWithQueue('a', 'b', 'c', 'd', 'e');
+    d.queue.items[1].attachments = [
+      { id: 'i1', mediaType: 'image/png', name: 'a.png', size: 1 },
+      { id: 'i2', mediaType: 'image/png', name: 'b.png', size: 1 },
+    ];
+    await open(api, d);
+    expect(
+      await within(queueRegion()).findByText(queueFullText(5)),
+    ).toBeInTheDocument();
+    expect(row('b')).toHaveTextContent('2 images');
+    expect(row('a')).not.toHaveTextContent('image');
+  });
+
+  it('has no full note below the limit', async () => {
+    const api = mockApi();
+    await open(api, runningWithQueue('a', 'b'));
+    await waitFor(() => expect(api.getInputConfig).toHaveBeenCalled());
+    expect(within(queueRegion()).queryByText(/queue is full/)).toBeNull();
   });
 });
 

@@ -19,9 +19,9 @@ import { signIn, snapshot, watch } from './support';
 
 /**
  * Messages while a run goes on, with the scripted model server: a message
- * inserted into the run, the queue (list, order, a run that waits for a
- * decision, a run that fails, two tabs), and a message that the run did not
- * read. The scripted model has a reply that takes seconds to arrive
+ * inserted into the run, the queue (list, order, Send now, a run that waits
+ * for a decision, a run that fails, two tabs), and a message that the run did
+ * not read. The scripted model has a reply that takes seconds to arrive
  * (`hold <seconds>`), which is the time to add a message to the run.
  */
 
@@ -169,6 +169,44 @@ test('the queue list: edit, delete and move, and it is still there after a reloa
   await expect(page.getByText('Got your addition: alpha')).toHaveCount(0);
   await expect(queue(page)).toBeHidden();
   await shot('22b-queue-drained');
+});
+
+test('Send now moves a queued message into the run: it waits to be read, the next answer uses it, and the queue follows', async ({
+  page,
+}) => {
+  const shot = watch(page);
+  await signIn(page);
+
+  await enter(page, 'hold 8');
+  await expect(page.getByText(/\bheld2\b/)).toBeVisible();
+  await queueIt(page, 'also first in line');
+  await queueIt(page, 'also jump the queue');
+  await expect(queue(page)).toContainText('Queued (2)');
+
+  await rows(page)
+    .filter({ hasText: 'also jump the queue' })
+    .getByRole('button', { name: 'Send now' })
+    .click();
+  await expect(waitingToBeRead(page)).toContainText('also jump the queue');
+  await expect(queue(page)).toContainText('Queued (1)');
+  await expect(rows(page)).toHaveCount(1);
+  await snapshot(page, '26-send-now');
+
+  // The model reads it in this run; the queue sends the rest when it ends.
+  await expect(
+    page.getByText('Got your addition: jump the queue'),
+  ).toBeVisible();
+  await expect(
+    page.getByText('Got your addition: first in line'),
+  ).toBeVisible();
+  await order(
+    page,
+    'also jump the queue',
+    'Got your addition: jump the queue',
+    'Got your addition: first in line',
+  );
+  await expect(queue(page)).toBeHidden();
+  await shot('26b-send-now-read');
 });
 
 const PAUSED = 'Queue paused. The last run did not end normally.';

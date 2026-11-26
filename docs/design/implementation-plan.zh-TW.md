@@ -609,7 +609,7 @@ flowchart LR
 | ----- | ------------------------------------- | ---- | ---------------------------- | ------------------------------------------------------------------------- | --- | ---- |
 | PU-01 | 文件                                  | S    | 無                           | 規格 D-31、架構第 9 節、這一節的驗收清單。三份文件一致                    | #43 | 完成 |
 | PU-02 | 地基：runtime、訊息串、工具、Markdown | L    | PU-01                        | runtime、訊息轉換、訊息串、工具卡片和核准、Markdown、契約測試、瀏覽器 e2e | #55 | 完成 |
-| PU-03 | 排隊和插入                            | M    | PU-02、PU-07                 | `queueAdapter`、佇列區塊、暫停和未讀的小元件、契約測試                    |     |      |
+| PU-03 | 排隊和插入                            | M    | PU-02、PU-07                 | `queueAdapter`、佇列區塊、暫停和未讀的小元件、契約測試                    | #63 | 完成 |
 | PU-04 | 圖片附件                              | M    | PU-02、PI-06 的後端          | `attachmentAdapter`、草稿和訊息裡的縮圖                                   |     |      |
 | PU-05 | Session 列表                          | M    | PU-02、P2-01 和 P2-06 的後端 | `threadListAdapter`、搜尋、釘選、封存、即時狀態                           |     |      |
 | PU-06 | 側邊面板的內容                        | S    | PU-02、P2-07                 | 面板接上新的訊息串；和整頁同時開著同一段對話時兩邊都正確                  |     |      |
@@ -651,7 +651,7 @@ flowchart LR
 ### PU-03 前端：排隊和插入
 
 - **範圍**：
-  - `adapters/assistantUi/queueAdapter.ts` 實作 `ExternalThreadQueueAdapter`，接到 `sessionRuntime` 的 `queue`。adapter 不存狀態：清單來自後端，操作完重新讀取。給了 `queue` 之後，沒有 Run 時的送出也走 `enqueue`，不走 `onNew`，所以「沒有 Run 就直接送出」寫在 adapter 裡。
+  - `adapters/assistantUi/queueAdapter.ts` 實作 `ExternalThreadQueueAdapter`，接到 `sessionRuntime` 的 `queue`。adapter 不存狀態：清單來自後端，操作完重新讀取。給了 `queue` 之後，沒有 Run 時的送出也走 `enqueue`，不走 `onNew`，所以「沒有 Run 就直接送出」寫在 adapter 背後的 `useSessionChat` 的 `queueMessage`。
   - 畫面用 `ComposerPrimitive.Queue`、`QueueItemPrimitive`（Text、Steer、Remove）。插入的訊息（steer 道）不畫「刪除」和「現在就送」。排隊的訊息有改、刪、上下移、「現在就送」；「現在就送」只在 Run 是 `running` 時能按。`composer.queue` 是兩條道合起來的清單，steer 在前，用 id 分辨是哪一條。
   - 自己畫的小元件：佇列暫停的橫幅和「繼續」（IN-15）、上限 5 則的提示、409 和 404 的錯誤、暫停時輸入框的提示文字（IN-18）。
   - 刪掉 `QueuePanel.tsx`、`PendingInserts.tsx`。不用它內建的瀏覽器佇列。不改後端。
@@ -673,6 +673,13 @@ flowchart LR
   - 元件測試：IN-12 到 IN-18 原有的情境都要有。
   - 端對端：Run 進行中插入、排隊、改、刪、調順序、「現在就送」、暫停後繼續、重新整理後清單還在。
   - 原本有的功能都還在（PR 說明列對照表）。
+
+- **測試**：契約在 `adapters/assistantUi/queueAdapter.test.tsx`（兩條道、三種 Run 狀態下的 `steer` 和 `enqueue`、`edit`、`remove`、兩種 `move`、「現在就送」的 404 和兩種 409）和 `sessionRuntime.test.tsx`（給了 `queue` 之後 Enter、排隊、沒有 Run 時都走 adapter，沒被收下時文字放回）。元件在 `ui/SessionView.test.tsx`。端對端在 `e2e-tests/input.test.ts`。
+- **實作和上面不同的地方**：
+  - 「現在就送」按下時先讀一次佇列，那一則不在就不送。`InsertLimitReached`（409）也在佇列區塊說明，訊息留在佇列。
+  - 佇列滿的提示用 `GET /input-config` 的 `queueMaxMessages`，不寫死 5。
+  - `useSessionChat` 加上 `insertQueued`；`moveQueued` 的第二個參數改成位移（任意格數），`move` 的位置換算成位移。
+  - 排隊訊息的圖片先顯示張數，縮圖在 PU-04。
 
 ### PU-04 前端：圖片附件
 

@@ -24,17 +24,21 @@ import type {
   ChatToolset,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { AiChatApi } from '../api';
+import { useQueueAdapter } from '../adapters/assistantUi/queueAdapter';
 import { useSessionRuntime } from '../adapters/assistantUi/sessionRuntime';
 import { describeError } from '../adapters/describeError';
 import { useSessionChat } from '../application/useSessionChat';
 import { useSessionTools } from '../application/useSessionTools';
+import { useInputConfig } from '../application/useInputConfig';
 import { usePageContext } from '../application/usePageContext';
 import { Composer } from './Composer';
+import { ComposerQueue } from './ComposerQueue';
 import { MessageList } from './MessageList';
-import { PendingInserts } from './PendingInserts';
-import { QueuePanel } from './QueuePanel';
 import { cx } from './styles';
 import { ToolsetPanel } from './ToolsetPanel';
+
+/** The limit of the queue until the input config has answered (the default of the backend). */
+const DEFAULT_QUEUE_MAX = 5;
 
 export interface SessionViewProps {
   api: AiChatApi;
@@ -89,13 +93,28 @@ export function SessionView(props: SessionViewProps) {
   const waiting = chat.activeRun?.status === 'waiting_approval';
   // A run that goes on, or a response on its way before the run is known.
   const inRun = running || chat.busy;
+  const queueMax = useInputConfig(api)?.queueMaxMessages ?? DEFAULT_QUEUE_MAX;
+  const queue = useQueueAdapter({
+    queued: chat.queue,
+    inserted: chat.pending,
+    send: chat.send,
+    queueMessage: chat.queueMessage,
+    editQueued: chat.editQueued,
+    removeQueued: chat.removeQueued,
+    moveQueued: chat.moveQueued,
+    insertQueued: chat.insertQueued,
+  });
   const runtime = useSessionRuntime({
     messages: chat.messages,
     isRunning: inRun,
-    isSendDisabled: chat.followingNext,
+    // A response on its way before its run is known, or a run of the queue
+    // that this page is about to follow: the next message would not know
+    // where to go.
+    isSendDisabled: chat.followingNext || (chat.busy && !running),
     onSend: chat.send,
     onStop: chat.stop,
     onDecide: chat.decide,
+    queue,
   });
   // While a run goes on the box takes messages: Enter inserts, Ctrl or Cmd
   // with Enter queues, and a run that waits for a decision only queues.
@@ -140,32 +159,26 @@ export function SessionView(props: SessionViewProps) {
             running || chat.busy ? undefined : chat.sendTextAgain
           }
         />
-        <QueuePanel
-          items={chat.queue}
+        <ComposerQueue
+          queue={queue}
           paused={chat.queuePaused}
           pausedReason={chat.queuePausedReason}
           notice={chat.queueNotice}
           onContinue={chat.continueQueue}
-          onEdit={chat.editQueued}
-          onRemove={chat.removeQueued}
           moving={chat.queueMoving}
-          onMove={chat.moveQueued}
+          canSendNow={
+            chat.activeRun?.status === 'running' &&
+            !chat.followingNext &&
+            !chat.sendingNow
+          }
+          maxMessages={queueMax}
         />
-        <PendingInserts items={chat.pending} />
         <Composer
           hint={hint}
           placeholder={placeholder}
           sendLabel={waiting ? 'Queue' : undefined}
+          canQueue={running && !waiting}
           canStop={running}
-          duringRun={
-            inRun
-              ? {
-                  onSend: chat.send,
-                  onQueue: running && !waiting ? chat.queueMessage : undefined,
-                  disabled: (chat.busy && !running) || chat.followingNext,
-                }
-              : undefined
-          }
         />
       </ThreadPrimitive.Root>
     </AssistantRuntimeProvider>
