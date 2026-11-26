@@ -40,6 +40,7 @@ type World = Awaited<ReturnType<typeof createWorld>>;
 type Backend = ReturnType<World['backend']>;
 
 const JANE = mockCredentials.user.header('user:default/jane');
+const BOB = mockCredentials.user.header('user:default/bob');
 const writeCall = callTool('m1', 'demo:write', { name: 'x' });
 const readCall = callTool('m1', 'demo:read', { name: 'x' });
 
@@ -527,6 +528,57 @@ describe('two backends on one database', () => {
         ['send me now', 'inserted'],
         ['stay queued', 'queued'],
       ]);
+    });
+  });
+  describe('a share (P2-04)', () => {
+    it('made on A is read on B at once, and a cancel on A stops the reads on B at once', async () => {
+      const a = app(backend([[say('hi')]]));
+      const b = app(backend([]));
+      const created = await request(a)
+        .post('/sessions')
+        .set('Authorization', JANE)
+        .expect(201);
+      const id = created.body.id;
+      await request(a)
+        .post(`/sessions/${id}/runs`)
+        .set('Authorization', JANE)
+        .send({ text: 'go' })
+        .expect(200);
+      await request(b)
+        .get(`/sessions/${id}`)
+        .set('Authorization', BOB)
+        .expect(404);
+      const shared = await request(a)
+        .post(`/sessions/${id}/shares`)
+        .set('Authorization', JANE)
+        .send({ subjectRef: 'user:default/bob' })
+        .expect(201);
+      const read = await request(b)
+        .get(`/sessions/${id}`)
+        .set('Authorization', BOB)
+        .expect(200);
+      expect(read.body.items.map((item: any) => item.kind)).toEqual([
+        'user_message',
+        'agent_message',
+      ]);
+      const listed = await request(b)
+        .get(`/sessions/${id}/shares`)
+        .set('Authorization', JANE)
+        .expect(200);
+      expect(listed.body.items).toEqual([shared.body]);
+
+      await request(a)
+        .delete(`/sessions/${id}/shares/${shared.body.id}`)
+        .set('Authorization', JANE)
+        .expect(204);
+      await request(b)
+        .get(`/sessions/${id}`)
+        .set('Authorization', BOB)
+        .expect(404);
+      await request(b)
+        .delete(`/sessions/${id}/shares/${shared.body.id}`)
+        .set('Authorization', JANE)
+        .expect(404);
     });
   });
 });

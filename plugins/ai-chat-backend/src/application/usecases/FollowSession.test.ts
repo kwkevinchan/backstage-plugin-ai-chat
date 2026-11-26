@@ -721,3 +721,157 @@ describe('FollowSession reconnect', () => {
     await loopHandle.done;
   });
 });
+
+describe('FollowSession for a sharee', () => {
+  const bob = {
+    userRef: 'user:default/bob',
+    ownershipRefs: ['user:default/bob'],
+  } as any;
+  const at = (seq: number, body: object): Item =>
+    ({ ...base(seq), ...body } as Item);
+  const call = (seq: number, callId: string, toolId: string) =>
+    at(seq, {
+      kind: 'tool_call',
+      callId,
+      toolId,
+      input: { name: 'x' },
+      schemaHash: 'h',
+      policy: 'allow',
+      step: 1,
+      index: 0,
+    });
+  const result = (seq: number, callId: string) =>
+    at(seq, {
+      kind: 'tool_result',
+      callId,
+      status: 'ok',
+      output: { secret: seq },
+      message: `secret ${seq}`,
+    });
+  const liveShare = (partial: object = {}) => ({
+    id: 'sh1',
+    sessionId: 's1',
+    subjectRef: 'user:default/bob',
+    outputsUpToSeq: 3,
+    expiresAt: '2026-01-02T00:00:00.000Z',
+    createdBy: 'user:default/jane',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    ...partial,
+  });
+
+  function world(options: { shares: object[]; status?: string }) {
+    const log: Item[] = [user(1), call(2, 'c1', 'demo:read'), result(3, 'c1')];
+    const state = {
+      log,
+      shares: options.shares,
+      status: options.status ?? 'running',
+      now: '2026-01-01T12:00:00.000Z',
+    };
+    const subscribe = jest.fn();
+    const useCase = new FollowSession({
+      sessions: {
+        get: async () => ({ id: 's1', ownerRef: 'user:default/jane' }),
+      } as any,
+      shares: { listBySession: async () => state.shares } as any,
+      access: new OwnerOrShareAccessControl(),
+      clock: { now: () => new Date(state.now) },
+      runs: {
+        findActive: async () => ({ id: 'r1', status: 'running' }),
+        get: async () => ({ id: 'r1', status: state.status }),
+      } as any,
+      items: {
+        read: async (_id: string, opts?: { afterSeq?: number }) =>
+          state.log.filter(item => item.seq > (opts?.afterSeq ?? 0)),
+      } as any,
+      // The loop is on this backend: a sharee still gets the poll.
+      supervisor: { subscribe, openDraft: jest.fn() } as any,
+      sleep: async () => undefined,
+    });
+    return { state, subscribe, useCase };
+  }
+
+  async function collect(events: AsyncIterable<any>) {
+    const seen: any[] = [];
+    for await (const event of events) seen.push(event);
+    return seen;
+  }
+
+  it('polls with the rules of the share, even when the run is on this backend', async () => {
+    const { state, subscribe, useCase } = world({ shares: [liveShare()] });
+    const followed = await useCase.execute({ principal: bob, sessionId: 's1' });
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(followed!.items.map(item => item.seq)).toEqual([1, 2, 3]);
+    expect(followed!.items[2]).toMatchObject({ output: { secret: 3 } });
+
+    state.log.push(call(4, 'c2', 'demo:read'), result(5, 'c2'));
+    state.status = 'completed';
+    const events = await collect(followed!.events);
+    const completed = events.filter(event => event.type === 'item.completed');
+    expect(completed.map(event => event.item.seq)).toEqual([4, 5]);
+    expect(completed[1].item).toEqual({
+      ...base(5),
+      kind: 'tool_result',
+      callId: 'c2',
+      status: 'ok',
+      output: 'not shared',
+    });
+    expect(JSON.stringify(events)).not.toContain('secret 5');
+    expect(events[events.length - 1]).toEqual({
+      type: 'run.ended',
+      outcome: { status: 'completed' },
+    });
+  });
+
+  it('ends without a call to decide when the run waits for an approval', async () => {
+    const { state, useCase } = world({ shares: [liveShare()] });
+    const followed = await useCase.execute({ principal: bob, sessionId: 's1' });
+    state.log.push(call(4, 'c2', 'demo:write'));
+    state.status = 'waiting_approval';
+    const events = await collect(followed!.events);
+    expect(events[events.length - 1]).toEqual({
+      type: 'run.ended',
+      outcome: { status: 'waiting_approval', pending: [] },
+    });
+  });
+
+  it('answers nothing for a snapshot or a live share past its expiry', async () => {
+    const snapshot = world({ shares: [liveShare({ upToSeq: 3 })] });
+    expect(
+      await snapshot.useCase.execute({ principal: bob, sessionId: 's1' }),
+    ).toBeUndefined();
+    const expired = world({ shares: [liveShare()] });
+    expired.state.now = '2026-01-02T00:00:00.001Z';
+    expect(
+      await expired.useCase.execute({ principal: bob, sessionId: 's1' }),
+    ).toBeUndefined();
+  });
+
+  it('ends the stream, with no end of the run, when the share is cancelled or expires', async () => {
+    for (const change of [
+      (state: any) => {
+        state.shares = [liveShare({ revokedAt: '2026-01-01T12:00:00.000Z' })];
+      },
+      (state: any) => {
+        state.now = '2026-01-02T00:00:00.001Z';
+      },
+    ]) {
+      const { state, useCase } = world({ shares: [liveShare()] });
+      const followed = await useCase.execute({
+        principal: bob,
+        sessionId: 's1',
+      });
+      change(state);
+      state.log.push(call(4, 'c2', 'demo:read'));
+      expect(await collect(followed!.events)).toEqual([]);
+    }
+  });
+
+  it('refuses someone no share names', async () => {
+    const { useCase } = world({
+      shares: [liveShare({ subjectRef: 'user:default/cara' })],
+    });
+    await expect(
+      useCase.execute({ principal: bob, sessionId: 's1' }),
+    ).rejects.toMatchObject({ name: 'NotSessionOwner' });
+  });
+});

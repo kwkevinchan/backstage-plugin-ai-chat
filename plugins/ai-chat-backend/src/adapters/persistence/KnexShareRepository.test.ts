@@ -139,4 +139,63 @@ describe('KnexShareRepository', () => {
     });
     expect(await p.shares.listActiveFor(session.id, [])).toEqual([]);
   });
+  it('takes the id it is given, and reads one share of its session only', async () => {
+    const session = await p.sessions.create(NEW_SESSION);
+    const other = await p.sessions.create(NEW_SESSION);
+    const share = await p.shares.add({
+      id: 'given-id',
+      sessionId: session.id,
+      subjectRef: 'user:default/bob',
+      createdBy: session.ownerRef,
+    });
+    expect(share.id).toBe('given-id');
+    expect(await p.shares.get(session.id, 'given-id')).toEqual(share);
+    expect(await p.shares.get(other.id, 'given-id')).toBeUndefined();
+    expect(await p.shares.get(session.id, 'missing')).toBeUndefined();
+  });
+
+  it('sets both seq fields, an absent one to null, and keeps expiresAt unless given', async () => {
+    const session = await p.sessions.create(NEW_SESSION);
+    const share = await p.shares.add({
+      sessionId: session.id,
+      subjectRef: 'user:default/bob',
+      outputsUpToSeq: 3,
+      expiresAt: '2026-02-01T00:00:00.000Z',
+      createdBy: session.ownerRef,
+    });
+    const widened = await p.shares.update(session.id, share.id, {});
+    expect(widened).toEqual({
+      ...share,
+      outputsUpToSeq: undefined,
+    } as never);
+    expect(widened?.outputsUpToSeq).toBeUndefined();
+    expect(widened?.expiresAt).toBe('2026-02-01T00:00:00.000Z');
+    const moved = await p.shares.update(session.id, share.id, {
+      upToSeq: 9,
+      outputsUpToSeq: 0,
+      expiresAt: '2026-03-01T09:00:00.000+09:00',
+    });
+    expect(moved).toMatchObject({
+      upToSeq: 9,
+      outputsUpToSeq: 0,
+      expiresAt: '2026-03-01T00:00:00.000Z',
+    });
+  });
+
+  it('cancels a share once, and changes no cancelled share', async () => {
+    const session = await p.sessions.create(NEW_SESSION);
+    const share = await p.shares.add({
+      sessionId: session.id,
+      subjectRef: 'user:default/bob',
+      createdBy: session.ownerRef,
+    });
+    const revoked = await p.shares.revoke(session.id, share.id);
+    expect(revoked?.revokedAt).toBe(p.clock.now().toISOString());
+    expect(await p.shares.revoke(session.id, share.id)).toBeUndefined();
+    expect(
+      await p.shares.update(session.id, share.id, { upToSeq: 1 }),
+    ).toBeUndefined();
+    expect(await p.shares.get(session.id, share.id)).toEqual(revoked);
+    expect(await p.shares.revoke(session.id, 'missing')).toBeUndefined();
+  });
 });

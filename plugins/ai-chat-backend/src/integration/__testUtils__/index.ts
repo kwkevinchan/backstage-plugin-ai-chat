@@ -62,6 +62,7 @@ import type {
 import {
   DEFAULT_IMAGE_LIMITS,
   type EntityFacts,
+  type LiveShareLimits,
   type Principal,
   type Run,
   type ToolOutputRule,
@@ -277,6 +278,8 @@ export async function createWorld(
     toolOutput?: ToolOutputRule[];
     /** `aiChat.writesPerMinute`; no limit by default. */
     writesPerMinute?: number;
+    /** `aiChat.sharing.live`; the defaults of the plugin when not given. */
+    liveShares?: LiveShareLimits;
   } = {},
 ) {
   const entities = options.entities ?? new FakeEntityReader();
@@ -416,6 +419,7 @@ export async function createWorld(
         budget: { tokenBudget: 100000, keepRecentSteps: 6 },
       },
       heartbeatMs: extra.heartbeatMs ?? 60_000,
+      ...(options.liveShares && { liveShares: options.liveShares }),
     });
     return { ...host, model, runs, logger };
   }
