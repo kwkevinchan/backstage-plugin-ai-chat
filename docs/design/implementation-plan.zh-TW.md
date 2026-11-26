@@ -610,7 +610,7 @@ flowchart LR
 | PU-01 | 文件                                  | S    | 無                           | 規格 D-31、架構第 9 節、這一節的驗收清單。三份文件一致                    | #43 | 完成 |
 | PU-02 | 地基：runtime、訊息串、工具、Markdown | L    | PU-01                        | runtime、訊息轉換、訊息串、工具卡片和核准、Markdown、契約測試、瀏覽器 e2e | #55 | 完成 |
 | PU-03 | 排隊和插入                            | M    | PU-02、PU-07                 | `queueAdapter`、佇列區塊、暫停和未讀的小元件、契約測試                    | #63 | 完成 |
-| PU-04 | 圖片附件                              | M    | PU-02、PI-06 的後端          | `attachmentAdapter`、草稿和訊息裡的縮圖                                   |     |      |
+| PU-04 | 圖片附件                              | M    | PU-02、PI-06 的後端          | `attachmentAdapter`、草稿和訊息裡的縮圖                                   |     | 完成 |
 | PU-05 | Session 列表                          | M    | PU-02、P2-01 和 P2-06 的後端 | `threadListAdapter`、搜尋、釘選、封存、即時狀態                           |     |      |
 | PU-06 | 側邊面板的內容                        | S    | PU-02、P2-07                 | 面板接上新的訊息串；和整頁同時開著同一段對話時兩邊都正確                  |     |      |
 | PU-07 | 後端：把排隊的訊息改成插入            | M    | 無                           | 「現在就送」的 API 一次做完；和 `startNext` 並行時只有一邊成功            | #47 | 完成 |
@@ -695,10 +695,18 @@ flowchart LR
   - 不改圖片上限、預算、`tokensPerImage`。不改後端。
 - **依賴**：PU-02、PI-06 的後端。
 - **驗收**：
+
   - PI-06 驗收清單的每一項；object URL 的釋放。
   - 模型不能讀圖片時 Attach 不出現（測 `SessionView` 和新對話頁，不是測一個永遠是 `undefined` 的 mock）。
   - 端對端：附加、送出、重新整理後還在、Run 進行中插入帶圖片的訊息。
   - PR 寫 `Closes #23`。
+
+- **測試**：契約在 `adapters/assistantUi/attachmentAdapter.test.ts`（`accept`；`add` 的型別、大小、張數，同時加入多張也算進張數；上傳中、上傳完成、上傳失敗三種狀態；`send` 回傳帶附件 id 的附件，上傳失敗過的在 `send` 再上傳一次；`remove`）和 `sessionRuntime.test.tsx`（送出、插入、排隊的訊息帶附件；沒被收下時文字和圖片放回輸入框）。訊息轉換在 `toThreadMessage.test.ts`。object URL 在 `application/useAttachmentUrl.test.tsx`。元件在 `ui/SessionView.test.tsx`（三種附加方式、拒絕的原因、移除、上傳失敗、只有圖片的訊息、訊息和插入和排隊裡的縮圖、圖片已不存在、模型不能讀圖片時沒有按鈕）和 `ui/ChatPage.test.tsx`（新對話頁：第一次附加建立 Session、兩張只建立一個、第一則訊息用同一個 Session、改工具組後馬上送出、模型不能讀圖片時沒有按鈕）。端對端在 `e2e-tests/images.test.ts`。
+- **實作和上面不同的地方**：
+  - 上傳在 `add` 就開始，`send` 只把上傳完成的換成帶附件 id 的附件。這樣草稿才看得到「上傳中」和「失敗」，新對話頁也才需要在第一次附加時建立 Session。上傳失敗的圖片留在草稿；按送出時 `send` 再上傳一次，又失敗就整則留在輸入框，文字也在。
+  - 型別不對的檔案由 assistant-ui 依 `accept` 擋下，不會進到 `add`。拒絕的原因由輸入框接 `composer.attachmentAddError` 事件顯示。一次附加（同一次選檔、貼上或拖放）的原因取代上一次的；送出成功時清空。
+  - 沒有刪除附件的 API，`remove` 只讓還在上傳的那張不再進草稿。沒用到的附件照後端的規則在 24 小時後刪除。
+  - 排隊項目的縮圖用帶身分的請求載入，不放進 `QueueItemState` 的 `parts`（那裡的圖片是網址）。`queueAdapter` 的 `imageCountOf` 換成 `attachmentsOf`。
 
 ### PU-05 前端：Session 列表
 
