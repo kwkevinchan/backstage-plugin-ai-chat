@@ -1415,7 +1415,7 @@ Session 列表（`threadListAdapter`，實作 `RemoteThreadListAdapter`）。
 
 ## 13. 輸入：圖片、插入、排隊（PI）
 
-這一節是 PI 的設計。PI-02（核心）、PI-03（宿主插入與排隊）、PI-05（圖片核心與宿主）與 PI-06 的後端和 client 已經完成，PI-07 完成文件與設定收尾；前端的佇列／插入畫面在 PU-03 重做、圖片畫面在 PU-04、綜合端對端與用途說明頁在 PU-03 與 PU-04 之後。對應規格 D-27 到 D-30 和需求 4.11（IN-01 到 IN-19），測試對照見 [pi-coverage.zh-TW.md](pi-coverage.zh-TW.md)。其他節的表格（use case、路由、事件、資料表）已列出 PI 的項目，細節在這裡。
+這一節是 PI 的設計。PI-01 到 PI-07 已全部完成（前端的佇列／插入畫面在 PU-03、圖片畫面在 PU-04、綜合端對端與用途說明頁在 PI-07 後半補齊）。對應規格 D-27 到 D-30 和需求 4.11（IN-01 到 IN-19），測試對照見 [pi-coverage.zh-TW.md](pi-coverage.zh-TW.md)。其他節的表格（use case、路由、事件、資料表）已列出 PI 的項目，細節在這裡。
 
 ### 13.1 結論
 
@@ -1967,14 +1967,14 @@ controller 依序做（`controllers/attachments.ts`；`route()` 先取出身分�
 
 ### 13.10 測試
 
-| 圈                    | 測什麼                                                                                                      | 在哪個 PR                       |
-| --------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| domain（核心）        | `unreadInserted`、`decideNextAction` 新的列、`buildModelInput` 的插入位置和 Run 的使用者訊息、圖片的預算    | PI-02、PI-05                    |
-| application（核心）   | 迴圈在模型輸出時被插入、最後回答時有未讀的訊息、`message.read` 只送一次                                     | PI-02                           |
-| application（宿主）   | 每個新 use case 的權限和流程；`afterRun` 的各種結束方式                                                     | PI-03、PI-05                    |
-| adapters：persistence | 插入和結束的競爭（兩種資料庫，PostgreSQL 用真的兩個連線）、`startNext` 同時兩個呼叫、重排、附件的標記和清理 | PI-03、PI-05                    |
-| adapters：http        | 每條新路由的狀態碼、上傳的大小和型別、讀取的標頭、SSE 的新事件（用 AI SDK 的解析器讀回）                    | PI-03、PI-05                    |
-| adapters：model       | 送給 fake LLM 的請求內容有 `image_url`，位元組相同                                                          | PI-05                           |
-| 整體                  | 兩台 backend：A 啟動、B 核准、B 的身分自動送出                                                              | PI-03                           |
-| 前端                  | `itemsToMessages` 的插入位置、Composer 的送出方式、排隊清單的操作、object URL 釋放                          | PI-04、PI-06                    |
-| 端對端                | 插入、排隊、暫停（PI-04）；圖片＋插入＋排隊整合（PU-03、PU-04 之後）                                        | PI-04（既有）、PI-07（PU 之後） |
+| 圈                    | 測什麼                                                                                                      | 在哪個 PR           |
+| --------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------- |
+| domain（核心）        | `unreadInserted`、`decideNextAction` 新的列、`buildModelInput` 的插入位置和 Run 的使用者訊息、圖片的預算    | PI-02、PI-05        |
+| application（核心）   | 迴圈在模型輸出時被插入、最後回答時有未讀的訊息、`message.read` 只送一次                                     | PI-02               |
+| application（宿主）   | 每個新 use case 的權限和流程；`afterRun` 的各種結束方式                                                     | PI-03、PI-05        |
+| adapters：persistence | 插入和結束的競爭（兩種資料庫，PostgreSQL 用真的兩個連線）、`startNext` 同時兩個呼叫、重排、附件的標記和清理 | PI-03、PI-05        |
+| adapters：http        | 每條新路由的狀態碼、上傳的大小和型別、讀取的標頭、SSE 的新事件（用 AI SDK 的解析器讀回）                    | PI-03、PI-05        |
+| adapters：model       | 送給 fake LLM 的請求內容有 `image_url`，位元組相同                                                          | PI-05               |
+| 整體                  | 兩台 backend：A 啟動、B 核准、B 的身分自動送出                                                              | PI-03               |
+| 前端                  | `itemsToMessages` 的插入位置、Composer 的送出方式、排隊清單的操作、object URL 釋放                          | PI-04、PI-06        |
+| 端對端                | 插入、排隊、暫停（PI-04）；圖片與圖片＋插入＋排隊整合（PU-04、PI-07）                                       | PI-04、PU-04、PI-07 |

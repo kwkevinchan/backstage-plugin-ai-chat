@@ -237,8 +237,8 @@ flowchart LR
 | PI-03 | 宿主：插入和排隊 | L    | IN-10 到 IN-17                      | #26、#29 | 完成                      |
 | PI-04 | 前端：插入和排隊 | M    | IN-12、IN-13、IN-15、IN-18          | #28      | 完成（畫面在 PU-03 重做） |
 | PI-05 | 核心和宿主：圖片 | L    | IN-01 到 IN-07                      | #30、#32 | 完成                      |
-| PI-06 | 前端：圖片       | M    | IN-08、IN-09                        | #41      | 後端完成，畫面在 PU-04    |
-| PI-07 | 收尾             | S    | 整體驗收                            | #49      | 完成                      |
+| PI-06 | 前端：圖片       | M    | IN-08、IN-09                        | #41、#64 | 完成（畫面在 PU-04）      |
+| PI-07 | 收尾             | S    | 整體驗收                            | #49、#70 | 完成                      |
 
 順序：PI-02 到 PI-05 依序做，PI-04 和 PI-05 互相獨立（PI-03 之後都可以開始）。PI-03 的排隊先不帶附件（`attachment_ids` 一律是空陣列），PI-05 加上保留和標記。IN-19 屬於 P2，在 P2-04、P2-05 做。
 
@@ -367,7 +367,7 @@ flowchart LR
 
 ### PI-07 收尾
 
-- **範圍**：對照表 [pi-coverage.zh-TW.md](pi-coverage.zh-TW.md)（IN-01 到 IN-18 對到測試；屬於畫面的需求先標「畫面在 PU-03、PU-04」）、README 的設定範例（`input`、`images`）和「圖片會送到模型供應商」的說明、`config.d.ts` 說明，以及三份設計文件標註 PI 的需求／PR 狀態和 P4-01（`delegate`）不做。**延後**：綜合端對端（圖片加插入加排隊一起）和 `usage.zh-TW.html` 的畫面說明，等 PU-03、PU-04 合併後另外補上。
+- **範圍**：對照表 [pi-coverage.zh-TW.md](pi-coverage.zh-TW.md)（IN-01 到 IN-18 對到測試）、README 的設定範例（`input`、`images`）和「圖片會送到模型供應商」的說明、`config.d.ts` 說明、三份設計文件標註 PI 的需求／PR 狀態與 P4-01（`delegate`）不做，以及綜合端對端（`e2e-tests/images.test.ts`：圖片＋插入＋排隊）和用途說明頁（`docs/design/usage.zh-TW.html`）的畫面與說明（#49、#70）。
 - **依賴**：PI-06（後端和 client）。
 - **驗收**：核心與後端的 PI 需求都對得到測試（[pi-coverage.zh-TW.md](pi-coverage.zh-TW.md)）；README 的 `input` 和 `images` 設定範例由 `config.test.ts` 檢查；用途說明頁（`usage.zh-TW.html`）由 `config.test.ts` 檢查不載入外部資源。
 
@@ -1474,3 +1474,4 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-26 | 1.2  | P3-10 完成（B-03，#61）：`ai-chat-react` 公開結果顯示元件的型別、`aiChatToolResultsApiRef`、`AiChatSafeLink`，`/alpha` 有 `AiChatToolResultBlueprint`；舊前端系統由 app 用 `createAiChatToolResultsApi` 覆蓋這個 API。元件畫在內建的列或核准卡片下面，先註冊的有效，內建工具不能被覆蓋，元件出錯時退回預設。逐項驗收見 P3-10                                                                                                                                                                                                                                                                                                                                                                         |
 | 2026-11-26 | 1.2  | P2-04 驗收清單（SH-02、SH-03、SH-06、SH-10、SH-11、IN-19 的讀取）：分享的 API 和兩個序號的對應；被分享的人的寫入一律 404；讀取（`GetSession`、附件、接回）都經過 `AccessControl` 和同一份可見範圍；接回時被分享的人一律輪詢；快照沒有到期時間；稽核先記再寫                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 2026-11-26 | 1.2  | P2-04 完成（SH-02、SH-03、SH-11，SH-06 和 SH-10 的後端，IN-19 的讀取，#62）：`/sessions/{id}/shares` 建立、修改、取消、列出唯讀的分享，先寫稽核再寫入；被分享的人的寫入一律 404；`GetSession`、附件、接回都經過 `AccessControl` 和同一份可見範圍；接回時被分享的人只輪詢游標之後的紀錄；分享對象整串小寫。逐項驗收見 P2-04                                                                                                                                                                                                                                                                                                                                                                           |
+| 2026-11-26 | 1.2  | PI-07 收尾完成（#70）：在 `e2e-tests/images.test.ts` 補齊圖片＋插入＋排隊綜合端對端測試；`usage.zh-TW.html` 補上三者的示意畫面與說明；`pi-coverage.zh-TW.md`、`harness-spec.zh-TW.md`、`architecture.zh-TW.md` 與本表將 PI-06、PI-07 標為完成                                                                                                                                                                                                                                                                                                                                                                                                                                                        |

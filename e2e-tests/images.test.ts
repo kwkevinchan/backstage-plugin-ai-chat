@@ -160,9 +160,13 @@ test('images, insert and queue work together in one conversation', async ({
   await box(page).press('Enter');
   const waiting = page.getByRole('list', { name: 'Waiting to be read' });
   await expect(waiting).toContainText('check this image now');
+  await expect(waiting).toContainText(
+    'The agent has not read this yet. It will at the next step.',
+  );
   await expect(
     waiting.getByRole('img', { name: 'inserted.png' }),
   ).toBeVisible();
+  await expect(timeline(page)).not.toContainText('check this image now');
 
   // Queue a message with an image and a follow-up text message.
   await attach(page, 'queued.png');
@@ -184,6 +188,9 @@ test('images, insert and queue work together in one conversation', async ({
     timeline(page).getByText('Got your addition: after the image'),
   ).toBeVisible({ timeout: 60_000 });
   await expect(queue).toBeHidden();
+  await expect(
+    timeline(page).getByText('check this image now', { exact: true }),
+  ).toHaveCount(1);
   await expect(
     timeline(page).getByText(/I can see 1 image\(s\): image\/png/),
   ).toHaveCount(2);
