@@ -18,6 +18,7 @@ import { decideNextAction, type Item, type RunUsage } from '../domain';
 import type { HarnessEvent, RunOutcome } from './events';
 import { callModel } from './steps/callModel';
 import { executeTools } from './steps/executeTools';
+import { deadlineReason } from './steps/observe';
 import type { AdvanceRunDeps, AdvanceRunRequest } from './types';
 
 /**
@@ -197,7 +198,8 @@ function deadlineOf(req: AdvanceRunRequest): Deadline {
   );
   const timer = setTimeout(() => {
     expired = true;
-    controller.abort();
+    // The reason tells the deadline from a stop in the measurements.
+    controller.abort(deadlineReason());
   }, Math.min(leftMs, MAX_TIMER_MS));
   // A host that drops the generator must not be kept alive until the deadline.
   timer.unref?.();

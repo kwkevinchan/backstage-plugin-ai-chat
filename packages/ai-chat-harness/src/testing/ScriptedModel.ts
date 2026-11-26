@@ -45,6 +45,12 @@ export const waitForAbort = Symbol('waitForAbort');
 /** A text chunk. @public */
 export const say = (text: string): ModelChunk => ({ type: 'text', text });
 
+/** A chunk with the tokens the model server reports. @public */
+export const usedTokens = (
+  inputTokens: number,
+  outputTokens: number,
+): ModelChunk => ({ type: 'usage', inputTokens, outputTokens });
+
 /** A tool call chunk. `modelCallId` is the id the model gives. @public */
 export const callTool = (
   modelCallId: string,

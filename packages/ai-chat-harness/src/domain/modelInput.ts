@@ -209,12 +209,158 @@ export function trimmedPartsOf(
   return { earlier, steps };
 }
 
+/**
+ * The size of a model input, estimated by {@link estimateTokens} (O-01).
+ *
+ * - `parts` are in tokens: `system` is the system prompt of the agent with the
+ *   notice about tool output, `context` what the step adds to the system
+ *   prompt (the skills, the plan note, the context providers), `tools` the
+ *   descriptors of the tools, `summary` the message of the summary, `history`
+ *   the other messages without their images, and `images` the images at
+ *   `tokensPerImage` each.
+ * - `estimatedTokens` is the sum of the parts: the size the loop compares
+ *   with `budgetTokens` (`tokenBudget`).
+ * - `messages`, `images` and `tools` count what is sent; the summary message
+ *   is not among `messages`.
+ * - `summarized` says the input starts with a summary; `trimmed` what the
+ *   budget left out (see {@link trimmedPartsOf}).
+ *
+ * @public
+ */
+export type ModelInputSize = {
+  estimatedTokens: number;
+  budgetTokens: number;
+  parts: {
+    system: number;
+    context: number;
+    tools: number;
+    summary: number;
+    history: number;
+    images: number;
+  };
+  messages: number;
+  images: number;
+  tools: number;
+  summarized: boolean;
+  trimmed: ('earlier' | 'steps')[];
+};
+
+/**
+ * {@link buildModelInput} and {@link trimmedPartsOf} in one pass, with the
+ * size of the input (O-01).
+ *
+ * @public
+ */
+export function modelInputOf(
+  items: readonly Item[],
+  agent: AgentDefinition,
+  extra: ModelInputExtra,
+  budget: ContextBudget,
+): {
+  input: ModelInput;
+  trimmed: { earlier: boolean; steps: boolean };
+  size: ModelInputSize;
+} {
+  const { input, earlier, steps, summaryMessages } = assemble(
+    items,
+    agent,
+    extra,
+    budget,
+  );
+  const base = estimateTokens(systemPromptOf(agent, []));
+  const system = estimateTokens(input.system);
+  const summary = summaryMessages.length;
+  const size = sizeOf(input.messages.slice(summary), budget, {
+    system: Math.min(base, system),
+    context: Math.max(0, system - base),
+    tools: estimateTokens(JSON.stringify(extra.tools)),
+    summary: input.messages
+      .slice(0, summary)
+      .reduce((sum, m) => sum + tokensOfMessage(m, 0), 0),
+  });
+  return {
+    input,
+    trimmed: { earlier, steps },
+    size: {
+      ...size,
+      tools: input.tools.length,
+      summarized: summary > 0,
+      trimmed: [
+        ...(earlier ? (['earlier'] as const) : []),
+        ...(steps ? (['steps'] as const) : []),
+      ],
+    },
+  };
+}
+
+/**
+ * The size of any model input, such as the request of a summary: the system
+ * prompt counts as `system`, every message as `history`.
+ *
+ * @public
+ */
+export function sizeOfModelInput(
+  input: ModelInput,
+  budget: ContextBudget,
+): ModelInputSize {
+  return {
+    ...sizeOf(input.messages, budget, {
+      system: estimateTokens(input.system),
+      context: 0,
+      tools: estimateTokens(JSON.stringify(input.tools)),
+      summary: 0,
+    }),
+    tools: input.tools.length,
+    summarized: false,
+    trimmed: [],
+  };
+}
+
+function sizeOf(
+  messages: readonly ModelMessage[],
+  budget: ContextBudget,
+  fixed: { system: number; context: number; tools: number; summary: number },
+): Omit<ModelInputSize, 'tools' | 'summarized' | 'trimmed'> {
+  const perImage = tokensPerImageOf(budget);
+  let history = 0;
+  let images = 0;
+  for (const message of messages) {
+    history += tokensOfMessage(message, 0);
+    if (message.role === 'user') images += message.images?.length ?? 0;
+  }
+  const parts = { ...fixed, history, images: images * perImage };
+  return {
+    estimatedTokens:
+      parts.system +
+      parts.context +
+      parts.tools +
+      parts.summary +
+      parts.history +
+      parts.images,
+    budgetTokens: budget.tokenBudget,
+    parts,
+    messages: messages.length,
+    images,
+  };
+}
+
+function systemPromptOf(agent: AgentDefinition, context: string[]): string {
+  return [agent.systemPrompt, UNTRUSTED_OUTPUT_NOTICE, ...context]
+    .filter(part => part.length > 0)
+    .join('\n\n');
+}
+
 function assemble(
   items: readonly Item[],
   agent: AgentDefinition,
   extra: ModelInputExtra,
   budget: ContextBudget,
-): { input: ModelInput; earlier: boolean; steps: boolean } {
+): {
+  input: ModelInput;
+  earlier: boolean;
+  steps: boolean;
+  summaryMessages: ModelMessage[];
+} {
   const layout = layoutOf(withoutLostInserts(items), agent, extra, budget);
   const perImage = tokensPerImageOf(budget);
   const copy = (segments: Segment[]) =>
@@ -268,6 +414,7 @@ function assemble(
     input: { system: layout.system, messages, tools: [...extra.tools] },
     earlier,
     steps,
+    summaryMessages: layout.summaryMessages,
   };
 }
 
@@ -683,9 +830,7 @@ function layoutOf(
     }
   }
 
-  const system = [agent.systemPrompt, UNTRUSTED_OUTPUT_NOTICE, ...extra.context]
-    .filter(part => part.length > 0)
-    .join('\n\n');
+  const system = systemPromptOf(agent, extra.context);
   const summaryMessages: ModelMessage[] = newest
     ? [
         {

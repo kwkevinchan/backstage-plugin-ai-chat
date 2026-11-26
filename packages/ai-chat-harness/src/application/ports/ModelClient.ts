@@ -25,6 +25,10 @@ import type { JsonValue, ModelImage, ModelInput } from '../../domain';
  *   (the loop gives the call its own `callId`). `input` is the arguments,
  *   already parsed; anything that is not a JSON object is answered with an
  *   `invalid` result.
+ * - `usage`: the tokens the model server reports for this call (O-01). It is
+ *   only measured: it is not stored and does not change the answer. When it
+ *   comes more than once, the last one counts. A model that reports nothing
+ *   leaves it out.
  *
  * @public
  */
@@ -35,7 +39,8 @@ export type ModelChunk =
       modelCallId: string;
       toolId: string;
       input: JsonValue;
-    };
+    }
+  | { type: 'usage'; inputTokens: number; outputTokens: number };
 
 /**
  * The bytes of an image of a message, as `ModelStreamOptions.readImage`

@@ -14,9 +14,22 @@
  * limitations under the License.
  */
 
-import { buildSummaryInput, type Item, type SummaryPlan } from '../../domain';
+import {
+  buildSummaryInput,
+  sizeOfModelInput,
+  type Item,
+  type SummaryPlan,
+} from '../../domain';
 import type { HarnessEvent } from '../events';
+import type { ModelCallOutcome } from '../ports/RunObserver';
 import type { AdvanceRunDeps, AdvanceRunRequest } from '../types';
+import {
+  abortedOutcome,
+  errorStatusOf,
+  msSince,
+  observeModelCall,
+  usageOf,
+} from './observe';
 
 /**
  * How the summary step ended: the `summary` item is written (`written`, with
@@ -44,32 +57,57 @@ export const SUMMARY_MAX_CHARS = 4000;
  * call, or an answer with no text, does not fail the run: the step reports
  * `summary.failed`, and the caller goes on without a summary. An abort ends
  * the step without a trace in the log. Errors of the log (`LeaseLost`) are
- * thrown, as everywhere in the loop.
+ * thrown, as everywhere in the loop. The call is measured as the summary
+ * before `step`.
  */
 export async function* summarize(
   deps: AdvanceRunDeps,
   req: AdvanceRunRequest,
   plan: SummaryPlan,
+  step: number,
 ): AsyncGenerator<HarnessEvent, SummarizeResult> {
   yield { type: 'summary.started', coversUpToSeq: plan.coversUpToSeq };
 
+  const input = buildSummaryInput(plan, req.budget);
+  const startedAt = deps.clock.now().getTime();
+  let reported: { inputTokens: number; outputTokens: number } | undefined;
+  const observe = (outcome: ModelCallOutcome, errorStatus?: number) =>
+    observeModelCall(deps, req, {
+      purpose: 'summary',
+      step,
+      durationMs: msSince(deps, startedAt),
+      outcome,
+      ...(errorStatus !== undefined && { errorStatus }),
+      ...reported,
+      toolCallsRequested: 0,
+      context: sizeOfModelInput(input, req.budget),
+    });
   let text = '';
   try {
-    for await (const chunk of req.model.stream(
-      buildSummaryInput(plan, req.budget),
-      { signal: req.signal, sessionId: req.ctx.sessionId },
-    )) {
+    for await (const chunk of req.model.stream(input, {
+      signal: req.signal,
+      sessionId: req.ctx.sessionId,
+    })) {
       // The request offers no tools, so a call in the answer is ignored.
       if (chunk.type === 'text') text += chunk.text;
+      else if (chunk.type === 'usage') reported = usageOf(chunk) ?? reported;
     }
   } catch (error) {
-    if (req.signal.aborted) return { status: 'aborted' };
+    if (req.signal.aborted) {
+      observe(abortedOutcome(req.signal));
+      return { status: 'aborted' };
+    }
+    observe('failed', errorStatusOf(error));
     yield { type: 'summary.failed', cause: error };
     return { status: 'failed' };
   }
-  if (req.signal.aborted) return { status: 'aborted' };
+  if (req.signal.aborted) {
+    observe(abortedOutcome(req.signal));
+    return { status: 'aborted' };
+  }
 
   const summary = text.trim().slice(0, SUMMARY_MAX_CHARS);
+  observe(summary.length === 0 ? 'empty' : 'ok');
   if (summary.length === 0) {
     yield { type: 'summary.failed' };
     return { status: 'failed' };
