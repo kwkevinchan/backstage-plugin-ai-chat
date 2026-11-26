@@ -1070,7 +1070,7 @@ flowchart LR
   - `ai-chat-react`（別的前端 plugin 用的套件）：
     - 型別，都有 TSDoc：`AiChatToolResult`（`actionId` 和 `component`）、`AiChatToolResultProps`（`actionId`、`input`、`status`、`output`、`errorText`）、`AiChatToolResultStatus`（`running`、`complete`、`failed`、`denied`、`unknown`）、`AiChatToolResultsApi`。
     - `aiChatToolResultsApiRef`（id `plugin.ai-chat.tool-results`）。
-    - `AiChatSafeLink`：網址是 `http:`、`https:`、`mailto:` 才畫成連結（新分頁、`rel="noopener noreferrer"`），其他的只顯示文字。
+    - `AiChatSafeLink`：網址是 `http:`、`https:`、`mailto:` 才畫成連結（新分頁、`rel="noopener noreferrer"`），其他的只顯示文字。同樣的檢查也匯出成 `isSafeLinkHref`。
     - 新的入口 `/alpha`：`AiChatToolResultBlueprint`（新前端系統），掛在 `api:ai-chat/tool-results` 的 `toolResults` 輸入。為了它，依賴加上 `@backstage/frontend-plugin-api`。
   - `ai-chat`：
     - `createAiChatToolResultsApi(results)`：實作 `AiChatToolResultsApi`，處理重複和內建工具的 id。
