@@ -117,6 +117,14 @@ the backend, which stores it with the message and tells the model in one line
 before the text ("The user is on the page of "component:default/my-service"
 ("/ai-chat/…").").
 
+A session can be bound to one entity. `POST /sessions` with an `entityRef`
+binds the new session to it; otherwise the first message of a session binds it
+to the entity of its page. The ref needs a kind, is stored in lower case
+(`component:default/my-service`), and the user must be able to read the entity
+in the catalog, with their own credentials. The binding never changes.
+`GET /sessions?entityRef=component:default/my-service` lists the sessions of the
+user bound to that entity.
+
 To open the chat from an entity page, add a link there that names the entity,
 for example in a card or a context menu of the entity page:
 
@@ -418,10 +426,21 @@ adds a model only; an id of the configuration stops the backend. The client
 reads the bytes of an image with `opts.readImage`, and the rate limit of
 `requestsPerMinute` applies only to the models of the configuration.
 
+`addContextProvider` registers a context provider. Before every model call,
+each provider returns text for the context of that step, or nothing. The
+model gets it in the system prompt as untrusted data, not as instructions,
+after the built-in providers: `user` (the entity ref of the user and the refs
+they own through), `entity` (a few fields of the entity the session is bound
+to, read from the catalog as the user) and `plan` (the current plan). Each
+text is cut to 8000 characters, and all of them together to 16000. The loop
+waits at most 5 seconds for a provider; when one throws or does not answer,
+the model is told that this context is not available, and the run goes on.
+The ids `user`, `entity` and `plan`, or a repeated id, stop the backend.
+
 `plugins/ai-chat-backend-module-example` in this repository is a private
 example of such a module, to copy from. It registers the agent `guide`, the
-skill `getting-started` and the model client `example-echo`, which calls no
-server and which no agent uses. It is
+skill `getting-started`, the model client `example-echo`, which calls no
+server and which no agent uses, and the context provider `docs-site`. It is
 not a package to install. The example uses `guide`, so `aiChat.agents.guide`
 would also stop the backend.
 
@@ -711,7 +730,8 @@ this plugin until it is updated.
 
 ## Not in this version
 
-An entity tab or sidebar widget, file uploads,
+An entity tab or sidebar widget (the backend lists the sessions of an entity),
+sessions shared with the user in the list of an entity, file uploads,
 several model providers at once, MCP servers outside Backstage, sharing a
 conversation, or an agent's model and limits (those
 fields can be set, and a module can register them; the loop does not use them

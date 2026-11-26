@@ -65,7 +65,8 @@ export default createBackendModule({
         });
         harness.addContextProvider({
           id: 'docs-site',
-          provide: async () => 'The documentation is at https://example.com/docs.',
+          provide: async () =>
+            'The documentation is at https://example.com/docs.',
         });
       },
     });

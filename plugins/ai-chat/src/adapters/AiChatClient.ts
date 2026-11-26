@@ -71,10 +71,12 @@ export class AiChatClient implements AiChatApi {
   async listSessions(options?: {
     query?: string;
     includeArchived?: boolean;
+    entityRef?: string;
   }): Promise<ChatSession[]> {
     const params = new URLSearchParams();
     if (options?.query) params.set('q', options.query);
     if (options?.includeArchived) params.set('includeArchived', 'true');
+    if (options?.entityRef) params.set('entityRef', options.entityRef);
     const search = params.toString();
     const response = await this.request(
       `${chatPaths.sessions()}${search ? `?${search}` : ''}`,

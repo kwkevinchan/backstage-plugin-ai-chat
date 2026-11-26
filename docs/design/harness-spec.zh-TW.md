@@ -384,7 +384,7 @@ aiChat:
 
 ## 7. 擴充點介面
 
-backend 的擴充點放在 `ai-chat-node` 套件，型別來自核心。前端的擴充點放在 `ai-chat-react` 套件。介面的完整版本在程式架構文件的第 6 節。目前公開的是 `addAgent`、`addHook`、`addSkill` 和 `addModelClient`。`addContextProvider` 在 P3-02 才加，連同迴圈的呼叫一起進來。下面是最終形狀。
+backend 的擴充點放在 `ai-chat-node` 套件，型別來自核心。前端的擴充點放在 `ai-chat-react` 套件。介面的完整版本在程式架構文件的第 6 節。目前公開的是 `addAgent`、`addContextProvider`、`addHook`、`addSkill` 和 `addModelClient`。下面是最終形狀。
 
 ```ts
 interface AiChatHarnessExtensionPoint {
@@ -397,7 +397,8 @@ interface AiChatHarnessExtensionPoint {
 
 interface ContextProvider {
   id: string;
-  provide(ctx: StepContext): Promise<string | undefined>; // 有長度上限
+  // 每一步呼叫，可以同步回傳。輸出是不可信的資料，有長度上限
+  provide(ctx: StepContext): string | undefined | Promise<string | undefined>;
 }
 
 interface Skill {

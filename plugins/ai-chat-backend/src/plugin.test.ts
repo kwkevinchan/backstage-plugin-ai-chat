@@ -21,6 +21,7 @@ import {
 import { actionsServiceRef } from '@backstage/backend-plugin-api/alpha';
 import exampleModule from '@kwkevinchan/backstage-plugin-ai-chat-backend-module-example';
 import { aiChatHarnessExtensionPoint } from '@kwkevinchan/backstage-plugin-ai-chat-node';
+import { catalogServiceMock } from '@backstage/plugin-catalog-node/testUtils';
 import {
   mockCredentials,
   mockServices,
@@ -648,6 +649,9 @@ describe('aiChatPlugin', () => {
       expect(logger.info).toHaveBeenCalledWith(
         expect.stringContaining('1 agent(s)'),
       );
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('1 context provider(s)'),
+      );
       const created = await request(server)
         .post('/api/ai-chat/sessions')
         .set('Authorization', alice)
@@ -657,6 +661,121 @@ describe('aiChatPlugin', () => {
     } finally {
       await db.destroy();
     }
+  });
+
+  it('gives the model the built-in context providers, then the ones of the modules, and binds a session to an entity of the catalog (X-03, SE-02)', async () => {
+    const oncall = createBackendModule({
+      pluginId: 'ai-chat',
+      moduleId: 'oncall',
+      register(env) {
+        env.registerInit({
+          deps: { harness: aiChatHarnessExtensionPoint },
+          async init({ harness }) {
+            harness.addContextProvider({
+              id: 'oncall',
+              provide: ctx =>
+                `The run ${ctx.runId} of ${ctx.sessionEntityRef}.`,
+            });
+          },
+        });
+      },
+    });
+    const server = await startBackend(undefined, [
+      exampleModule,
+      oncall,
+      catalogServiceMock.factory({
+        entities: [
+          {
+            apiVersion: 'backstage.io/v1alpha1',
+            kind: 'Component',
+            metadata: { name: 'shop', namespace: 'default', title: 'Shop' },
+            spec: { type: 'service', owner: 'group:default/team-a' },
+          },
+        ],
+      }),
+    ]);
+    answers = [
+      call('update_plan', {
+        items: [{ text: 'Look at the shop', status: 'in_progress' }],
+      }),
+      text('Done.'),
+    ];
+    await request(server)
+      .post('/api/ai-chat/sessions')
+      .set('Authorization', alice)
+      .send({ entityRef: 'component:default/gone' })
+      .expect(400);
+    const created = await request(server)
+      .post('/api/ai-chat/sessions')
+      .set('Authorization', alice)
+      .send({ entityRef: 'Component:shop' })
+      .expect(201);
+    expect(created.body.entityRef).toBe('component:default/shop');
+    await request(server)
+      .post(`/api/ai-chat/sessions/${created.body.id}/runs`)
+      .set('Authorization', alice)
+      .send({ text: 'what is the shop?' })
+      .expect(200);
+
+    const systems = llm.requests
+      .map(
+        r =>
+          r.body.messages?.find(
+            (message: { role?: string }) => message.role === 'system',
+          )?.content as string,
+      )
+      .filter(content => !content.startsWith(TITLE_PROMPT_MARK));
+    const last = systems[systems.length - 1];
+    const at = (part: string) => last.indexOf(part);
+    expect(
+      at('Context from "user":\n> The signed-in user is "user:default/alice".'),
+    ).toBeGreaterThan(0);
+    expect(
+      at(
+        'Context from "entity":\n> The session is about "component:default/shop".',
+      ),
+    ).toBeGreaterThan(at('Context from "user":'));
+    expect(last).toContain('>   "title": "Shop"');
+    expect(at('Context from "plan":\n> The current plan')).toBeGreaterThan(
+      at('Context from "entity":'),
+    );
+    expect(
+      at(
+        'Context from "docs-site":\n> The documentation of this organization is at https://example.com/docs.',
+      ),
+    ).toBeGreaterThan(at('Context from "plan":'));
+    expect(at('Context from "oncall":\n> The run ')).toBeGreaterThan(
+      at('Context from "docs-site":'),
+    );
+    expect(last).toContain('of component:default/shop.');
+    expect(systems[0]).not.toContain('Context from "plan":');
+
+    const listed = await request(server)
+      .get('/api/ai-chat/sessions')
+      .query({ entityRef: 'component:default/shop' })
+      .set('Authorization', alice)
+      .expect(200);
+    expect(listed.body.items.map((s: { id: string }) => s.id)).toEqual([
+      created.body.id,
+    ]);
+  });
+
+  it('does not start when a module registers a context provider with a built-in id', async () => {
+    const taken = createBackendModule({
+      pluginId: 'ai-chat',
+      moduleId: 'taken',
+      register(env) {
+        env.registerInit({
+          deps: { harness: aiChatHarnessExtensionPoint },
+          async init({ harness }) {
+            harness.addContextProvider({ id: 'plan', provide: () => 'x' });
+          },
+        });
+      },
+    });
+    await expect(startConfigured({ features: [taken] })).rejects.toThrow(
+      /context provider plan: the id is taken/,
+    );
   });
 
   it('does not start when a module registers an unknown hook', async () => {

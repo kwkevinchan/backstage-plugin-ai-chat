@@ -46,6 +46,10 @@ backend.add(import('@backstage/plugin-signals-backend'));
 前端（新前端系統）：`import aiChatPlugin from '@kwkevinchan/backstage-plugin-ai-chat/alpha'`，
 頁面在 `/ai-chat`，每一段對話有自己的網址 `/ai-chat/<session id>`。
 `/ai-chat?entityRef=component:default/my-service` 會以那個 entity 開啟對話。
+一段 Session 可以綁定一個 entity：`POST /sessions` 帶 `entityRef` 時綁定它；沒帶的話，
+第一則訊息的頁面的 entity 就是它的綁定。ref 要有 kind，存成小寫（`component:default/my-service`），
+而且使用者用自己的身分讀得到那個 entity。綁定之後不會改。
+`GET /sessions?entityRef=component:default/my-service` 列出自己綁定那個 entity 的 Session。
 別的 frontend plugin 用 `@kwkevinchan/backstage-plugin-ai-chat-react` 的
 `<AiChatLauncher prompt="…" entityRef="…" />`、`useAiChatPanel()` 或
 `aiChatPanelApiRef` Utility API 開啟側邊面板，並帶入 prompt 和 entity（app
@@ -169,13 +173,17 @@ backend:
 - **計畫**：每個 Agent 都有唯讀的內建工具 `update_plan`（預設 `allow`，`policy` 設成 `update_plan: deny` 就關掉）。
   每次呼叫取代整份計畫（最多 20 項，狀態是 `pending`、`in_progress`、`completed`），目前的計畫每一步都放進上下文，畫面把每次更新顯示成清單。
   `aiChat.skills.directories` 可載入子目錄內的 `SKILL.md`（上下文只含 id 與一句說明，由唯讀內建工具 `load_skill` 延遲載入全文；相對路徑以後端的工作目錄為基準；符號連結會跟過去，但子目錄或 `SKILL.md` 解析後在設定的目錄外面時，後端無法啟動）。值不對會讓後端無法啟動。
-- 別的 backend module 透過 `@kwkevinchan/backstage-plugin-ai-chat-node` 註冊 Agent、Hook、Skill 與 model client（`addAgent`、`addHook`、`addSkill`、`addModelClient`），不必
+- 別的 backend module 透過 `@kwkevinchan/backstage-plugin-ai-chat-node` 註冊 Agent、Hook、Skill、model client 與 Context provider（`addAgent`、`addHook`、`addSkill`、`addModelClient`、`addContextProvider`），不必
   import 宿主。模組註冊的 Agent 也套同一套內建規則。設定檔和 module 用了同一個 id 時，後端無法啟動。
   `addHook` 支援 `beforeModelCall`、`beforeToolCall`、`afterToolCall` 與 `onRunEnd`。`beforeToolCall` 只能調嚴（`ask`／`deny`），不能放寬。
   `addModelClient` 只新增模型，用了設定檔的 id 時後端無法啟動；client 用 `opts.readImage` 讀圖片的位元組；`requestsPerMinute` 的限流只套在設定檔的模型。
   Hook 丟例外時：`beforeModelCall` 讓 Run 失敗；`beforeToolCall` 讓這個工具呼叫被拒絕，Run 繼續；
   `afterToolCall` 讓這個工具結果變成錯誤，不保留原始輸出，Run 繼續；`onRunEnd` 只記 log，不影響 Run。
-  這個庫的 `plugins/ai-chat-backend-module-example` 是可以照抄的範例（Agent id 是 `guide`、Skill id 是 `getting-started`），
+  Context provider 在每次呼叫模型前回傳一段文字（或不回傳），放進系統提示，當成不可信的資料，不是指令。
+  排在內建的 `user`（使用者的 ref）、`entity`（綁定的 entity 的幾個欄位，用使用者的身分讀 catalog）和 `plan`（目前的計畫）之後。
+  每段最多 8000 字元，全部最多 16000 字元。每個最多等 5 秒；丟例外或逾時時，模型會看到這段內容這一步拿不到，Run 繼續。
+  module 用了 `user`、`entity`、`plan` 或重複的 id 時，後端無法啟動。
+  這個庫的 `plugins/ai-chat-backend-module-example` 是可以照抄的範例（Agent id 是 `guide`、Skill id 是 `getting-started`、Context provider id 是 `docs-site`），
   不是要安裝的套件。
 
 細節見[英文 README](README.md#agents)。
@@ -254,6 +262,7 @@ Run 的狀態在資料庫，不在行程裡，所以可以部署多台，也可�
   `GET /sessions/:id/stream` 仍回 `204`。
 - 摘要涵蓋最新使用者訊息之前的步驟；同一個 Run 裡的舊步驟只縮短和省略，不做摘要。
 - 對話可以依標題搜尋，也可以釘選、改名、封存。第一輪正常結束後會自動產生短標題；你自己改過的標題會留下。產生不出標題時，對話照常結束。
+- entity 頁面還沒有 Session 的分頁（後端已能列出一個 entity 的 Session）。entity 的列表只有自己的 Session，不含分享給自己的。
 
 完整的安全說明、API 與試用方式見[英文 README](README.md)。
 

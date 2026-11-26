@@ -202,7 +202,7 @@ components:
           type: string
         entityRef:
           type: string
-          description: The entity the session was opened for.
+          description: The entity the session is bound to, `kind:namespace/name` in lower case. It is the one the session was created with, or else the entity of the page of its first message when the user can read it. It does not change.
         enabledToolsets:
           type: array
           items:
@@ -526,8 +526,16 @@ paths:
       operationId: listSessions
       tags: [Sessions]
       summary: List the sessions of the user. Pinned ones come first, then the most recently changed.
-      description: Only the sessions that the signed-in user owns. Archived sessions are left out unless `includeArchived` is `true`. `q` keeps the sessions whose stored title contains that text.
+      description: Only the sessions that the signed-in user owns. Archived sessions are left out unless `includeArchived` is `true`. `q` keeps the sessions whose stored title contains that text. `entityRef` keeps the sessions bound to that entity.
       parameters:
+        - name: entityRef
+          in: query
+          description: An entity reference with a kind, `kind:[namespace/]name`. It is compared in lower case, with `default` when the namespace is left out. 400 without a kind.
+          allowReserved: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 255
         - name: includeArchived
           in: query
           allowReserved: true
@@ -569,7 +577,7 @@ paths:
       operationId: createSession
       tags: [Sessions]
       summary: Create an empty session.
-      description: Without `enabledToolsets` the session has the toolsets that are on by default. 400 for a toolset or an agent that does not exist.
+      description: Without `enabledToolsets` the session has the toolsets that are on by default. 400 for a toolset or an agent that does not exist. `entityRef` binds the session to that entity, for good; it needs a kind, and is stored in lower case with `default` when the namespace is left out. 400 when the entity does not exist or the user cannot read it, with the same message for both.
       requestBody:
         required: false
         content:
@@ -585,6 +593,8 @@ paths:
                   maxLength: 200
                 entityRef:
                   type: string
+                  minLength: 1
+                  maxLength: 255
                 enabledToolsets:
                   type: array
                   items:
