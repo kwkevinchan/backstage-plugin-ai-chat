@@ -513,7 +513,7 @@ export interface UpdateChatShareRequest {
   includeLaterToolOutputs?: boolean;
   // (undocumented)
   includeToolOutputs?: boolean;
-  refresh?: boolean;
+  refresh?: true;
 }
 
 // @public
