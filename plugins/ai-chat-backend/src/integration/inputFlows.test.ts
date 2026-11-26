@@ -228,6 +228,7 @@ describe('inserted messages and the queue on a database', () => {
       const a: Backend = backend([[say('answer 1')], [say('answer 2')]], {
         items: (inner: ItemLog) => ({
           read: (...args) => inner.read(...args),
+          latestPlanUpdate: (...args) => inner.latestPlanUpdate(...args),
           append: async (sessionId, drafts, fence) => {
             if (!done && drafts.some(d => d.kind === 'agent_message')) {
               done = true;
@@ -422,6 +423,7 @@ describe('inserted messages and the queue on a database', () => {
       const a: Backend = backend([[readCall], [say('never called')]], {
         items: (inner: ItemLog) => ({
           read: (...args) => inner.read(...args),
+          latestPlanUpdate: (...args) => inner.latestPlanUpdate(...args),
           append: async (sessionId, drafts, fence) => {
             if (!done && drafts.some(d => d.kind === 'tool_call')) {
               done = true;
@@ -896,6 +898,7 @@ describe('inserted messages and the queue on a database', () => {
         {
           items: (inner: ItemLog) => ({
             read: (...args) => inner.read(...args),
+            latestPlanUpdate: (...args) => inner.latestPlanUpdate(...args),
             append: async (sid, drafts, fence) => {
               if (!inserted && drafts.some(d => d.kind === 'tool_call')) {
                 inserted = true;

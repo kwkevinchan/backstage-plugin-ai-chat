@@ -260,6 +260,7 @@ describe('the routes of the inserted messages and the queue', () => {
       const b: Backend = backend([[say('first')], [say('second')]], {
         items: (inner: ItemLog) => ({
           read: (...args) => inner.read(...args),
+          latestPlanUpdate: (...args) => inner.latestPlanUpdate(...args),
           append: async (sessionId, drafts, fence) => {
             if (!done && drafts.some(d => d.kind === 'agent_message')) {
               done = true;

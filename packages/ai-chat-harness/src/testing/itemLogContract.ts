@@ -237,6 +237,61 @@ export function itemLogContract(
       }
     });
 
+    describe('latestPlanUpdate', () => {
+      const plan = (text: string): ItemBody => ({
+        kind: 'plan_update',
+        plan: { items: [{ text, status: 'pending' }] },
+      });
+
+      it('is undefined for a session with no plan_update', async () => {
+        const { log, newSession } = subject;
+        const { sessionId, fence } = await newSession();
+        expect(await log.latestPlanUpdate(sessionId)).toBeUndefined();
+        await log.append(sessionId, [user('a'), agent('b')], fence);
+        expect(await log.latestPlanUpdate(sessionId)).toBeUndefined();
+      });
+
+      it('is the last plan_update of the session, with its seq', async () => {
+        const { log, newSession } = subject;
+        const { sessionId, fence } = await newSession();
+        const other = await newSession();
+        await log.append(
+          sessionId,
+          [user('a'), plan('first'), agent('b'), plan('second'), agent('c')],
+          fence,
+        );
+        await log.append(other.sessionId, [plan('elsewhere')], other.fence);
+        expect(await log.latestPlanUpdate(sessionId)).toMatchObject({
+          kind: 'plan_update',
+          seq: 4,
+          sessionId,
+          plan: { items: [{ text: 'second', status: 'pending' }] },
+        });
+      });
+
+      it('reads a plan_update that the newest summary covers', async () => {
+        const { log, newSession } = subject;
+        const { sessionId, fence } = await newSession();
+        await log.append(
+          sessionId,
+          [
+            user('a'),
+            plan('covered'),
+            agent('b'),
+            user('c'),
+            { kind: 'summary', coversUpToSeq: 3, text: 'so far' },
+          ],
+          fence,
+        );
+        const window = await log.read(sessionId, { fromLatestSummary: true });
+        expect(window.some(item => item.kind === 'plan_update')).toBe(false);
+        expect(await log.latestPlanUpdate(sessionId)).toMatchObject({
+          seq: 2,
+          plan: { items: [{ text: 'covered', status: 'pending' }] },
+        });
+      });
+    });
+
     it('does not change what it read when the caller changes it', async () => {
       const { log, newSession } = subject;
       const { sessionId, fence } = await newSession();

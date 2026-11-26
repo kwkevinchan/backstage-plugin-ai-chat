@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { Item, ItemBody } from '../../domain';
+import type { Item, ItemBody, PlanUpdateItem } from '../../domain';
 
 /**
  * What the loop asks the log to write. The log adds the session id, the
@@ -58,6 +58,12 @@ export interface ItemLog {
     sessionId: string,
     opts?: { afterSeq?: number; fromLatestSummary?: boolean },
   ): Promise<Item[]>;
+
+  /**
+   * The last `plan_update` item of the session, whatever a `summary` covers;
+   * `undefined` when the session has none. Its plan is the current plan (X-06).
+   */
+  latestPlanUpdate(sessionId: string): Promise<PlanUpdateItem | undefined>;
 
   /**
    * Writes all drafts in one step, with consecutive sequence numbers starting
