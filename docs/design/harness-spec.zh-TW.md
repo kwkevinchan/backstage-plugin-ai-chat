@@ -206,7 +206,7 @@ S-05 到 S-07（`SandboxProvider`）在 0.2 版移除。編號不重用。
 
 | 編號 | 需求                                                                                | 分期                   |
 | ---- | ----------------------------------------------------------------------------------- | ---------------------- |
-| O-01 | 每一步記錄：上下文的組成和大小、token 用量、每個工具的耗時和結果狀態                | P3                     |
+| O-01 | 每一步記錄：上下文的組成和大小、token 用量、每個工具的耗時和結果狀態                | P3（完成）             |
 | O-02 | 核准、拒絕、不是唯讀的工具的執行寫進 Auditor                                        | P1（完成；PR #1 已有） |
 | O-03 | 題組測試：每個 Agent 配一組題目，檢查用了哪些工具和答案要點。用假模型或真模型都能跑 | P4                     |
 
@@ -510,6 +510,7 @@ interface Hooks {
 | 2026-11-26 | 1.2  | P-01、P-02、P-03、P-05、P-06、X-09 完成（P3-07）：同一步的唯讀呼叫同時執行，結果照模型的順序交回；每個工具呼叫有逾時，寫入逾時後這一步後面的寫入不執行；每步的工具呼叫數和每人同時的 Run 數有上限；模型呼叫有所有後端共用的限流。`aiChat.models` 加其他模型，擴充點改為 `addModelClient`（只新增，不覆蓋設定檔的模型）。第 6 節的設定範例改成實際的平鋪寫法；P-04 註明唯讀的照 D-09 同時執行                                                                                                                                                                                              |
 | 2026-11-26 | 1.2  | X-03、SE-02 完成，SE-06 的後端完成（P3-02）：Context provider 每一步把一段文字加進系統提示，標成不可信的資料，有長度上限和逾時，失敗時 Run 繼續；內建使用者身分、綁定的 entity、目前的計畫。Session 建立時或第一則訊息的頁面綁定一個使用者讀得到的 entity，之後不改；後端可以列出一個 entity 的 Session。entity 頁面的分頁另做                                                                                                                                                                                                                                                            |
 | 2026-11-26 | 1.2  | T-08、T-09、T-10 完成（P3-08）：permission `ai-chat.toolset.use`（resource type `ai-chat-toolset`，條件 `IS_TOOLSET`）決定誰能用哪個 Toolset，Permission framework 沒開時全部允許；送給模型的工具是 Session 開啟的、Agent 的 `toolsets` 列的、使用者能用的 Toolset 的交集（X-01 的 `toolsets` 開始生效）。`aiChat.toolOutput` 依 action ID 樣式設輸出上限（只能調低）和要遮蔽的欄位，先遮蔽再裁切，`afterToolCall` 之後再做一次，遮蔽失敗時不存輸出。`aiChat.writesPerMinute` 是每個使用者每分鐘的寫入次數，所有後端共用（`write_quota_windows`），超過時不執行，結果是 `error`，Run 繼續 |
+| 2026-11-26 | 1.2  | O-01 完成（P3-09）：模型呼叫、工具結果、結束的 Run 各寫一筆結構化 log，並用 Backstage 的 metrics 服務記 OpenTelemetry metric（時間、結果、回報的 token、上下文各部分的大小、provider 狀態、拒絕原因、限流等待）。只有數字、id 和固定的分類詞；模型失敗的 log 只記錯誤名稱和狀態碼。新設定 `reportUsage`（預設 true）。沒有 trace                                                                                                                                                                                                                                                          |
 
 ## 12. 對照的開源專案
 

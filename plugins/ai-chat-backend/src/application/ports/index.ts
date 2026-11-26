@@ -26,6 +26,14 @@ export type {
 } from './AuditLog';
 export type { EntityReader } from './EntityReader';
 export type { Logger } from './Logger';
+export type {
+  MetricAttributes,
+  MetricCounter,
+  MetricHistogram,
+  MetricOptions,
+  Metrics,
+} from './Metrics';
+export { NoopMetrics } from './Metrics';
 export type { ModelCallLimiter } from './ModelCallLimiter';
 export type { WriteQuota } from './WriteQuota';
 export type { Notifier, SessionActivity } from './Notifier';

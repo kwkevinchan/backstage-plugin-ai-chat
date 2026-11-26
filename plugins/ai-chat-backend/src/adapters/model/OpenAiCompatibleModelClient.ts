@@ -134,6 +134,8 @@ export class OpenAiCompatibleModelClient implements ModelClient {
         input: parseArguments(call.arguments),
       };
     }
+    const { usage } = outcome.value;
+    if (usage) yield { type: 'usage', ...usage };
   }
 
   private async toLlmMessages(

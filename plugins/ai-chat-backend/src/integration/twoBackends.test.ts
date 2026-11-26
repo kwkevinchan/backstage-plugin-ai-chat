@@ -32,6 +32,7 @@ import {
   createWorld,
   jane,
   janeFresh,
+  RecordingMetrics,
   testInputConfig,
   until,
 } from './__testUtils__';
@@ -198,6 +199,39 @@ describe('two backends on one database', () => {
         item => item.kind === 'approval',
       );
       expect(approvals).toHaveLength(1);
+    });
+
+    it('measures the run once when both backends get the same decision at the same time (O-01)', async () => {
+      const metrics = new RecordingMetrics();
+      const a = backend([[writeCall], [say('a took it')]], { metrics });
+      const b = backend([[say('b took it')]], { metrics });
+      const { session, handle, callId } = await waitingRun(a);
+
+      const decide = (host: Backend) =>
+        host.useCases.decideApproval.execute({
+          principal: jane,
+          sessionId: session.id,
+          callId,
+          decision: 'allow',
+        });
+      const [fromA, fromB] = await Promise.all([decide(a), decide(b)]);
+      const [run] = [fromA.run, fromB.run].filter(Boolean);
+      for await (const _event of run!.events) {
+        // Reads to the end.
+      }
+      await run!.done;
+      await until(() => metrics.of('ai_chat.run.duration').length > 0);
+      await new Promise(resolve => setTimeout(resolve, 20));
+
+      expect((await world.runRow(handle.runId)).status).toBe('completed');
+      expect(metrics.of('ai_chat.run.duration')).toHaveLength(1);
+      const ended = [a, b].flatMap(host =>
+        (host.logger.info as jest.Mock).mock.calls.filter(
+          ([message]) => message === 'Run ended',
+        ),
+      );
+      expect(ended).toHaveLength(1);
+      expect(ended[0][1]).toMatchObject({ runId: handle.runId });
     });
 
     it('does the same through the routes: the decision that B receives streams the rest of the run', async () => {

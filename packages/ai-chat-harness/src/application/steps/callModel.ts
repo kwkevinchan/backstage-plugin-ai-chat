@@ -15,10 +15,9 @@
  */
 
 import {
-  buildModelInput,
   decidePolicy,
+  modelInputOf,
   planSummary,
-  trimmedPartsOf,
   unreadInserted,
   type Item,
   type ItemBody,
@@ -32,6 +31,7 @@ import {
 import type { HarnessEvent, RunOutcome } from '../events';
 import type { Skill, StepContext } from '../ports/extensions';
 import type { ItemDraft } from '../ports/ItemLog';
+import type { ModelCallRecord, ToolDeniedReason } from '../ports/RunObserver';
 import type { ValidationResult } from '../ports/ToolGateway';
 import type { AdvanceRunDeps, AdvanceRunRequest } from '../types';
 import {
@@ -53,6 +53,15 @@ import {
   updatePlanDescriptor,
   validateUpdatePlanInput,
 } from './plan';
+import {
+  abortedOutcome,
+  errorStatusOf,
+  msSince,
+  observeModelCall,
+  observeResults,
+  usageOf,
+  type ResultMeasure,
+} from './observe';
 import { stepContextOf } from './stepContext';
 import { summarize } from './summarize';
 
@@ -192,7 +201,7 @@ export async function* callModel(
     ? planSummary(items, req.agent, extra, req.budget)
     : undefined;
   if (plan) {
-    const made = yield* summarize(deps, req, plan);
+    const made = yield* summarize(deps, req, plan, step);
     if (made.status === 'aborted') {
       return {
         toolCallsRequested: 0,
@@ -215,8 +224,11 @@ export async function* callModel(
       summaryFailed = true;
     }
   }
-  const input = buildModelInput(current, req.agent, extra, req.budget);
-  const trimmed = trimmedPartsOf(current, req.agent, extra, req.budget);
+  const {
+    input,
+    trimmed,
+    size: context,
+  } = modelInputOf(current, req.agent, extra, req.budget);
   const parts = [
     ...(trimmed.earlier ? (['earlier'] as const) : []),
     ...(trimmed.steps ? (['steps'] as const) : []),
@@ -240,12 +252,28 @@ export async function* callModel(
   let text = '';
   let textDraftId: string | undefined;
   const requested: RequestedCall[] = [];
+  let reported: { inputTokens: number; outputTokens: number } | undefined;
+  const startedAt = deps.clock.now().getTime();
+  const observe = (outcome: ModelCallRecord['outcome'], errorStatus?: number) =>
+    observeModelCall(deps, req, {
+      purpose: 'step',
+      step,
+      durationMs: msSince(deps, startedAt),
+      outcome,
+      ...(errorStatus !== undefined && { errorStatus }),
+      ...reported,
+      toolCallsRequested: requested.length,
+      context,
+      ...(provided.providers.length > 0 && { providers: provided.providers }),
+    });
   try {
     for await (const chunk of req.model.stream(input, {
       signal: req.signal,
       sessionId: req.ctx.sessionId,
     })) {
-      if (chunk.type === 'text') {
+      if (chunk.type === 'usage') {
+        reported = usageOf(chunk) ?? reported;
+      } else if (chunk.type === 'text') {
         text += chunk.text;
         // Leading blank text is held back: a blank answer is not an item.
         if (text.trim().length === 0) continue;
@@ -260,7 +288,8 @@ export async function* callModel(
         } else if (chunk.text.length > 0) {
           yield { type: 'item.delta', draftId: textDraftId, text: chunk.text };
         }
-      } else {
+      } else if (chunk.type === 'tool_call') {
+        // A chunk of another type, from a newer or a foreign client, is ignored.
         const callId = deps.ids.next();
         requested.push({
           callId,
@@ -278,8 +307,10 @@ export async function* callModel(
     }
   } catch (error) {
     if (req.signal.aborted) {
+      observe(abortedOutcome(req.signal));
       return { toolCallsRequested: 0, outcome: { status: 'cancelled' } };
     }
+    observe('failed', errorStatusOf(error));
     return {
       toolCallsRequested: 0,
       outcome: {
@@ -291,8 +322,10 @@ export async function* callModel(
   }
 
   if (req.signal.aborted) {
+    observe(abortedOutcome(req.signal));
     return { toolCallsRequested: 0, outcome: { status: 'cancelled' } };
   }
+  observe(text.trim().length === 0 && requested.length === 0 ? 'empty' : 'ok');
 
   const drafts: ItemDraft[] = [];
   const draftIds: (string | undefined)[] = [];
@@ -306,6 +339,7 @@ export async function* callModel(
     req.limits.maxToolCallsPerRun - usage.toolCallsUsed,
   );
   const results: ItemBody[] = [];
+  const measures = new Map<string, ResultMeasure>();
   for (let position = 0; position < requested.length; position++) {
     const call = requested[position];
     const descriptor = byId.get(call.toolId);
@@ -326,6 +360,12 @@ export async function* callModel(
     drafts.push({ ...classified.body, readUpToSeq });
     draftIds.push(call.callId);
     if (classified.result) results.push(classified.result);
+    if (classified.reason || classified.unknownTool) {
+      measures.set(call.callId, {
+        ...(classified.reason && { reason: classified.reason }),
+        ...(classified.unknownTool && { unknownTool: true }),
+      });
+    }
   }
   for (const result of results) {
     drafts.push(result);
@@ -346,6 +386,18 @@ export async function* callModel(
   }
 
   const written = await deps.items.append(req.ctx.sessionId, drafts, req.fence);
+  const calls = new Map(
+    written.flatMap(item =>
+      item.kind === 'tool_call' ? [[item.callId, item] as const] : [],
+    ),
+  );
+  observeResults(
+    deps,
+    req,
+    written,
+    callId => calls.get(callId),
+    callId => measures.get(callId),
+  );
   for (let i = 0; i < written.length; i++) {
     yield {
       type: 'item.completed',
@@ -361,6 +413,8 @@ export async function* callModel(
   };
 }
 
+const RUN_LIMIT_MESSAGE = 'tool call limit';
+
 /**
  * The message of the limit a call at `position` is beyond: the calls the run
  * may still make, then the calls of one step.
@@ -370,7 +424,7 @@ function limitOf(
   remaining: number,
   perStep: number,
 ): string | undefined {
-  if (position >= remaining) return 'tool call limit';
+  if (position >= remaining) return RUN_LIMIT_MESSAGE;
   if (position >= perStep) return 'tool call limit per step';
   return undefined;
 }
@@ -393,7 +447,14 @@ async function classify(
   },
 ): Promise<
   | { aborted: true }
-  | { aborted?: false; body: ToolCallBody; result?: ToolResultBody }
+  | {
+      aborted?: false;
+      body: ToolCallBody;
+      result?: ToolResultBody;
+      reason?: ToolDeniedReason;
+      /** The model named a tool that is not offered: its name is the model's. */
+      unknownTool?: true;
+    }
 > {
   const {
     call,
@@ -411,21 +472,26 @@ async function classify(
     status: 'denied' | 'invalid',
     message: string,
     body: Omit<ToolCallBody, 'kind' | 'callId' | 'toolId'>,
+    reason?: ToolDeniedReason,
   ) => ({
     body: { ...base, ...body },
     result: { kind: 'tool_result' as const, callId, status, message },
+    ...(reason !== undefined && { reason }),
   });
 
   if (!descriptor) {
     const message = firstStepNote ?? `Unknown tool: ${call.toolId}`;
-    return refuse('invalid', message, {
-      input: {},
-      schemaHash: '',
-      policy: 'ask',
-      readOnly: false,
-      step,
-      position,
-    });
+    return {
+      ...refuse('invalid', message, {
+        input: {},
+        schemaHash: '',
+        policy: 'ask',
+        readOnly: false,
+        step,
+        position,
+      }),
+      unknownTool: true,
+    };
   }
   const isObject =
     typeof call.input === 'object' &&
@@ -441,16 +507,20 @@ async function classify(
   const policy = decidePolicy(descriptor, req.policy);
 
   if (overLimit !== undefined) {
-    return refuse('denied', overLimit, {
-      ...fields,
-      policy: policy === 'allow' ? 'allow' : 'ask',
-    });
+    return refuse(
+      'denied',
+      overLimit,
+      { ...fields, policy: policy === 'allow' ? 'allow' : 'ask' },
+      overLimit === RUN_LIMIT_MESSAGE ? 'run_limit' : 'step_limit',
+    );
   }
   if (policy === 'deny') {
-    return refuse('denied', 'The policy does not allow this tool.', {
-      ...fields,
-      policy: 'ask',
-    });
+    return refuse(
+      'denied',
+      'The policy does not allow this tool.',
+      { ...fields, policy: 'ask' },
+      'policy',
+    );
   }
   if (!isObject) {
     return refuse('invalid', 'The input must be a JSON object.', {
@@ -497,7 +567,12 @@ async function classify(
     return { aborted: true };
   }
   if (hookDecision.action === 'deny') {
-    return refuse('denied', hookDecision.reason, { ...fields, policy: 'ask' });
+    return refuse(
+      'denied',
+      hookDecision.reason,
+      { ...fields, policy: 'ask' },
+      'hook',
+    );
   }
   return {
     body: {

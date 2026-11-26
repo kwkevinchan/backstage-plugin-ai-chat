@@ -180,4 +180,34 @@ describe('OpenAiCompatibleModelClient', () => {
       'a_b_2',
     ]);
   });
+
+  it('gives the usage the server reported as the last chunk (O-01)', async () => {
+    const llm: LlmClient = {
+      async complete(request) {
+        request.onText?.('Hi');
+        return {
+          content: 'Hi',
+          toolCalls: [
+            { id: 'm1', name: 'catalog_get-entity', arguments: '{}' },
+          ],
+          usage: { inputTokens: 30, outputTokens: 4 },
+        };
+      },
+    };
+    const chunks = await collect(modelClient(llm).stream(input, opts));
+    expect(chunks.map(c => c.type)).toEqual(['text', 'tool_call', 'usage']);
+    expect(chunks[2]).toEqual({
+      type: 'usage',
+      inputTokens: 30,
+      outputTokens: 4,
+    });
+
+    const none: LlmClient = {
+      async complete() {
+        return { content: 'Hi', toolCalls: [] };
+      },
+    };
+    const plain = await collect(modelClient(none).stream(input, opts));
+    expect(plain.map(c => c.type)).toEqual([]);
+  });
 });

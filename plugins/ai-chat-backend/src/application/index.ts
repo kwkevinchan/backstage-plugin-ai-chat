@@ -34,6 +34,13 @@ export { createRunEnded, RUN_END_HOOK_TIMEOUT_MS } from './runEnded';
 export type { RunEnded } from './runEnded';
 export { RunSupervisor } from './RunSupervisor';
 export type { ShareView } from './shareChanges';
+export { RunTelemetry } from './RunTelemetry';
+export type {
+  RateLimitWaitRecord,
+  RunEndRecord,
+  TitleCallRecord,
+} from './RunTelemetry';
+export { errorStatusOf, modelErrorFields } from './modelErrors';
 export type {
   LaunchRequest,
   RunHandle,

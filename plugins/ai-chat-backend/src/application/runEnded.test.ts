@@ -152,4 +152,29 @@ describe('createRunEnded', () => {
     const runEnded = createRunEnded({ hooks: [], logger: fakeLogger() });
     await expect(runEnded.drain(10_000)).resolves.toBeUndefined();
   });
+
+  it('measures every run that ends, also without hooks, and not one that waits (O-01)', () => {
+    const measured: unknown[] = [];
+    const runEnded = createRunEnded({
+      hooks: [],
+      logger: fakeLogger(),
+      telemetry: { runEnded: r => void measured.push(r) },
+    });
+    runEnded({ run, agentId: 'guide', userRef: 'user:default/jane' });
+    runEnded({
+      run: { ...run, id: 'run-2', status: 'waiting_approval' },
+      agentId: 'guide',
+      userRef: 'user:default/jane',
+    });
+    expect(measured).toEqual([
+      {
+        sessionId: 'session-1',
+        runId: 'run-1',
+        agentId: 'guide',
+        status: 'completed',
+        endReason: 'max_steps',
+        usage: { stepsUsed: 3, toolCallsUsed: 2, elapsedSeconds: 4 },
+      },
+    ]);
+  });
 });

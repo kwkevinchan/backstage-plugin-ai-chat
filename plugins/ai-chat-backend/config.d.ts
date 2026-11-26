@@ -59,6 +59,13 @@ export interface Config {
        * the model server or gateway. No limit when not set.
        */
       requestsPerMinute?: number;
+      /**
+       * Whether a streamed request asks the server for the tokens it used
+       * (`stream_options: { include_usage: true }`). The tokens go to the
+       * logs and metrics of the plugin. Turn it off for a server that
+       * refuses the field. Defaults to true.
+       */
+      reportUsage?: boolean;
     };
     /**
      * More models, by id, that agents can name with `model`. Each one has the
@@ -85,6 +92,8 @@ export interface Config {
         parallelToolCalls?: boolean;
         /** As `llm.requestsPerMinute`. No limit when not set. */
         requestsPerMinute?: number;
+        /** As `llm.reportUsage`. Defaults to true. */
+        reportUsage?: boolean;
       };
     };
     /**

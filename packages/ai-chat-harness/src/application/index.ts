@@ -55,6 +55,15 @@ export type {
 } from './ports/ModelClient';
 export type { RunControl } from './ports/RunControl';
 export type {
+  ContextProviderRecord,
+  ContextProviderStatus,
+  ModelCallOutcome,
+  ModelCallRecord,
+  RunObserver,
+  ToolCallRecord,
+  ToolDeniedReason,
+} from './ports/RunObserver';
+export type {
   CallContext,
   ToolGateway,
   ToolOutput,

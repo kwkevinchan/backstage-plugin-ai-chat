@@ -19,7 +19,10 @@ import {
   createBackendPlugin,
   resolvePackagePath,
 } from '@backstage/backend-plugin-api';
-import { actionsServiceRef } from '@backstage/backend-plugin-api/alpha';
+import {
+  actionsServiceRef,
+  metricsServiceRef,
+} from '@backstage/backend-plugin-api/alpha';
 import { InputError } from '@backstage/errors';
 import type { ModelClient } from '@kwkevinchan/ai-chat-harness';
 import { catalogServiceRef } from '@backstage/plugin-catalog-node';
@@ -28,6 +31,7 @@ import { aiChatHarnessExtensionPoint } from '@kwkevinchan/backstage-plugin-ai-ch
 import { ActionsToolGateway } from './adapters/backstage/ActionsToolGateway';
 import { AiChatHarnessRegistry } from './adapters/backstage/AiChatHarnessRegistry';
 import { AuditorAuditLog } from './adapters/backstage/AuditorAuditLog';
+import { BackstageMetrics } from './adapters/backstage/BackstageMetrics';
 import { CatalogEntityReader } from './adapters/backstage/CatalogEntityReader';
 import { ConfigAgentCatalog } from './adapters/backstage/ConfigAgentCatalog';
 import { PermissionAccessControl } from './adapters/backstage/PermissionAccessControl';
@@ -115,6 +119,7 @@ export const aiChatPlugin = createBackendPlugin({
         lifecycle: coreServices.lifecycle,
         scheduler: coreServices.scheduler,
         actions: actionsServiceRef,
+        metrics: metricsServiceRef,
         catalogService: catalogServiceRef,
         permissions: coreServices.permissions,
         permissionsRegistry: coreServices.permissionsRegistry,
@@ -131,6 +136,7 @@ export const aiChatPlugin = createBackendPlugin({
         lifecycle,
         scheduler,
         actions,
+        metrics,
         catalogService,
         permissions,
         permissionsRegistry,
@@ -287,6 +293,7 @@ export const aiChatPlugin = createBackendPlugin({
           clock,
           ids,
           logger,
+          metrics: new BackstageMetrics(metrics),
           queueMaxMessages: aiChat.input.queueMaxMessages,
           insertMaxPerRun: aiChat.input.insertMaxPerRun,
           images: { ...aiChat.input.images, enabled: aiChat.llm.images },

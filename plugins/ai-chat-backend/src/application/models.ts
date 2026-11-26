@@ -26,6 +26,7 @@ import type {
 } from '@kwkevinchan/ai-chat-harness';
 import { AttachmentNotFound } from '../domain';
 import type { AttachmentStore, ModelCallLimiter } from './ports';
+import type { RunTelemetry } from './RunTelemetry';
 import { abortableSleep } from './sleep';
 
 /** The id of the model of `aiChat.llm`, which an agent without `model` uses. */
@@ -57,6 +58,8 @@ export class HostModelClient implements ModelClient {
       clock: Clock;
       rate?: { limiter: ModelCallLimiter; perMinute: number };
       sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+      /** Measures the wait for the rate limit (O-01). */
+      telemetry?: Pick<RunTelemetry, 'rateLimitWaited'>;
     },
   ) {
     this.capabilities = inner.capabilities;
@@ -86,21 +89,36 @@ export class HostModelClient implements ModelClient {
   }
 
   private async takeTurn(signal: AbortSignal): Promise<void> {
-    const { rate, clock, modelId } = this.deps;
+    const { rate, clock, modelId, telemetry } = this.deps;
     if (!rate) return;
     const sleep = this.deps.sleep ?? abortableSleep;
-    for (;;) {
-      signal.throwIfAborted();
-      const turn = await rate.limiter.tryAcquire(
+    const startedAt = clock.now().getTime();
+    const waited = (outcome: 'acquired' | 'cancelled') =>
+      telemetry?.rateLimitWaited({
         modelId,
-        rate.perMinute,
-        clock.now(),
-      );
-      if (turn.acquired) return;
-      const wait =
-        Math.max(0, turn.retryAt.getTime() - clock.now().getTime()) +
-        Math.floor(Math.random() * RETRY_JITTER_MS);
-      await sleep(wait, signal);
+        waitMs: Math.max(0, clock.now().getTime() - startedAt),
+        outcome,
+      });
+    try {
+      for (;;) {
+        signal.throwIfAborted();
+        const turn = await rate.limiter.tryAcquire(
+          modelId,
+          rate.perMinute,
+          clock.now(),
+        );
+        if (turn.acquired) {
+          waited('acquired');
+          return;
+        }
+        const wait =
+          Math.max(0, turn.retryAt.getTime() - clock.now().getTime()) +
+          Math.floor(Math.random() * RETRY_JITTER_MS);
+        await sleep(wait, signal);
+      }
+    } catch (error) {
+      if (signal.aborted) waited('cancelled');
+      throw error;
     }
   }
 }

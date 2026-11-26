@@ -18,12 +18,14 @@ export type AdvanceRunDeps = {
   clock: Clock;
   ids: IdGenerator;
   extensions: Extensions;
+  observer?: RunObserver;
 };
 
 // @public
 export type AdvanceRunRequest = {
   agent: AgentDefinition;
   model: ModelClient;
+  modelId?: string;
   limits: Limits;
   budget: ContextBudget;
   policy: PolicySettings;
@@ -165,6 +167,22 @@ export interface ContextProvider {
   id: string;
   provide(ctx: StepContext): string | undefined | Promise<string | undefined>;
 }
+
+// @public
+export type ContextProviderRecord = {
+  id: string;
+  status: ContextProviderStatus;
+  chars: number;
+};
+
+// @public
+export type ContextProviderStatus =
+  | 'ok'
+  | 'cut'
+  | 'empty'
+  | 'failed'
+  | 'timeout'
+  | 'left_out';
 
 // @public
 export function decideNextAction(
@@ -394,6 +412,32 @@ export const LOAD_SKILL_TOOL_ID = 'load_skill';
 export function loadSkillDescriptor(skills: readonly Skill[]): ToolDescriptor;
 
 // @public
+export type ModelCallOutcome =
+  | 'ok'
+  | 'empty'
+  | 'failed'
+  | 'cancelled'
+  | 'timeout';
+
+// @public
+export type ModelCallRecord = {
+  sessionId: string;
+  runId: string;
+  agentId: string;
+  modelId?: string;
+  purpose: 'step' | 'summary';
+  step: number;
+  durationMs: number;
+  outcome: ModelCallOutcome;
+  errorStatus?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  toolCallsRequested: number;
+  context: ModelInputSize;
+  providers?: ContextProviderRecord[];
+};
+
+// @public
 export type ModelChunk =
   | {
       type: 'text';
@@ -404,6 +448,11 @@ export type ModelChunk =
       modelCallId: string;
       toolId: string;
       input: JsonValue;
+    }
+  | {
+      type: 'usage';
+      inputTokens: number;
+      outputTokens: number;
     };
 
 // @public
@@ -443,6 +492,40 @@ export type ModelInputExtra = {
   context: string[];
   tools: ToolDescriptor[];
   images?: boolean;
+};
+
+// @public
+export function modelInputOf(
+  items: readonly Item[],
+  agent: AgentDefinition,
+  extra: ModelInputExtra,
+  budget: ContextBudget,
+): {
+  input: ModelInput;
+  trimmed: {
+    earlier: boolean;
+    steps: boolean;
+  };
+  size: ModelInputSize;
+};
+
+// @public
+export type ModelInputSize = {
+  estimatedTokens: number;
+  budgetTokens: number;
+  parts: {
+    system: number;
+    context: number;
+    tools: number;
+    summary: number;
+    history: number;
+    images: number;
+  };
+  messages: number;
+  images: number;
+  tools: number;
+  summarized: boolean;
+  trimmed: ('earlier' | 'steps')[];
 };
 
 // @public
@@ -593,6 +676,12 @@ export type RunFence = {
 };
 
 // @public
+export interface RunObserver {
+  modelCall(record: ModelCallRecord): void;
+  toolCall(record: ToolCallRecord): void;
+}
+
+// @public
 export type RunOutcome =
   | {
       status: 'completed';
@@ -637,6 +726,12 @@ export type RunUsage = {
   toolCallsUsed: number;
   elapsedSeconds: number;
 };
+
+// @public
+export function sizeOfModelInput(
+  input: ModelInput,
+  budget: ContextBudget,
+): ModelInputSize;
 
 // @public
 export interface Skill {
@@ -703,6 +798,31 @@ export type ToolCallBody = {
 
 // @public (undocumented)
 export type ToolCallItem = Item & ToolCallBody;
+
+// @public
+export type ToolCallRecord = {
+  sessionId: string;
+  runId: string;
+  agentId: string;
+  step: number;
+  position: number;
+  callId: string;
+  toolId: string;
+  readOnly: boolean;
+  status: ToolResultStatus;
+  reason?: ToolDeniedReason;
+  durationMs?: number;
+  truncated?: boolean;
+};
+
+// @public
+export type ToolDeniedReason =
+  | 'policy'
+  | 'run_limit'
+  | 'step_limit'
+  | 'hook'
+  | 'user'
+  | 'earlier_write_timed_out';
 
 // @public
 export type ToolDescriptor = {
