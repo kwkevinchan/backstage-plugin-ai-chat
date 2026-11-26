@@ -72,6 +72,7 @@ aiChat:
     images: false # 模型能讀圖片；預設 false。圖片會送到模型伺服器，見下方說明
     parallelToolCalls: false # 請伺服器允許一次多個工具呼叫；預設 false
     requestsPerMinute: 60 # 選填；所有後端合計每分鐘的呼叫數
+    reportUsage: true # 請伺服器回報每次回答的 token 用量（stream_options）；不接受這個欄位的伺服器設 false；預設 true
   models: # 選填；Agent 用 `model` 指定的其他模型，欄位和 llm 相同。llm 就是 default
     small:
       baseUrl: https://llm.example.com/v1
@@ -241,6 +242,36 @@ aiChat:
 - 不是唯讀的 action 執行前先記「開始執行」。後端在執行中途停掉時不會重跑，畫面顯示「Result unknown」。
 - 不是唯讀的 action 的核准、拒絕與執行會寫入 Backstage auditor
   （`tool-call-approve`、`tool-call-deny`、`tool-call-invoke`）；唯讀的 action 執行時不稽核。
+
+## 觀測
+
+外掛對每次模型呼叫、每個工具結果、每個結束的 Run 各寫一筆 log，並透過 Backstage 的 metrics 服務（`@alpha`）記錄 OpenTelemetry 的 metric。
+內容只有數字、id 和固定的分類詞：沒有訊息、提示、上下文、工具的輸入和輸出、工具或模型伺服器的錯誤訊息，也沒有使用者。
+模型呼叫失敗時，log 只記錯誤的名稱和 HTTP 狀態碼：錯誤訊息可能帶回對話的內容。
+
+| log          | 欄位                                                                                                                                                                                                                                                                                                                                   |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Model call` | `sessionId`、`runId`、`agentId`、`modelId`、`purpose`（`step`、`summary`、`title`）、`step`、`durationMs`、`outcome`（`ok`、`empty`、`failed`、`cancelled`、`timeout`）、`errorStatus`、`inputTokens`、`outputTokens`、`toolCallsRequested`、`context`（各部分的估計 token 和個數）、`providers`（每個 context provider 的狀態和長度） |
+| `Tool call`  | `sessionId`、`runId`、`agentId`、`step`、`position`、`callId`、`toolId`、`readOnly`、`status`、`reason`（被拒絕的原因：`policy`、`run_limit`、`step_limit`、`hook`、`user`、`earlier_write_timed_out`）、`durationMs`（執行過的才有）、`truncated`                                                                                     |
+| `Run ended`  | `sessionId`、`runId`、`agentId`、`status`、`endReason`、`stepsUsed`、`toolCallsUsed`、`elapsedSeconds`                                                                                                                                                                                                                                 |
+
+| metric                             | 類型      | 單位       | 屬性                                   |
+| ---------------------------------- | --------- | ---------- | -------------------------------------- |
+| `ai_chat.model.duration`           | histogram | `s`        | `agent`、`model`、`purpose`、`outcome` |
+| `ai_chat.model.tokens`             | histogram | `{token}`  | `agent`、`model`、`purpose`、`type`    |
+| `ai_chat.context.tokens`           | histogram | `{token}`  | `agent`、`part`                        |
+| `ai_chat.context_provider.results` | counter   | `{result}` | `agent`、`provider`、`status`          |
+| `ai_chat.tool.calls`               | counter   | `{call}`   | `agent`、`tool`、`status`、`reason`    |
+| `ai_chat.tool.duration`            | histogram | `s`        | `agent`、`tool`、`status`              |
+| `ai_chat.model.rate_limit.wait`    | histogram | `s`        | `model`、`outcome`                     |
+| `ai_chat.run.duration`             | histogram | `s`        | `agent`、`status`、`end_reason`        |
+| `ai_chat.run.steps`                | histogram | `{step}`   | `agent`、`status`                      |
+| `ai_chat.run.tool_calls`           | histogram | `{call}`   | `agent`、`status`                      |
+
+- token 是模型伺服器回報的數字（`reportUsage`）；沒有回報的伺服器就沒有這兩個欄位。上下文的大小是外掛算預算用的估計值。
+- metric 沒有 Session、Run、呼叫和使用者的屬性；log 有這些 id，可以追一個 Run，也可以用 `runId`、`callId` 對照 auditor 的紀錄。
+- meter 的名稱是 `backstage-plugin-ai-chat`。backend 沒有裝 OpenTelemetry SDK 時，metric 不會送到任何地方，也沒有額外的成本；要匯出時，照 Backstage 文件的說明設定 OpenTelemetry。
+- 沒有 trace。
 
 ## 多台 backend
 

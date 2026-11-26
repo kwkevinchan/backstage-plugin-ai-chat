@@ -106,7 +106,7 @@ packages/ai-chat-harness/src/
     agent.ts                   AgentDefinition、Limits
     plan.ts                    Plan、PlanItem
     nextAction.ts              decideNextAction()：從紀錄算出下一步
-    modelInput.ts              buildModelInput()、planSummary()、buildSummaryInput()、estimateTokens()：從紀錄算出送給模型的內容，套用 token 預算
+    modelInput.ts              buildModelInput()、planSummary()、buildSummaryInput()、estimateTokens()：從紀錄算出送給模型的內容，套用 token 預算；modelInputOf()、sizeOfModelInput()：同時算出內容的大小（O-01）
     errors.ts
   application/                 第 2 圈
     ports/
@@ -114,6 +114,7 @@ packages/ai-chat-harness/src/
       ModelClient.ts           呼叫模型，回傳串流；ModelChunk
       ToolGateway.ts           列出工具、驗證、執行；CallContext、ToolOutput、ValidationResult
       RunControl.ts            續租、讀取停止要求、更新用量
+      RunObserver.ts           收迴圈的量測紀錄（O-01）：模型呼叫、工具結果。可以不給
       Clock.ts
       IdGenerator.ts
       extensions.ts            P3 才有內容。現在 Extensions 是空型別
@@ -124,6 +125,7 @@ packages/ai-chat-harness/src/
       executeTools.ts
       summarize.ts             用模型產生摘要，寫成 summary Item
       plan.ts                  內建 update_plan：描述、驗證、執行、上下文裡的計畫（X-06、X-07）
+      observe.ts               把量測紀錄交給 RunObserver；observer 丟的例外不影響 Run
     plan.ts                    readCurrentPlan()：目前的計畫，摘要涵蓋了也讀得到
     events.ts                  HarnessEvent、RunOutcome
   testing/                     另一個入口：ai-chat-harness/testing
@@ -537,6 +539,13 @@ export type HarnessEvent =
 - `message.read` 在 `step.started` 之前（在 `context.trimmed` 之後）：這一輪才第一次給模型的插入訊息，每則送一次，`item` 是那筆 `user_message`。模型呼叫在這之後失敗或中止，訊息仍標成沒讀到（紀錄沒有 `readUpToSeq` 蓋過它），下一次 `execute()` 會再送。
 - 模型呼叫失敗或中止時，已送出的 `item.started` 沒有對應的 `item.completed`。畫面要能忽略它們。
 
+**觀測**（O-01）：`AdvanceRunDeps.observer`（`RunObserver`）收迴圈的量測紀錄，不經過事件，所以串流和畫面不受影響。
+
+- `modelCall`：每一步、每次摘要一筆。用 `Clock` 量的時間、結果（`ok`、`empty`、`failed`、`cancelled`、`timeout`）、模型回報的 token（`usage` chunk）、錯誤的 HTTP 狀態碼、上下文的大小（`modelInputOf` 和 `buildModelInput` 同一次算出）、每個 context provider 的狀態和長度。
+- `toolCall`：每個寫入的 `tool_result` 一筆，跟著寫入走。被拒絕的有原因，執行過的有工具本身的時間（不含 Hook 和等核准）。
+- 紀錄只有數字、id 和固定的分類詞。錯誤本身、文字和工具的輸入輸出都不交給 observer。observer 不被 `await`，丟的例外被忽略。
+- Run 的截止時間用名稱是 `TimeoutError` 的 reason 中止 signal，紀錄用它分辨 `timeout` 和使用者的停止。
+
 ## 5. 宿主：`ai-chat-backend`
 
 ### 5.1 目錄
@@ -567,6 +576,7 @@ plugins/ai-chat-backend/
         AccessControl.ts               P2：能不能讀這段 Session、能不能用這個 Toolset。P1 只檢查擁有者（domain 的 assertOwner）
         AuditLog.ts                    begin() 回傳 AuditSpan（success、fail）
         Logger.ts
+        Metrics.ts                     counter、histogram（O-01）；NoopMetrics 什麼都不記
         Notifier.ts                    通知擁有者處理中、等核准、有新回覆。沒有 Signals 時不做事
         AgentCatalog.ts                agent()、defaultAgentId()、toolsets()、policy()
         Scheduler.ts                   P2：定期工作。P1 的 `plugin.ts` 直接用 `coreServices.scheduler` 排 ExpireStaleRuns
@@ -592,6 +602,8 @@ plugins/ai-chat-backend/
       resumeIfDecided.ts               DecideApproval 和 ResumeRun 共用：全部已決定就 acquireLease 並啟動迴圈
       EventChannel.ts                  給一個訂閱者的事件佇列
       AuditedToolGateway.ts            包住 ToolGateway：不是唯讀的工具執行時寫稽核（O-02）
+      RunTelemetry.ts                  核心的 RunObserver，加上 Run 的結束、限流等待、自動標題：寫 log、記 metric（O-01）
+      modelErrors.ts                   模型呼叫失敗時 log 可以記的欄位：錯誤的名稱和 HTTP 狀態碼
       buildRunRequest.ts               組出 AdvanceRun 的 request（agent、政策、限制、用量）
     adapters/                          第 3 圈
       http/
@@ -616,6 +628,7 @@ plugins/ai-chat-backend/
         ActionsToolGateway.ts          Actions Registry 轉成 ToolGateway
         PermissionAccessControl.ts
         AuditorAuditLog.ts
+        BackstageMetrics.ts            Metrics 接到 metricsServiceRef（OpenTelemetry）
         SignalsNotifier.ts             頻道 `ai-chat`。由 `ai-chat` 的 signals module 裝上，plugin 本身不依賴 Signals
         ConfigAgentCatalog.ts
         principalFromRequest.ts        httpAuth、userInfo、auth（getLimitedUserToken 取 token 的到期時間）轉成 Principal
@@ -788,6 +801,7 @@ export class SendMessage {
 | `ModelClient`                                                      | `OpenAiCompatibleModelClient`  | 沒有。包住 `llm/` 裡用 `fetch` 的 client                                          |
 | `AccessControl`                                                    | `PermissionAccessControl`      | `coreServices.permissions`（P2。P1 只檢查擁有者，是 domain 的 `assertOwner`）     |
 | `AuditLog`                                                         | `AuditorAuditLog`              | `coreServices.auditor`                                                            |
+| `Metrics`                                                          | `BackstageMetrics`             | `metricsServiceRef`（`@backstage/backend-plugin-api/alpha`）                      |
 | `Notifier`                                                         | `SignalsNotifier`              | `signalsServiceRef`，由 signals module 裝上。沒有安裝時不做事，畫面改為輪詢       |
 | `AgentCatalog`                                                     | `ConfigAgentCatalog`           | `coreServices.rootConfig`，加上擴充點註冊的內容                                   |
 | `Scheduler`                                                        | `BackstageScheduler`           | `coreServices.scheduler`                                                          |

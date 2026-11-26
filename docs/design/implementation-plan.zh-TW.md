@@ -1108,7 +1108,7 @@ flowchart LR
   - Token 用量：
     - 模型回報 `usage` 時，紀錄、`Model call` 的 log 和 `ai_chat.model.tokens`（`type` 是 `input`、`output`）都是回報的數字。回報兩次時用最後一次。不是非負整數的值不算。沒有回報時紀錄沒有這兩個欄位，也不記 `ai_chat.model.tokens`。
     - `usage` 不產生 Item 和事件，回答不變。
-    - `OpenAiCompatibleClient` 串流的請求有 `stream_options: { include_usage: true }`，讀得到最後一個 chunk（`choices` 是空的）的 `usage`，也讀得到不是串流的回答的 `usage`。`reportUsage: false` 時請求沒有 `stream_options`。`reportUsage` 不是布林時丟 `InputError`。
+    - `OpenAiCompatibleClient` 串流的請求有 `stream_options: { include_usage: true }`，讀得到最後一個 chunk（`choices` 是空的）的 `usage`，也讀得到不是串流的回答的 `usage`。`reportUsage: false` 時請求沒有 `stream_options`。`reportUsage` 不是布林值時後端無法啟動。
   - 延遲和逾時：
     - 模型呼叫的 `durationMs` 用 `Clock` 量，從呼叫模型到串流結束，包含限流的等待。
     - 工具的 `durationMs` 只算工具本身，不含 `beforeToolCall`、`afterToolCall` 和等核准的時間。

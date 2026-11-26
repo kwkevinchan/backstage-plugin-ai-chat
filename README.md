@@ -204,6 +204,7 @@ aiChat:
     images: false # the model reads images; default false. See "Images"
     parallelToolCalls: false # ask the server for parallel tool calls; default false
     requestsPerMinute: 60 # optional; calls per minute over all backends
+    reportUsage: true # ask for the tokens of each answer (stream_options); default true
   models: # optional; more models that an agent names with `model`
     small:
       baseUrl: https://llm.example.com/v1
@@ -331,6 +332,7 @@ exactly `days` ago is kept.
 | `toolTimeoutSeconds`                                     | Most seconds of one tool call, at most 600. A call that takes longer gets a timeout result and the run goes on, but the action may still be running. After an action that is not read-only went over its time, the later actions of that answer that are not read-only do not run. `runTimeoutSeconds` still ends the whole run, also during a call. |
 | `runsPerUser`                                            | Runs one user may have going on at the same time (running or waiting for an approval), over all sessions and backends. A message beyond it is refused with 429, and a queue waits.                                                                                                                                                                   |
 | `llm.requestsPerMinute`, `models.<id>.requestsPerMinute` | Most calls of the model per minute, over all backends that share the database (steps, summaries and titles). A call over the limit waits for the next minute.                                                                                                                                                                                        |
+| `llm.reportUsage`, `models.<id>.reportUsage`             | Whether a streamed request asks the server for its token usage (`stream_options: { include_usage: true }`). The tokens go to the logs and metrics (see "Observability"). Set it to `false` for a server that refuses the field.                                                                                                                      |
 | `models`                                                 | More models by id, with the fields of `llm`. `llm` is the model `default`. An agent names one with `model`; a backend module can add a model with `addModelClient`.                                                                                                                                                                                  |
 | `runTimeoutSeconds`                                      | Most seconds of work in one run, at most 600. The tools run with the token of the user, so a run also ends before that token expires (the shortest life that Backstage allows is 10 minutes).                                                                                                                                                        |
 | `context.tokenBudget`                                    | Size of the model input in estimated tokens (one token is a quarter of an ASCII character or one other character). Set it well below the context window of the model.                                                                                                                                                                                |
@@ -555,6 +557,45 @@ Rules that the backend enforces, whatever the model or the browser sends:
   is recorded with the Backstage [auditor](https://backstage.io/docs/backend-system/core-services/auditor)
   (`tool-call-approve`, `tool-call-deny`, `tool-call-invoke`). The input of
   the call is not copied into the audit log.
+
+## Observability
+
+The plugin writes one log line for each model call, each tool result and each
+run that ends, and records OpenTelemetry metrics through the metrics service of
+Backstage (`@alpha`). They hold numbers, ids and fixed words only: no message,
+prompt, context, tool input or output, error text of a tool or of the model
+server, or user. A failed model call is logged with the name and the HTTP status
+of its error only, as its text may repeat what the conversation said.
+
+| Log line     | Fields                                                                                                                                                                                                                                                                                                                                                             |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Model call` | `sessionId`, `runId`, `agentId`, `modelId`, `purpose` (`step`, `summary`, `title`), `step`, `durationMs`, `outcome` (`ok`, `empty`, `failed`, `cancelled`, `timeout`), `errorStatus`, `inputTokens`, `outputTokens`, `toolCallsRequested`, `context` (the estimated tokens by part and the counts), `providers` (each context provider with its status and length) |
+| `Tool call`  | `sessionId`, `runId`, `agentId`, `step`, `position`, `callId`, `toolId`, `readOnly`, `status`, `reason` (why it was denied: `policy`, `run_limit`, `step_limit`, `hook`, `user`, `earlier_write_timed_out`), `durationMs` (calls that ran), `truncated`                                                                                                            |
+| `Run ended`  | `sessionId`, `runId`, `agentId`, `status`, `endReason`, `stepsUsed`, `toolCallsUsed`, `elapsedSeconds`                                                                                                                                                                                                                                                             |
+
+| Metric                             | Type      | Unit       | Attributes                             |
+| ---------------------------------- | --------- | ---------- | -------------------------------------- |
+| `ai_chat.model.duration`           | histogram | `s`        | `agent`, `model`, `purpose`, `outcome` |
+| `ai_chat.model.tokens`             | histogram | `{token}`  | `agent`, `model`, `purpose`, `type`    |
+| `ai_chat.context.tokens`           | histogram | `{token}`  | `agent`, `part`                        |
+| `ai_chat.context_provider.results` | counter   | `{result}` | `agent`, `provider`, `status`          |
+| `ai_chat.tool.calls`               | counter   | `{call}`   | `agent`, `tool`, `status`, `reason`    |
+| `ai_chat.tool.duration`            | histogram | `s`        | `agent`, `tool`, `status`              |
+| `ai_chat.model.rate_limit.wait`    | histogram | `s`        | `model`, `outcome`                     |
+| `ai_chat.run.duration`             | histogram | `s`        | `agent`, `status`, `end_reason`        |
+| `ai_chat.run.steps`                | histogram | `{step}`   | `agent`, `status`                      |
+| `ai_chat.run.tool_calls`           | histogram | `{call}`   | `agent`, `status`                      |
+
+- The tokens are the ones the model server reports (`reportUsage`); a server
+  that reports none leaves them out. The size of the context is the estimate
+  the plugin uses for its budget.
+- The metrics have no session, run, call or user attribute; the log lines do
+  have the ids, so a run can be followed there and matched with the auditor
+  records by `runId` and `callId`.
+- The meter is `backstage-plugin-ai-chat`. Without an OpenTelemetry SDK in the
+  backend, the metrics go nowhere and cost nothing; to export them, set up
+  OpenTelemetry as the Backstage documentation describes.
+- There are no traces.
 
 ## Running several backends
 
