@@ -22,7 +22,9 @@ import type { ModelInputSize, ToolResultStatus } from '../../domain';
  * - `ok`: the model answered.
  * - `empty`: the answer had no text and no call.
  * - `failed`: the call threw.
- * - `cancelled`: the user stopped the run.
+ * - `cancelled`: the signal of the run aborted for another reason than its
+ *   deadline: the user stopped the run, the backend shut down, or the host
+ *   lost the lease of the run.
  * - `timeout`: the working time of the run ran out.
  *
  * @public
@@ -129,6 +131,10 @@ export type ToolCallRecord = {
   step: number;
   position: number;
   callId: string;
+  /**
+   * The id of the tool, or `unknown` when the model named a tool that is not
+   * offered (its name is text of the model).
+   */
   toolId: string;
   readOnly: boolean;
   /** The status as written, after the `afterToolCall` hooks. */
@@ -151,6 +157,8 @@ export type ToolCallRecord = {
  * @public
  */
 export interface RunObserver {
+  /** One model call: each step and each summary, when the call ended. */
   modelCall(record: ModelCallRecord): void;
+  /** One `tool_result` item, after it was written to the log. */
   toolCall(record: ToolCallRecord): void;
 }

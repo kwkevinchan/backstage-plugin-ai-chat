@@ -92,8 +92,11 @@ The plugin keeps its state in its own database (`ai-chat`; tables
 it starts. On SQLite it allows one connection: the pool maximum must be 1,
 which is what Knex uses for SQLite unless the configuration says otherwise.
 A deployment that needs more than one connection uses PostgreSQL. It uses the
-actions service of Backstage (`@alpha` in
-`@backstage/backend-plugin-api/alpha`), which `createBackend()` provides.
+actions service and the metrics service of Backstage (`actionsServiceRef` and
+`metricsServiceRef`, `@alpha` in `@backstage/backend-plugin-api/alpha`), which
+`createBackend()` provides. A backend that is not made with `createBackend()`
+must install both (`actionsServiceFactory` and `metricsServiceFactory` of
+`@backstage/backend-defaults/alpha`), or the plugin does not start.
 
 ### Frontend: new frontend system
 
@@ -613,11 +616,11 @@ prompt, context, tool input or output, error text of a tool or of the model
 server, or user. A failed model call is logged with the name and the HTTP status
 of its error only, as its text may repeat what the conversation said.
 
-| Log line     | Fields                                                                                                                                                                                                                                                                                                                                                             |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Model call` | `sessionId`, `runId`, `agentId`, `modelId`, `purpose` (`step`, `summary`, `title`), `step`, `durationMs`, `outcome` (`ok`, `empty`, `failed`, `cancelled`, `timeout`), `errorStatus`, `inputTokens`, `outputTokens`, `toolCallsRequested`, `context` (the estimated tokens by part and the counts), `providers` (each context provider with its status and length) |
-| `Tool call`  | `sessionId`, `runId`, `agentId`, `step`, `position`, `callId`, `toolId`, `readOnly`, `status`, `reason` (why it was denied: `policy`, `run_limit`, `step_limit`, `hook`, `user`, `earlier_write_timed_out`), `durationMs` (calls that ran), `truncated`                                                                                                            |
-| `Run ended`  | `sessionId`, `runId`, `agentId`, `status`, `endReason`, `stepsUsed`, `toolCallsUsed`, `elapsedSeconds`                                                                                                                                                                                                                                                             |
+| Log line     | Fields                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Model call` | `sessionId`, `runId`, `agentId`, `modelId`, `purpose` (`step`, `summary`, `title`), `step`, `durationMs`, `outcome` (`ok`, `empty`, `failed`, `cancelled` (the user stopped the run, the backend shut down or lost the lease), `timeout`), `errorStatus`, `inputTokens`, `outputTokens`, `toolCallsRequested`, `context` (the estimated tokens by part and the counts), `providers` (each context provider with its status and length) |
+| `Tool call`  | `sessionId`, `runId`, `agentId`, `step`, `position`, `callId`, `toolId` (`unknown` when the model named a tool that is not offered), `readOnly`, `status`, `reason` (why it was denied: `policy`, `run_limit`, `step_limit`, `hook`, `user`, `earlier_write_timed_out`), `durationMs` (calls that ran), `truncated`                                                                                                                    |
+| `Run ended`  | `sessionId`, `runId`, `agentId`, `status`, `endReason`, `stepsUsed`, `toolCallsUsed`, `elapsedSeconds`                                                                                                                                                                                                                                                                                                                                 |
 
 | Metric                             | Type      | Unit       | Attributes                             |
 | ---------------------------------- | --------- | ---------- | -------------------------------------- |
@@ -812,8 +815,8 @@ A failed run ends with a fixed error text. The types are in
 | ----------- | --------------- |
 | `0.1.x`     | 1.56 (`1.56.2`) |
 
-The actions service is `@alpha` in Backstage, so a Backstage upgrade can break
-this plugin until it is updated.
+The actions service and the metrics service are `@alpha` in Backstage, so a
+Backstage upgrade can break this plugin until it is updated.
 
 ## Not in this version
 

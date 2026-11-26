@@ -76,11 +76,18 @@ export function usageOf(chunk: {
  */
 function tell(
   observer: RunObserver | undefined,
-  send: (observer: RunObserver) => void,
+  send: (observer: RunObserver) => unknown,
 ): void {
   if (!observer) return;
   try {
-    send(observer);
+    const returned = send(observer);
+    // An observer written as an async function returns a promise; its
+    // rejection must not become an unhandled one.
+    if (
+      typeof (returned as PromiseLike<unknown> | undefined)?.then === 'function'
+    ) {
+      Promise.resolve(returned).catch(() => {});
+    }
   } catch {
     // The observer is the host's; its failure is not the run's.
   }
@@ -106,7 +113,15 @@ export function observeModelCall(
 export type ResultMeasure = {
   reason?: ToolDeniedReason;
   durationMs?: number;
+  /**
+   * The model named a tool that is not offered. The name is the model's
+   * text, so the record says `unknown` instead.
+   */
+  unknownTool?: true;
 };
+
+/** The tool id of the record of a call to a tool that is not offered. */
+export const UNKNOWN_TOOL_ID = 'unknown';
 
 /**
  * Gives the observer one record for each `tool_result` among `written`, with
@@ -136,7 +151,7 @@ export function observeResults(
       step: call.step,
       position: call.position,
       callId: item.callId,
-      toolId: call.toolId,
+      toolId: measure?.unknownTool ? UNKNOWN_TOOL_ID : call.toolId,
       readOnly: call.readOnly === true,
       status: item.status,
       ...(item.status === 'denied' &&

@@ -677,9 +677,7 @@ export type RunFence = {
 
 // @public
 export interface RunObserver {
-  // (undocumented)
   modelCall(record: ModelCallRecord): void;
-  // (undocumented)
   toolCall(record: ToolCallRecord): void;
 }
 

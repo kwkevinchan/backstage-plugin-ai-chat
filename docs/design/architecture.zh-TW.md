@@ -542,7 +542,7 @@ export type HarnessEvent =
 **觀測**（O-01）：`AdvanceRunDeps.observer`（`RunObserver`）收迴圈的量測紀錄，不經過事件，所以串流和畫面不受影響。
 
 - `modelCall`：每一步、每次摘要一筆。用 `Clock` 量的時間、結果（`ok`、`empty`、`failed`、`cancelled`、`timeout`）、模型回報的 token（`usage` chunk）、錯誤的 HTTP 狀態碼、上下文的大小（`modelInputOf` 和 `buildModelInput` 同一次算出）、每個 context provider 的狀態和長度。
-- `toolCall`：每個寫入的 `tool_result` 一筆，跟著寫入走。被拒絕的有原因，執行過的有工具本身的時間（不含 Hook 和等核准）。
+- `toolCall`：每個寫入的 `tool_result` 一筆，跟著寫入走。被拒絕的有原因，執行過的有工具本身的時間（不含 Hook 和等核准）。模型要的工具不在清單裡時，`toolId` 是 `unknown`，不放模型寫的名稱。
 - 紀錄只有數字、id 和固定的分類詞。錯誤本身、文字和工具的輸入輸出都不交給 observer。observer 不被 `await`，丟的例外被忽略。
 - Run 的截止時間用名稱是 `TimeoutError` 的 reason 中止 signal，紀錄用它分辨 `timeout` 和使用者的停止。
 

@@ -30,6 +30,8 @@ yarn --cwd packages/app add @kwkevinchan/backstage-plugin-ai-chat
 backend.add(import('@kwkevinchan/backstage-plugin-ai-chat-backend'));
 ```
 
+外掛用到 Backstage 的 actions 服務和 metrics 服務（`actionsServiceRef`、`metricsServiceRef`，在 `@backstage/backend-plugin-api/alpha`，`@alpha`），`createBackend()` 會提供。不是用 `createBackend()` 建的 backend 要自己裝上 `@backstage/backend-defaults/alpha` 的 `actionsServiceFactory` 和 `metricsServiceFactory`，否則外掛無法啟動。
+
 `GET /sessions` 在 Run 尚未結束時會帶 `activity`（`running` 或
 `waiting_approval`）。要將活動變化（`running`、`waiting_approval`、
 `replied`、`idle`）推送到擁有者的 `ai-chat` Signals 頻道，依這個 Backstage
@@ -269,11 +271,11 @@ aiChat:
 內容只有數字、id 和固定的分類詞：沒有訊息、提示、上下文、工具的輸入和輸出、工具或模型伺服器的錯誤訊息，也沒有使用者。
 模型呼叫失敗時，log 只記錯誤的名稱和 HTTP 狀態碼：錯誤訊息可能帶回對話的內容。
 
-| log          | 欄位                                                                                                                                                                                                                                                                                                                                   |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Model call` | `sessionId`、`runId`、`agentId`、`modelId`、`purpose`（`step`、`summary`、`title`）、`step`、`durationMs`、`outcome`（`ok`、`empty`、`failed`、`cancelled`、`timeout`）、`errorStatus`、`inputTokens`、`outputTokens`、`toolCallsRequested`、`context`（各部分的估計 token 和個數）、`providers`（每個 context provider 的狀態和長度） |
-| `Tool call`  | `sessionId`、`runId`、`agentId`、`step`、`position`、`callId`、`toolId`、`readOnly`、`status`、`reason`（被拒絕的原因：`policy`、`run_limit`、`step_limit`、`hook`、`user`、`earlier_write_timed_out`）、`durationMs`（執行過的才有）、`truncated`                                                                                     |
-| `Run ended`  | `sessionId`、`runId`、`agentId`、`status`、`endReason`、`stepsUsed`、`toolCallsUsed`、`elapsedSeconds`                                                                                                                                                                                                                                 |
+| log          | 欄位                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Model call` | `sessionId`、`runId`、`agentId`、`modelId`、`purpose`（`step`、`summary`、`title`）、`step`、`durationMs`、`outcome`（`ok`、`empty`、`failed`、`cancelled`（使用者停止、backend 關機或租約遺失）、`timeout`）、`errorStatus`、`inputTokens`、`outputTokens`、`toolCallsRequested`、`context`（各部分的估計 token 和個數）、`providers`（每個 context provider 的狀態和長度） |
+| `Tool call`  | `sessionId`、`runId`、`agentId`、`step`、`position`、`callId`、`toolId`（模型要的工具不在清單裡時是 `unknown`）、`readOnly`、`status`、`reason`（被拒絕的原因：`policy`、`run_limit`、`step_limit`、`hook`、`user`、`earlier_write_timed_out`）、`durationMs`（執行過的才有）、`truncated`                                                                                   |
+| `Run ended`  | `sessionId`、`runId`、`agentId`、`status`、`endReason`、`stepsUsed`、`toolCallsUsed`、`elapsedSeconds`                                                                                                                                                                                                                                                                       |
 
 | metric                             | 類型      | 單位       | 屬性                                   |
 | ---------------------------------- | --------- | ---------- | -------------------------------------- |

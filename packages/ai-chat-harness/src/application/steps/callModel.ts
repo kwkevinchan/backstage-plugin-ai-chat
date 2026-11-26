@@ -288,7 +288,8 @@ export async function* callModel(
         } else if (chunk.text.length > 0) {
           yield { type: 'item.delta', draftId: textDraftId, text: chunk.text };
         }
-      } else {
+      } else if (chunk.type === 'tool_call') {
+        // A chunk of another type, from a newer or a foreign client, is ignored.
         const callId = deps.ids.next();
         requested.push({
           callId,
@@ -359,8 +360,11 @@ export async function* callModel(
     drafts.push({ ...classified.body, readUpToSeq });
     draftIds.push(call.callId);
     if (classified.result) results.push(classified.result);
-    if (classified.reason) {
-      measures.set(call.callId, { reason: classified.reason });
+    if (classified.reason || classified.unknownTool) {
+      measures.set(call.callId, {
+        ...(classified.reason && { reason: classified.reason }),
+        ...(classified.unknownTool && { unknownTool: true }),
+      });
     }
   }
   for (const result of results) {
@@ -448,6 +452,8 @@ async function classify(
       body: ToolCallBody;
       result?: ToolResultBody;
       reason?: ToolDeniedReason;
+      /** The model named a tool that is not offered: its name is the model's. */
+      unknownTool?: true;
     }
 > {
   const {
@@ -475,14 +481,17 @@ async function classify(
 
   if (!descriptor) {
     const message = firstStepNote ?? `Unknown tool: ${call.toolId}`;
-    return refuse('invalid', message, {
-      input: {},
-      schemaHash: '',
-      policy: 'ask',
-      readOnly: false,
-      step,
-      position,
-    });
+    return {
+      ...refuse('invalid', message, {
+        input: {},
+        schemaHash: '',
+        policy: 'ask',
+        readOnly: false,
+        step,
+        position,
+      }),
+      unknownTool: true,
+    };
   }
   const isObject =
     typeof call.input === 'object' &&

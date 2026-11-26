@@ -19,12 +19,14 @@ import {
   say,
   ScriptedModel,
   usedTokens,
+  waitForAbort,
 } from '@kwkevinchan/ai-chat-harness/testing';
 import type { Extensions, ModelClient } from '@kwkevinchan/ai-chat-harness';
 import { mockServices } from '@backstage/backend-test-utils';
 import { AiChatHarnessRegistry } from '../adapters/backstage/AiChatHarnessRegistry';
 import { TITLE_PROMPT_MARK } from '../application';
 import type { Metrics } from '../application/ports';
+import { IMAGES } from '../__testUtils__/images';
 import {
   createWorld,
   drain,
@@ -37,6 +39,9 @@ type World = Awaited<ReturnType<typeof createWorld>>;
 
 /** A string that must never reach a log line or a metric. */
 const CANARY = 'CANARY-7f3a9e';
+
+/** The value of a field that `aiChat.toolOutput` hides (T-09). */
+const MASKED = 'MASKED-91c2d0';
 
 /** The attributes each metric may have (O-01). */
 const ALLOWED_ATTRIBUTES: Record<string, string[]> = {
@@ -75,6 +80,7 @@ describe('observability of the runs (O-01)', () => {
           skills: ['notes'],
         },
       },
+      toolOutput: [{ pattern: 'demo:read', redact: ['token'] }],
     });
   });
 
@@ -95,7 +101,7 @@ describe('observability of the runs (O-01)', () => {
       world.actions.actions.find(a => a.id === 'demo:read') as unknown as {
         output: unknown;
       }
-    ).output = { secret: CANARY };
+    ).output = { secret: CANARY, token: MASKED };
     const invoke = world.actions.invoke;
     world.actions.invoke = async options => {
       if ((options.input as { name?: string } | undefined)?.name === 'fail') {
@@ -144,6 +150,11 @@ describe('observability of the runs (O-01)', () => {
         callTool('m2', 'demo:read', { name: 'fail' }),
         callTool('m3', 'demo:write', { name: CANARY }),
         callTool('m4', 'load_skill', { id: 'notes' }),
+        // A tool that is not offered: its name is text of the model.
+        callTool('m5', CANARY, {}),
+        callTool('m6', 'update_plan', {
+          items: [{ text: `Plan ${CANARY}`, status: 'pending' }],
+        }),
         usedTokens(321, 12),
       ],
       [say(`Done ${CANARY}`), usedTokens(400, 5)],
@@ -163,12 +174,29 @@ describe('observability of the runs (O-01)', () => {
     };
     const host = backend([], { extensions, metrics, model });
 
+    // The token of the user, as the request carries it.
+    const user = {
+      ...jane,
+      credentials: { ...(jane.credentials as object), token: `t-${CANARY}` },
+    };
     const session = await world.newSession(jane, 'canary');
+    const image = await world.attachments.put({
+      sessionId: session.id,
+      ownerRef: jane.userRef,
+      mediaType: 'image/png',
+      name: `${CANARY}.png`,
+      bytes: IMAGES['image/png'],
+      maxPending: 100,
+    });
     const first = await host.useCases.sendMessage.execute({
-      principal: jane,
+      principal: user,
       sessionId: session.id,
       text: `Look at ${CANARY}`,
-      page: { path: `/catalog/default/component/${CANARY}` },
+      attachmentIds: [image.id],
+      page: {
+        path: `/catalog/default/component/${CANARY}`,
+        entityRef: `component:default/${CANARY}`,
+      },
     });
     const firstEvents = await drain(first);
     expect(firstEvents[firstEvents.length - 1]).toMatchObject({
@@ -182,8 +210,9 @@ describe('observability of the runs (O-01)', () => {
       ),
     );
 
+    await world.sessions.update(session.id, { title: `Title ${CANARY}` });
     const second = await host.useCases.sendMessage.execute({
-      principal: jane,
+      principal: user,
       sessionId: session.id,
       text: `Again ${CANARY}`,
     });
@@ -219,6 +248,8 @@ describe('observability of the runs (O-01)', () => {
           reason: 'hook',
         }),
         expect.objectContaining({ toolId: 'load_skill', status: 'ok' }),
+        expect.objectContaining({ toolId: 'unknown', status: 'invalid' }),
+        expect.objectContaining({ toolId: 'update_plan', status: 'ok' }),
       ]),
     );
     const models = lines
@@ -251,9 +282,16 @@ describe('observability of the runs (O-01)', () => {
       errorStatus: 401,
     });
 
+    // The hidden field is hidden where it is stored.
+    expect(JSON.stringify(await world.items.read(session.id))).not.toContain(
+      MASKED,
+    );
+
     // …and the canary is nowhere in them.
     expect(JSON.stringify(lines)).not.toContain(CANARY);
     expect(JSON.stringify(lines)).not.toContain('internal.example');
+    expect(JSON.stringify(lines)).not.toContain(MASKED);
+    expect(JSON.stringify(metrics.measurements)).not.toContain(MASKED);
     expect(JSON.stringify(metrics.instruments)).not.toContain(CANARY);
     expect(JSON.stringify(metrics.measurements)).not.toContain(CANARY);
     expect(JSON.stringify(metrics.measurements)).not.toContain(jane.userRef);
@@ -271,6 +309,55 @@ describe('observability of the runs (O-01)', () => {
     for (const { name } of metrics.instruments) {
       expect(ALLOWED_ATTRIBUTES[name]).toBeDefined();
     }
+  });
+
+  it('logs a summary that fails with the name and the status of its error, not its text', async () => {
+    await world.cleanup();
+    world = await createWorld({
+      budget: { tokenBudget: 2500, keepRecentSteps: 1 },
+    });
+    // Long answers: the old steps do not fit, and no output can be shortened.
+    const long = (n: number) => say(`${n} `.repeat(2000));
+    const b = backend([
+      [long(1)],
+      [long(2)],
+      // The summary before the step of the third message.
+      Object.assign(new Error(`summary refused: ${CANARY}`), { status: 429 }),
+      [say('Third answer.')],
+    ]);
+    const session = await world.newSession();
+    for (const text of ['one', 'two', 'three']) {
+      await drain(
+        await b.useCases.sendMessage.execute({
+          principal: jane,
+          sessionId: session.id,
+          text,
+        }),
+      );
+    }
+
+    const lines = logCalls(b.logger as never);
+    const failed = lines.find(c => c.args[0] === 'A summary could not be made');
+    expect(failed?.args[1]).toEqual({
+      runId: expect.any(String),
+      errorName: 'Error',
+      errorStatus: 429,
+    });
+    expect(
+      lines.filter(
+        c =>
+          c.args[0] === 'Model call' &&
+          (c.args[1] as { purpose: string }).purpose === 'summary',
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        args: [
+          'Model call',
+          expect.objectContaining({ outcome: 'failed', errorStatus: 429 }),
+        ],
+      }),
+    ]);
+    expect(JSON.stringify(lines)).not.toContain(CANARY);
   });
 
   it('logs a hook and a context provider of a module that throw with the name of the error, not its text', async () => {
@@ -420,6 +507,107 @@ describe('observability of the runs (O-01)', () => {
     await until(() => metrics.of('ai_chat.run.duration').length === 1);
     expect(metrics.of('ai_chat.run.duration')[0].attributes).toMatchObject({
       status: 'cancelled',
+    });
+  });
+
+  it('records a run that ExpireStaleRuns of two backends ends, once', async () => {
+    const metrics = new RecordingMetrics();
+    const crashed = backend([waitForAbort]);
+    const b = backend([], { metrics });
+    const c = backend([], { metrics });
+    const session = await world.newSession();
+    const handle = await crashed.useCases.sendMessage.execute({
+      principal: jane,
+      sessionId: session.id,
+      text: 'long',
+    });
+    await until(() => crashed.model.inputs.length === 1);
+    world.clock.advance(31);
+
+    await Promise.all([
+      b.useCases.expireStaleRuns.execute(),
+      c.useCases.expireStaleRuns.execute(),
+    ]);
+
+    await until(() => metrics.of('ai_chat.run.duration').length === 1);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(metrics.of('ai_chat.run.duration')).toEqual([
+      expect.objectContaining({
+        attributes: {
+          agent: 'default',
+          status: 'expired',
+          end_reason: 'lease_expired',
+        },
+      }),
+    ]);
+    const ended = [b, c].flatMap(host =>
+      logCalls(host.logger as never).filter(l => l.args[0] === 'Run ended'),
+    );
+    expect(ended).toHaveLength(1);
+    expect(ended[0].args[1]).toMatchObject({ runId: handle.runId });
+  });
+
+  it('records a run that waited for an approval and could not be carried on', async () => {
+    const metrics = new RecordingMetrics();
+    const a = backend([[callTool('m1', 'demo:write', { name: 'w' })]], {
+      metrics,
+    });
+    const session = await world.newSession();
+    const handle = await a.useCases.sendMessage.execute({
+      principal: jane,
+      sessionId: session.id,
+      text: 'go',
+    });
+    await drain(handle);
+    const [pending] = (await world.items.read(session.id)).filter(
+      i => i.kind === 'tool_call',
+    );
+    // The agent of the session is gone, so the loop cannot start again.
+    await world.knex('sessions').where({ id: session.id }).update({
+      agent_id: 'removed',
+    });
+    await expect(
+      a.useCases.decideApproval.execute({
+        principal: jane,
+        sessionId: session.id,
+        callId: pending.callId,
+        decision: 'allow',
+      }),
+    ).rejects.toThrow();
+
+    await until(() => metrics.of('ai_chat.run.duration').length === 1);
+    expect(metrics.of('ai_chat.run.duration')[0].attributes).toEqual({
+      agent: 'removed',
+      status: 'failed',
+      end_reason: 'not_started',
+    });
+  });
+
+  it('records the run when an onRunEnd hook throws', async () => {
+    const metrics = new RecordingMetrics();
+    const b = backend([[say('Done.')]], {
+      metrics,
+      extensions: {
+        hooks: {
+          onRunEnd: [
+            () => {
+              throw new Error('hook down');
+            },
+          ],
+        },
+      },
+    });
+    const session = await world.newSession();
+    await drain(
+      await b.useCases.sendMessage.execute({
+        principal: jane,
+        sessionId: session.id,
+        text: 'Hi',
+      }),
+    );
+    await until(() => metrics.of('ai_chat.run.duration').length === 1);
+    expect(metrics.of('ai_chat.run.duration')[0].attributes).toMatchObject({
+      status: 'completed',
     });
   });
 

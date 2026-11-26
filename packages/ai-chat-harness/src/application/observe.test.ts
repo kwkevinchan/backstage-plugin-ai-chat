@@ -478,7 +478,7 @@ describe('RunObserver: tool calls (O-01)', () => {
           callTool('m1', 'x:ok'),
           callTool('m2', 'x:error'),
           callTool('m3', 'x:slow'),
-          callTool('m4', 'x:unknown'),
+          callTool('m4', 'secret:made-up-by-the-model'),
           callTool('m5', 'x:denied'),
           callTool('m6', 'x:hooked'),
           callTool('m7', 'x:over'),
@@ -494,7 +494,8 @@ describe('RunObserver: tool calls (O-01)', () => {
     expect(records['x:ok']).toMatchObject({ status: 'ok', position: 0 });
     expect(records['x:error']).toMatchObject({ status: 'error' });
     expect(records['x:slow']).toMatchObject({ status: 'timeout' });
-    expect(records['x:unknown']).toMatchObject({ status: 'invalid' });
+    // The name of a tool that is not offered is text of the model.
+    expect(records.unknown).toMatchObject({ status: 'invalid' });
     expect(records['x:denied']).toMatchObject({
       status: 'denied',
       reason: 'policy',
@@ -510,17 +511,16 @@ describe('RunObserver: tool calls (O-01)', () => {
     for (const id of ['x:ok', 'x:error', 'x:slow']) {
       expect(records[id].durationMs).toEqual(expect.any(Number));
     }
-    for (const id of ['x:unknown', 'x:denied', 'x:hooked', 'x:over']) {
+    for (const id of ['unknown', 'x:denied', 'x:hooked', 'x:over']) {
       expect(records[id]).not.toHaveProperty('durationMs');
     }
-    expect(records['x:invalid']).toBeUndefined();
     for (const record of t.observed.toolCalls) {
       expect(record).toMatchObject({
         sessionId: 'session-1',
         runId: 'run-1',
         agentId: 'default',
         step: 1,
-        readOnly: record.toolId !== 'x:unknown',
+        readOnly: record.toolId !== 'unknown',
       });
     }
     expect(JSON.stringify(t.observed.toolCalls)).not.toContain('secret');
@@ -751,6 +751,20 @@ describe('RunObserver: tool calls (O-01)', () => {
   });
 });
 
+describe('RunObserver: chunks of other types', () => {
+  it('ignores a chunk of a type the loop does not know', async () => {
+    const strange = { type: 'reasoning', text: 'thinking' } as never;
+    const t = await kit({ script: [[strange, say('Hello')]] });
+    const { outcome } = await t.execute();
+    expect(outcome).toEqual({ status: 'completed' });
+    expect(await t.kinds()).toEqual(['user_message', 'agent_message']);
+    expect(t.observed.modelCalls[0]).toMatchObject({
+      outcome: 'ok',
+      toolCallsRequested: 0,
+    });
+  });
+});
+
 describe('RunObserver: the run stays the same', () => {
   const scenario = (observer?: RunObserver) =>
     kit({
@@ -786,5 +800,30 @@ describe('RunObserver: the run stays the same', () => {
     expect(await broken.read()).toEqual(await none.read());
     expect(recording.modelCalls).toHaveLength(2);
     expect(recording.toolCalls).toHaveLength(1);
+  });
+
+  it('catches the rejection of an observer written with async functions', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const rejecting = {
+        modelCall: async () => {
+          throw new Error('observer down');
+        },
+        toolCall: async () => {
+          throw new Error('observer down');
+        },
+      } as unknown as RunObserver;
+      const none = await scenario();
+      const broken = await scenario(rejecting);
+      const a = await none.execute();
+      const c = await broken.execute();
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(c).toEqual(a);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
   });
 });

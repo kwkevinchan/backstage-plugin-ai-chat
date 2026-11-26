@@ -28,6 +28,7 @@ import {
   type ScriptedStep,
 } from '@kwkevinchan/ai-chat-harness/testing';
 import type {
+  ContextBudget,
   Extensions,
   ItemLog,
   Limits,
@@ -278,6 +279,8 @@ export async function createWorld(
     maxToolOutputChars?: number;
     /** `aiChat.toolOutput`, as read from the configuration. */
     toolOutput?: ToolOutputRule[];
+    /** The context budget of the runs; 100000 tokens and 6 steps by default. */
+    budget?: ContextBudget;
     /** `aiChat.writesPerMinute`; no limit by default. */
     writesPerMinute?: number;
   } = {},
@@ -419,7 +422,7 @@ export async function createWorld(
       ...(extra.metrics && { metrics: extra.metrics }),
       settings: {
         limits,
-        budget: { tokenBudget: 100000, keepRecentSteps: 6 },
+        budget: options.budget ?? { tokenBudget: 100000, keepRecentSteps: 6 },
       },
       heartbeatMs: extra.heartbeatMs ?? 60_000,
     });
