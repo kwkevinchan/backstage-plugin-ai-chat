@@ -388,7 +388,7 @@ interface AiChatHarnessExtensionPoint {
   addContextProvider(provider: ContextProvider): void;
   addSkill(skill: Skill): void;
   addHook<K extends HookName>(name: K, hook: Hooks[K]): void;
-  setModelClient(id: string, client: ModelClient): void;
+  addModelClient(id: string, client: ModelClient): void;
 }
 
 interface ContextProvider {
