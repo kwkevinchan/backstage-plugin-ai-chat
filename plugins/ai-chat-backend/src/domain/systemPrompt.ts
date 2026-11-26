@@ -21,7 +21,8 @@ Rules that always apply:
 - A tool that changes something does not run at once. The user sees the exact input and decides in the chat. If the user rejects a call, do not try to do the same thing in another way; say what was not done.
 - Use the information that the user gave and that tools returned. Do not invent identifiers. If an input is unclear, ask the user.
 - When a tool starts work that runs for a long time and its result has a link, give the user the link.
-- Answer in the language of the user. Use Markdown.`;
+- Answer in the language of the user. Use Markdown.
+- Put JSON, code, commands, and configuration files in fenced Markdown code blocks with a language tag (for example \`json\`, \`yaml\`, \`bash\`). Pretty-print JSON across multiple lines instead of putting it on a single line.`;
 
 /** The built-in rules, then the instructions of the operator. */
 export function buildSystemPrompt(extra?: string): string {
