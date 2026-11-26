@@ -20,6 +20,7 @@
 import {
   AdvanceRun,
   emptyExtensions,
+  planContextProvider,
   type AdvanceRunRequest,
   type Extensions,
   type HarnessEvent,
@@ -63,9 +64,14 @@ export async function kit(options: {
   capabilities?: ConstructorParameters<typeof ScriptedModel>[1];
   /** The log before the run: the first item is normally a user message. */
   log?: ItemBody[];
-  /** Registrations the loop receives and does not call. */
+  /**
+   * Registrations the loop receives. Without `contextProviders`, the kit
+   * gives the built-in `plan` provider, as the host does.
+   */
   extensions?: Extensions;
   agent?: AgentDefinition;
+  /** The entity the session is bound to. */
+  sessionEntityRef?: string;
 }) {
   const clock = new FakeClock();
   const items = new InMemoryItemLog({ clock });
@@ -82,7 +88,14 @@ export async function kit(options: {
     run,
     clock,
     ids,
-    extensions: options.extensions ?? emptyExtensions(),
+    // The host lists the built-in `plan` provider; the kit does the same
+    // unless a test gives its own providers.
+    extensions: {
+      ...(options.extensions ?? emptyExtensions()),
+      contextProviders: options.extensions?.contextProviders ?? [
+        planContextProvider(items),
+      ],
+    },
   });
 
   const append = (...bodies: ItemBody[]): Promise<Item[]> =>
@@ -108,7 +121,14 @@ export async function kit(options: {
     budget: options.budget ?? { tokenBudget: 24000, keepRecentSteps: 6 },
     policy: options.policy ?? {},
     fence: runFence,
-    ctx: { sessionId, runId: runFence.runId, principal: { user: 'user:a' } },
+    ctx: {
+      sessionId,
+      runId: runFence.runId,
+      principal: { user: 'user:a' },
+      ...(options.sessionEntityRef !== undefined && {
+        sessionEntityRef: options.sessionEntityRef,
+      }),
+    },
     signal: controller.signal,
     usage,
   });

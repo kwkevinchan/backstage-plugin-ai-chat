@@ -19,8 +19,8 @@ import type { ModelClient } from './ModelClient';
 import type { CallContext, ToolOutput } from './ToolGateway';
 
 /**
- * What `beforeModelCall` and `beforeToolCall` hooks get about the step (X-05).
- * Every call of a hook gets its own copy.
+ * What `beforeModelCall` and `beforeToolCall` hooks (X-05), skills and context
+ * providers (X-03) get about the step. Every call of one gets its own copy.
  *
  * @public
  */
@@ -38,7 +38,10 @@ export interface StepContext extends CallContext {
   agentId: string;
   /** 1-based step number about to run inside the current run. */
   step: number;
-  /** Aborts when the run stops. The loop stops waiting for the hook then. */
+  /**
+   * Aborts when the run stops, and for a context provider also when its time
+   * is up. The loop stops waiting for the call then.
+   */
   signal: AbortSignal;
 }
 
@@ -187,8 +190,26 @@ export interface Skill {
 }
 
 /**
- * What a backend module can add (X-02). Context providers (P3-02) are added
- * on that later item, together with the loop calling them.
+ * A source of text that the loop adds to the context of every step (X-03).
+ *
+ * The loop calls `provide` before each model call, with a copy of the
+ * `StepContext`, and waits for it at most `CONTEXT_PROVIDER_TIMEOUT_MS`. The
+ * text is cut to `CONTEXT_PROVIDER_MAX_CHARS`, and is given to the model as
+ * untrusted data, not as instructions. `undefined` or blank text adds
+ * nothing. When `provide` throws, times out or returns something else than a
+ * string, the step goes on and the model is told that this context is not
+ * available.
+ *
+ * @public
+ */
+export interface ContextProvider {
+  /** Names the text in the context; unique among the providers. */
+  id: string;
+  provide(ctx: StepContext): string | undefined | Promise<string | undefined>;
+}
+
+/**
+ * What a backend module can add (X-02).
  *
  * @public
  */
@@ -207,18 +228,25 @@ export interface AiChatHarnessExtensionPoint {
    */
   addHook<K extends HookName>(name: K, hook: Hooks[K]): void;
   addSkill(skill: Skill): void;
+  /**
+   * Adds a context provider. A repeated or reserved id, or a provider of the
+   * wrong shape, stops the backend.
+   */
+  addContextProvider(provider: ContextProvider): void;
 }
 
 /**
  * The registrations the loop reads from backend modules. The loop calls
- * `beforeModelCall`, `beforeToolCall` and `afterToolCall`, and lists the
- * skills; the host calls `onRunEnd`, once it stored the end of the run.
+ * `beforeModelCall`, `beforeToolCall` and `afterToolCall` and the context
+ * providers, and lists the skills; the host calls `onRunEnd`, once it stored the end of the run.
  *
  * @public
  */
 export type Extensions = {
   readonly hooks?: Partial<HookRegistry>;
   readonly skills?: readonly Skill[];
+  /** Called at every step, in this order. */
+  readonly contextProviders?: readonly ContextProvider[];
 };
 
 /** No registrations. @public */

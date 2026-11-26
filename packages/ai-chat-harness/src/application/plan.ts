@@ -15,7 +15,9 @@
  */
 
 import type { Plan } from '../domain';
+import type { ContextProvider } from './ports/extensions';
 import type { ItemLog } from './ports/ItemLog';
+import { currentPlanText } from './steps/plan';
 
 /**
  * The current plan of a session (X-06): the plan of its last `plan_update`
@@ -29,4 +31,23 @@ export async function readCurrentPlan(
   sessionId: string,
 ): Promise<Plan | undefined> {
   return (await log.latestPlanUpdate(sessionId))?.plan;
+}
+
+/**
+ * The built-in context provider `plan` (X-03): the current plan of the
+ * session, read with `readCurrentPlan`, or nothing before the model wrote
+ * one. The host puts it in the list of the providers.
+ *
+ * @public
+ */
+export function planContextProvider(
+  log: Pick<ItemLog, 'latestPlanUpdate'>,
+): ContextProvider {
+  return {
+    id: 'plan',
+    async provide(ctx) {
+      const plan = await readCurrentPlan(log, ctx.sessionId);
+      return plan ? currentPlanText(plan) : undefined;
+    },
+  };
 }

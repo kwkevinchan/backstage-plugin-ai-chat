@@ -30,7 +30,6 @@ import {
   type ToolResultBody,
 } from '../../domain';
 import type { HarnessEvent, RunOutcome } from '../events';
-import { readCurrentPlan } from '../plan';
 import type { Skill, StepContext } from '../ports/extensions';
 import type { ItemDraft } from '../ports/ItemLog';
 import type { ValidationResult } from '../ports/ToolGateway';
@@ -47,9 +46,10 @@ import {
   skillsContextBlock,
   validateLoadSkillInput,
 } from './skills';
+import { runContextProviders } from './contextProviders';
 import {
+  PLAN_FIRST_NOTICE,
   UPDATE_PLAN_TOOL_ID,
-  planContextBlock,
   updatePlanDescriptor,
   validateUpdatePlanInput,
 } from './plan';
@@ -106,8 +106,10 @@ type RequestedCall = {
  *   write is not counted: a message inserted while it was made is not read.
  * - `message.read` is sent, before `step.started`, for each inserted message
  *   this call is the first to give to the model (`unreadInserted(items)`).
- * - Every step offers the built-in `update_plan` with the other tools, and
- *   the context has the current plan when there is one (X-06). The first
+ * - Every step offers the built-in `update_plan` with the other tools (X-06).
+ *   The current plan comes into the context through the context provider
+ *   `plan` (`planContextProvider`), like every other provider: after the
+ *   `beforeModelCall` hooks, before the budget is checked (X-03). The first
  *   step of a run of an agent with `planning: 'required'` offers only
  *   `update_plan`; a call of another tool there is `invalid` (X-07).
  * - When the input would be over the budget even with the old tool outputs
@@ -164,17 +166,21 @@ export async function* callModel(
   const firstStepNote = planOffered
     ? `Only ${UPDATE_PLAN_TOOL_ID} is available in this step: write the plan first.`
     : 'No tool is available in this step.';
-  const planText = planContextBlock(
-    await readCurrentPlan(deps.items, req.ctx.sessionId),
-    { planFirst: planFirst && planOffered },
-  );
-  // Context providers come with the extension points (P3-02).
+  const provided = await runContextProviders(deps.extensions, stepCtx);
+  if (provided.aborted) {
+    return {
+      toolCallsRequested: 0,
+      outcome: { status: 'cancelled' },
+      noStep: true,
+    };
+  }
   const extra = {
     context: [
       ...(loadSkillOffered && !planFirst
         ? [skillsContextBlock(activeSkills)]
         : []),
-      ...(planText ? [planText] : []),
+      ...(planFirst && planOffered ? [PLAN_FIRST_NOTICE] : []),
+      ...(provided.text !== undefined ? [provided.text] : []),
     ],
     tools: offered,
     images: req.model.capabilities.images,

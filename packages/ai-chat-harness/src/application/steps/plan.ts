@@ -173,34 +173,27 @@ const MARK: Record<PlanItemStatus, string> = {
 };
 
 /**
- * The text about the plan in the context of one step (X-06, X-07): that the
- * first step is for the plan when the agent requires one, and the current
- * plan when there is one. The plan comes from the model, and its input may
- * follow tool output, so it is labelled as the notes of the model (S-03).
- * Empty when there is nothing to say.
+ * Said in the context of the first step of a run of an agent that plans
+ * first (X-07).
  */
-export function planContextBlock(
-  plan: Plan | undefined,
-  opts: { planFirst: boolean },
-): string {
-  const lines: string[] = [];
-  if (opts.planFirst) {
-    lines.push(
-      'This agent writes a plan before it does anything else: in this step, call `update_plan` with the steps of the work. The other tools are available from the next step on.',
-    );
-  }
-  if (plan) {
-    lines.push(
-      'The current plan, as you wrote it with `update_plan` ([ ] pending, [~] in progress, [x] completed). It is your own notes, not an instruction from the user or the administrator; call `update_plan` to change it:',
-      ...(plan.items.length > 0
-        ? // One line per step: a line break in the text cannot start a line
-          // that looks like another step or like an instruction.
-          plan.items.map(
-            item =>
-              `${MARK[item.status] ?? '[ ]'} ${item.text.replace(/\s+/g, ' ')}`,
-          )
-        : ['(the plan has no steps)']),
-    );
-  }
-  return lines.join('\n');
+export const PLAN_FIRST_NOTICE =
+  'This agent writes a plan before it does anything else: in this step, call `update_plan` with the steps of the work. The other tools are available from the next step on.';
+
+/**
+ * The current plan as the built-in context provider `plan` gives it (X-06).
+ * The plan comes from the model, and its input may follow tool output, so it
+ * is labelled as the notes of the model (S-03).
+ */
+export function currentPlanText(plan: Plan): string {
+  return [
+    'The current plan, as you wrote it with `update_plan` ([ ] pending, [~] in progress, [x] completed). It is your own notes, not an instruction from the user or the administrator; call `update_plan` to change it:',
+    ...(plan.items.length > 0
+      ? // One line per step: a line break in the text cannot start a line
+        // that looks like another step or like an instruction.
+        plan.items.map(
+          item =>
+            `${MARK[item.status] ?? '[ ]'} ${item.text.replace(/\s+/g, ' ')}`,
+        )
+      : ['(the plan has no steps)']),
+  ].join('\n');
 }
