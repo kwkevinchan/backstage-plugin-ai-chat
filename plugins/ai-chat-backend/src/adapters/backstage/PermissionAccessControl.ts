@@ -20,7 +20,10 @@ import type {
 } from '@backstage/backend-plugin-api';
 import { AuthorizeResult } from '@backstage/plugin-permission-common';
 import type { PolicyDecision } from '@backstage/plugin-permission-common';
-import { aiChatSessionReadPermission } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import {
+  aiChatSessionReadPermission,
+  aiChatToolsetUsePermission,
+} from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { AccessControl } from '../../application/ports';
 import {
   allowsSessionRead,
@@ -29,9 +32,10 @@ import {
   type Session,
 } from '../../domain';
 import { sessionAccessFrom, type SessionAccess } from './sessionAccess';
+import type { ToolsetAccess } from './toolsetAccess';
 
 /**
- * `AccessControl` on the Backstage permission framework (SH-05).
+ * `AccessControl` on the Backstage permission framework (SH-05, T-08).
  *
  * ALLOW is what this app returns when the framework is off. An admin must not
  * read a conversation, so ALLOW falls back to the owner and the shares. DENY
@@ -45,6 +49,10 @@ export class PermissionAccessControl implements AccessControl {
       authorizer: (
         decision: PolicyDecision,
         resource: SessionAccess | undefined,
+      ) => boolean;
+      toolsetAuthorizer: (
+        decision: PolicyDecision,
+        resource: ToolsetAccess | undefined,
       ) => boolean;
     },
   ) {}
@@ -68,5 +76,26 @@ export class PermissionAccessControl implements AccessControl {
       );
     }
     return allowsSessionRead(input.session, input.principal, input.shares);
+  }
+
+  /**
+   * ALLOW (also what this app returns when the framework is off) is every
+   * toolset, DENY none. CONDITIONAL applies the conditions to each toolset.
+   */
+  async usableToolsets(input: {
+    principal: Principal;
+    toolsetIds: readonly string[];
+  }): Promise<string[]> {
+    const [decision] = await this.deps.permissions.authorizeConditional(
+      [{ permission: aiChatToolsetUsePermission }],
+      {
+        credentials: input.principal.credentials as BackstageCredentials,
+      },
+    );
+    if (decision.result === AuthorizeResult.ALLOW) return [...input.toolsetIds];
+    if (decision.result === AuthorizeResult.DENY) return [];
+    return input.toolsetIds.filter(id =>
+      this.deps.toolsetAuthorizer(decision, { id }),
+    );
   }
 }

@@ -14,14 +14,23 @@
  * limitations under the License.
  */
 
-import type { Toolset } from '../../domain';
-import type { AgentCatalog } from '../ports';
+import type { Principal, Toolset } from '../../domain';
+import type { AccessControl, AgentCatalog } from '../ports';
+import { usableToolsets } from '../ToolsetScope';
 
-/** The toolsets the administrator defined; the user switches them per session (T-11). */
+/**
+ * The toolsets the administrator defined and the user may use (T-08); the
+ * user switches them per session (T-11).
+ */
 export class ListToolsets {
-  constructor(private readonly deps: { agents: AgentCatalog }) {}
+  constructor(
+    private readonly deps: {
+      agents: AgentCatalog;
+      access: Pick<AccessControl, 'usableToolsets'>;
+    },
+  ) {}
 
-  execute(): Promise<readonly Toolset[]> {
-    return this.deps.agents.toolsets();
+  execute(input: { principal: Principal }): Promise<readonly Toolset[]> {
+    return usableToolsets(this.deps, input.principal);
   }
 }

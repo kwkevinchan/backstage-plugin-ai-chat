@@ -28,6 +28,7 @@ import {
   type ScriptedStep,
 } from '@kwkevinchan/ai-chat-harness/testing';
 import type {
+  ContextBudget,
   Extensions,
   ItemLog,
   Limits,
@@ -42,18 +43,24 @@ import { KnexQueuedMessageRepository } from '../../adapters/persistence/KnexQueu
 import { KnexRunRepository } from '../../adapters/persistence/KnexRunRepository';
 import { KnexSessionRepository } from '../../adapters/persistence/KnexSessionRepository';
 import { KnexShareRepository } from '../../adapters/persistence/KnexShareRepository';
+import { KnexWriteQuota } from '../../adapters/persistence/KnexWriteQuota';
 import {
   CreateSession,
   OwnerOrShareAccessControl,
   TITLE_PROMPT_MARK,
+  ToolsetScope,
   type HostEvent,
   type ImageSettings,
   type RunHandle,
 } from '../../application';
 import type {
+  AccessControl,
   AuditEvent,
   AuditLog,
   EntityReader,
+  MetricAttributes,
+  MetricOptions,
+  Metrics,
   Notifier,
 } from '../../application/ports';
 import {
@@ -61,6 +68,7 @@ import {
   type EntityFacts,
   type Principal,
   type Run,
+  type ToolOutputRule,
 } from '../../domain';
 import { createHost, type HostPorts } from '../../host';
 import { createMigratedDb } from '../../__testUtils__';
@@ -263,6 +271,18 @@ export async function createWorld(
     runsPerUser?: number;
     /** The catalog the sessions are bound with; empty by default. */
     entities?: EntityReader;
+    /** `aiChat.toolsets`; one `demo` toolset with every action by default. */
+    toolsets?: JsonObject;
+    /** Who may use which toolset; everyone may use every toolset by default. */
+    access?: AccessControl;
+    /** `aiChat.maxToolOutputChars`; 20000 by default. */
+    maxToolOutputChars?: number;
+    /** `aiChat.toolOutput`, as read from the configuration. */
+    toolOutput?: ToolOutputRule[];
+    /** The context budget of the runs; 100000 tokens and 6 steps by default. */
+    budget?: ContextBudget;
+    /** `aiChat.writesPerMinute`; no limit by default. */
+    writesPerMinute?: number;
   } = {},
 ) {
   const entities = options.entities ?? new FakeEntityReader();
@@ -290,7 +310,9 @@ export async function createWorld(
     mockServices.rootConfig({
       data: {
         aiChat: {
-          toolsets: { demo: { actions: ['demo:*'], default: true } },
+          toolsets: options.toolsets ?? {
+            demo: { actions: ['demo:*'], default: true },
+          },
           ...(options.agents && { agents: options.agents }),
           ...(options.policy && { policy: options.policy }),
         },
@@ -298,6 +320,8 @@ export async function createWorld(
     }),
     mockServices.logger.mock(),
   );
+  const access = options.access ?? new OwnerOrShareAccessControl();
+  const toolsetScope = new ToolsetScope({ sessions, agents: catalog, access });
   const limits: Limits = {
     maxSteps: 10,
     maxToolCallsPerRun: 30,
@@ -319,6 +343,8 @@ export async function createWorld(
       rateLimits?: HostPorts['rateLimits'];
       notifier?: Notifier;
       extensions?: Extensions;
+      /** Where the measurements go; nowhere by default. */
+      metrics?: Metrics;
       heartbeatMs?: number;
       /**
        * Runs around every `transition` of this backend: `call()` makes the
@@ -360,7 +386,7 @@ export async function createWorld(
       queue,
       attachments,
       shares: new KnexShareRepository(knex, clock, ids),
-      access: new OwnerOrShareAccessControl(),
+      access,
       entities,
       images,
       insertMaxPerRun: options.insertMaxPerRun,
@@ -369,9 +395,20 @@ export async function createWorld(
         actions,
         catalog,
         logger,
-        enabledToolsets: async ctx =>
-          (await sessions.get(ctx.sessionId)).enabledToolsets,
-        maxOutputChars: 20000,
+        enabledToolsets: ctx =>
+          toolsetScope.offered({
+            sessionId: ctx.sessionId,
+            principal: ctx.principal as Principal,
+          }),
+        maxOutputChars: options.maxToolOutputChars ?? 20000,
+        ...(options.toolOutput && { toolOutput: options.toolOutput }),
+        ...(options.writesPerMinute !== undefined && {
+          writeQuota: {
+            quota: new KnexWriteQuota(knex),
+            perMinute: options.writesPerMinute,
+            clock,
+          },
+        }),
       }),
       model: extra.model ?? modelForHost,
       ...(extra.models && { models: extra.models }),
@@ -382,9 +419,10 @@ export async function createWorld(
       logger,
       ...(extra.notifier && { notifier: extra.notifier }),
       ...(extra.extensions && { extensions: extra.extensions }),
+      ...(extra.metrics && { metrics: extra.metrics }),
       settings: {
         limits,
-        budget: { tokenBudget: 100000, keepRecentSteps: 6 },
+        budget: options.budget ?? { tokenBudget: 100000, keepRecentSteps: 6 },
       },
       heartbeatMs: extra.heartbeatMs ?? 60_000,
     });
@@ -406,6 +444,7 @@ export async function createWorld(
         sessions,
         agents: catalog,
         entities,
+        access,
       }).execute({
         principal,
         ...(agentId !== undefined && { agentId }),
@@ -440,5 +479,41 @@ export async function until(condition: () => boolean | Promise<boolean>) {
   while (!(await condition())) {
     if (Date.now() > deadline) throw new Error('Timed out waiting');
     await new Promise(resolve => setTimeout(resolve, 5));
+  }
+}
+
+/** Metrics that keep every instrument and every measurement. */
+export class RecordingMetrics implements Metrics {
+  readonly instruments: {
+    kind: 'counter' | 'histogram';
+    name: string;
+    options: MetricOptions;
+  }[] = [];
+  readonly measurements: {
+    name: string;
+    value: number;
+    attributes: MetricAttributes;
+  }[] = [];
+
+  counter(name: string, options: MetricOptions) {
+    this.instruments.push({ kind: 'counter', name, options });
+    return {
+      add: (value: number, attributes: MetricAttributes) => {
+        this.measurements.push({ name, value, attributes: { ...attributes } });
+      },
+    };
+  }
+
+  histogram(name: string, options: MetricOptions) {
+    this.instruments.push({ kind: 'histogram', name, options });
+    return {
+      record: (value: number, attributes: MetricAttributes) => {
+        this.measurements.push({ name, value, attributes: { ...attributes } });
+      },
+    };
+  }
+
+  of(name: string) {
+    return this.measurements.filter(m => m.name === name);
   }
 }

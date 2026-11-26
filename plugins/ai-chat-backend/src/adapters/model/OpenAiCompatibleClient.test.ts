@@ -233,6 +233,65 @@ describe('OpenAiCompatibleClient', () => {
     });
   });
 
+  it('asks for the usage of a streamed answer and reads it from the last chunk (O-01)', async () => {
+    server = await startLlmServer(() => ({
+      body: sseBody([
+        chunk({ content: 'Hi' }),
+        { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+        {
+          choices: [],
+          usage: { prompt_tokens: 42, completion_tokens: 7, total_tokens: 49 },
+        },
+      ]),
+    }));
+    const result = await client().complete({ messages: [], tools: [] });
+    expect(result).toEqual({
+      content: 'Hi',
+      toolCalls: [],
+      usage: { inputTokens: 42, outputTokens: 7 },
+    });
+    expect(server.requests[0].body.stream_options).toEqual({
+      include_usage: true,
+    });
+  });
+
+  it('sends no stream_options when reportUsage is false, and gives no usage when the server sends none', async () => {
+    server = await startLlmServer(() => ({
+      body: sseBody([chunk({ content: 'Hi' })]),
+    }));
+    const result = await client({ reportUsage: false }).complete({
+      messages: [],
+      tools: [],
+    });
+    expect(result).toEqual({ content: 'Hi', toolCalls: [] });
+    expect(server.requests[0].body).not.toHaveProperty('stream_options');
+  });
+
+  it('reads the usage of an answer that is not streamed, and ignores counts that are not counts', async () => {
+    const answers = [
+      { prompt_tokens: 10, completion_tokens: 2 },
+      { prompt_tokens: -1, completion_tokens: 2 },
+      { prompt_tokens: 'many', completion_tokens: 2 },
+    ];
+    let n = 0;
+    server = await startLlmServer(() => ({
+      type: 'application/json',
+      body: JSON.stringify({
+        choices: [{ message: { content: 'ok' } }],
+        usage: answers[n++],
+      }),
+    }));
+    const results = [];
+    for (let i = 0; i < answers.length; i++) {
+      results.push(await client().complete({ messages: [], tools: [] }));
+    }
+    expect(results.map(r => r.usage)).toEqual([
+      { inputTokens: 10, outputTokens: 2 },
+      undefined,
+      undefined,
+    ]);
+  });
+
   it('reports a refusal without the key', async () => {
     server = await startLlmServer(() => ({
       status: 401,

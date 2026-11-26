@@ -92,8 +92,11 @@ The plugin keeps its state in its own database (`ai-chat`; tables
 it starts. On SQLite it allows one connection: the pool maximum must be 1,
 which is what Knex uses for SQLite unless the configuration says otherwise.
 A deployment that needs more than one connection uses PostgreSQL. It uses the
-actions service of Backstage (`@alpha` in
-`@backstage/backend-plugin-api/alpha`), which `createBackend()` provides.
+actions service and the metrics service of Backstage (`actionsServiceRef` and
+`metricsServiceRef`, `@alpha` in `@backstage/backend-plugin-api/alpha`), which
+`createBackend()` provides. A backend that is not made with `createBackend()`
+must install both (`actionsServiceFactory` and `metricsServiceFactory` of
+`@backstage/backend-defaults/alpha`), or the plugin does not start.
 
 ### Frontend: new frontend system
 
@@ -217,6 +220,7 @@ aiChat:
     images: false # the model reads images; default false. See "Images"
     parallelToolCalls: false # ask the server for parallel tool calls; default false
     requestsPerMinute: 60 # optional; calls per minute over all backends
+    reportUsage: true # ask for the tokens of each answer (stream_options); default true
   models: # optional; more models that an agent names with `model`
     small:
       baseUrl: https://llm.example.com/v1
@@ -267,6 +271,12 @@ aiChat:
     tokenBudget: 100000 # estimated tokens of the model input; default 100000
     keepRecentSteps: 6 # newest steps that are never shortened; default 6
   maxToolOutputChars: 20000 # output stored and sent to the model, also of load_skill; default 20000, at least 100
+  toolOutput: # optional; by action ID pattern (* matches any characters)
+    '*':
+      redact: [password, token] # field names hidden at any depth
+    'catalog:get-entity':
+      maxOutputChars: 4000 # lower than maxToolOutputChars for this action
+  writesPerMinute: 20 # optional; changes one user may make per minute, over all backends
   # What the user may add while a run goes on
   input:
     insert:
@@ -344,6 +354,7 @@ exactly `days` ago is kept.
 | `toolTimeoutSeconds`                                     | Most seconds of one tool call, at most 600. A call that takes longer gets a timeout result and the run goes on, but the action may still be running. After an action that is not read-only went over its time, the later actions of that answer that are not read-only do not run. `runTimeoutSeconds` still ends the whole run, also during a call. |
 | `runsPerUser`                                            | Runs one user may have going on at the same time (running or waiting for an approval), over all sessions and backends. A message beyond it is refused with 429, and a queue waits.                                                                                                                                                                   |
 | `llm.requestsPerMinute`, `models.<id>.requestsPerMinute` | Most calls of the model per minute, over all backends that share the database (steps, summaries and titles). A call over the limit waits for the next minute.                                                                                                                                                                                        |
+| `llm.reportUsage`, `models.<id>.reportUsage`             | Whether a streamed request asks the server for its token usage (`stream_options: { include_usage: true }`). The tokens go to the logs and metrics (see "Observability"). Set it to `false` for a server that refuses the field.                                                                                                                      |
 | `models`                                                 | More models by id, with the fields of `llm`. `llm` is the model `default`. An agent names one with `model`; a backend module can add a model with `addModelClient`.                                                                                                                                                                                  |
 | `runTimeoutSeconds`                                      | Most seconds of work in one run, at most 600. The tools run with the token of the user, so a run also ends before that token expires (the shortest life that Backstage allows is 10 minutes).                                                                                                                                                        |
 | `context.tokenBudget`                                    | Size of the model input in estimated tokens (one token is a quarter of an ASCII character or one other character). Set it well below the context window of the model.                                                                                                                                                                                |
@@ -356,6 +367,9 @@ exactly `days` ago is kept.
 | `input.images.maxPendingPerSession`                      | Most uploaded images in one session not yet in any message (`12` by default). Unused images are deleted after 24 hours.                                                                                                                                                                                                                              |
 | `input.images.tokensPerImage`                            | Estimated tokens one image uses in `context.tokenBudget` (`1600` by default). Set it for the model you use.                                                                                                                                                                                                                                          |
 | `maxToolOutputChars`                                     | The output of an action, and the output of `load_skill`, is cut here, and the cut is stated.                                                                                                                                                                                                                                                         |
+| `toolOutput.<pattern>.redact`                            | Field names whose values become `"[redacted]"` in the output of the matching actions, at any depth, before the output is cut. The hidden values are not stored, streamed or sent to the model. An output nested deeper than 100 levels is not kept: the result is an error.                                                                          |
+| `toolOutput.<pattern>.maxOutputChars`                    | A lower limit than `maxToolOutputChars` for the matching actions (at least 100). When patterns overlap, the smallest limit and every field apply. `update_plan` and `load_skill` are not actions and keep `maxToolOutputChars`.                                                                                                                      |
+| `writesPerMinute`                                        | Most actions that are not read-only one user may run per minute, over all sessions and backends (1 to 10000; no limit when not set). A change over the limit does not run, even after the approval: the result is an error that says so, and the run goes on. Up to twice the limit can run around the turn of a minute.                             |
 | `sharing.live.enabled`                                   | Whether a share may keep updating. Default true. Creating or changing a share is not in this version, so this is only checked and kept.                                                                                                                                                                                                              |
 | `sharing.live.defaultHours`                              | Hours a live share lasts when nobody picks a life. Default 24. A positive integer, at most `maxHours`.                                                                                                                                                                                                                                               |
 | `sharing.live.maxHours`                                  | Longest life of a live share, in hours. Default 72. A positive integer, at least `defaultHours`.                                                                                                                                                                                                                                                     |
@@ -385,6 +399,42 @@ of the chat, above the messages), only the ones that you define.
 - An action without the `readOnly` attribute counts as not read-only.
 - `egress: true` is for actions that send data out of the organization. They
   ask even when they only read.
+- Who may use a toolset is the permission `ai-chat.toolset.use` (resource type
+  `ai-chat-toolset`, the toolset id). The tools of a toolset the user may not
+  use are not offered, the toolset is not listed, and a session cannot switch
+  it on. Without the permission framework (`permission.enabled: false`, the
+  default of Backstage) everyone may use every toolset.
+- **Before you upgrade** with the permission framework on and a default-deny
+  policy: allow `ai-chat.toolset.use` (or return CONDITIONAL). Otherwise the
+  chat has no tools after the upgrade, and a session made in that time stores
+  an empty list of toolsets; the user has to switch them on again.
+
+A permission policy narrows the toolsets with the `isToolset` condition:
+
+```ts
+import {
+  AuthorizeResult,
+  isResourcePermission,
+} from '@backstage/plugin-permission-common';
+import {
+  aiChatToolsetConditions,
+  createAiChatToolsetConditionalDecision,
+} from '@kwkevinchan/backstage-plugin-ai-chat-backend';
+
+// in handle(request, user) of your PermissionPolicy. `user.info` is
+// deprecated; `this.userInfo` is `coreServices.userInfo`, which the module of
+// the policy passes to it.
+if (isResourcePermission(request.permission, 'ai-chat-toolset')) {
+  const info = user && (await this.userInfo.getUserInfo(user.credentials));
+  if (info?.ownershipEntityRefs.includes('group:default/sre')) {
+    return { result: AuthorizeResult.ALLOW };
+  }
+  return createAiChatToolsetConditionalDecision(
+    request.permission,
+    aiChatToolsetConditions.isToolset({ toolsetIds: ['catalog'] }),
+  );
+}
+```
 
 `actions.include` and `actions.exclude` are deprecated. Without `toolsets`
 they make the one default toolset, with `toolsets` they are ignored, and the
@@ -401,7 +451,9 @@ The system prompt of a configured agent is the built-in rules plus that
 agent's `systemPrompt`. When the agent omits `systemPrompt`, the installation
 `aiChat.systemPrompt` is used instead. The two extra texts are not combined.
 `toolsets` names toolsets from `aiChat.toolsets` (or `default`, when no
-toolsets are configured). `skills` chooses the skills the agent offers (see
+toolsets are configured); only their tools go to the model, `[]` gives none,
+and an agent without `toolsets` has them all. A session may still have
+another toolset switched on; it gives no tools to that agent. `skills` chooses the skills the agent offers (see
 below); an id that no skill has stops the backend. `planning: required`
 gives the agent only the `update_plan` tool in the first step of every run, so
 it writes a plan before it does anything else. `model` chooses the model of the
@@ -415,8 +467,7 @@ Every agent has the read-only built-in `update_plan` tool (`allow` by default;
 plan is in the context of every step, and the chat shows each update as a
 checklist.
 
-The loop still uses the limits of the installation. It does not filter tools
-by the agent's toolsets. When skills
+The loop still uses the limits of the installation. When skills
 are registered through `aiChat.skills.directories` (`SKILL.md`) or `addSkill`,
 the prompt lists only each allowed skill's `id` and short `description`; the
 full instructions are loaded on demand by the read-only built-in `load_skill`
@@ -568,6 +619,45 @@ Rules that the backend enforces, whatever the model or the browser sends:
   is recorded with the Backstage [auditor](https://backstage.io/docs/backend-system/core-services/auditor)
   (`tool-call-approve`, `tool-call-deny`, `tool-call-invoke`). The input of
   the call is not copied into the audit log.
+
+## Observability
+
+The plugin writes one log line for each model call, each tool result and each
+run that ends, and records OpenTelemetry metrics through the metrics service of
+Backstage (`@alpha`). They hold numbers, ids and fixed words only: no message,
+prompt, context, tool input or output, error text of a tool or of the model
+server, or user. A failed model call is logged with the name and the HTTP status
+of its error only, as its text may repeat what the conversation said.
+
+| Log line     | Fields                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Model call` | `sessionId`, `runId`, `agentId`, `modelId`, `purpose` (`step`, `summary`, `title`), `step`, `durationMs`, `outcome` (`ok`, `empty`, `failed`, `cancelled` (the user stopped the run, the backend shut down or lost the lease), `timeout`), `errorStatus`, `inputTokens`, `outputTokens`, `toolCallsRequested`, `context` (the estimated tokens by part and the counts), `providers` (each context provider with its status and length) |
+| `Tool call`  | `sessionId`, `runId`, `agentId`, `step`, `position`, `callId`, `toolId` (`unknown` when the model named a tool that is not offered), `readOnly`, `status`, `reason` (why it was denied: `policy`, `run_limit`, `step_limit`, `hook`, `user`, `earlier_write_timed_out`), `durationMs` (calls that ran), `truncated`                                                                                                                    |
+| `Run ended`  | `sessionId`, `runId`, `agentId`, `status`, `endReason`, `stepsUsed`, `toolCallsUsed`, `elapsedSeconds`                                                                                                                                                                                                                                                                                                                                 |
+
+| Metric                             | Type      | Unit       | Attributes                             |
+| ---------------------------------- | --------- | ---------- | -------------------------------------- |
+| `ai_chat.model.duration`           | histogram | `s`        | `agent`, `model`, `purpose`, `outcome` |
+| `ai_chat.model.tokens`             | histogram | `{token}`  | `agent`, `model`, `purpose`, `type`    |
+| `ai_chat.context.tokens`           | histogram | `{token}`  | `agent`, `part`                        |
+| `ai_chat.context_provider.results` | counter   | `{result}` | `agent`, `provider`, `status`          |
+| `ai_chat.tool.calls`               | counter   | `{call}`   | `agent`, `tool`, `status`, `reason`    |
+| `ai_chat.tool.duration`            | histogram | `s`        | `agent`, `tool`, `status`              |
+| `ai_chat.model.rate_limit.wait`    | histogram | `s`        | `model`, `outcome`                     |
+| `ai_chat.run.duration`             | histogram | `s`        | `agent`, `status`, `end_reason`        |
+| `ai_chat.run.steps`                | histogram | `{step}`   | `agent`, `status`                      |
+| `ai_chat.run.tool_calls`           | histogram | `{call}`   | `agent`, `status`                      |
+
+- The tokens are the ones the model server reports (`reportUsage`); a server
+  that reports none leaves them out. The size of the context is the estimate
+  the plugin uses for its budget.
+- The metrics have no session, run, call or user attribute; the log lines do
+  have the ids, so a run can be followed there and matched with the auditor
+  records by `runId` and `callId`.
+- The meter is `backstage-plugin-ai-chat`. Without an OpenTelemetry SDK in the
+  backend, the meter does nothing with the metrics and sends nothing; to export them, set up
+  OpenTelemetry as the Backstage documentation describes.
+- There are no traces.
 
 ## Running several backends
 
@@ -738,8 +828,8 @@ A failed run ends with a fixed error text. The types are in
 | ----------- | --------------- |
 | `0.1.x`     | 1.56 (`1.56.2`) |
 
-The actions service is `@alpha` in Backstage, so a Backstage upgrade can break
-this plugin until it is updated.
+The actions service and the metrics service are `@alpha` in Backstage, so a
+Backstage upgrade can break this plugin until it is updated.
 
 ## Not in this version
 

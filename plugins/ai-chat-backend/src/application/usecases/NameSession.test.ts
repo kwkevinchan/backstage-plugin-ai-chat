@@ -23,6 +23,8 @@ import type {
 } from '@kwkevinchan/ai-chat-harness';
 import type { Run, Session } from '../../domain';
 import type { Logger, RunRepository, SessionRepository } from '../ports';
+import { FakeClock } from '@kwkevinchan/ai-chat-harness/testing';
+import type { TitleCallRecord } from '../RunTelemetry';
 import { TITLE_PROMPT_MARK, NameSession } from './NameSession';
 
 const session: Session = {
@@ -72,8 +74,14 @@ function setup(
     reply?: string | Error | 'hang';
     timeoutMs?: number;
     onStream?: () => void | Promise<void>;
+    /** Tokens the model reports after its text. */
+    usage?: { inputTokens: number; outputTokens: number };
+    /** Seconds the fake clock moves while the model answers. */
+    takes?: number;
   } = {},
 ) {
+  const clock = new FakeClock();
+  const titleCalls: TitleCallRecord[] = [];
   let stored = over.title;
   const sessions = {
     get: jest.fn(async () =>
@@ -113,8 +121,10 @@ function setup(
         });
         return;
       }
+      if (over.takes) clock.advance(over.takes);
       if (over.reply instanceof Error) throw over.reply;
       yield { type: 'text', text: over.reply ?? '"Build is red"' };
+      if (over.usage) yield { type: 'usage', ...over.usage };
     },
   };
   const logger: Logger = {
@@ -130,9 +140,12 @@ function setup(
     models: { forAgent: () => model },
     logger,
     ...(over.timeoutMs !== undefined && { timeoutMs: over.timeoutMs }),
+    clock,
+    telemetry: { titleCall: record => void titleCalls.push(record) },
   });
   return {
     name,
+    titleCalls,
     sessions,
     inputs,
     logger,
@@ -196,10 +209,15 @@ describe('NameSession', () => {
     );
     expect(t.title()).toBeUndefined();
     expect(t.sessions.setTitleIfAbsent).not.toHaveBeenCalled();
+    // The name of the error, not its text: the model server may repeat
+    // what the conversation said.
     expect(t.logger.warn).toHaveBeenCalledWith(
       'Could not name the session',
-      expect.objectContaining({ error: 'model down' }),
+      expect.objectContaining({ errorName: 'Error' }),
     );
+    expect(
+      JSON.stringify((t.logger.warn as jest.Mock).mock.calls),
+    ).not.toContain('model down');
   });
 
   it('leaves the title unset when the answer is empty', async () => {
@@ -232,5 +250,44 @@ describe('NameSession', () => {
       'Build is red',
     );
     expect(t.title()).toBe('Mine');
+  });
+
+  it('measures the call of the model, with the reported tokens (O-01)', async () => {
+    const t = setup({
+      usage: { inputTokens: 90, outputTokens: 4 },
+      takes: 0.4,
+    });
+    await t.name.execute({ run, outcome: normal });
+    expect(t.titleCalls).toEqual([
+      {
+        sessionId: 's1',
+        runId: run.id,
+        agentId: 'default',
+        modelId: 'default',
+        durationMs: 400,
+        outcome: 'ok',
+        inputTokens: 90,
+        outputTokens: 4,
+      },
+    ]);
+  });
+
+  it('measures a failed call with its status, an empty answer and a timeout (O-01)', async () => {
+    const failed = setup({
+      reply: Object.assign(new Error('down'), { status: 500 }),
+    });
+    await failed.name.execute({ run, outcome: normal });
+    expect(failed.titleCalls[0]).toMatchObject({
+      outcome: 'failed',
+      errorStatus: 500,
+    });
+
+    const empty = setup({ reply: '   ' });
+    await empty.name.execute({ run, outcome: normal });
+    expect(empty.titleCalls[0].outcome).toBe('empty');
+
+    const slow = setup({ reply: 'hang', timeoutMs: 10 });
+    await slow.name.execute({ run, outcome: normal });
+    expect(slow.titleCalls[0].outcome).toBe('timeout');
   });
 });

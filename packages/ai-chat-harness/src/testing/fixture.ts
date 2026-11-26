@@ -25,8 +25,11 @@ import {
   type Extensions,
   type HarnessEvent,
   type ItemDraft,
+  type ModelCallRecord,
   type RunFence,
+  type RunObserver,
   type RunOutcome,
+  type ToolCallRecord,
 } from '../application';
 import type {
   AgentDefinition,
@@ -54,6 +57,20 @@ export const defaultLimits: Limits = {
   toolTimeoutSeconds: 60,
 };
 
+/** An observer that keeps every record, in order. */
+export class RecordingObserver implements RunObserver {
+  readonly modelCalls: ModelCallRecord[] = [];
+  readonly toolCalls: ToolCallRecord[] = [];
+
+  modelCall(record: ModelCallRecord): void {
+    this.modelCalls.push(structuredClone(record));
+  }
+
+  toolCall(record: ToolCallRecord): void {
+    this.toolCalls.push(structuredClone(record));
+  }
+}
+
 export async function kit(options: {
   script: ScriptedStep[];
   tools?: FakeTool[];
@@ -75,6 +92,13 @@ export async function kit(options: {
   /** The principal and the page of the request; `{ user: 'user:a' }` and none by default. */
   principal?: unknown;
   page?: { path: string; entityRef?: string };
+  /**
+   * Receives the measurements of the loop; a `RecordingObserver` by default,
+   * none when it is given as `undefined`.
+   */
+  observer?: RunObserver;
+  /** The `modelId` of the request. */
+  modelId?: string;
 }) {
   const clock = new FakeClock();
   const items = new InMemoryItemLog({ clock });
@@ -85,7 +109,10 @@ export async function kit(options: {
   const ids = new SequentialIdGenerator('call');
   const controller = new AbortController();
   const limits = { ...defaultLimits, ...options.limits };
+  const recorded = new RecordingObserver();
   const loop = new AdvanceRun({
+    // A test that sets `observer` to undefined runs the loop without one.
+    observer: 'observer' in options ? options.observer : recorded,
     items,
     tools,
     run,
@@ -120,6 +147,7 @@ export async function kit(options: {
       systemPrompt: 'You are a helpful agent.',
     },
     model,
+    ...(options.modelId !== undefined && { modelId: options.modelId }),
     limits,
     budget: options.budget ?? { tokenBudget: 24000, keepRecentSteps: 6 },
     policy: options.policy ?? {},
@@ -162,6 +190,7 @@ export async function kit(options: {
     model,
     tools,
     run,
+    observed: recorded,
     clock,
     ids,
     controller,

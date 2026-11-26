@@ -239,13 +239,15 @@ describe('RunSupervisor', () => {
     },
   );
 
-  it('logs the cause of a failure and of a failed summary, and keeps it from the subscribers', async () => {
+  it('logs the name and the status of the cause of a failure and of a failed summary, not its text, and keeps it from the subscribers', async () => {
     const { supervisor, logger } = setup(async function* () {
       yield { type: 'summary.failed', cause: new Error('provider said x') };
       const outcome: RunOutcome = {
         status: 'failed',
         message: 'The model call failed.',
-        cause: new Error('provider said y'),
+        cause: Object.assign(new TypeError('provider said y'), {
+          status: 502,
+        }),
       };
       yield { type: 'run.ended', outcome };
       return outcome;
@@ -253,14 +255,21 @@ describe('RunSupervisor', () => {
     const handle = supervisor.launch(leased('r1', 'lease-1'), request);
     const seen: HostEvent[] = [];
     for await (const event of handle.events) seen.push(event);
-    expect(logger.warn).toHaveBeenCalledWith(
-      'A summary could not be made',
-      expect.objectContaining({ cause: 'provider said x' }),
-    );
-    expect(logger.error).toHaveBeenCalledWith(
-      'A run failed',
-      expect.objectContaining({ cause: 'provider said y' }),
-    );
+    expect(logger.warn).toHaveBeenCalledWith('A summary could not be made', {
+      runId: 'r1',
+      errorName: 'Error',
+    });
+    expect(logger.error).toHaveBeenCalledWith('A run failed', {
+      runId: 'r1',
+      errorName: 'TypeError',
+      errorStatus: 502,
+    });
+    expect(
+      JSON.stringify([
+        ...(logger.warn as jest.Mock).mock.calls,
+        ...(logger.error as jest.Mock).mock.calls,
+      ]),
+    ).not.toContain('provider said');
     expect(seen).toEqual([
       { type: 'summary.failed' },
       {

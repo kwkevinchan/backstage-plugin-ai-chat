@@ -27,7 +27,8 @@ import type {
   ToolResult,
 } from '@kwkevinchan/ai-chat-harness';
 import type { Logger } from '../../application/ports';
-import { limitToolResult } from './ActionsToolGateway';
+import type { ToolOutputRule } from '../../domain';
+import { limitToolResult, toolOutputLimitsOf } from './ActionsToolGateway';
 import { assertExtensionId, readExtensionAgent } from './agentShape';
 import { readExtensionContextProvider } from './contextProviderShape';
 import { readExtensionSkill } from './skillShape';
@@ -157,9 +158,10 @@ export class AiChatHarnessRegistry implements AiChatHarnessExtensionPoint {
   /**
    * The hooks as the loop and the host call them. Each hook logs what it
    * throws, with its name, and throws it again: the loop decides what a
-   * failure means. When a module changes tool results, the changed output is
-   * cut to `maxToolOutputChars` after the last `afterToolCall` hook, as the
-   * tool gateway cuts the output of a tool.
+   * failure means. When a module changes tool results, the changed output
+   * loses the fields to hide and is cut to the limit of its tool after the
+   * last `afterToolCall` hook, as the tool gateway treats the output of a
+   * tool (T-09).
    *
    * The context providers of the modules come after `builtIns`, in the order
    * they were registered. Each one logs what it throws, with its id and the
@@ -169,14 +171,18 @@ export class AiChatHarnessRegistry implements AiChatHarnessExtensionPoint {
     logger: Logger;
     maxToolOutputChars: number;
     builtInContextProviders?: readonly ContextProvider[];
+    toolOutput?: readonly ToolOutputRule[];
   }): Extensions {
-    const { logger, maxToolOutputChars } = opts;
+    const { logger, maxToolOutputChars, toolOutput = [] } = opts;
     const afterToolCall = this.hookLists.afterToolCall.map(hook =>
       logged('afterToolCall', hook, logger),
     );
     if (afterToolCall.length > 0) {
-      afterToolCall.push((_call, result: ToolResult) =>
-        limitToolResult(result, maxToolOutputChars),
+      afterToolCall.push((call, result: ToolResult) =>
+        limitToolResult(
+          result,
+          toolOutputLimitsOf(call.toolId, toolOutput, maxToolOutputChars),
+        ),
       );
     }
     return {
@@ -200,6 +206,14 @@ export class AiChatHarnessRegistry implements AiChatHarnessExtensionPoint {
   }
 }
 
+/**
+ * What the log says of an error of a hook or a context provider: its name.
+ * Not its message: the code of a module may put what it read in it.
+ */
+function errorNameOf(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
+}
+
 function loggedProvider(
   provider: ContextProvider,
   logger: Logger,
@@ -213,7 +227,7 @@ function loggedProvider(
         logger.warn('An AI chat context provider failed', {
           contextProvider: provider.id,
           runId: ctx.runId,
-          error: error instanceof Error ? error.message : String(error),
+          errorName: errorNameOf(error),
         });
         throw error;
       }
@@ -234,7 +248,7 @@ function logged<K extends HookName>(
       logger.warn(`An AI chat ${name} hook failed`, {
         hook: name,
         ...definedOf(whereOf(name, args)),
-        error: error instanceof Error ? error.message : String(error),
+        errorName: errorNameOf(error),
       });
       throw error;
     }

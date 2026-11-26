@@ -27,8 +27,11 @@ import type {
   ActionsServiceAction,
 } from '@backstage/backend-plugin-api/alpha';
 import {
+  LOAD_SKILL_TOOL_ID,
+  UPDATE_PLAN_TOOL_ID,
   decidePolicy,
   needsApproval,
+  type Clock,
   type CallContext,
   type JsonObject,
   type JsonValue,
@@ -40,6 +43,13 @@ import {
 } from '@kwkevinchan/ai-chat-harness';
 import Ajv, { type ValidateFunction } from 'ajv';
 import type { AgentCatalog } from '../../application/ports/AgentCatalog';
+import type { WriteQuota } from '../../application/ports/WriteQuota';
+import {
+  redactFields,
+  toolOutputLimits,
+  type ToolOutputLimits,
+  type ToolOutputRule,
+} from '../../domain/toolOutput';
 import {
   defaultToolsetIds,
   enabledTools,
@@ -53,15 +63,24 @@ export type ActionsToolGatewayDeps = {
   catalog: Pick<AgentCatalog, 'toolsets' | 'policy'>;
   logger: LoggerService;
   /**
-   * The toolsets the session of the call has switched on; `undefined` when it
-   * has not chosen, which means the default toolsets.
+   * The toolsets whose tools the session of the call offers now: switched on,
+   * named by the agent and usable by the user (T-08). `undefined` means the
+   * default toolsets.
    */
   enabledToolsets: (ctx: CallContext) => Promise<readonly string[] | undefined>;
   /** Most characters of the output of an action that are kept. */
   maxOutputChars: number;
+  /** Lower limits and fields to hide, by action ID pattern (T-09). */
+  toolOutput?: readonly ToolOutputRule[];
+  /** The changes one user may make per minute (T-10). No limit when absent. */
+  writeQuota?: { quota: WriteQuota; perMinute: number; clock: Clock };
 };
 
 const MAX_MESSAGE_CHARS = 2000;
+
+/** The result of an output that could not be checked for fields to hide. */
+export const REDACTION_FAILED_MESSAGE =
+  'The output could not be checked for redaction, so it is not kept.';
 
 /**
  * The tools of a session as the actions of the actions registry, run as the
@@ -76,6 +95,10 @@ const MAX_MESSAGE_CHARS = 2000;
  *   for approval now although the call was stored without one, no longer read-only when the call was stored as
  *   read-only, or whose schema changed and no longer fits the stored input,
  *   does not run (T-06).
+ * - The output loses the fields to hide, then is cut to the limit of the
+ *   action (T-09). An output that cannot be checked is not kept.
+ * - A call that is not read-only takes one change of the quota of the user
+ *   right before the action runs; without one it does not run (T-10).
  *
  * @internal
  */
@@ -152,6 +175,12 @@ export class ActionsToolGateway implements ToolGateway {
       );
     }
     throwIfAborted(signal);
+    if (call.readOnly !== true && !(await this.takeWrite(ctx))) {
+      return error(
+        `Not run: you reached the limit of ${this.deps.writeQuota?.perMinute} changes per minute. Try again in a minute.`,
+      );
+    }
+    throwIfAborted(signal);
 
     let output: JsonValue | undefined;
     try {
@@ -170,7 +199,35 @@ export class ActionsToolGateway implements ToolGateway {
       if (signal.aborted) throw e;
       return error(e instanceof Error ? e.message : String(e));
     }
-    return limit(output, this.deps.maxOutputChars);
+    return limitToolResult(
+      output === undefined ? { status: 'ok' } : { status: 'ok', output },
+      this.limitsOf(call.toolId),
+    );
+  }
+
+  /** The limit and the fields to hide for the output of a tool (T-09). */
+  private limitsOf(toolId: string): ToolOutputLimits {
+    return toolOutputLimitsOf(
+      toolId,
+      this.deps.toolOutput ?? [],
+      this.deps.maxOutputChars,
+    );
+  }
+
+  /** Takes one change of the user of the call; `true` without a quota. */
+  private async takeWrite(ctx: CallContext): Promise<boolean> {
+    const settings = this.deps.writeQuota;
+    if (!settings) return true;
+    const userRef = (ctx.principal as { userRef?: unknown } | undefined)
+      ?.userRef;
+    if (typeof userRef !== 'string') {
+      throw new Error('The call has no user.');
+    }
+    return settings.quota.tryTake(
+      userRef,
+      settings.perMinute,
+      settings.clock.now(),
+    );
   }
 
   private check(tool: ToolDescriptor, input: JsonObject): ValidationResult {
@@ -288,16 +345,43 @@ function cut(text: string): string {
 }
 
 /**
- * `result` with its output cut to `maxChars` characters, as `execute` cuts the
- * output of a tool. A result whose output fits is returned as it is.
+ * The limits of a tool: the built-in tools of the core keep the limit of the
+ * installation and hide nothing; `toolOutput` is for actions.
+ */
+export function toolOutputLimitsOf(
+  toolId: string,
+  rules: readonly ToolOutputRule[],
+  maxChars: number,
+): ToolOutputLimits {
+  if (toolId === UPDATE_PLAN_TOOL_ID || toolId === LOAD_SKILL_TOOL_ID) {
+    return { maxChars, redact: [] };
+  }
+  return toolOutputLimits(toolId, rules, maxChars);
+}
+
+/**
+ * `result` without the fields to hide, then with its output cut to the limit,
+ * as `execute` treats the output of an action. A result whose output cannot
+ * be checked becomes an `error` result without output. A result that needs
+ * neither is returned as it is.
  */
 export function limitToolResult(
   result: ToolOutput,
-  maxChars: number,
+  limits: ToolOutputLimits,
 ): ToolOutput {
   if (result.output === undefined) return result;
-  const limited = limit(result.output, maxChars);
-  if (!limited.truncated) return result;
+  let redacted: JsonValue;
+  try {
+    redacted = redactFields(result.output, limits.redact);
+  } catch {
+    return { status: 'error', message: REDACTION_FAILED_MESSAGE };
+  }
+  const limited = limit(redacted, limits.maxChars);
+  if (!limited.truncated) {
+    return redacted === result.output
+      ? result
+      : { ...result, output: redacted };
+  }
   return {
     ...result,
     output: limited.output,

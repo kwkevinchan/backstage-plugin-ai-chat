@@ -124,8 +124,8 @@ export function createRouter(options: RouterOptions): express.Router {
   );
   router.get(
     '/toolsets',
-    route(async (_user, _req, res) => {
-      res.json(await sessions.toolsets());
+    route(async (user, _req, res) => {
+      res.json(await sessions.toolsets(user));
     }),
   );
 

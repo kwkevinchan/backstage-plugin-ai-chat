@@ -39,9 +39,27 @@ export const aiChatSessionConditions: Conditions<{
 export const aiChatSignalsModule: BackendFeature;
 
 // @public
+export const aiChatToolsetConditions: Conditions<{
+  isToolset: PermissionRule<
+    ToolsetAccess,
+    ToolsetAccessQuery,
+    'ai-chat-toolset',
+    {
+      toolsetIds: string[];
+    }
+  >;
+}>;
+
+// @public
 export const createAiChatConditionalDecision: (
   permission: ResourcePermission<'ai-chat-session'>,
   conditions: PermissionCriteria<PermissionCondition<'ai-chat-session'>>,
+) => ConditionalPolicyDecision;
+
+// @public
+export const createAiChatToolsetConditionalDecision: (
+  permission: ResourcePermission<'ai-chat-toolset'>,
+  conditions: PermissionCriteria<PermissionCondition<'ai-chat-toolset'>>,
 ) => ConditionalPolicyDecision;
 
 // @public
@@ -62,4 +80,14 @@ export type SessionAccessQuery =
       subjectRef: string;
       revoked: false;
     };
+
+// @public
+export type ToolsetAccess = {
+  id: string;
+};
+
+// @public
+export type ToolsetAccessQuery = {
+  toolsetId: string;
+};
 ```

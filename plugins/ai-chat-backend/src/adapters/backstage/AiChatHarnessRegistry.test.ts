@@ -181,13 +181,16 @@ describe('AiChatHarnessRegistry', () => {
       { runId: 'r' },
     ],
   ])(
-    'logs a %s hook that throws with its name, and throws again',
+    'logs a %s hook that throws with its name and the name of the error, not its text, and throws again',
     async (name, run, where) => {
       const registry = new AiChatHarnessRegistry();
       await expect(run(registry)).rejects.toThrow('quota service down');
+      expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(
+        'quota service down',
+      );
       expect(logger.warn).toHaveBeenCalledWith(
         `An AI chat ${name} hook failed`,
-        { hook: name, ...where, error: 'quota service down' },
+        { hook: name, ...where, errorName: 'Error' },
       );
     },
   );
@@ -211,6 +214,45 @@ describe('AiChatHarnessRegistry', () => {
 
     const short = { status: 'ok' as const, output: { a: 1 } };
     expect(await afterToolCall![1](toolCall, short)).toBe(short);
+  });
+
+  it('hides the fields and cuts to the limit of the tool after the last afterToolCall hook (T-09)', async () => {
+    const registry = new AiChatHarnessRegistry();
+    registry.addHook('afterToolCall', (_call, result) => ({
+      ...result,
+      output: { token: 'S', padding: 'x'.repeat(500) },
+    }));
+    const { afterToolCall } = registry.extensions({
+      logger: mockServices.logger.mock(),
+      maxToolOutputChars: 1000,
+      toolOutput: [
+        { pattern: '*', redact: ['token'] },
+        { pattern: toolCall.toolId, maxOutputChars: 200, redact: [] },
+      ],
+    }).hooks!;
+    const last = afterToolCall![1];
+    const hooked = await afterToolCall![0](toolCall, { status: 'ok' });
+    const result = await last(toolCall, hooked);
+    expect(result).toMatchObject({ status: 'ok', truncated: true });
+    expect(JSON.stringify(result)).not.toContain('"S"');
+    expect(JSON.stringify(result.output).length).toBeLessThanOrEqual(200);
+
+    // A built-in tool keeps the limit of the installation and hides nothing.
+    const plan = { ...toolCall, toolId: 'update_plan' };
+    expect(await last(plan, { status: 'ok', output: { token: 'S' } })).toEqual({
+      status: 'ok',
+      output: { token: 'S' },
+    });
+
+    let deep: unknown = { token: 'S' };
+    for (let i = 0; i < 100; i++) deep = { next: deep };
+    expect(await last(toolCall, { status: 'ok', output: deep as any })).toEqual(
+      {
+        status: 'error',
+        message:
+          'The output could not be checked for redaction, so it is not kept.',
+      },
+    );
   });
 
   it('rejects unknown hook names and non-function hooks', () => {
@@ -412,7 +454,7 @@ describe('AiChatHarnessRegistry', () => {
       expect(await only.provide(stepContext)).toBe('first');
     });
 
-    it('logs a provider that throws with its id and run, without its text, and throws again', async () => {
+    it('logs a provider that throws with its id, its run and the name of the error, not the text of the error, and throws again', async () => {
       const warn = mockServices.logger.mock();
       const registry = new AiChatHarnessRegistry();
       registry.addContextProvider({
@@ -433,8 +475,11 @@ describe('AiChatHarnessRegistry', () => {
         {
           contextProvider: 'oncall',
           runId: 'r',
-          error: 'pager service is down',
+          errorName: 'Error',
         },
+      );
+      expect(JSON.stringify(warn.warn.mock.calls)).not.toContain(
+        'pager service',
       );
     });
   });

@@ -174,5 +174,11 @@ export class SequentialIdGenerator implements IdGenerator {
 }
 
 // @public
+export const usedTokens: (
+  inputTokens: number,
+  outputTokens: number,
+) => ModelChunk;
+
+// @public
 export const waitForAbort: unique symbol;
 ```

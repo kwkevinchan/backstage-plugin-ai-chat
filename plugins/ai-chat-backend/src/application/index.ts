@@ -16,6 +16,7 @@
 
 export { AuditedToolGateway } from './AuditedToolGateway';
 export { OwnerOrShareAccessControl } from './OwnerOrShareAccessControl';
+export { ToolsetScope, usableToolsets } from './ToolsetScope';
 export { bindAttachments, toAttachmentRef } from './attachments';
 export type { ImageSettings } from './attachments';
 export { createAfterRun } from './afterRun';
@@ -32,6 +33,13 @@ export type { AfterRun, HostEvent, QueueState } from './hostEvents';
 export { createRunEnded, RUN_END_HOOK_TIMEOUT_MS } from './runEnded';
 export type { RunEnded } from './runEnded';
 export { RunSupervisor } from './RunSupervisor';
+export { RunTelemetry } from './RunTelemetry';
+export type {
+  RateLimitWaitRecord,
+  RunEndRecord,
+  TitleCallRecord,
+} from './RunTelemetry';
+export { errorStatusOf, modelErrorFields } from './modelErrors';
 export type {
   LaunchRequest,
   RunHandle,

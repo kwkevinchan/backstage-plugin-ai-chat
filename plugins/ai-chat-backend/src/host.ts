@@ -49,6 +49,7 @@ import {
   ResumeQueue,
   ResumeRun,
   RunSupervisor,
+  RunTelemetry,
   SendMessage,
   StartNextQueued,
   UpdateQueuedMessage,
@@ -64,6 +65,7 @@ import {
   type RunSettings,
 } from './application';
 import {
+  NoopMetrics,
   NoopNotifier,
   type AccessControl,
   type AgentCatalog,
@@ -71,6 +73,7 @@ import {
   type AuditLog,
   type EntityReader,
   type Logger,
+  type Metrics,
   type ModelCallLimiter,
   type Notifier,
   type QueuedMessageRepository,
@@ -123,6 +126,8 @@ export type HostPorts = {
   clock: Clock;
   ids: IdGenerator;
   logger: Logger;
+  /** Where the measurements of the runs go (O-01); nowhere when not given. */
+  metrics?: Metrics;
   settings: RunSettings;
   /** `aiChat.input.queue.maxMessages`; 5 by default. */
   queueMaxMessages?: number;
@@ -184,6 +189,10 @@ export function createHost(ports: HostPorts) {
     throw new Error(`The model ${DEFAULT_MODEL_ID} is the one of \`model\``);
   }
   const rateLimits = ports.rateLimits;
+  const telemetry = new RunTelemetry(
+    ports.metrics ?? new NoopMetrics(),
+    logger,
+  );
   const models = new ModelCatalog(
     new Map(
       [
@@ -202,6 +211,7 @@ export function createHost(ports: HostPorts) {
                 rate: { limiter: rateLimits.limiter, perMinute },
               }),
             ...(rateLimits?.sleep && { sleep: rateLimits.sleep }),
+            telemetry,
           }),
         ];
       }),
@@ -214,6 +224,7 @@ export function createHost(ports: HostPorts) {
     clock,
     ids: ports.ids,
     extensions,
+    observer: telemetry,
   });
   // The supervisor calls `afterRun` for the queue, and the queue starts runs
   // on the supervisor: the function is set once both exist.
@@ -237,10 +248,13 @@ export function createHost(ports: HostPorts) {
     agents,
     models,
     logger,
+    clock,
+    telemetry,
   });
   const runEnded = createRunEnded({
     hooks: ports.extensions?.hooks?.onRunEnd ?? [],
     logger,
+    telemetry,
   });
   const supervisor = new RunSupervisor({
     advance,
@@ -276,7 +290,12 @@ export function createHost(ports: HostPorts) {
   return {
     supervisor,
     useCases: {
-      createSession: new CreateSession({ sessions, agents, entities }),
+      createSession: new CreateSession({
+        sessions,
+        agents,
+        entities,
+        access,
+      }),
       getSession: new GetSession({
         sessions,
         runs,
@@ -287,7 +306,7 @@ export function createHost(ports: HostPorts) {
         clock,
       }),
       listSessions: new ListSessions({ sessions, runs }),
-      updateSession: new UpdateSession({ sessions, agents }),
+      updateSession: new UpdateSession({ sessions, agents, access }),
       deleteSession: new DeleteSession({ sessions, runs }),
       sendMessage: new SendMessage({
         sessions,
@@ -375,7 +394,7 @@ export function createHost(ports: HostPorts) {
         supervisor,
         logger,
       }),
-      listToolsets: new ListToolsets({ agents }),
+      listToolsets: new ListToolsets({ agents, access }),
       listSessionTools: new ListSessionTools({
         sessions,
         tools: ports.tools,
