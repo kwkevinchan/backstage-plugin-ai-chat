@@ -89,6 +89,10 @@ export const QUEUE_FULL_TEXT =
   'The queue is full. Delete a queued message, or wait until one is sent.';
 export const RUN_CANNOT_TAKE_TEXT =
   'The run could not take the message. Send it again when the run has ended.';
+export const RUN_NOT_RUNNING_TEXT =
+  'The run is not running any more. The queue is up to date now.';
+export const INSERT_LIMIT_TEXT =
+  'The run takes no more messages. This one stays in the queue.';
 
 /** The time that a direct send waits for the stream of an ended run to close. */
 const IDLE_WAIT_MS = 3000;
@@ -171,6 +175,9 @@ export function useSessionChat(options: UseSessionChatOptions) {
   const movingRef = useRef(false);
   const [moving, setMoving] = useState(false);
   const [queueNotice, setQueueNotice] = useState<string>();
+  /** A "send now" is on its way: one at a time. */
+  const sendingNowRef = useRef(false);
+  const [sendingNow, setSendingNow] = useState(false);
   /** The run that the queue started and this page is about to follow. */
   const [followingNext, setFollowingNext] = useState<string>();
   const followingNextRef = useRef<string>();
@@ -713,16 +720,18 @@ export function useSessionChat(options: UseSessionChatOptions) {
     [api, queueChangeFailed, sessionId],
   );
 
+  /** Moves a queued message by `offset` places (-1 is up one). */
   const moveQueued = useCallback(
-    async (id: string, direction: -1 | 1) => {
+    async (id: string, offset: number) => {
       // One move at a time: the next one starts from the order this one made.
       if (movingRef.current) return;
       setQueueNotice(undefined);
       const ids = queueRef.current.items.map(m => m.id);
       const from = ids.indexOf(id);
-      const to = from + direction;
-      if (from < 0 || to < 0 || to >= ids.length) return;
-      [ids[from], ids[to]] = [ids[to], ids[from]];
+      const to = from + offset;
+      if (from < 0 || offset === 0 || to < 0 || to >= ids.length) return;
+      ids.splice(from, 1);
+      ids.splice(to, 0, id);
       movingRef.current = true;
       setMoving(true);
       try {
@@ -735,6 +744,81 @@ export function useSessionChat(options: UseSessionChatOptions) {
       }
     },
     [api, applyQueue, queueChangeFailed, sessionId],
+  );
+
+  /**
+   * Moves a queued message into the running run as an inserted message
+   * ("send now"). Resolves with `false` when it stayed in the queue.
+   */
+  const insertQueued = useCallback(
+    async (id: string): Promise<boolean> => {
+      const run = activeRunRef.current;
+      if (run?.status !== 'running' || sendingNowRef.current) return false;
+      sendingNowRef.current = true;
+      setSendingNow(true);
+      setFailure(undefined);
+      setQueueNotice(undefined);
+      try {
+        // Another tab may have changed or sent it: show the stored queue
+        // first. The backend inserts what is stored, and the answer says what
+        // that was.
+        try {
+          const stored = await api.getQueue(sessionId);
+          if (!mounted.current) return false;
+          applyQueue(stored, true);
+          if (!stored.items.some(m => m.id === id)) {
+            setQueueNotice(QUEUED_GONE_TEXT);
+            return false;
+          }
+        } catch (error) {
+          setFailure(describeError(error));
+          return false;
+        }
+        try {
+          const item = await api.insertQueuedMessage(sessionId, id, {
+            runId: run.id,
+          });
+          setQueue(current => ({
+            ...current,
+            items: current.items.filter(m => m.id !== id),
+          }));
+          if (item.kind === 'user_message' && !readSeqs.current.has(item.seq)) {
+            const attachments = item.attachments;
+            setPending(current => [
+              ...current.filter(m => m.seq !== item.seq),
+              {
+                seq: item.seq,
+                text: item.text,
+                ...(attachments && attachments.length > 0
+                  ? { attachments }
+                  : {}),
+              },
+            ]);
+          }
+          return true;
+        } catch (error) {
+          const name = errorNameOf(error);
+          if (name === 'QueuedMessageNotFound') {
+            setQueueNotice(QUEUED_GONE_TEXT);
+            await refreshQueue();
+          } else if (name === 'RunNotRunning') {
+            // The run ended or waits for a decision; the queue may have sent
+            // this message as the next run.
+            setQueueNotice(RUN_NOT_RUNNING_TEXT);
+            await reload();
+          } else if (name === 'InsertLimitReached') {
+            setQueueNotice(INSERT_LIMIT_TEXT);
+          } else {
+            setFailure(describeError(error));
+          }
+          return false;
+        }
+      } finally {
+        sendingNowRef.current = false;
+        if (mounted.current) setSendingNow(false);
+      }
+    },
+    [api, applyQueue, refreshQueue, reload, sessionId],
   );
 
   /** Sends the first queued message as a new run (the queue is paused). */
@@ -844,6 +928,9 @@ export function useSessionChat(options: UseSessionChatOptions) {
     editQueued,
     removeQueued,
     moveQueued,
+    insertQueued,
+    /** A "send now" is on its way. */
+    sendingNow,
     continueQueue,
     decide,
     stop,

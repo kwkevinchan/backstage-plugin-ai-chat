@@ -517,6 +517,11 @@
   display: flex;
   gap: var(--bui-space-1);
 }
+.chat-queue-images {
+  color: var(--bui-fg-secondary);
+  font-size: var(--bui-font-size-1);
+  white-space: nowrap;
+}
 
 /* Side panel. It stays mounted across pages; a closed conversation is hidden, not removed. */
 .panel-tab {

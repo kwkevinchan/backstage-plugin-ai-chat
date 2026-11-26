@@ -28,31 +28,15 @@ import { cx } from './styles';
 
 type Handler = (text: string) => Promise<boolean | void> | void;
 
-/** What the box does while a run goes on, outside the runtime of assistant-ui. */
-export interface ComposerDuringRun {
-  /** Enter, and the main button. Resolves with `false` when the message was not sent. */
-  onSend: Handler;
-  /**
-   * Ctrl or Cmd with Enter, and the Queue button, which shows only with this.
-   * Without it Ctrl or Cmd with Enter does what Enter does.
-   */
-  onQueue?: Handler;
-  /** Nothing can be sent now. */
-  disabled: boolean;
-}
-
 export interface ComposerProps {
   /** Shown above the box. */
   hint?: string;
   /** The text of the empty box. */
   placeholder?: string;
-  /** The name of the main button while a run goes on; default Send. */
+  /** The name of the main button; default Send. */
   sendLabel?: string;
-  /**
-   * Set while a run goes on. The send of assistant-ui is off then, so the
-   * box takes messages through these handlers (the run adds or queues them).
-   */
-  duringRun?: ComposerDuringRun;
+  /** Shows the Queue button (a run is `running`). */
+  canQueue?: boolean;
   /** Shows Stop, which stops the run through the runtime. */
   canStop?: boolean;
 }
@@ -61,36 +45,32 @@ const DEFAULT_PLACEHOLDER =
   'Write a message (Enter sends, Shift+Enter starts a new line)';
 
 /**
- * The input box of the runtime around it: Send when no run goes on, Send and
- * Queue for a run that goes on, and Stop.
+ * The input box, on the composer of assistant-ui. With the queue of the
+ * session in the runtime, Enter steers (inserts into a running run) and
+ * Ctrl or Cmd with Enter, or the Queue button, enqueues; the queue adapter
+ * decides what that means for the state of the run.
  */
 export function Composer(props: ComposerProps) {
   const aui = useAui();
-  const empty = useAuiState(s => !s.composer.text.trim());
   // The primitive buttons pass `disabled` to their child, which the Button of
   // @backstage/ui (React Aria) does not read: it takes `isDisabled`.
   const canSend = useAuiState(s => s.composer.canSend);
   const canCancel = useAuiState(s => s.composer.canCancel);
-  const { duringRun } = props;
 
-  const submitDuringRun = async (run: ComposerDuringRun, queue: boolean) => {
-    const text = aui.composer.getState().text.trim();
-    if (!text || run.disabled) return;
-    aui.composer.setText('');
-    const handler = queue && run.onQueue ? run.onQueue : run.onSend;
-    const sent = await handler(text);
-    // A message that was not sent goes back into the box, unless the user typed again.
-    if (sent === false && !aui.composer.getState().text) {
-      aui.composer.setText(text);
-    }
+  const enqueue = () => {
+    if (aui.composer.getState().canSend) aui.composer.send({ steer: false });
   };
+  // The default of assistant-ui steers on Ctrl or Cmd with Enter as well.
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!duringRun || event.key !== 'Enter') return;
-    if (event.nativeEvent.isComposing) return;
-    const modified = event.ctrlKey || event.metaKey;
-    if (event.shiftKey && !modified) return;
+    if (event.key !== 'Enter') return;
+    // keyCode 229: some browsers end a composition with this Enter.
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
+      return;
+    }
+    if (!(event.ctrlKey || event.metaKey)) return;
+    if (!aui.thread.getState().capabilities.queue) return;
     event.preventDefault();
-    submitDuringRun(duringRun, modified);
+    enqueue();
   };
 
   return (
@@ -117,30 +97,16 @@ export function Composer(props: ComposerProps) {
             </Button>
           </ComposerPrimitive.Cancel>
         )}
-        {duringRun?.onQueue && (
-          <Button
-            variant="secondary"
-            isDisabled={duringRun.disabled || empty}
-            onPress={() => submitDuringRun(duringRun, true)}
-          >
+        {props.canQueue && (
+          <Button variant="secondary" isDisabled={!canSend} onPress={enqueue}>
             Queue
           </Button>
         )}
-        {duringRun ? (
-          <Button
-            variant="primary"
-            isDisabled={duringRun.disabled || empty}
-            onPress={() => submitDuringRun(duringRun, false)}
-          >
+        <ComposerPrimitive.Send asChild>
+          <Button variant="primary" isDisabled={!canSend}>
             {props.sendLabel ?? 'Send'}
           </Button>
-        ) : (
-          <ComposerPrimitive.Send asChild>
-            <Button variant="primary" isDisabled={!canSend}>
-              Send
-            </Button>
-          </ComposerPrimitive.Send>
-        )}
+        </ComposerPrimitive.Send>
       </ComposerPrimitive.Root>
     </>
   );

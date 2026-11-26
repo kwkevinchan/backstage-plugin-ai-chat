@@ -1227,10 +1227,10 @@ plugins/ai-chat/src/
       queueAdapter.ts       後端的排隊和插入 → 它的兩條道
       threadListAdapter.ts  Session API → RemoteThreadListAdapter
       attachmentAdapter.ts  我們的上傳 → AttachmentAdapter
-  application/              不動：React hooks，包 useChat
+  application/              React hooks，包 useChat
     panelStore.ts           實作 aiChatPanelApiRef 的面板狀態與 launch 協調
     toolResultsApi.ts       createAiChatToolResultsApi：實作 aiChatToolResultsApiRef（先註冊的有效）
-    useSessionChat.ts       一個 Session 的 useChat：還原、決定、接續、停止、重新讀取
+    useSessionChat.ts       一個 Session 的 useChat：還原、決定、接續、停止、重新讀取、插入和排隊
     useSessionList.ts       Session 列表（PU-05 之後刪掉，改由 threadListAdapter 負責）
     useToolsets.ts          GET /toolsets
     useSessionTools.ts      GET /sessions/:id/tools
@@ -1238,6 +1238,8 @@ plugins/ai-chat/src/
   ui/                       assistant-ui 的 primitives，套 @backstage/ui 的樣式
     ChatPage.tsx            路由（SE-01）、Session 列表、新對話
     SessionView.tsx         一個 Session：Toolset、訊息、輸入框。可傳 page
+    Composer.tsx            ComposerPrimitive：Enter 是 steer，Ctrl 或 Cmd 加 Enter 和「排隊」按鈕是 enqueue
+    ComposerQueue.tsx       ComposerPrimitive.Queue、QueueItemPrimitive；自己畫暫停和「繼續」、上限、錯誤
     AiChatPanel.tsx         側邊面板。舊系統由 app 掛在路由外面
     ToolsetPanel.tsx        自己畫（assistant-ui 的模型裡沒有工具組）
     ToolCallCard.tsx        吃工具元件的 props：核准、拒絕、誰決定的、等待中、失敗
@@ -1248,7 +1250,7 @@ plugins/ai-chat/src/
   plugin.ts                 舊 frontend system
 ```
 
-`application/`、`domain/`、其餘 `adapters/`（`AiChatClient`、`AiChatTransport`）不變。狀態仍用 `@ai-sdk/react` 的 `useChat`，加我們的 `ChatTransport`。畫面不直接用 `useChat`：`sessionRuntime` 以 `useExternalStoreRuntime` 把它接到 assistant-ui。型別、路徑、`messageIdOfRun` 來自 `ai-chat-common`，前端沒有自己的一份。
+`application/`、`domain/`、其餘 `adapters/`（`AiChatClient`、`AiChatTransport`）的分層不變。狀態仍用 `@ai-sdk/react` 的 `useChat`，加我們的 `ChatTransport`。畫面不直接用 `useChat`：`sessionRuntime` 以 `useExternalStoreRuntime` 把它接到 assistant-ui。型別、路徑、`messageIdOfRun` 來自 `ai-chat-common`，前端沒有自己的一份。
 
 整頁的樹是 `useRemoteThreadListRuntime({ adapter: threadListAdapter, threadId: 網址上的 id, onThreadIdChange: navigate, runtimeHook: () => sessionRuntime })`。側邊面板只有一段對話、沒有列表，所以不用 `useRemoteThreadListRuntime`。
 
@@ -1258,18 +1260,24 @@ plugins/ai-chat/src/
 
 排隊和插入（`queueAdapter`，實作 `ExternalThreadQueueAdapter`）。adapter 不存狀態，清單來自後端，操作完重新讀取。不用它內建的瀏覽器佇列。
 
-| 它的                      | 我們的來源或動作                                 | 我們的 API                                              |
-| ------------------------- | ------------------------------------------------ | ------------------------------------------------------- |
-| `items`（queue 道）       | 後端的排隊清單                                   | `GET /sessions/:id` 的 `queue`                          |
-| `steerItems`（steer 道）  | 已插入、模型還沒讀到的訊息                       | 現在 `PendingInserts` 顯示的那些（來自插入 API 和紀錄） |
-| `steer(msg)`              | Run 是 `running`：插入                           | `POST …/runs/:runId/messages`                           |
-|                           | Run 在等核准：改成排隊（IN-18 規定這時只能排隊） | `POST …/queue`                                          |
-| `enqueue(msg)`            | 有進行中的 Run：排隊                             | `POST …/queue`                                          |
-|                           | 沒有 Run：直接送出，開新的 Run                   | `POST …/runs`                                           |
-| `edit(id, msg)`           | 改排隊的訊息                                     | `PATCH …/queue/:id`                                     |
-| `remove(id)`              | 刪排隊的訊息                                     | `DELETE …/queue/:id`                                    |
-| `move(id, 佇列內的位置)`  | 調整順序                                         | `PUT …/queue/order`                                     |
-| `move(id, 移到 steer 道)` | 「現在就送」：把排隊的那一則改成插入             | `POST …/queue/:queuedId/insert`（PU-07）                |
+| 它的                      | 我們的來源或動作                                 | 我們的 API                                           |
+| ------------------------- | ------------------------------------------------ | ---------------------------------------------------- |
+| `items`（queue 道）       | 後端的排隊清單                                   | `GET /sessions/:id` 的 `queue`                       |
+| `steerItems`（steer 道）  | 已插入、模型還沒讀到的訊息                       | `useSessionChat` 的 `pending`（來自插入 API 和紀錄） |
+| `steer(msg)`              | Run 是 `running`：插入                           | `POST …/runs/:runId/messages`                        |
+|                           | Run 在等核准：改成排隊（IN-18 規定這時只能排隊） | `POST …/queue`                                       |
+| `enqueue(msg)`            | 有進行中的 Run：排隊                             | `POST …/queue`                                       |
+|                           | 沒有 Run：直接送出，開新的 Run                   | `POST …/runs`                                        |
+| `edit(id, msg)`           | 改排隊的訊息                                     | `PATCH …/queue/:id`                                  |
+| `remove(id)`              | 刪排隊的訊息                                     | `DELETE …/queue/:id`                                 |
+| `move(id, 佇列內的位置)`  | 調整順序                                         | `PUT …/queue/order`                                  |
+| `move(id, 移到 steer 道)` | 「現在就送」：把排隊的那一則改成插入             | `POST …/queue/:queuedId/insert`（PU-07）             |
+
+- 給了 `queue` 之後，沒有 Run 時的送出也走 `enqueue`（Run 進行中 Enter 走 `steer`），不走 `onNew`，所以「沒有 Run 就直接送出」在 adapter 背後的 `useSessionChat`。訊息沒被收下時，文字放回輸入框。
+- `composer.queue` 是兩條道合起來的清單，steer 在前。插入的訊息的 id 是 `inserted-<seq>`，排隊的用後端的 id；畫面用 `laneOf` 分辨。插入的訊息不能改、刪、移動。
+- adapter 的方法回傳 Promise（`false` 是沒有改變），比介面的 `void` 多給畫面用；另有 `editText`、`laneOf`、`imageCountOf`。
+- 「現在就送」只在 Run 是 `running` 時能按，請求進行中不能再按。按下時先讀一次佇列：那一則已經不在就說明並停下；在的話送出，畫面用回應裡實際寫入的內容（別的分頁改過時就是改過的內容）。404：說明並重新讀佇列。409 `RunNotRunning`：說明並重新讀 Session。409 `InsertLimitReached`：說明，訊息留在佇列。
+- 佇列的上限來自 `GET /input-config` 的 `queueMaxMessages`（還沒回來時用 5），滿了在佇列區塊說明。
 
 Session 列表（`threadListAdapter`，實作 `RemoteThreadListAdapter`）。
 

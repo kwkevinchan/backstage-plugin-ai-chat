@@ -21,9 +21,11 @@ import {
   ComposerPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
+  useAui,
   type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
 import type { ChatUiMessage } from '../../domain/types';
+import { createQueueAdapter, type SessionQueueSource } from './queueAdapter';
 import {
   useSessionRuntime,
   type SessionRuntimeOptions,
@@ -76,9 +78,33 @@ function App(options: SessionRuntimeOptions) {
           <ComposerPrimitive.Send>Send</ComposerPrimitive.Send>
           <ComposerPrimitive.Cancel>Stop</ComposerPrimitive.Cancel>
         </ComposerPrimitive.Root>
+        <QueueButton />
       </ThreadPrimitive.Root>
     </AssistantRuntimeProvider>
   );
+}
+
+function QueueButton() {
+  const aui = useAui();
+  return (
+    <button onClick={() => aui.composer.send({ steer: false })}>Queue</button>
+  );
+}
+
+function queueSource(
+  overrides: Partial<SessionQueueSource> = {},
+): SessionQueueSource {
+  return {
+    queued: [],
+    inserted: [],
+    send: jest.fn().mockResolvedValue(true),
+    queueMessage: jest.fn().mockResolvedValue(true),
+    editQueued: jest.fn().mockResolvedValue(true),
+    removeQueued: jest.fn().mockResolvedValue(undefined),
+    moveQueued: jest.fn().mockResolvedValue(undefined),
+    insertQueued: jest.fn().mockResolvedValue(true),
+    ...overrides,
+  };
 }
 
 const question: ChatUiMessage = {
@@ -175,5 +201,64 @@ describe('useSessionRuntime', () => {
     );
     await userEvent.click(screen.getByRole('button', { name: 'Reject' }));
     await waitFor(() => expect(onDecide).toHaveBeenCalledWith('c1', false));
+  });
+
+  describe('with the queue of the session', () => {
+    it('keeps the box usable while a run goes on: Enter steers, send without steer enqueues, onSend is not used', async () => {
+      const source = queueSource();
+      const onSend = jest.fn();
+      render(
+        <App
+          messages={[question]}
+          isRunning
+          onSend={onSend}
+          queue={createQueueAdapter(source)}
+        />,
+      );
+      await userEvent.type(screen.getByLabelText('Message'), 'more{Enter}');
+      await waitFor(() => expect(source.send).toHaveBeenCalledWith('more'));
+      expect(screen.getByLabelText('Message')).toHaveValue('');
+
+      await userEvent.type(screen.getByLabelText('Message'), 'later');
+      await userEvent.click(screen.getByRole('button', { name: 'Queue' }));
+      await waitFor(() =>
+        expect(source.queueMessage).toHaveBeenCalledWith('later'),
+      );
+      expect(onSend).not.toHaveBeenCalled();
+    });
+
+    it('sends through the queue when no run goes on as well', async () => {
+      const source = queueSource();
+      const onSend = jest.fn();
+      render(
+        <App
+          messages={[]}
+          isRunning={false}
+          onSend={onSend}
+          queue={createQueueAdapter(source)}
+        />,
+      );
+      await userEvent.type(screen.getByLabelText('Message'), 'hello{Enter}');
+      await waitFor(() =>
+        expect(source.queueMessage).toHaveBeenCalledWith('hello'),
+      );
+      expect(onSend).not.toHaveBeenCalled();
+    });
+
+    it('puts the text back when the queue did not take the message', async () => {
+      const source = queueSource({ send: jest.fn().mockResolvedValue(false) });
+      render(
+        <App
+          messages={[question]}
+          isRunning
+          onSend={jest.fn()}
+          queue={createQueueAdapter(source)}
+        />,
+      );
+      await userEvent.type(screen.getByLabelText('Message'), 'keep me{Enter}');
+      await waitFor(() =>
+        expect(screen.getByLabelText('Message')).toHaveValue('keep me'),
+      );
+    });
   });
 });

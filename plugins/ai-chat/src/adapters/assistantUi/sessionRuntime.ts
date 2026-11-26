@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import {
   useExternalStoreRuntime,
   type AppendMessage,
@@ -22,6 +22,7 @@ import {
 } from '@assistant-ui/react';
 import { isToolUIPart } from 'ai';
 import type { ChatUiMessage, ToolPart } from '../../domain/types';
+import type { SessionQueueAdapter } from './queueAdapter';
 import { toThreadMessage } from './toThreadMessage';
 
 export interface SessionRuntimeOptions {
@@ -43,6 +44,12 @@ export interface SessionRuntimeOptions {
   onStop?(): Promise<void> | void;
   /** The decision of the user on a call that waits for approval. */
   onDecide?(callId: string, approved: boolean): Promise<void> | void;
+  /**
+   * The queue and the inserted messages of the session. With it, the box
+   * stays usable while a run goes on, and every send goes through it (also
+   * when no run goes on), not through `onSend`.
+   */
+  queue?: SessionQueueAdapter;
 }
 
 function textOf(message: AppendMessage): string {
@@ -71,8 +78,9 @@ function callOfApproval(
 /**
  * The runtime of assistant-ui on the state of `useSessionChat`
  * (`useExternalStoreRuntime`). The state stays in the chat: this only
- * converts the messages and passes the actions on. The queue of assistant-ui
- * is not used.
+ * converts the messages and passes the actions on. The queue is the
+ * backend's (`queueAdapter`); the queue that assistant-ui keeps in the
+ * browser is not used.
  */
 export function useSessionRuntime(
   options: SessionRuntimeOptions,
@@ -81,7 +89,31 @@ export function useSessionRuntime(
   latest.current = options;
   const runtimeRef = useRef<AssistantRuntime>();
 
-  const { onStop, onDecide } = options;
+  /** A message that was not taken goes back into the box, unless the user typed again. */
+  const keepIfNotSent = useCallback((sent: boolean | void, text: string) => {
+    if (sent !== false) return;
+    const composer = runtimeRef.current?.thread.composer;
+    if (composer && !composer.getState().text) composer.setText(text);
+  }, []);
+
+  const { onStop, onDecide, queue } = options;
+  const queueWithDraft = useMemo<SessionQueueAdapter | undefined>(
+    () =>
+      queue && {
+        ...queue,
+        steer: async message => {
+          const sent = await queue.steer(message);
+          keepIfNotSent(sent, textOf(message));
+          return sent;
+        },
+        enqueue: async message => {
+          const sent = await queue.enqueue(message);
+          keepIfNotSent(sent, textOf(message));
+          return sent;
+        },
+      },
+    [queue, keepIfNotSent],
+  );
   const runtime = useExternalStoreRuntime<ChatUiMessage>({
     messages: options.messages,
     convertMessage: toThreadMessage,
@@ -90,11 +122,9 @@ export function useSessionRuntime(
     onNew: async message => {
       const text = textOf(message);
       if (!text) return;
-      const sent = await latest.current.onSend(text);
-      if (sent !== false) return;
-      const composer = runtimeRef.current?.thread.composer;
-      if (composer && !composer.getState().text) composer.setText(text);
+      keepIfNotSent(await latest.current.onSend(text), text);
     },
+    queue: queueWithDraft,
     ...(onStop && {
       onCancel: async () => {
         await latest.current.onStop?.();
