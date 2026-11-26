@@ -982,7 +982,7 @@ flowchart LR
   - 模組怎麼拿到圖片的位元組：`ModelClient.stream` 的 `opts.readImage(image)`，回傳 `{ mediaType, bytes }`，圖片不在了回傳 `undefined`。宿主給每個 client 都包一層來提供它，只讀這段 Session 的附件。內建的 OpenAI 相容 client 照舊自己讀 `AttachmentStore`。
   - 設定的上限沿用現有的平鋪寫法（`aiChat.maxToolCallsPerStep`、`aiChat.readConcurrency`、`aiChat.toolTimeoutSeconds`、`aiChat.runsPerUser`），和 `maxTurns`、`maxToolCallsPerRun` 一樣；規格第 6 節的範例已改成這個寫法。
   - `toolTimeoutSeconds` 預設 60，範圍 1 到 600。它和 `runTimeoutSeconds` 的關係：每個呼叫的 `signal` 在兩者中較早的時間中止。工具逾時先到，這個呼叫是 `timeout`，Run 繼續；Run 的截止時間先到，Run 結束成 `completed`、`endReason: 'timeout'`，還沒結束的呼叫沒有結果（和 P3-06 一樣）。`toolTimeoutSeconds` 比 `runTimeoutSeconds` 長時，實際只有 Run 的截止時間有效。等核准的時間不算。
-  - 逾時的呼叫可能還在執行：Backstage 的 actions service 不收 `signal`，迴圈只是不再等它。之後的唯讀呼叫不等它。之後的寫入呼叫這一步不執行（D-09：寫的先後順序有意義），寫成 `denied`；看紀錄判斷，所以換一台後端接手也一樣。
+  - 逾時的呼叫可能還在執行：Backstage 的 actions service 不收 `signal`，迴圈只是不再等它。之後的唯讀呼叫不等它。之後的寫入呼叫這一步不執行（D-09：寫的先後順序有意義），寫成 `denied`；看紀錄判斷，所以換一台後端接手也一樣。即時判斷看工具原本回傳的狀態，`afterToolCall` 把結果改掉也蓋不掉逾時；接手時看紀錄裡經過 `afterToolCall` 之後存下的狀態。
   - 唯讀呼叫的 `afterToolCall` 在它的工具結束後就執行，所以同一批不同呼叫的 Hook 可能同時在跑。寫入的順序不受影響。
   - `parallelToolCalls` 是模型宣告的能力：迴圈不管它都會同時執行唯讀呼叫（D-09）。它只決定請求帶不帶 `parallel_tool_calls: true`；不支援這個欄位的伺服器用預設的 `false`。
   - 每人同時的 Run 數包含 `waiting_approval`（H-03 的「進行中」）。兩台後端的計數用資料庫：PostgreSQL 在建立 Run 的 transaction 開頭先取這個使用者的 advisory lock（`pg_advisory_xact_lock`），再數、再新增；SQLite 只有一條連線，transaction 本來就一個接一個。這個鎖在任何列鎖之前取，其他 transaction 不取它，所以不會跟第 13.8 節的鎖順序形成循環。

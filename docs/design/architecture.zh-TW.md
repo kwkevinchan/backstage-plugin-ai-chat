@@ -500,6 +500,7 @@ function executeTools(
   - 只在決定是 `allow` 時執行：需要核准的看 `approval`（`needsApproval`），其他的看政策。`deny` 寫 `denied`，不執行。沒有決定的不動。決定不是 `allow` 也不是 `deny` 時丟錯。
   - 不是唯讀的工具：先 `heartbeat`，看到 `cancelRequested` 就停止（回傳 `'cancelled'`，這個呼叫和後面的都不開始）；再寫 `tool_started`；再檢查 `signal`；才執行（D-25）。
   - 工具丟例外，或沒有回傳結果，寫成 `error`。Run 的 `signal` 中止時，還沒有結果的呼叫什麼都不寫；同一批已經結束的結果照順序寫入，不再開始新的呼叫。
+  - 不是唯讀的呼叫逾時後，它可能還在執行：這一步後面不是唯讀的呼叫不開始，寫成 `denied`（D-09）；唯讀呼叫照常。判斷看工具回傳的狀態，接手時看紀錄裡的 `timeout` 結果。
   - 每個 Item 準備好就寫，當掉時已完成的不會丟。
 - **停止**：使用者按停止時，`heartbeat` 回 `cancelRequested`。迴圈在每一輪開頭、每個不是唯讀的呼叫之前、摘要寫入之後呼叫 `heartbeat`，所以一步裡的第二個寫入工具在停止之後不會開始。
 - **一步之內的時間上限**：迴圈從 `limits.runTimeoutSeconds` 減去 `usage.elapsedSeconds` 算出剩餘時間，設一個計時器，到時候中止傳給模型和工具的 `signal`。因此執行中的模型呼叫或工具在截止時間結束。這時 Run 結束成 `completed`，`endReason: 'timeout'`，不是 `cancelled`。使用者的 `signal` 先中止則是 `cancelled`。每一輪開頭仍用 `Clock` 檢查總時間。計時器已 `unref`，不會讓程序保持運作；宿主要自己讓程序活著，直到 generator 結束。沒有 HTTP server 的宿主（CLI、worker、demo 腳本）要注意：沒有別的 I/O 時，程序會直接結束，Run 沒有收尾。

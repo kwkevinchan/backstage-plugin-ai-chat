@@ -536,6 +536,58 @@ describe('executeTools: a change that goes over its time (D-09, P-02)', () => {
       items.filter(i => i.kind === 'tool_started').map(i => i.callId),
     ).toEqual([first.callId]);
   });
+  it('does not run a later change when the log shows an earlier change of the step over its time (a takeover)', async () => {
+    const next = tool('catalog:write2', false, async () => ({
+      status: 'ok',
+      output: {},
+    }));
+    const write = (callId: string, toolId: string, position: number) => ({
+      kind: 'tool_call' as const,
+      callId,
+      toolId,
+      input: {},
+      schemaHash: `hash-${toolId}`,
+      policy: 'ask' as const,
+      readOnly: false,
+      step: 1,
+      position,
+    });
+    const allow = (callId: string) => ({
+      kind: 'approval' as const,
+      callId,
+      decision: 'allow' as const,
+      decidedBy: 'user:a',
+    });
+    const t = await kit({
+      tools: [tool('catalog:write', false, () => never()), next],
+      script: [[say('done')]],
+      log: [
+        { kind: 'user_message', text: 'change two things' },
+        write('w1', 'catalog:write', 0),
+        write('w2', 'catalog:write2', 1),
+        allow('w1'),
+        allow('w2'),
+        { kind: 'tool_started', callId: 'w1' },
+        {
+          kind: 'tool_result',
+          callId: 'w1',
+          status: 'timeout',
+          message: 'The tool did not answer within 60 seconds.',
+        },
+      ],
+    });
+
+    const { outcome } = await t.execute();
+
+    expect(outcome).toEqual({ status: 'completed' });
+    expect(t.tools.executed).toHaveLength(0);
+    const w2 = resultsOf(await t.read()).find(r => r.callId === 'w2');
+    expect(w2).toMatchObject({
+      status: 'denied',
+      message:
+        'Not run: an earlier change of this step did not answer in time and may still be running.',
+    });
+  });
 });
 
 describe('callModel: tool calls per step (P-05)', () => {
