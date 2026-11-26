@@ -42,6 +42,8 @@ export interface ModelSettings {
   parallelToolCalls: boolean;
   /** Model calls per minute, over all backends (P-06). No limit when absent. */
   requestsPerMinute?: number;
+  /** Ask the server for the tokens of each streamed answer (O-01). */
+  reportUsage: boolean;
 }
 
 export interface AiChatConfig {
@@ -272,6 +274,7 @@ function readModel(config: Config, key: string): ModelSettings {
     images: config.getOptionalBoolean(`${key}.images`) ?? false,
     parallelToolCalls:
       config.getOptionalBoolean(`${key}.parallelToolCalls`) ?? false,
+    reportUsage: config.getOptionalBoolean(`${key}.reportUsage`) ?? true,
     ...(config.getOptional(rateKey) !== undefined && {
       requestsPerMinute: positiveInt(config, rateKey, 1),
     }),

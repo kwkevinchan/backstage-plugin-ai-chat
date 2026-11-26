@@ -713,7 +713,7 @@ flowchart LR
 | P3-06 | TechDocs 搜尋的 action                                  | M    | X-08                               | #54 | 完成 |
 | P3-07 | 平行唯讀呼叫、每步上限、模型能力、限流                  | M    | P-01、P-02、P-03、P-05、P-06、X-09 | #57 | 完成 |
 | P3-08 | Toolset 的權限、輸出上限和遮蔽、寫入配額                | M    | T-08、T-09、T-10                   | #59 | 完成 |
-| P3-09 | 觀測                                                    | S    | O-01                               |
+| P3-09 | 觀測                                                    | S    | O-01                               | #60 | 完成 |
 | P3-10 | 結果顯示元件                                            | M    | B-03                               |
 
 順序：P3-01 最先。P3-03 和 P3-04 都需要 P3-01 的 Agent 定義。P3-06 到 P3-10 互相獨立。
@@ -728,6 +728,7 @@ flowchart LR
 - **P3-06**：搜尋結果只有使用者有權限看的文件。先確認 Backstage 有沒有官方的 search action，有就直接用。
 - **P3-07**：在擴充點加上 `addModelClient`。逐項驗收見下方 P3-07。四個唯讀工具同時執行，其中一個逾時，其他三個的結果照原本順序交回。
 - **P3-08**：用不了的 Toolset 的工具不送給模型。遮蔽掉的值不在紀錄、串流和送給模型的內容裡。寫入超過每人每分鐘的配額時不執行。逐項驗收見下方 P3-08。
+- **P3-09**：每一步、每個工具呼叫、每個 Run 各有一筆結構化 log 和 OpenTelemetry 的 metric，只有數字、id 和固定的分類詞，沒有對話內容。沒有安裝 OpenTelemetry SDK 時不出錯。逐項驗收見下方 P3-09。
 
 ### P3-01 `ai-chat-node`、擴充點、設定檔裡的 Agent
 
@@ -1121,6 +1122,88 @@ flowchart LR
   - 拿不到額度就不執行，不等下一分鐘：使用者已經核准，等待看起來像卡住。`ToolOutput` 沒有 `denied`，所以結果是 `error`。它不是 `timeout`，所以同一步後面的寫入照常各自拿額度。被擋下的寫入仍算在 `maxToolCallsPerStep`、`maxToolCallsPerRun` 裡（提出呼叫時就算了）。拿額度的時間算在這個呼叫的 `toolTimeoutSeconds` 裡。
   - 配額用固定的一分鐘格子，和 P-06 一樣：`write_quota_windows` 的 `(user_ref, window_start)` 一列一個計數，`INSERT … ON CONFLICT DO UPDATE … WHERE writes < 上限 RETURNING` 一句話決定。格子邊界前後最多可能有兩倍的量。舊的格子在之後的呼叫裡刪除。
 
+### P3-09 觀測
+
+- **範圍**：
+  - 核心（`packages/ai-chat-harness`）：
+    - `ModelChunk` 加 `{ type: 'usage'; inputTokens; outputTokens }`：模型回報的 token 用量。迴圈不把它寫進紀錄，也不送成事件。
+    - 新 port `application/ports/RunObserver.ts`：`modelCall(record)`、`toolCall(record)`，型別 `ModelCallRecord`、`ToolCallRecord`、`ModelInputSize`、`ContextProviderRecord`。`AdvanceRunDeps.observer` 可以不給。`AdvanceRunRequest.modelId` 是宿主給的模型 id，核心只把它放進紀錄。
+    - `domain/modelInput.ts`：新增 `modelInputOf(items, agent, extra, budget)`，一次算出送給模型的內容、省略了哪些部分，和上下文的組成（`ModelInputSize`）。`callModel` 改用它。
+    - `callModel`、`summarize`、`executeTools` 在寫入結果的地方交出紀錄；`runContextProviders` 回報每個 provider 的狀態和長度。
+  - 宿主（`plugins/ai-chat-backend`）：
+    - 新 port `application/ports/Metrics.ts`（counter、histogram），adapter `adapters/backstage/BackstageMetrics.ts` 包 `metricsServiceRef`（`@backstage/backend-plugin-api/alpha`）。`plugin.ts` 依賴它。
+    - `application/RunTelemetry.ts` 實作 `RunObserver`，並記 Run 的結束、限流等待和自動標題的模型呼叫：寫 log、記 metric。
+    - `createRunEnded` 在 Run 寫入終態時交給 `RunTelemetry`，沒有 `onRunEnd` Hook 時也一樣。`HostModelClient` 記限流等待。`NameSession` 記自動標題的模型呼叫。`buildRunRequest` 給 `modelId`。
+    - `OpenAiCompatibleClient`：串流的請求帶 `stream_options: { include_usage: true }`，讀回答裡的 `usage`。設定 `aiChat.llm.reportUsage`、`aiChat.models.<id>.reportUsage`（預設 `true`）；`false` 時不帶這個欄位。
+    - 模型呼叫失敗的 log（`A run failed`、`A summary could not be made`、`Could not name the session`）只記錯誤的 `name` 和 HTTP 狀態碼，不記錯誤的訊息：模型伺服器的錯誤訊息可能帶回使用者的內容。
+    - `AiChatHarnessRegistry`：module 的 Hook 或 context provider 丟例外時，log 只記錯誤的 `name` 和既有的 id（Hook 名稱、provider id、`runId`、`callId`），不記錯誤的訊息：module 的程式可能把讀到的內容放進訊息。
+  - 文件：規格 O-01；架構文件的 port、adapter 和觀測一節；backend README（中英）列出 log、metric 和屬性。
+  - 不做：trace（span）；把 token 用量存進資料庫、`RunUsage` 或 `RunSummary`；稽核（O-02）的改動；擴充點上的 observer；畫面和用量頁面；送出訊息被每人 Run 數擋下的計數。
+- **依賴**：P3-02（provider 的狀態）、P3-05（`createRunEnded`）、P3-07（`HostModelClient`、`modelId`）。
+- **紀錄的內容**：
+  - 模型呼叫（每一步、每次摘要、每次自動標題各一筆）：`sessionId`、`runId`、`agentId`、`modelId`、`purpose`（`step`、`summary`、`title`）、`step`、`durationMs`、`outcome`（`ok`、`empty`、`failed`、`cancelled`、`timeout`）、`errorStatus`、`inputTokens`、`outputTokens`、`toolCallsRequested`、`context`、`providers`。
+  - `context`（`ModelInputSize`）：`estimatedTokens`、`budgetTokens`、`parts`（`system`、`context`、`tools`、`summary`、`history`、`images`，估計的 token）、`messages`、`images`、`tools`（個數）、`summarized`、`trimmed`。
+  - `providers`：每個 provider 一筆 `{ id, status, chars }`，`status` 是 `ok`、`cut`、`empty`、`failed`、`timeout`、`left_out`。
+  - 工具呼叫（每個寫入的 `tool_result` 一筆）：`sessionId`、`runId`、`agentId`、`step`、`position`、`callId`、`toolId`（模型要的工具不在清單裡時是固定詞 `unknown`）、`readOnly`、`status`、`reason`（`denied` 時：`policy`、`run_limit`、`step_limit`、`hook`、`user`、`earlier_write_timed_out`）、`durationMs`（執行過的才有）、`truncated`。
+  - Run（每個 Run 一筆）：`sessionId`、`runId`、`agentId`、`status`、`endReason`、`stepsUsed`、`toolCallsUsed`、`elapsedSeconds`。
+  - 限流等待：`modelId`、等待的時間、`outcome`（`acquired`、`cancelled`）。
+- **log**（`info`，訊息是固定文字，資料在 meta）：`Model call`、`Tool call`、`Run ended`。
+- **metric**：
+
+  | 名稱                               | 類型      | 單位       | 屬性                                   |
+  | ---------------------------------- | --------- | ---------- | -------------------------------------- |
+  | `ai_chat.model.duration`           | histogram | `s`        | `agent`、`model`、`purpose`、`outcome` |
+  | `ai_chat.model.tokens`             | histogram | `{token}`  | `agent`、`model`、`purpose`、`type`    |
+  | `ai_chat.context.tokens`           | histogram | `{token}`  | `agent`、`part`                        |
+  | `ai_chat.context_provider.results` | counter   | `{result}` | `agent`、`provider`、`status`          |
+  | `ai_chat.tool.calls`               | counter   | `{call}`   | `agent`、`tool`、`status`、`reason`    |
+  | `ai_chat.tool.duration`            | histogram | `s`        | `agent`、`tool`、`status`              |
+  | `ai_chat.model.rate_limit.wait`    | histogram | `s`        | `model`、`outcome`                     |
+  | `ai_chat.run.duration`             | histogram | `s`        | `agent`、`status`、`end_reason`        |
+  | `ai_chat.run.steps`                | histogram | `{step}`   | `agent`、`status`                      |
+  | `ai_chat.run.tool_calls`           | histogram | `{call}`   | `agent`、`status`                      |
+
+- **驗收**：
+  - Token 用量：
+    - 模型回報 `usage` 時，紀錄、`Model call` 的 log 和 `ai_chat.model.tokens`（`type` 是 `input`、`output`）都是回報的數字。回報兩次時用最後一次。不是非負整數的值不算。沒有回報時紀錄沒有這兩個欄位，也不記 `ai_chat.model.tokens`。
+    - `usage` 不產生 Item 和事件，回答不變。
+    - `OpenAiCompatibleClient` 串流的請求有 `stream_options: { include_usage: true }`，讀得到最後一個 chunk（`choices` 是空的）的 `usage`，也讀得到不是串流的回答的 `usage`。`reportUsage: false` 時請求沒有 `stream_options`。`reportUsage` 不是布林值時後端無法啟動。
+  - 延遲和逾時：
+    - 模型呼叫的 `durationMs` 用 `Clock` 量，從呼叫模型到串流結束，包含限流的等待。
+    - 工具的 `durationMs` 只算工具本身，不含 `beforeToolCall`、`afterToolCall` 和等核准的時間。
+    - 工具逾時：`status` 是 `timeout`，有 `durationMs`。Run 的截止時間在模型呼叫時到：`outcome` 是 `timeout`。使用者停止：`outcome` 是 `cancelled`。
+    - 有 `requestsPerMinute` 的模型等到下一分鐘：`ai_chat.model.rate_limit.wait` 記等待的秒數，`outcome` 是 `acquired`；等待時 Run 被停止是 `cancelled`。沒有 `requestsPerMinute` 的模型不記。
+  - 工具的結果：
+    - `ok`、`error`、`timeout`、`invalid`、`denied`（政策、Run 的上限、每步上限、Hook、使用者拒絕、前一個寫入逾時）、`unknown` 各有一筆紀錄，`status` 和 `reason` 正確，`ai_chat.tool.calls` 加 1。`ai_chat.tool.duration` 只記執行過的（`ok`、`error`、`timeout`）。
+    - `afterToolCall` 改過的結果：紀錄是存下的狀態，`durationMs` 仍是工具本身的時間。
+    - 同時執行的唯讀呼叫：紀錄的順序和 `tool_result` 寫入的順序相同。
+  - 上下文：
+    - `estimatedTokens` 是 `parts` 的合計，`budgetTokens` 是 `tokenBudget`。有 Skill 清單、provider、圖片、摘要、省略的舊步驟時，對應的欄位有值。
+    - 摘要的模型呼叫有一筆 `purpose: 'summary'`；失敗是 `failed`，沒有文字是 `empty`，Run 照常。
+    - provider 的 `ok`、`cut`、`empty`、`failed`、`timeout`、`left_out` 各出現在 `providers`，`chars` 是放進系統提示的長度；`ai_chat.context_provider.results` 照 `status` 加 1。
+  - 錯誤：模型呼叫失敗時 `outcome` 是 `failed`；錯誤有 100 到 599 的整數 `status` 時 `errorStatus` 是它。沒有回答是 `empty`。`beforeModelCall` 丟例外時沒有模型呼叫的紀錄。
+  - Run：每個 Run 寫入終態時記一筆 `Run ended` 和三個 Run 的 metric，觸發的地方和 `onRunEnd` 相同，沒有註冊 Hook 時也記。等核准不記。`onRunEnd` 收到的 `RunSummary` 不變。
+  - 不能出現的內容：同一段字串放進使用者訊息、頁面的路徑和 entity、圖片名稱、Session 標題、計畫文字、模型編的工具名稱、`aiChat.toolOutput` 遮蔽的欄位、摘要失敗的錯誤訊息、系統提示、Skill 內容、provider 的輸出、模型的回答和呼叫參數、工具的輸出和錯誤訊息、Hook 的拒絕理由、`afterToolCall` 的輸出、模型伺服器的錯誤訊息、使用者的 token：這段字串不在任何 log 的 meta 和訊息裡，也不在 metric 的名稱、選項、值和屬性裡。metric 的屬性只有上表的鍵，沒有 `sessionId`、`runId`、`callId` 和使用者。
+  - 經過 `AiChatHarnessRegistry` 的 Hook 和 context provider 丟出訊息含那段字串的例外：log 有 Hook 名稱或 provider id 和 `errorName`，沒有那段字串。
+  - 沒有 exporter：沒有給 `observer` 時，迴圈的紀錄、事件和結果不變。observer 丟例外時也不變。`RunTelemetry` 的 metric 丟例外時 Run 照常，只記一次警告。沒有安裝 OpenTelemetry SDK（Backstage 預設的 `metricsServiceFactory`）時，對話、工具和核准照常，觀測沒有警告。
+- **規格沒寫、實作選定的地方**：
+  - 不做 trace：Backstage 的 `TracingService` 只有 `startActiveSpan(name, fn)`，span 在 `fn` 結束時結束。迴圈是 `AsyncGenerator`，一步之內要交出事件，Run 又會因為等核准分成幾次呼叫，甚至換一台後端，做不成一個 span。`fn` 丟例外時，預設的實作把錯誤訊息寫進 span，模型伺服器的錯誤訊息會外流。
+  - 用 port，不用事件：事件交給訂閱者和串流（A-03），觀測不是給畫面的。
+  - 用 Backstage 的 `metricsServiceRef`，不直接用 `@opentelemetry/api`，和 Backstage 的 scheduler 一樣。meter 的名稱是 Backstage 給的 `backstage-plugin-ai-chat`。沒有安裝 OpenTelemetry SDK 時，OpenTelemetry API 給的 meter 什麼都不做。log 不依賴 exporter，照常寫。
+  - metric 的名稱用 `ai_chat.` 開頭，單位照 OpenTelemetry 的寫法（`s`、`{token}`）。不用 OpenTelemetry GenAI 的名稱：那份規範還在 Development 狀態，而且要的是模型伺服器的模型名稱，模組的 client 給不出來。histogram 給 bucket 的建議值：秒是 0.01 到 600，token 是 1 到 1048576。
+  - metric 的屬性不放 `sessionId`、`runId`、`callId`、使用者：數量沒有上限，使用者也是個人資料。log 有 `sessionId`、`runId`、`callId`，沒有使用者；要知道是誰，用 `runId` 對稽核紀錄。
+  - 紀錄跟著寫入的 Item：工具的紀錄在 `tool_result` 寫入時交出，Run 被停止時沒有結果的呼叫沒有紀錄。換一台後端接手也不重複。
+  - `durationMs` 的範圍：模型呼叫包含 `HostModelClient` 的限流等待（等待另外記）；工具只算工具本身。核心內建的 `update_plan` 不經過工具，沒有 `durationMs`。
+  - `errorStatus` 由核心從錯誤的 `status` 讀出，錯誤本身不交給 observer。
+  - Run 的截止時間：迴圈用 `TimeoutError` 中止 signal，用它分辨截止時間（`timeout`）和停止（`cancelled`）。
+  - `reportUsage` 預設 `true`：大多數 OpenAI 相容的伺服器接受 `stream_options`。不接受的伺服器，管理員設成 `false`。
+  - Token 用量只記在每次模型呼叫。每個 Run 的合計用 metric 或 log 加總，不存進資料庫。
+  - 模型要的工具不在清單裡時，紀錄的 `toolId` 是 `unknown`：那個名稱是模型寫的文字，可能是對話的內容，數量也沒有上限。紀錄裡的 `tool_call` 照舊存模型寫的名稱。
+  - 迴圈只認得 `text`、`tool_call`、`usage` 三種 chunk，其他的忽略：新版或別家的 client 多送的 chunk 不會被當成工具呼叫。
+  - `cancelled` 是 Run 的 signal 因為截止時間以外的原因中止：使用者停止、backend 關機、宿主失去租約。
+  - observer 的方法回傳 promise 時，迴圈接住它的 rejection，不留下 unhandled rejection。
+  - 不改的兩條 log：`AuditedToolGateway` 在結束稽核紀錄失敗時記 auditor 的錯誤訊息，`afterRun` 在佇列送不出下一則訊息時記錯誤訊息。這兩個錯誤來自 Backstage 的 auditor 和這個外掛的資料庫，不是模型、工具或 module 的輸出，不會帶回對話的內容。
+
 ### P4：擴大
 
 | 編號  | 工作項目           | 大小 | 完成的需求       | PR  | 狀態 |
@@ -1270,3 +1353,4 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-26 | 1.2  | P3-07 完成（P-01、P-02、P-03、P-05、P-06、X-09，#57）：唯讀呼叫同時執行（`readConcurrency`）、結果照順序寫入；每個工具呼叫的逾時（`toolTimeoutSeconds`），寫入逾時後這一步後面的寫入不執行；`maxToolCallsPerStep`、`runsPerUser`（429）；`aiChat.models` 與擴充點 `addModelClient`（只新增），模組用 `readImage` 讀圖片；`requestsPerMinute` 的限流由所有後端共用（`model_call_windows`）                                                                                                                                                                                                                                                                                                            |
 | 2026-11-26 | 1.2  | P3-02 完成（X-03、SE-02、SE-06 的後端，#58）：擴充點加入 `addContextProvider`；每一步呼叫內建的 `user`、`entity`、`plan` 和 module 的 provider，輸出放在系統提示、標成不可信的資料，每個 8000、全部 16000 字元，逾時 5 秒，失敗時 Run 繼續。Session 可以綁定一個 entity（建立時或第一則訊息的頁面，要讀得到，綁定不改），`GET /sessions?entityRef=` 列出自己綁定那個 entity 的 Session。逐項驗收見 P3-02                                                                                                                                                                                                                                                                                             |
 | 2026-11-26 | 1.2  | P3-08 完成（T-08、T-09、T-10，#59）：permission `ai-chat.toolset.use` 和條件 `IS_TOOLSET` 決定誰能用哪個 Toolset，送給模型的是 Session 開啟的、Agent 的 `toolsets` 列的、使用者能用的 Toolset 的交集；`aiChat.toolOutput` 依 action ID 樣式設輸出上限和要遮蔽的欄位，先遮蔽再裁切，`afterToolCall` 之後再做一次，遮蔽失敗時不存輸出；`aiChat.writesPerMinute` 是每人每分鐘的寫入次數，所有後端共用（`write_quota_windows`），超過時不執行。逐項驗收見 P3-08                                                                                                                                                                                                                                          |
+| 2026-11-26 | 1.2  | P3-09 完成（O-01，#60）：核心的 `RunObserver` 收每次模型呼叫和每個工具結果的量測，`ModelChunk` 加 `usage`；宿主寫 `Model call`、`Tool call`、`Run ended` 三種 log，並用 Backstage 的 `metricsServiceRef` 記 `ai_chat.*` metric。只有數字、id 和固定的分類詞。模型、Hook、context provider 失敗的 log 只記錯誤的名稱（模型另有 HTTP 狀態碼）。新設定 `reportUsage`。不做 trace                                                                                                                                                                                                                                                                                                                        |

@@ -480,7 +480,7 @@ describe('the HTTP routes', () => {
       expect(chunks[chunks.length - 1]).toMatchObject({ type: 'finish' });
     });
 
-    it('ends a failed run with the state and then an error with a fixed text, and no finish; the cause stays in the log', async () => {
+    it('ends a failed run with the state and then an error with a fixed text, and no finish; the log has the name and the status of the error, not its text', async () => {
       const b = backend([
         new Error('401 from the provider: key sk-live-12345 is not valid'),
       ]);
@@ -499,12 +499,13 @@ describe('the HTTP routes', () => {
       });
       expect(res.text).not.toContain('sk-live');
       expect(res.text).not.toContain('provider');
-      expect(b.logger.error).toHaveBeenCalledWith(
-        'A run failed',
-        expect.objectContaining({
-          cause: expect.stringContaining('sk-live-12345'),
-        }),
-      );
+      expect(b.logger.error).toHaveBeenCalledWith('A run failed', {
+        runId: expect.any(String),
+        errorName: 'Error',
+      });
+      expect(
+        JSON.stringify((b.logger.error as jest.Mock).mock.calls),
+      ).not.toContain('sk-live');
     });
 
     it('does not put the system prompt, or the text of an error of the model server, into any response (H-10)', async () => {

@@ -25,6 +25,9 @@ permission policy narrows it with `aiChatToolsetConditions.isToolset`, which
 this package exports.
 To search TechDocs, offer the `search:query` action of the Backstage search
 backend; the setup is in the README of the repository.
+Each model call, tool result and run that ends is logged, and measured with
+the metrics service of Backstage (OpenTelemetry); the log lines and metrics are
+listed in the README of the repository.
 A backend module registers further agents through
 `@kwkevinchan/backstage-plugin-ai-chat-node`.
 `plugins/ai-chat-backend-module-example` in this repository is a private

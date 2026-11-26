@@ -27,6 +27,7 @@ import type { IdGenerator } from './ports/IdGenerator';
 import type { ItemLog, RunFence } from './ports/ItemLog';
 import type { ModelClient } from './ports/ModelClient';
 import type { RunControl } from './ports/RunControl';
+import type { RunObserver } from './ports/RunObserver';
 import type { CallContext, ToolGateway } from './ports/ToolGateway';
 
 /** What `AdvanceRun` needs from outside. @public */
@@ -37,6 +38,8 @@ export type AdvanceRunDeps = {
   clock: Clock;
   ids: IdGenerator;
   extensions: Extensions;
+  /** Receives the measurements of the loop (O-01). Nothing is measured without it. */
+  observer?: RunObserver;
 };
 
 /**
@@ -48,6 +51,8 @@ export type AdvanceRunRequest = {
   agent: AgentDefinition;
   /** The client of the model of the agent (X-09). */
   model: ModelClient;
+  /** The id of that model; the loop only puts it in its measurements. */
+  modelId?: string;
   limits: Limits;
   budget: ContextBudget;
   /** The policy of the administrator; the loop decides every call with it. */

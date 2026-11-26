@@ -17,12 +17,13 @@
 import type { Hooks, RunSummary } from '@kwkevinchan/ai-chat-harness';
 import type { Run } from '../domain';
 import type { Logger } from './ports';
+import type { RunTelemetry } from './RunTelemetry';
 
 /**
- * Tells the `onRunEnd` hooks that a run ended. The caller calls it once it
- * changed the status of the run itself, with the run as stored; a run that
- * waits for an approval has not ended and is ignored. It returns at once: the
- * run does not wait for the hooks.
+ * Tells the `onRunEnd` hooks, and the measurements (O-01), that a run ended.
+ * The caller calls it once it changed the status of the run itself, with the
+ * run as stored; a run that waits for an approval has not ended and is
+ * ignored. It returns at once: the run does not wait for the hooks.
  */
 export type RunEnded = {
   (info: { run: Run; agentId: string; userRef: string }): void;
@@ -50,12 +51,13 @@ export function createRunEnded(deps: {
   hooks: readonly Hooks['onRunEnd'][];
   logger: Logger;
   timeoutMs?: number;
+  /** Measures every run that ends (O-01), with or without hooks. */
+  telemetry?: Pick<RunTelemetry, 'runEnded'>;
 }): RunEnded {
-  const { hooks, logger } = deps;
+  const { hooks, logger, telemetry } = deps;
   const timeoutMs = deps.timeoutMs ?? RUN_END_HOOK_TIMEOUT_MS;
   const running = new Set<Promise<void>>();
   const ended = ({ run, agentId, userRef }: Parameters<RunEnded>[0]): void => {
-    if (hooks.length === 0) return;
     const status = run.status;
     if (
       status !== 'completed' &&
@@ -65,6 +67,15 @@ export function createRunEnded(deps: {
     ) {
       return;
     }
+    telemetry?.runEnded({
+      sessionId: run.sessionId,
+      runId: run.id,
+      agentId,
+      status,
+      ...(run.endReason !== undefined && { endReason: run.endReason }),
+      usage: { ...run.usage },
+    });
+    if (hooks.length === 0) return;
     const summary: RunSummary = {
       sessionId: run.sessionId,
       runId: run.id,

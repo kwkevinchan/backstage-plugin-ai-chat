@@ -141,6 +141,81 @@ describe('HostModelClient (X-09, P-06)', () => {
   });
 });
 
+describe('HostModelClient: the wait for the rate limit (O-01)', () => {
+  const limiterOf = (...turns: object[]) => {
+    const tryAcquire = jest.fn();
+    for (const turn of turns) tryAcquire.mockResolvedValueOnce(turn);
+    return { tryAcquire };
+  };
+
+  it('measures the wait until the turn, and a turn that came at once', async () => {
+    const clock = new FakeClock(new Date('2026-01-01T00:00:45.000Z'));
+    const waited: unknown[] = [];
+    const telemetry = { rateLimitWaited: (r: unknown) => void waited.push(r) };
+    const host = new HostModelClient(inner().client, {
+      modelId: 'small',
+      clock,
+      attachments: noAttachments,
+      rate: {
+        limiter: limiterOf(
+          { acquired: false, retryAt: new Date('2026-01-01T00:01:00.000Z') },
+          { acquired: true },
+          { acquired: true },
+        ),
+        perMinute: 1,
+      },
+      sleep: async () => clock.advance(15),
+      telemetry,
+    });
+
+    await collect(host);
+    await collect(host);
+
+    expect(waited).toEqual([
+      { modelId: 'small', waitMs: 15_000, outcome: 'acquired' },
+      { modelId: 'small', waitMs: 0, outcome: 'acquired' },
+    ]);
+  });
+
+  it('measures a wait that the stop of the run cut short', async () => {
+    const controller = new AbortController();
+    const waited: unknown[] = [];
+    const host = new HostModelClient(inner().client, {
+      modelId: 'small',
+      clock: new FakeClock(),
+      attachments: noAttachments,
+      rate: {
+        limiter: {
+          tryAcquire: async () => ({
+            acquired: false,
+            retryAt: new Date('2026-01-01T00:01:00.000Z'),
+          }),
+        },
+        perMinute: 1,
+      },
+      telemetry: { rateLimitWaited: r => void waited.push(r) },
+    });
+    const done = collect(host, controller.signal);
+    controller.abort();
+    await expect(done).rejects.toBeDefined();
+    expect(waited).toEqual([
+      expect.objectContaining({ modelId: 'small', outcome: 'cancelled' }),
+    ]);
+  });
+
+  it('measures nothing for a model without a rate limit', async () => {
+    const waited: unknown[] = [];
+    const host = new HostModelClient(inner().client, {
+      modelId: 'default',
+      clock: new FakeClock(),
+      attachments: noAttachments,
+      telemetry: { rateLimitWaited: r => void waited.push(r) },
+    });
+    await collect(host);
+    expect(waited).toEqual([]);
+  });
+});
+
 describe('ModelCatalog', () => {
   it('gives the client of the model of the agent, and default for an agent without one', () => {
     const a = inner().client;

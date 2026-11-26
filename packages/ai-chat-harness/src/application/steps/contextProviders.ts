@@ -19,6 +19,7 @@ import type {
   Extensions,
   StepContext,
 } from '../ports/extensions';
+import type { ContextProviderRecord } from '../ports/RunObserver';
 import { settle } from './hooks';
 import { copyStepContext } from './stepContext';
 
@@ -53,8 +54,8 @@ const NOT_AVAILABLE = '(not available in this step)';
 
 type Provided =
   | { aborted: true }
-  | { aborted?: false; failed: true }
-  | { aborted?: false; failed?: false; text?: string };
+  | { aborted?: false; failed: 'failed' | 'timeout' }
+  | { aborted?: false; failed?: undefined; text?: string };
 
 /**
  * Calls one provider with its own copy of the context. The signal it gets
@@ -74,10 +75,11 @@ async function callProvider(
       signal,
     );
     if (ctx.signal.aborted) return { aborted: true };
-    if (settled.aborted || !settled.ok) return { failed: true };
+    if (settled.aborted) return { failed: 'timeout' };
+    if (!settled.ok) return { failed: 'failed' };
     const { value } = settled;
     if (value === undefined) return {};
-    if (typeof value !== 'string') return { failed: true };
+    if (typeof value !== 'string') return { failed: 'failed' };
     return { text: value };
   } finally {
     clearTimeout(timer);
@@ -133,14 +135,18 @@ function block(id: string, text: string): string {
  * per provider in the order of the list, each line of its text quoted, so the
  * text cannot pass for another block. A provider that fails gets a block that
  * says its context is not available; the step goes on. `text` is undefined
- * when no provider has anything to say.
+ * when no provider has anything to say. `providers` says what became of each
+ * provider, in the order of the list (O-01).
  */
 export async function runContextProviders(
   extensions: Extensions,
   ctx: StepContext,
-): Promise<{ aborted: true } | { aborted?: false; text?: string }> {
+): Promise<
+  | { aborted: true }
+  | { aborted?: false; text?: string; providers: ContextProviderRecord[] }
+> {
   const providers = extensions.contextProviders ?? [];
-  if (providers.length === 0) return {};
+  if (providers.length === 0) return { providers: [] };
   if (ctx.signal.aborted) return { aborted: true };
   const results = await Promise.all(
     providers.map(provider => callProvider(provider, ctx)),
@@ -151,15 +157,21 @@ export async function runContextProviders(
 
   const blocks: string[] = [];
   const leftOut: string[] = [];
+  const records: ContextProviderRecord[] = [];
   let remaining = CONTEXT_PROVIDERS_MAX_CHARS;
   providers.forEach((provider, index) => {
     const result = results[index] as Exclude<Provided, { aborted: true }>;
+    const { id } = provider;
     if (result.failed) {
-      blocks.push(block(provider.id, NOT_AVAILABLE));
+      blocks.push(block(id, NOT_AVAILABLE));
+      records.push({ id, status: result.failed, chars: 0 });
       return;
     }
     const text = normalizeProvidedText(result.text ?? '');
-    if (text.length === 0) return;
+    if (text.length === 0) {
+      records.push({ id, status: 'empty', chars: 0 });
+      return;
+    }
     const limited =
       leftOut.length > 0
         ? undefined
@@ -168,17 +180,26 @@ export async function runContextProviders(
             Math.min(CONTEXT_PROVIDER_MAX_CHARS, remaining),
           );
     if (limited === undefined) {
-      leftOut.push(provider.id);
+      leftOut.push(id);
+      records.push({ id, status: 'left_out', chars: 0 });
       return;
     }
     remaining -= limited.length;
-    blocks.push(block(provider.id, limited));
+    blocks.push(block(id, limited));
+    records.push({
+      id,
+      status: limited === text ? 'ok' : 'cut',
+      chars: limited.length,
+    });
   });
   if (leftOut.length > 0) {
     blocks.push(
       `[context left out: ${leftOut.map(id => JSON.stringify(id)).join(', ')}]`,
     );
   }
-  if (blocks.length === 0) return {};
-  return { text: [CONTEXT_NOTICE, ...blocks].join('\n\n') };
+  if (blocks.length === 0) return { providers: records };
+  return {
+    text: [CONTEXT_NOTICE, ...blocks].join('\n\n'),
+    providers: records,
+  };
 }

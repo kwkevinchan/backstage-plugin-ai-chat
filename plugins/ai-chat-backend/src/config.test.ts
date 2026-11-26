@@ -37,6 +37,7 @@ describe('readAiChatConfig', () => {
         timeoutMs: 120000,
         images: false,
         parallelToolCalls: false,
+        reportUsage: true,
       },
       models: new Map(),
       maxTurns: 10,
@@ -102,9 +103,30 @@ describe('readAiChatConfig', () => {
           timeoutMs: 10000,
           images: true,
           parallelToolCalls: false,
+          reportUsage: true,
         },
       ],
     ]);
+  });
+
+  it('reads reportUsage of each model (O-01): true by default, and a value that is not a boolean stops the backend', () => {
+    const read = (aiChat: Record<string, unknown>) =>
+      readAiChatConfig(
+        mockServices.rootConfig({ data: { aiChat: { llm, ...aiChat } } }),
+      );
+    const config = read({
+      llm: { ...llm, reportUsage: false },
+      models: {
+        small: { ...llm, reportUsage: false },
+        large: { ...llm },
+      },
+    });
+    expect(config.llm.reportUsage).toBe(false);
+    expect(config.models.get('small')?.reportUsage).toBe(false);
+    expect(config.models.get('large')?.reportUsage).toBe(true);
+    expect(() => read({ llm: { ...llm, reportUsage: 3 } })).toThrow(
+      'reportUsage',
+    );
   });
 
   it('refuses aiChat.models.default, a bad model id, a bad baseUrl and a requestsPerMinute that is not a positive integer', () => {

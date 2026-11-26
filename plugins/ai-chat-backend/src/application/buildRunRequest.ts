@@ -25,7 +25,7 @@ import {
   type Principal,
   type Session,
 } from '../domain';
-import type { ModelCatalog } from './models';
+import { DEFAULT_MODEL_ID, type ModelCatalog } from './models';
 import type { LaunchRequest } from './RunSupervisor';
 import type { AgentCatalog } from './ports';
 
@@ -61,6 +61,7 @@ export async function buildRunRequest(
   return {
     agent,
     model: deps.models.forAgent(agent),
+    modelId: agent.model ?? DEFAULT_MODEL_ID,
     limits: runLimits(
       deps.settings.limits,
       run.usage,

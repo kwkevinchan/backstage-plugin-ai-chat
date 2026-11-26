@@ -26,6 +26,7 @@ import type { ItemDraft } from '../ports/ItemLog';
 import type { ToolOutput } from '../ports/ToolGateway';
 import type { AdvanceRunDeps, AdvanceRunRequest } from '../types';
 import { runAfterToolCall, settle } from './hooks';
+import { msSince, observeResults, type ResultMeasure } from './observe';
 import { UPDATE_PLAN_TOOL_ID, executeUpdatePlan } from './plan';
 import {
   LOAD_SKILL_TOOL_ID,
@@ -106,6 +107,11 @@ export async function* executeTools(
   items: readonly Item[],
   action: { calls: ToolCallItem[]; interrupted: ToolCallItem[] },
 ): AsyncGenerator<HarnessEvent, 'cancelled' | undefined> {
+  const calls = new Map(
+    [...action.interrupted, ...action.calls].map(call => [call.callId, call]),
+  );
+  // What the loop knows of each result besides the item, for the observer.
+  const measures = new Map<string, ResultMeasure>();
   async function* write(
     ...drafts: ItemDraft[]
   ): AsyncGenerator<HarnessEvent, void> {
@@ -113,6 +119,13 @@ export async function* executeTools(
       req.ctx.sessionId,
       drafts,
       req.fence,
+    );
+    observeResults(
+      deps,
+      req,
+      written,
+      callId => calls.get(callId),
+      callId => measures.get(callId),
     );
     for (const item of written) yield { type: 'item.completed', item };
   }
@@ -125,12 +138,7 @@ export async function* executeTools(
       message:
         'The call started but its result was lost. It may or may not have run, and it is not run again.',
     }));
-    const written = await deps.items.append(
-      req.ctx.sessionId,
-      unknown,
-      req.fence,
-    );
-    for (const item of written) yield { type: 'item.completed', item };
+    yield* write(...unknown);
   }
 
   // A change that went over its time may still run: the later changes of the
@@ -139,13 +147,21 @@ export async function* executeTools(
   for (const batch of batchesOf(action.calls)) {
     if (req.signal.aborted) return undefined;
     if (batch.concurrent) {
-      const done = yield* runConcurrently(deps, req, items, batch.calls, write);
+      const done = yield* runConcurrently(
+        deps,
+        req,
+        items,
+        batch.calls,
+        write,
+        measures,
+      );
       if (done === 'aborted') return undefined;
       continue;
     }
     const [call] = batch.calls;
     const decision = decisionFor(items, call);
     if (decision === 'allow' && writeTimedOut) {
+      measures.set(call.callId, { reason: 'earlier_write_timed_out' });
       yield* write({
         kind: 'tool_result',
         callId: call.callId,
@@ -163,7 +179,7 @@ export async function* executeTools(
       yield* write({ kind: 'tool_started', callId: call.callId });
       if (req.signal.aborted) return undefined;
     }
-    const outcome = await settleCall(deps, req, call, decision);
+    const outcome = await settleCall(deps, req, call, decision, measures);
     if (outcome.kind === 'aborted') return undefined;
     if (outcome.kind === 'write') {
       if (outcome.timedOut) writeTimedOut = true;
@@ -213,6 +229,7 @@ async function* runConcurrently(
   items: readonly Item[],
   calls: readonly ToolCallItem[],
   write: (...drafts: ItemDraft[]) => AsyncGenerator<HarnessEvent, void>,
+  measures: Map<string, ResultMeasure>,
 ): AsyncGenerator<HarnessEvent, 'aborted' | undefined> {
   const limit = Math.max(1, req.limits.readConcurrency);
   const decisions = calls.map(call => decisionFor(items, call));
@@ -253,6 +270,7 @@ async function* runConcurrently(
           callReq,
           calls[index],
           decisions[index],
+          measures,
         ).then(outcome => {
           outcomes[index] = outcome;
           running.delete(task);
@@ -287,15 +305,18 @@ function decisionFor(
 /**
  * The outcome of one call with its decision: runs it when it is `allow`,
  * within its time, and passes the result through the `afterToolCall` hooks.
+ * What it measures goes to `measures`.
  */
 async function settleCall(
   deps: AdvanceRunDeps,
   req: AdvanceRunRequest,
   call: ToolCallItem,
   decision: 'allow' | 'deny' | undefined,
+  measures: Map<string, ResultMeasure>,
 ): Promise<Outcome> {
   if (decision === undefined) return { kind: 'skip' };
   if (decision === 'deny') {
+    measures.set(call.callId, { reason: 'user' });
     return {
       kind: 'write',
       drafts: [
@@ -328,8 +349,10 @@ async function settleCall(
       ],
     };
   }
-  const raw = await runInTime(deps, req, call);
-  if (!raw) return { kind: 'aborted' };
+  const ran = await runInTime(deps, req, call);
+  if (!ran) return { kind: 'aborted' };
+  const { output: raw, durationMs } = ran;
+  measures.set(call.callId, { durationMs });
   const output = await runAfterToolCall(deps.extensions, call, raw, req.signal);
   return {
     kind: 'write',
@@ -340,9 +363,19 @@ async function settleCall(
 
 /**
  * Runs one call with a signal that also aborts after `toolTimeoutSeconds`
- * (P-02). `undefined` means the run stopped first.
+ * (P-02), and how long it took. `undefined` means the run stopped first.
  */
 async function runInTime(
+  deps: AdvanceRunDeps,
+  req: AdvanceRunRequest,
+  call: ToolCallItem,
+): Promise<{ output: ToolOutput; durationMs: number } | undefined> {
+  const startedAt = deps.clock.now().getTime();
+  const output = await runWithTimeout(deps, req, call);
+  return output && { output, durationMs: msSince(deps, startedAt) };
+}
+
+async function runWithTimeout(
   deps: AdvanceRunDeps,
   req: AdvanceRunRequest,
   call: ToolCallItem,
