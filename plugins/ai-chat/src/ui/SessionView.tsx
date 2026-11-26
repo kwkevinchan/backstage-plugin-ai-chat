@@ -16,6 +16,8 @@
 
 import { useCallback, useState } from 'react';
 import { AssistantRuntimeProvider, ThreadPrimitive } from '@assistant-ui/react';
+import { useApiHolder } from '@backstage/core-plugin-api';
+import { aiChatToolResultsApiRef } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import type {
   ChatPageContext,
   ChatSessionDetail,
@@ -62,6 +64,7 @@ export function SessionView(props: SessionViewProps) {
   });
   const [enabled, setEnabled] = useState(detail.session.enabledToolsets);
   const tools = useSessionTools(api, detail.session.id, enabled.join(','));
+  const toolResults = useApiHolder().get(aiChatToolResultsApiRef);
   const [toolsetError, setToolsetError] = useState<string>();
 
   const changeToolsets = useCallback(
@@ -129,6 +132,7 @@ export function SessionView(props: SessionViewProps) {
           notice={chat.notice}
           tools={tools}
           decisions={chat.decisions}
+          toolResults={toolResults}
           error={chat.error}
           interrupted={chat.interrupted && chat.canResend}
           onSendAgain={chat.sendAgain}

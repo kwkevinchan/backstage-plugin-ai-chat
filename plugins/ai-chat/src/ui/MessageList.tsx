@@ -28,6 +28,7 @@ import type {
   ChatNoticeData,
   ChatTool,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { AiChatToolResultsApi } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import type { DecisionInfo } from '../domain/itemsToMessages';
 import { UPDATE_PLAN_TOOL } from '../domain/plan';
 import type { ChatUnreadData } from '../domain/types';
@@ -59,6 +60,8 @@ export interface MessageListProps {
   /** The tools of the session by id, and who decided which call. */
   tools?: Record<string, ChatTool>;
   decisions?: Record<string, DecisionInfo>;
+  /** The result components of the plugins, by action id. */
+  toolResults?: AiChatToolResultsApi;
   error?: string;
   /** The last run stopped before it gave an answer. */
   interrupted?: boolean;
@@ -168,6 +171,7 @@ export function MessageList(props: MessageListProps) {
         tools: props.tools,
         decisions: props.decisions,
         disabled: props.disabled || props.busy,
+        toolResults: props.toolResults,
       }}
     >
       <SendTextAgainContext.Provider value={props.onSendTextAgain}>

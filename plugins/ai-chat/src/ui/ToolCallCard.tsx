@@ -18,6 +18,7 @@ import { createContext, useContext } from 'react';
 import type { ToolCallMessagePartProps } from '@assistant-ui/react';
 import { Button } from '@backstage/ui';
 import type { ChatTool } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { AiChatToolResultsApi } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import type { DecisionInfo } from '../domain/itemsToMessages';
 import {
   NOT_RUN,
@@ -27,6 +28,7 @@ import {
 } from '../domain/toolView';
 import { LinkedText } from './LinkedText';
 import { cx } from './styles';
+import { ToolResult } from './ToolResult';
 
 /** What a tool card reads of the call: the props of a tool component of assistant-ui. */
 export type ToolCallProps = Pick<
@@ -326,6 +328,8 @@ export interface ToolCallView {
   decisions?: Record<string, DecisionInfo>;
   /** Set while a decision is being sent, or a response is under way. */
   disabled: boolean;
+  /** The result components of the plugins. */
+  toolResults?: AiChatToolResultsApi;
 }
 
 export const ToolCallViewContext = createContext<ToolCallView>({
@@ -339,14 +343,23 @@ export const ToolCallViewContext = createContext<ToolCallView>({
 export function ToolCall(props: ToolCallMessagePartProps) {
   const view = useContext(ToolCallViewContext);
   const tool = view.tools?.[props.toolName];
-  return needsCard(props) ? (
-    <ApprovalCard
-      call={props}
-      tool={tool}
-      decision={view.decisions?.[props.toolCallId]}
-      disabled={view.disabled}
-    />
-  ) : (
-    <ToolCallRow call={props} tool={tool} />
+  return (
+    <>
+      {needsCard(props) ? (
+        <ApprovalCard
+          call={props}
+          tool={tool}
+          decision={view.decisions?.[props.toolCallId]}
+          disabled={view.disabled}
+        />
+      ) : (
+        <ToolCallRow call={props} tool={tool} />
+      )}
+      <ToolResult
+        call={props}
+        title={tool?.title ?? titleOfTool(props.toolName)}
+        toolResults={view.toolResults}
+      />
+    </>
   );
 }

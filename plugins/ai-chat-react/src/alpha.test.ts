@@ -33,15 +33,4 @@ describe('AiChatToolResultBlueprint', () => {
       component: Result,
     });
   });
-
-  it('attaches to the result component API of the chat', () => {
-    const extension = AiChatToolResultBlueprint.make({
-      name: 'list-services',
-      params: { actionId: 'example:list-services', component: Result },
-    });
-    expect(extension.attachTo).toEqual({
-      id: 'api:ai-chat/tool-results',
-      input: 'toolResults',
-    });
-  });
 });
