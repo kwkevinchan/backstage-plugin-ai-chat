@@ -11,6 +11,9 @@ import { ResourcePermission } from '@backstage/plugin-permission-common';
 export const aiChatSessionReadPermission: ResourcePermission<'ai-chat-session'>;
 
 // @public
+export const aiChatToolsetUsePermission: ResourcePermission<'ai-chat-toolset'>;
+
+// @public
 export interface ChatAttachment {
   // (undocumented)
   id: string;

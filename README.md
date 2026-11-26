@@ -254,6 +254,12 @@ aiChat:
     tokenBudget: 100000 # estimated tokens of the model input; default 100000
     keepRecentSteps: 6 # newest steps that are never shortened; default 6
   maxToolOutputChars: 20000 # output stored and sent to the model, also of load_skill; default 20000, at least 100
+  toolOutput: # optional; by action ID pattern (* matches any characters)
+    '*':
+      redact: [password, token] # field names hidden at any depth
+    'catalog:get-entity':
+      maxOutputChars: 4000 # lower than maxToolOutputChars for this action
+  writesPerMinute: 20 # optional; changes one user may make per minute, over all backends
   # What the user may add while a run goes on
   input:
     insert:
@@ -343,6 +349,9 @@ exactly `days` ago is kept.
 | `input.images.maxPendingPerSession`                      | Most uploaded images in one session not yet in any message (`12` by default). Unused images are deleted after 24 hours.                                                                                                                                                                                                                              |
 | `input.images.tokensPerImage`                            | Estimated tokens one image uses in `context.tokenBudget` (`1600` by default). Set it for the model you use.                                                                                                                                                                                                                                          |
 | `maxToolOutputChars`                                     | The output of an action, and the output of `load_skill`, is cut here, and the cut is stated.                                                                                                                                                                                                                                                         |
+| `toolOutput.<pattern>.redact`                            | Field names whose values become `"[redacted]"` in the output of the matching actions, at any depth, before the output is cut. The hidden values are not stored, streamed or sent to the model. An output nested deeper than 100 levels is not kept: the result is an error.                                                                          |
+| `toolOutput.<pattern>.maxOutputChars`                    | A lower limit than `maxToolOutputChars` for the matching actions (at least 100). When patterns overlap, the smallest limit and every field apply. `update_plan` and `load_skill` are not actions and keep `maxToolOutputChars`.                                                                                                                      |
+| `writesPerMinute`                                        | Most actions that are not read-only one user may run per minute, over all sessions and backends (1 to 10000; no limit when not set). A change over the limit does not run, even after the approval: the result is an error that says so, and the run goes on. Up to twice the limit can run around the turn of a minute.                             |
 | `sharing.live.enabled`                                   | Whether a share may keep updating. Default true. Creating or changing a share is not in this version, so this is only checked and kept.                                                                                                                                                                                                              |
 | `sharing.live.defaultHours`                              | Hours a live share lasts when nobody picks a life. Default 24. A positive integer, at most `maxHours`.                                                                                                                                                                                                                                               |
 | `sharing.live.maxHours`                                  | Longest life of a live share, in hours. Default 72. A positive integer, at least `defaultHours`.                                                                                                                                                                                                                                                     |
@@ -372,6 +381,35 @@ of the chat, above the messages), only the ones that you define.
 - An action without the `readOnly` attribute counts as not read-only.
 - `egress: true` is for actions that send data out of the organization. They
   ask even when they only read.
+- Who may use a toolset is the permission `ai-chat.toolset.use` (resource type
+  `ai-chat-toolset`, the toolset id). The tools of a toolset the user may not
+  use are not offered, the toolset is not listed, and a session cannot switch
+  it on. Without the permission framework (`permission.enabled: false`, the
+  default of Backstage) everyone may use every toolset.
+
+A permission policy narrows the toolsets with the `isToolset` condition:
+
+```ts
+import {
+  AuthorizeResult,
+  isResourcePermission,
+} from '@backstage/plugin-permission-common';
+import {
+  aiChatToolsetConditions,
+  createAiChatToolsetConditionalDecision,
+} from '@kwkevinchan/backstage-plugin-ai-chat-backend';
+
+// in handle(request, user) of your PermissionPolicy
+if (isResourcePermission(request.permission, 'ai-chat-toolset')) {
+  if (user?.info.ownershipEntityRefs.includes('group:default/sre')) {
+    return { result: AuthorizeResult.ALLOW };
+  }
+  return createAiChatToolsetConditionalDecision(
+    request.permission,
+    aiChatToolsetConditions.isToolset({ toolsetIds: ['catalog'] }),
+  );
+}
+```
 
 `actions.include` and `actions.exclude` are deprecated. Without `toolsets`
 they make the one default toolset, with `toolsets` they are ignored, and the
@@ -388,7 +426,9 @@ The system prompt of a configured agent is the built-in rules plus that
 agent's `systemPrompt`. When the agent omits `systemPrompt`, the installation
 `aiChat.systemPrompt` is used instead. The two extra texts are not combined.
 `toolsets` names toolsets from `aiChat.toolsets` (or `default`, when no
-toolsets are configured). `skills` chooses the skills the agent offers (see
+toolsets are configured); only their tools go to the model, `[]` gives none,
+and an agent without `toolsets` has them all. A session may still have
+another toolset switched on; it gives no tools to that agent. `skills` chooses the skills the agent offers (see
 below); an id that no skill has stops the backend. `planning: required`
 gives the agent only the `update_plan` tool in the first step of every run, so
 it writes a plan before it does anything else. `model` chooses the model of the
@@ -402,8 +442,7 @@ Every agent has the read-only built-in `update_plan` tool (`allow` by default;
 plan is in the context of every step, and the chat shows each update as a
 checklist.
 
-The loop still uses the limits of the installation. It does not filter tools
-by the agent's toolsets. When skills
+The loop still uses the limits of the installation. When skills
 are registered through `aiChat.skills.directories` (`SKILL.md`) or `addSkill`,
 the prompt lists only each allowed skill's `id` and short `description`; the
 full instructions are loaded on demand by the read-only built-in `load_skill`
