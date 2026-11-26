@@ -1294,6 +1294,85 @@
           </li>
           <li><b>隨時可以停止。</b>已經查到的結果會留著。</li>
         </ul>
+        <div class="block">
+          <h3>圖片、進行中插入與排隊</h3>
+          <p>
+            模型支援圖片時，輸入框會顯示
+            <code>Attach</code>（也能直接貼上或拖放圖片）。
+            對話正在執行時，輸入框不會鎖住：你可以把補充說明直接插入這一輪，或先排進佇列等這一輪結束後自動送出。
+          </p>
+          <div
+            class="mock mock-one"
+            role="img"
+            aria-label="進行中的對話示意：上方是帶圖片的訊息與進行中狀態，輸入框上方依序是 Queued (2) 排隊清單與 Waiting to be read 插入清單，最下方是附有 Attach 的輸入列"
+          >
+            <div class="mock-main">
+              <div class="mock-h">進行中的對話示意</div>
+              <div class="msg me">
+                幫我查 payments 為什麼一直重啟，順便看這張截圖
+                <span class="pill ok">payments-error.png</span>
+              </div>
+              <div class="row">
+                <span class="pill ext">進行中</span>
+                <span>正在讀取日誌與服務狀態…</span>
+              </div>
+              <div class="group">
+                <div class="gh">Queued (2)（這一輪正常結束後依序自動送出）</div>
+                <div class="row">
+                  <span>查完幫我整理一份事故時間線</span>
+                  <span class="pill off">Up</span>
+                  <span class="pill off">Down</span>
+                  <span class="pill off">Edit</span>
+                  <span class="pill off">Delete</span>
+                  <span class="pill off">Send now</span>
+                </div>
+                <div class="row">
+                  <span>再確認 billing 有沒有一起受影響</span>
+                  <span class="pill off">Up</span>
+                  <span class="pill off">Down</span>
+                  <span class="pill off">Edit</span>
+                  <span class="pill off">Delete</span>
+                  <span class="pill off">Send now</span>
+                </div>
+              </div>
+              <div class="group">
+                <div class="gh">
+                  Waiting to be read（已插入這一輪，下一步模型會讀到）
+                </div>
+                <div class="row">
+                  <span>只看最近 15 分鐘的錯誤就好</span>
+                  <span class="pill ok">metrics.png</span>
+                </div>
+              </div>
+              <div class="row">
+                <span class="pill gate">Attach</span>
+                <span class="muted">輸入補充訊息…</span>
+                <span class="pill ext">Enter 插入</span>
+                <span class="pill off">Ctrl+Enter 排隊</span>
+              </div>
+            </div>
+          </div>
+          <p class="mock-note">這是示意畫面，不能操作。</p>
+          <ul class="rules">
+            <li>
+              <b>圖片附件：</b>支援
+              PNG、JPEG、WebP、GIF；上傳後會顯示縮圖，送出前可以移除；送出後，訊息裡的縮圖重新整理後仍看得到。模型不支援圖片時不顯示
+              <code>Attach</code>。
+            </li>
+            <li>
+              <b>進行中插入（Enter）：</b>訊息會顯示在輸入框上方的「Waiting to
+              be
+              read」，模型在下一個步驟讀入後出現在對話裡。若這輪還沒讀到就結束，會標示未讀。
+            </li>
+            <li>
+              <b>排隊（Ctrl+Enter／Cmd+Enter）與「現在就送」：</b
+              >停在等待核准時只能排隊。排隊中的訊息可以編輯、調整順序、刪除，或按
+              <code>Send now</code>
+              改成插入目前這輪；若上一輪失敗、取消或逾時，佇列會先暫停，等你按
+              <code>Continue</code> 或先送出一則新訊息。
+            </li>
+          </ul>
+        </div>
       </section>
 
       <!-- ===================== SHARE ===================== -->
@@ -1639,6 +1718,14 @@
                   知道你正在看哪一頁。部署時被中斷的一次執行會停在「The last run
                   stopped before it gave an answer.」，旁邊有「Send the message
                   again」可以重送。對話列表還沒有自動標題
+                </td>
+              </tr>
+              <tr>
+                <td class="who">PI 輸入（已完成）</td>
+                <td>
+                  訊息附加圖片（按鈕、貼上、拖放，送出後重新整理仍看得到）。執行中按
+                  Enter 插入這一輪，按 Ctrl+Enter／Cmd+Enter
+                  排進佇列，可編輯、上下移動、刪除或按 Send now 改成插入
                 </td>
               </tr>
               <tr>
