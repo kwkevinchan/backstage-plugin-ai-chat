@@ -131,7 +131,7 @@ describe('attachment adapter: the upload', () => {
     const { adapter, upload } = setup();
     const file = png();
     const states = await statesOf(adapter.add({ file }));
-    expect(upload).toHaveBeenCalledWith(file, expect.any(Function));
+    expect(upload).toHaveBeenCalledWith(file);
     expect(states.map(s => s.status)).toEqual([
       { type: 'running', reason: 'uploading', progress: 0 },
       { type: 'complete' },

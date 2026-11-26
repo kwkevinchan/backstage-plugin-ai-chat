@@ -499,6 +499,8 @@ describe('the new conversation with images', () => {
       expect(screen.getByLabelText('Message')).toHaveValue('go'),
     );
     expect(screen.getByRole('button', { name: 'Remove a.png' })).toBeVisible();
+    // The image put back has no file to preview: its name stands for it.
+    expect(screen.getByText('a.png')).toBeVisible();
     expect(api.sendMessage).not.toHaveBeenCalled();
     expect(where()).toBe('/ai-chat');
   });

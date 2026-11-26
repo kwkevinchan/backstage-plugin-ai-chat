@@ -1277,7 +1277,7 @@ plugins/ai-chat/src/
 
 - 給了 `queue` 之後，沒有 Run 時的送出也走 `enqueue`（Run 進行中 Enter 走 `steer`），不走 `onNew`，所以「沒有 Run 就直接送出」在 adapter 背後的 `useSessionChat`。訊息沒被收下時，文字放回輸入框。
 - `composer.queue` 是兩條道合起來的清單，steer 在前。插入的訊息的 id 是 `inserted-<seq>`，排隊的用後端的 id；畫面用 `laneOf` 分辨。插入的訊息不能改、刪、移動。
-- adapter 的方法回傳 Promise（`false` 是沒有改變），比介面的 `void` 多給畫面用；另有 `editText`、`laneOf`、`imageCountOf`。
+- adapter 的方法回傳 Promise（`false` 是沒有改變），比介面的 `void` 多給畫面用；另有 `editText`、`laneOf`、`attachmentsOf`。
 - 「現在就送」只在 Run 是 `running` 時能按，請求進行中不能再按。按下時先讀一次佇列：那一則已經不在就說明並停下；在的話送出，畫面用回應裡實際寫入的內容（別的分頁改過時就是改過的內容）。404：說明並重新讀佇列。409 `RunNotRunning`：說明並重新讀 Session。409 `InsertLimitReached`：說明，訊息留在佇列。
 - 佇列的上限來自 `GET /input-config` 的 `queueMaxMessages`（還沒回來時用 5），滿了在佇列區塊說明。
 
@@ -1303,7 +1303,7 @@ Session 列表（`threadListAdapter`，實作 `RemoteThreadListAdapter`）。
 | `accept`        | `GET /input-config` 的四種圖片型別。型別不對的檔案由 assistant-ui 擋下                                                                                                |
 | `add({ file })` | 先檢查大小和張數（上限來自 `input-config`），不符合就丟錯、不上傳。符合就開始上傳（`POST …/attachments`），依序回報上傳中、完成（`complete`，內容是我們的附件）或失敗 |
 | `send(附件)`    | 只有上傳失敗的那張會走到這裡：丟出失敗的原因，整則留在輸入框，不再上傳                                                                                                |
-| `remove(附件)`  | 還在上傳的那張不再進草稿。沒有刪除附件的 API，沒用到的附件照後端的規則在 24 小時後刪除                                                                                |
+| `remove(附件)`  | 還在上傳的那張不再進草稿。已知限制：沒有刪除附件的 API，移除的圖片仍算進後端的 `maxPendingPerSession`，約 24 小時後才刪除                                             |
 
 - 張數算草稿裡的圖片加上這一刻同時開始加入的：同一次拖放或選檔的幾張是同時加入的。
 - 上傳完成的圖片在 `add` 的最後一個狀態就是 `complete`。`add` 的型別只列未完成的狀態，0.15.38 照樣收下。帶著未完成附件的訊息，assistant-ui 會當成「送出中」，在 thread 裡多畫一則，直到 thread 出現新的使用者訊息；插入和排隊的訊息不會變成那樣的一則，多出來的那則會留著。所以圖片還在上傳時，送出、排隊和 Enter 都先停用。

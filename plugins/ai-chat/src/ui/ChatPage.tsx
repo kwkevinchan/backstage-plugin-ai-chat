@@ -203,14 +203,9 @@ function NewSession({ api, basePath, toolsets, onChanged }: Basics) {
       images?.enabled
         ? {
             limits: images,
-            upload: async (file, onProgress) => {
+            upload: async file => {
               const session = await ensureSession();
-              return api.uploadAttachment(
-                session.id,
-                file,
-                file.name,
-                onProgress,
-              );
+              return api.uploadAttachment(session.id, file, file.name);
             },
           }
         : undefined,

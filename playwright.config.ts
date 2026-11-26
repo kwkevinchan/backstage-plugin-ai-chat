@@ -30,6 +30,9 @@ import { defineConfig } from '@playwright/test';
  * servers on other ports (start them yourself, with the same ports in the
  * app config); FAKE_LLM_PORT moves the scripted model server (and the
  * backend reaches it with AI_CHAT_BASE_URL).
+ *
+ * Outside CI a backend that already runs is used as it is: start it with
+ * APP_CONFIG_aiChat_llm_images=true, or the image tests find no Attach button.
  */
 const app = process.env.SMOKE_APP ?? 'app';
 const appUrl = process.env.SMOKE_APP_URL ?? 'http://localhost:3000';

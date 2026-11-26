@@ -567,6 +567,9 @@
   color: var(--bui-fg-secondary);
   overflow-wrap: anywhere;
 }
+.chat-draft-name {
+  overflow-wrap: anywhere;
+}
 .chat-draft-failed {
   color: var(--bui-fg-danger);
 }

@@ -109,8 +109,7 @@ export function SessionView(props: SessionViewProps) {
       images?.enabled
         ? {
             limits: images,
-            upload: (file, onProgress) =>
-              api.uploadAttachment(sessionId, file, file.name, onProgress),
+            upload: file => api.uploadAttachment(sessionId, file, file.name),
             onAdd: rejections.begin,
           }
         : undefined,

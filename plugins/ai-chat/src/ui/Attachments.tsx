@@ -113,7 +113,12 @@ function DraftImage() {
   const preview = useFileUrl(file);
   return (
     <AttachmentPrimitive.Root className={cx('chat-draft')}>
-      {preview && <img src={preview} alt={name} />}
+      {/* An image put back into the box after a refused send has no file. */}
+      {preview ? (
+        <img src={preview} alt={name} />
+      ) : (
+        <span className={cx('chat-draft-name')}>{name}</span>
+      )}
       {status.type === 'running' && (
         <span className={cx('chat-draft-meta')} role="status">
           Uploading...

@@ -36,10 +36,7 @@ export interface ImageLimits {
 export interface AttachmentSource {
   limits: ImageLimits;
   /** Uploads one image to the session. */
-  upload(
-    file: File,
-    onProgress: (loaded: number, total: number) => void,
-  ): Promise<ChatAttachment>;
+  upload(file: File): Promise<ChatAttachment>;
   /** Called when `add` starts, before its checks. */
   onAdd?(): void;
 }
@@ -186,7 +183,7 @@ export function createAttachmentAdapter(
       };
       shown();
       try {
-        const attachment = await source.upload(file, () => {});
+        const attachment = await source.upload(file);
         if (removed.has(base.id)) return;
         yield {
           ...toCompleteAttachment(attachment),

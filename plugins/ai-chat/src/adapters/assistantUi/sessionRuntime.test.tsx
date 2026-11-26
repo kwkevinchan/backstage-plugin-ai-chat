@@ -324,7 +324,7 @@ describe('useSessionRuntime', () => {
           'dot.png:complete',
         ),
       );
-      expect(upload).toHaveBeenCalledWith(dot, expect.any(Function));
+      expect(upload).toHaveBeenCalledWith(dot);
       await userEvent.click(screen.getByText('Send'));
       await waitFor(() =>
         expect(onSend).toHaveBeenCalledWith({
