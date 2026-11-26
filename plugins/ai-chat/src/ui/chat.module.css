@@ -271,7 +271,8 @@
   white-space: nowrap;
 }
 .chat-markdown a,
-.chat-code a {
+.chat-code a,
+.chat-tool-result a {
   color: var(--bui-fg-info);
   text-decoration: underline;
 }
@@ -332,6 +333,8 @@
 .chat-tool-result {
   align-self: flex-start;
   width: min(760px, 100%);
+  /* With overflow set, a flex item could shrink below its content. */
+  flex-shrink: 0;
   overflow-x: auto;
   font-size: var(--bui-font-size-2);
   color: var(--bui-fg-primary);

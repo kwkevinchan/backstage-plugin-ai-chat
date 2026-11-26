@@ -490,6 +490,13 @@ test('a plugin shows the result of an action with its own component', async ({
   ).toBeVisible();
   const payments = result.getByRole('row', { name: /payments/ });
   await expect(payments).toContainText('running');
+  // A row for each service, all shown: the result does not scroll inside.
+  await expect(result.getByRole('row')).toHaveCount(4);
+  expect(
+    await result.evaluate(
+      element => element.scrollHeight <= element.clientHeight,
+    ),
+  ).toBe(true);
   await expect(
     payments.getByRole('link', { name: 'payments' }),
   ).toHaveAttribute('href', /\/catalog\/default\/component\/example-payments$/);
