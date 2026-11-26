@@ -644,6 +644,7 @@ describe('the host on a real database', () => {
       const a = backend([[say('hi')]], {
         items: (inner: ItemLog): ItemLog => ({
           read: (...args) => inner.read(...args),
+          latestPlanUpdate: (...args) => inner.latestPlanUpdate(...args),
           append: async (sessionId, drafts, fence) => {
             if (drafts.some(d => d.kind === 'agent_message')) {
               throw new Error('database is down');

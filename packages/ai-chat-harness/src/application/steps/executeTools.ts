@@ -26,6 +26,7 @@ import type { ItemDraft } from '../ports/ItemLog';
 import type { ToolOutput } from '../ports/ToolGateway';
 import type { AdvanceRunDeps, AdvanceRunRequest } from '../types';
 import { runAfterToolCall } from './hooks';
+import { UPDATE_PLAN_TOOL_ID, executeUpdatePlan } from './plan';
 import {
   LOAD_SKILL_TOOL_ID,
   executeLoadSkill,
@@ -53,6 +54,8 @@ type Batch = { calls: ToolCallItem[]; concurrent: boolean };
  * - A failure of the tool, or no answer from it, is an `error` result; it does
  *   not end the run. When the signal aborts, the call is left as it is and
  *   nothing is written for it.
+ * - `update_plan` runs in the core: a valid call writes a `plan_update` item,
+ *   then its result.
  * - The `afterToolCall` hooks may change the result before it is written. The
  *   tool has run by then, so a stop while they run writes an `error` result.
  * - Before each call that is not read-only the loop asks `heartbeat`. When the
@@ -111,7 +114,18 @@ export async function* executeTools(
           yield* write({ kind: 'tool_started', callId: call.callId });
           if (req.signal.aborted) return undefined;
         }
-        const raw = await run(deps, req, call);
+        let raw: ToolOutput | undefined;
+        if (call.toolId === UPDATE_PLAN_TOOL_ID) {
+          // The plan is the effect of the call: it is written before the
+          // hooks see the result, as a tool has run before they do.
+          const updated = executeUpdatePlan(call);
+          if (updated.plan) {
+            yield* write({ kind: 'plan_update', plan: updated.plan });
+          }
+          raw = updated.output;
+        } else {
+          raw = await run(deps, req, call);
+        }
         if (!raw) return undefined;
         const output = await runAfterToolCall(
           deps.extensions,

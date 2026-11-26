@@ -32,6 +32,8 @@ export {
   type ToolCall,
   type ToolResult,
 } from './ports/extensions';
+export { readCurrentPlan } from './plan';
+export { UPDATE_PLAN_TOOL_ID, updatePlanDescriptor } from './steps/plan';
 export {
   LOAD_SKILL_TOOL_ID,
   loadSkillDescriptor,

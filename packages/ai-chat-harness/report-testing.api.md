@@ -14,6 +14,7 @@ import type { JsonValue } from '@kwkevinchan/ai-chat-harness';
 import type { ModelChunk } from '@kwkevinchan/ai-chat-harness';
 import type { ModelClient } from '@kwkevinchan/ai-chat-harness';
 import type { ModelInput } from '@kwkevinchan/ai-chat-harness';
+import { PlanUpdateItem } from '@kwkevinchan/ai-chat-harness';
 import type { RunControl } from '@kwkevinchan/ai-chat-harness';
 import { RunFence } from '@kwkevinchan/ai-chat-harness';
 import type { RunUsage } from '@kwkevinchan/ai-chat-harness';
@@ -101,6 +102,8 @@ export class InMemoryItemLog implements ItemLog {
     fence: RunFence,
   ): Promise<Item[]>;
   grantLease(sessionId: string, fence: RunFence): void;
+  // (undocumented)
+  latestPlanUpdate(sessionId: string): Promise<PlanUpdateItem | undefined>;
   // (undocumented)
   read(
     sessionId: string,

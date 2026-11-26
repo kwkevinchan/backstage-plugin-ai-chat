@@ -331,6 +331,7 @@ describe('TechDocs search through the search:query action (X-08)', () => {
       .expect(200);
     expect(tools.body.items).toEqual([
       expect.objectContaining({ id: 'search:query', readOnly: true }),
+      expect.objectContaining({ id: 'update_plan', readOnly: true }),
     ]);
 
     const part = await searchPart(stream);

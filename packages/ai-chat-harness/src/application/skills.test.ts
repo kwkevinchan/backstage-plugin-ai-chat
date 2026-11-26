@@ -23,6 +23,7 @@ import type {
 import {
   AdvanceRun,
   LOAD_SKILL_TOOL_ID,
+  UPDATE_PLAN_TOOL_ID,
   emptyExtensions,
   type AdvanceRunRequest,
   type Extensions,
@@ -195,6 +196,7 @@ describe('AdvanceRun: skills and load_skill (X-04)', () => {
           },
         }),
       }),
+      expect.objectContaining({ id: UPDATE_PLAN_TOOL_ID }),
     ]);
 
     // Loaded lazily only once for the requested skill, with full StepContext.
@@ -295,7 +297,9 @@ describe('AdvanceRun: skills and load_skill (X-04)', () => {
     expect(emptyAgentHarness.model.inputs[0].system).not.toContain(
       'Available skills',
     );
-    expect(emptyAgentHarness.model.inputs[0].tools).toEqual([]);
+    expect(
+      emptyAgentHarness.model.inputs[0].tools.map(tool => tool.id),
+    ).toEqual([UPDATE_PLAN_TOOL_ID]);
     expect(unusedLoad).not.toHaveBeenCalled();
     expect(
       (await emptyAgentHarness.read()).find(i => i.kind === 'tool_result'),
@@ -312,7 +316,9 @@ describe('AdvanceRun: skills and load_skill (X-04)', () => {
       'Available skills',
     );
     expect(noSkillsHarness.model.inputs[0].system).not.toContain('load_skill');
-    expect(noSkillsHarness.model.inputs[0].tools).toEqual([]);
+    expect(noSkillsHarness.model.inputs[0].tools.map(tool => tool.id)).toEqual([
+      UPDATE_PLAN_TOOL_ID,
+    ]);
   });
 
   it('rejects malformed load_skill arguments at validation time without calling load()', async () => {
@@ -385,7 +391,9 @@ describe('AdvanceRun: skills and load_skill (X-04)', () => {
       expect(denyHarness.model.inputs[0].system).not.toContain(
         'Available skills',
       );
-      expect(denyHarness.model.inputs[0].tools).toEqual([]);
+      expect(denyHarness.model.inputs[0].tools.map(tool => tool.id)).toEqual([
+        UPDATE_PLAN_TOOL_ID,
+      ]);
       expect(
         (await denyHarness.read()).find(i => i.kind === 'tool_result'),
       ).toMatchObject({ status: 'denied' });

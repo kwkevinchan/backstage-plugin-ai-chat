@@ -466,6 +466,7 @@ describe('two backends on one database', () => {
         {
           items: inner => ({
             read: (...args) => inner.read(...args),
+            latestPlanUpdate: (...args) => inner.latestPlanUpdate(...args),
             append: async (sessionId, drafts, fence) => {
               if (!moved && drafts.some(d => d.kind === 'tool_call')) {
                 moved = true;

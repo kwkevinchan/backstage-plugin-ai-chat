@@ -575,3 +575,56 @@
   border: 0;
   border-radius: 0;
 }
+
+/* The plan of an update_plan call */
+.chat-plan {
+  align-self: flex-start;
+  box-sizing: border-box;
+  width: min(760px, 100%);
+  padding: var(--bui-space-2) var(--bui-space-3);
+  border: 1px solid var(--bui-border-1);
+  border-radius: var(--bui-radius-2);
+  background: var(--bui-bg-neutral-1);
+  color: var(--bui-fg-primary);
+  font-size: var(--bui-font-size-2);
+}
+.chat-plan-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--bui-space-2);
+  font-weight: var(--bui-font-weight-bold);
+}
+.chat-plan-count {
+  color: var(--bui-fg-secondary);
+  font-size: var(--bui-font-size-1);
+  font-weight: var(--bui-font-weight-regular);
+}
+.chat-plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bui-space-1);
+  margin: var(--bui-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.chat-plan-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--bui-space-2);
+}
+.chat-plan-mark {
+  flex: none;
+  width: 1.2em;
+  color: var(--bui-fg-secondary);
+  text-align: center;
+}
+.chat-plan-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.chat-plan-item-completed .chat-plan-text {
+  color: var(--bui-fg-secondary);
+  text-decoration: line-through;
+}

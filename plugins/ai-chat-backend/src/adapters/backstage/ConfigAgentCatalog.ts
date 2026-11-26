@@ -56,8 +56,9 @@ const POLICY_NAMES: readonly string[] = ['allow', 'ask', 'deny'];
  *
  * `skills` chooses which registered skills the agent offers through
  * `load_skill`: all of them when it is omitted, none when it is empty. An id
- * that no skill has stops the backend. `toolsets`, `model`, `limits` and
- * `planning` are recorded; the loop does not apply them yet.
+ * that no skill has stops the backend. `planning: required` gives the agent
+ * only `update_plan` in the first step of every run. `toolsets`, `model` and
+ * `limits` are recorded; the loop does not apply them yet.
  *
  * Without `aiChat.toolsets` it builds one toolset, `default`, switched on for
  * every session, from the deprecated `aiChat.actions.include` and

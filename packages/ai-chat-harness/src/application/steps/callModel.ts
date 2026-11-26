@@ -30,6 +30,7 @@ import {
   type ToolResultBody,
 } from '../../domain';
 import type { HarnessEvent, RunOutcome } from '../events';
+import { readCurrentPlan } from '../plan';
 import type { Skill, StepContext } from '../ports/extensions';
 import type { ItemDraft } from '../ports/ItemLog';
 import type { ValidationResult } from '../ports/ToolGateway';
@@ -46,6 +47,12 @@ import {
   skillsContextBlock,
   validateLoadSkillInput,
 } from './skills';
+import {
+  UPDATE_PLAN_TOOL_ID,
+  planContextBlock,
+  updatePlanDescriptor,
+  validateUpdatePlanInput,
+} from './plan';
 import { stepContextOf } from './stepContext';
 import { summarize } from './summarize';
 
@@ -97,6 +104,10 @@ type RequestedCall = {
  *   write is not counted: a message inserted while it was made is not read.
  * - `message.read` is sent, before `step.started`, for each inserted message
  *   this call is the first to give to the model (`unreadInserted(items)`).
+ * - Every step offers the built-in `update_plan` with the other tools, and
+ *   the context has the current plan when there is one (X-06). The first
+ *   step of a run of an agent with `planning: 'required'` offers only
+ *   `update_plan`; a call of another tool there is `invalid` (X-07).
  * - When the input would be over the budget even with the old tool outputs
  *   shortened, the old steps are summarized first (`summarize`; H-09), unless
  *   `summarize` is false. The summary is not a step. If it fails, the model is
@@ -128,25 +139,41 @@ export async function* callModel(
   }
   const activeSkills = resolveAgentSkills(req.agent, deps.extensions.skills);
   const externalTools = (await deps.tools.list(req.ctx)).filter(
-    tool => tool.id !== LOAD_SKILL_TOOL_ID,
+    tool => tool.id !== LOAD_SKILL_TOOL_ID && tool.id !== UPDATE_PLAN_TOOL_ID,
   );
   const loadSkillTool =
     activeSkills.length > 0 ? loadSkillDescriptor(activeSkills) : undefined;
   const loadSkillOffered =
     loadSkillTool !== undefined &&
     decidePolicy(loadSkillTool, req.policy) !== 'deny';
-  const available = [
-    ...externalTools,
-    ...(loadSkillTool ? [loadSkillTool] : []),
-  ];
+  const planTool = updatePlanDescriptor();
+  // An agent that plans first gets only `update_plan` in the first step of a
+  // run (X-07); a call of another tool in that step is refused.
+  const planFirst = req.agent.planning === 'required' && step === 1;
+  const available = planFirst
+    ? [planTool]
+    : [...externalTools, ...(loadSkillTool ? [loadSkillTool] : []), planTool];
   const byId = new Map(available.map(tool => [tool.id, tool]));
   // A tool the policy denies is not offered to the model.
   const offered = available.filter(
     tool => decidePolicy(tool, req.policy) !== 'deny',
   );
+  const planOffered = offered.includes(planTool);
+  const firstStepNote = planOffered
+    ? `Only ${UPDATE_PLAN_TOOL_ID} is available in this step: write the plan first.`
+    : 'No tool is available in this step.';
+  const planText = planContextBlock(
+    await readCurrentPlan(deps.items, req.ctx.sessionId),
+    { planFirst: planFirst && planOffered },
+  );
   // Context providers come with the extension points (P3-02).
   const extra = {
-    context: loadSkillOffered ? [skillsContextBlock(activeSkills)] : [],
+    context: [
+      ...(loadSkillOffered && !planFirst
+        ? [skillsContextBlock(activeSkills)]
+        : []),
+      ...(planText ? [planText] : []),
+    ],
     tools: offered,
     images: deps.model.capabilities.images,
   };
@@ -279,6 +306,7 @@ export async function* callModel(
       callId: call.callId,
       descriptor,
       activeSkills,
+      firstStepNote: planFirst ? firstStepNote : undefined,
       step,
       position,
       overLimit: position >= remaining,
@@ -333,6 +361,8 @@ async function classify(
     callId: string;
     descriptor: ToolDescriptor | undefined;
     activeSkills: readonly Skill[];
+    /** Set in the first step of an agent that plans first: why a tool is missing. */
+    firstStepNote: string | undefined;
     step: number;
     position: number;
     overLimit: boolean;
@@ -347,6 +377,7 @@ async function classify(
     callId,
     descriptor,
     activeSkills,
+    firstStepNote,
     step,
     position,
     overLimit,
@@ -363,7 +394,8 @@ async function classify(
   });
 
   if (!descriptor) {
-    return refuse('invalid', `Unknown tool: ${call.toolId}`, {
+    const message = firstStepNote ?? `Unknown tool: ${call.toolId}`;
+    return refuse('invalid', message, {
       input: {},
       schemaHash: '',
       policy: 'ask',
@@ -405,10 +437,17 @@ async function classify(
   }
   let validation: ValidationResult;
   try {
-    validation =
-      call.toolId === LOAD_SKILL_TOOL_ID
-        ? validateLoadSkillInput(fields.input, activeSkills)
-        : await deps.tools.validate(call.toolId, fields.input, req.ctx);
+    if (call.toolId === LOAD_SKILL_TOOL_ID) {
+      validation = validateLoadSkillInput(fields.input, activeSkills);
+    } else if (call.toolId === UPDATE_PLAN_TOOL_ID) {
+      validation = validateUpdatePlanInput(fields.input);
+    } else {
+      validation = await deps.tools.validate(
+        call.toolId,
+        fields.input,
+        req.ctx,
+      );
+    }
   } catch {
     return refuse('invalid', 'The input could not be checked.', {
       ...fields,

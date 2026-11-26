@@ -16,10 +16,14 @@
 
 import {
   LOAD_SKILL_TOOL_ID,
+  UPDATE_PLAN_TOOL_ID,
   decidePolicy,
   loadSkillDescriptor,
   resolveAgentSkills,
+  updatePlanDescriptor,
+  type PolicySettings,
   type Skill,
+  type ToolDescriptor,
   type ToolGateway,
 } from '@kwkevinchan/ai-chat-harness';
 import { AgentNotFound, assertOwner, type Principal } from '../../domain';
@@ -61,7 +65,9 @@ export class ListSessionTools {
         runId: '',
         principal: input.principal,
       })
-    ).filter(tool => tool.id !== LOAD_SKILL_TOOL_ID);
+    ).filter(
+      tool => tool.id !== LOAD_SKILL_TOOL_ID && tool.id !== UPDATE_PLAN_TOOL_ID,
+    );
     const result: SessionTool[] = listed.map(tool => ({
       id: tool.id,
       ...(tool.title !== undefined && { title: tool.title }),
@@ -69,24 +75,28 @@ export class ListSessionTools {
       readOnly: tool.readOnly === true,
     }));
 
+    const policy: PolicySettings = agents ? await agents.policy() : {};
+    const builtIn = (descriptor: ToolDescriptor) => {
+      if (decidePolicy(descriptor, policy) === 'deny') return;
+      result.push({
+        id: descriptor.id,
+        ...(descriptor.title !== undefined && { title: descriptor.title }),
+        description: withoutTitle(descriptor.description, descriptor.title),
+        readOnly: descriptor.readOnly === true,
+      });
+    };
+
     if (agents && skills && skills.length > 0) {
       const agent = await agentOrUndefined(agents, session.agentId);
       // An agent removed from the configuration offers no skill; the session
       // still lists its other tools.
       const activeSkills = agent ? resolveAgentSkills(agent, skills) : [];
       if (activeSkills.length > 0) {
-        const descriptor = loadSkillDescriptor(activeSkills);
-        const policy = await agents.policy();
-        if (decidePolicy(descriptor, policy) !== 'deny') {
-          result.push({
-            id: descriptor.id,
-            ...(descriptor.title !== undefined && { title: descriptor.title }),
-            description: withoutTitle(descriptor.description, descriptor.title),
-            readOnly: descriptor.readOnly === true,
-          });
-        }
+        builtIn(loadSkillDescriptor(activeSkills));
       }
     }
+    // Every agent may write a plan (D-07), in the order the model gets it.
+    builtIn(updatePlanDescriptor());
 
     return result;
   }
