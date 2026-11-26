@@ -24,6 +24,7 @@ import { DEFAULT_MODEL_ID } from './application';
 import {
   DEFAULT_IMAGE_LIMITS,
   DEFAULT_INSERT_MAX_PER_RUN,
+  DEFAULT_LIVE_SHARE_LIMITS,
   DEFAULT_QUEUE_MAX_MESSAGES,
   DEFAULT_RETENTION_DAYS,
   type ImageLimits,
@@ -134,9 +135,6 @@ const MAX_MODEL_ID_LENGTH = 64;
  */
 const MAX_RUN_TIMEOUT_SECONDS = 600;
 const DEFAULT_MAX_TOOL_OUTPUT_CHARS = 20000;
-const DEFAULT_LIVE_ENABLED = true;
-const DEFAULT_LIVE_HOURS = 24;
-const DEFAULT_LIVE_MAX_HOURS = 72;
 /** A cut output keeps a wrapper of about 30 characters, so a smaller limit keeps no text. */
 const MIN_MAX_TOOL_OUTPUT_CHARS = 100;
 const MAX_REDACT_FIELD_LENGTH = 200;
@@ -208,23 +206,23 @@ function readImageLimits(config: Config): ImageLimits {
 }
 
 /**
- * `sharing` and `live` may be left out. `enabled: false` is stored as false;
- * creating a share, which would refuse a live share then, is not in this
- * version. The hours are positive integers and the default is not longer than
- * the maximum.
+ * `sharing` and `live` may be left out. `enabled: false` refuses a new live
+ * share and a new expiry. The hours are positive integers and the default is
+ * not longer than the maximum.
  */
 function readSharing(config: Config): AiChatConfig['sharing'] {
   const enabled =
-    config.getOptionalBoolean('sharing.live.enabled') ?? DEFAULT_LIVE_ENABLED;
+    config.getOptionalBoolean('sharing.live.enabled') ??
+    DEFAULT_LIVE_SHARE_LIMITS.enabled;
   const defaultHours = positiveInt(
     config,
     'sharing.live.defaultHours',
-    DEFAULT_LIVE_HOURS,
+    DEFAULT_LIVE_SHARE_LIMITS.defaultHours,
   );
   const maxHours = positiveInt(
     config,
     'sharing.live.maxHours',
-    DEFAULT_LIVE_MAX_HOURS,
+    DEFAULT_LIVE_SHARE_LIMITS.maxHours,
   );
   if (defaultHours > maxHours) {
     throw new InputError(

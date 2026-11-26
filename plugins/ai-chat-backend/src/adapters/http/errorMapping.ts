@@ -30,6 +30,8 @@ import {
   ImagesNotSupported,
   InsertLimitReached,
   InvalidAttachment,
+  InvalidShare,
+  LiveSharingDisabled,
   NoActiveRun,
   NotSessionOwner,
   QueueChanged,
@@ -40,6 +42,7 @@ import {
   RunNotRunning,
   RunNotWaiting,
   SessionNotFound,
+  ShareNotFound,
   ShuttingDown,
   TooManyAttachments,
   TooManyImageBytes,
@@ -130,6 +133,12 @@ export function toHttpError(
   }
   if (error instanceof TooManyActiveRuns) {
     return new NamedHttpError(error.name, 429, error.message);
+  }
+  if (error instanceof ShareNotFound) {
+    return new NamedHttpError(error.name, 404, error.message);
+  }
+  if (error instanceof InvalidShare || error instanceof LiveSharingDisabled) {
+    return new NamedHttpError(error.name, 400, error.message);
   }
   if (error instanceof QueuedMessageNotFound) {
     return new NamedHttpError(error.name, 404, error.message);

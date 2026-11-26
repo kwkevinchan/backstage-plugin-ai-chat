@@ -22,10 +22,17 @@ import type {
   ChatRun,
   ChatSession,
   ChatSessionDetail,
+  ChatShare,
   ChatToolset,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
-import type { SessionView } from '../../../application';
-import type { QueuedMessage, Run, Session, Toolset } from '../../../domain';
+import type { SessionView, ShareView } from '../../../application';
+import {
+  shareModeOf,
+  type QueuedMessage,
+  type Run,
+  type Session,
+  type Toolset,
+} from '../../../domain';
 
 /** The fields of a session that the owner gets, and no others. */
 export function toChatSession(
@@ -121,5 +128,21 @@ export function toChatToolset(toolset: Toolset): ChatToolset {
     ...(toolset.title !== undefined && { title: toolset.title }),
     default: toolset.default,
     egress: toolset.egress,
+  };
+}
+
+export function toChatShare({ share, expired }: ShareView): ChatShare {
+  return {
+    id: share.id,
+    subjectRef: share.subjectRef,
+    mode: shareModeOf(share),
+    ...(share.upToSeq !== undefined && { upToSeq: share.upToSeq }),
+    ...(share.outputsUpToSeq !== undefined && {
+      outputsUpToSeq: share.outputsUpToSeq,
+    }),
+    ...(share.expiresAt !== undefined && { expiresAt: share.expiresAt }),
+    expired,
+    createdBy: share.createdBy,
+    createdAt: share.createdAt,
   };
 }

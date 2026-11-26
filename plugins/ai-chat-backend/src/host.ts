@@ -39,6 +39,7 @@ import {
   ListQueue,
   ListSessions,
   ListSessionTools,
+  ListShares,
   ListToolsets,
   NameSession,
   PurgeExpiredSessions,
@@ -48,11 +49,14 @@ import {
   ReorderQueue,
   ResumeQueue,
   ResumeRun,
+  RevokeShare,
   RunSupervisor,
   SendMessage,
+  ShareSession,
   StartNextQueued,
   UpdateQueuedMessage,
   UpdateSession,
+  UpdateShare,
   UploadAttachment,
   createAfterRun,
   createRunEnded,
@@ -81,8 +85,10 @@ import {
 import {
   DEFAULT_IMAGE_LIMITS,
   DEFAULT_INSERT_MAX_PER_RUN,
+  DEFAULT_LIVE_SHARE_LIMITS,
   DEFAULT_QUEUE_MAX_MESSAGES,
   DEFAULT_RETENTION_DAYS,
+  type LiveShareLimits,
 } from './domain';
 
 /** The ports of the host: what the use cases and the supervisor run on. */
@@ -152,6 +158,8 @@ export type HostPorts = {
    * deleted. 0 keeps every session. Defaults to 90.
    */
   retentionDays?: number;
+  /** `aiChat.sharing.live`; on, 24 hours, at most 72 when not given. */
+  liveShares?: LiveShareLimits;
 };
 
 /**
@@ -180,6 +188,7 @@ export function createHost(ports: HostPorts) {
     enabled: false,
   };
   const extensions = ports.extensions ?? emptyExtensions();
+  const live = ports.liveShares ?? DEFAULT_LIVE_SHARE_LIMITS;
   if (ports.models?.has(DEFAULT_MODEL_ID)) {
     throw new Error(`The model ${DEFAULT_MODEL_ID} is the one of \`model\``);
   }
@@ -378,8 +387,30 @@ export function createHost(ports: HostPorts) {
         runs,
         items,
         supervisor,
+        shares,
+        access,
+        clock,
         logger,
       }),
+      listShares: new ListShares({ sessions, shares, clock }),
+      shareSession: new ShareSession({
+        sessions,
+        shares,
+        items,
+        audit,
+        clock,
+        ids: ports.ids,
+        live,
+      }),
+      updateShare: new UpdateShare({
+        sessions,
+        shares,
+        items,
+        audit,
+        clock,
+        live,
+      }),
+      revokeShare: new RevokeShare({ sessions, shares, audit }),
       listToolsets: new ListToolsets({ agents, access }),
       listSessionTools: new ListSessionTools({
         sessions,
@@ -388,7 +419,14 @@ export function createHost(ports: HostPorts) {
         skills: extensions.skills,
       }),
       uploadAttachment: new UploadAttachment({ sessions, attachments, images }),
-      readAttachment: new ReadAttachment({ sessions, attachments }),
+      readAttachment: new ReadAttachment({
+        sessions,
+        attachments,
+        shares,
+        access,
+        items,
+        clock,
+      }),
       purgeUnusedAttachments: new PurgeUnusedAttachments({
         attachments,
         clock,

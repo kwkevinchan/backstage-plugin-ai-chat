@@ -54,6 +54,9 @@ export const chatPaths = {
     `/sessions/${encodeURIComponent(id)}/queue/resume`,
   resume: (id: string) => `/sessions/${encodeURIComponent(id)}/resume`,
   stream: (id: string) => `/sessions/${encodeURIComponent(id)}/stream`,
+  shares: (id: string) => `/sessions/${encodeURIComponent(id)}/shares`,
+  share: (id: string, shareId: string) =>
+    `/sessions/${encodeURIComponent(id)}/shares/${encodeURIComponent(shareId)}`,
   tools: (id: string) => `/sessions/${encodeURIComponent(id)}/tools`,
   toolsets: () => '/toolsets',
 };

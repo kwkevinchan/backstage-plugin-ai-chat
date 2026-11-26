@@ -21,6 +21,7 @@ export type {
   AuditLog,
   AuditSpan,
   QueueAuditEvent,
+  ShareAuditEvent,
   ToolAuditEvent,
 } from './AuditLog';
 export type { EntityReader } from './EntityReader';

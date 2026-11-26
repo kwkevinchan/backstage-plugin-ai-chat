@@ -33,6 +33,7 @@ export type { AfterRun, HostEvent, QueueState } from './hostEvents';
 export { createRunEnded, RUN_END_HOOK_TIMEOUT_MS } from './runEnded';
 export type { RunEnded } from './runEnded';
 export { RunSupervisor } from './RunSupervisor';
+export type { ShareView } from './shareChanges';
 export type {
   LaunchRequest,
   RunHandle,
@@ -62,16 +63,20 @@ export {
 } from './usecases/NameSession';
 export { ListSessionTools } from './usecases/ListSessionTools';
 export type { SessionTool } from './usecases/ListSessionTools';
+export { ListShares } from './usecases/ListShares';
 export { ListToolsets } from './usecases/ListToolsets';
 export { PurgeExpiredSessions } from './usecases/PurgeExpiredSessions';
 export { PurgeUnusedAttachments } from './usecases/PurgeUnusedAttachments';
 export { QueueMessage } from './usecases/QueueMessage';
 export { ReadAttachment, etagOf } from './usecases/ReadAttachment';
 export { ReorderQueue } from './usecases/ReorderQueue';
+export { RevokeShare } from './usecases/RevokeShare';
 export { ResumeQueue } from './usecases/ResumeQueue';
 export { ResumeRun } from './usecases/ResumeRun';
 export { SendMessage } from './usecases/SendMessage';
+export { ShareSession } from './usecases/ShareSession';
 export { StartNextQueued } from './usecases/StartNextQueued';
 export { UpdateQueuedMessage } from './usecases/UpdateQueuedMessage';
+export { UpdateShare } from './usecases/UpdateShare';
 export { UploadAttachment } from './usecases/UploadAttachment';
 export { UpdateSession } from './usecases/UpdateSession';

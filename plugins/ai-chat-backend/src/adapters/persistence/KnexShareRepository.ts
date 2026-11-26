@@ -18,7 +18,7 @@ import { InputError } from '@backstage/errors';
 import type { Clock, IdGenerator } from '@kwkevinchan/ai-chat-harness';
 import type { Knex } from 'knex';
 import type { ShareRepository } from '../../application/ports';
-import type { NewShare, Share } from '../../domain';
+import type { NewShare, Share, ShareScope } from '../../domain';
 
 type ShareRow = {
   id: string;
@@ -42,7 +42,7 @@ export class KnexShareRepository implements ShareRepository {
 
   async add(input: NewShare): Promise<Share> {
     const row: ShareRow = {
-      id: this.ids.next(),
+      id: input.id ?? this.ids.next(),
       session_id: input.sessionId,
       subject_ref: input.subjectRef,
       up_to_seq: input.upToSeq ?? null,
@@ -54,6 +54,42 @@ export class KnexShareRepository implements ShareRepository {
     };
     await this.knex('shares').insert(row);
     return toShare(row);
+  }
+
+  async get(sessionId: string, shareId: string): Promise<Share | undefined> {
+    const row = await this.knex<ShareRow>('shares')
+      .where({ session_id: sessionId, id: shareId })
+      .first();
+    return row ? toShare(row) : undefined;
+  }
+
+  async update(
+    sessionId: string,
+    shareId: string,
+    change: ShareScope & { expiresAt?: string },
+  ): Promise<Share | undefined> {
+    const values: Partial<ShareRow> = {
+      up_to_seq: change.upToSeq ?? null,
+      outputs_up_to_seq: change.outputsUpToSeq ?? null,
+      ...(change.expiresAt !== undefined && {
+        expires_at: toIso8601(change.expiresAt),
+      }),
+    };
+    const changed = await this.knex<ShareRow>('shares')
+      .where({ session_id: sessionId, id: shareId })
+      .whereNull('revoked_at')
+      .update(values);
+    if (changed === 0) return undefined;
+    return this.get(sessionId, shareId);
+  }
+
+  async revoke(sessionId: string, shareId: string): Promise<Share | undefined> {
+    const changed = await this.knex<ShareRow>('shares')
+      .where({ session_id: sessionId, id: shareId })
+      .whereNull('revoked_at')
+      .update({ revoked_at: this.clock.now().toISOString() });
+    if (changed === 0) return undefined;
+    return this.get(sessionId, shareId);
   }
 
   async listBySession(sessionId: string): Promise<Share[]> {

@@ -285,6 +285,78 @@ export interface ChatPageContext {
   entityRef?: string;
 }
 
+/**
+ * `snapshot`: the sharee sees the session up to the moment of the share, or
+ * of the last refresh. `live`: the sharee sees what comes next too, until the
+ * share expires.
+ *
+ * @public
+ */
+export type ChatShareMode = 'snapshot' | 'live';
+
+/**
+ * A read-only share of a session, as its owner sees it.
+ *
+ * @public
+ */
+export interface ChatShare {
+  id: string;
+  /** `user:<namespace>/<name>` or `group:<namespace>/<name>`. */
+  subjectRef: string;
+  mode: ChatShareMode;
+  /** Snapshot: the last `seq` the sharee sees. */
+  upToSeq?: number;
+  /**
+   * The last `seq` whose tool output the sharee sees; past it a tool result
+   * is a status only. `0` hides every output; absent shows every output in
+   * the range.
+   */
+  outputsUpToSeq?: number;
+  /** Live: when the share stops updating (ISO 8601). */
+  expiresAt?: string;
+  /** Live and past `expiresAt`: the sharee sees the session as it was then. */
+  expired: boolean;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** The answer of `GET /sessions/:id/shares`: the shares that are not cancelled, oldest first. @public */
+export interface ChatShareList {
+  items: ChatShare[];
+}
+
+/**
+ * The body of `POST /sessions/:id/shares`.
+ *
+ * @public
+ */
+export interface CreateChatShareRequest {
+  subjectRef: string;
+  /** `snapshot` by default. */
+  mode?: ChatShareMode;
+  /** True by default. False: the sharee sees no tool output. */
+  includeToolOutputs?: boolean;
+  /** Live only. True: tool output written after the share is shown too. */
+  includeLaterToolOutputs?: boolean;
+  /** Live only: hours until the share expires. The default and the maximum are set by the administrator. */
+  hours?: number;
+}
+
+/**
+ * The body of `PATCH /sessions/:id/shares/:shareId`. At least one field.
+ *
+ * @public
+ */
+export interface UpdateChatShareRequest {
+  /** Snapshot only: the sharee sees the session up to now. */
+  refresh?: boolean;
+  includeToolOutputs?: boolean;
+  /** Live only. */
+  includeLaterToolOutputs?: boolean;
+  /** Live only: the share expires this many hours from now. */
+  hours?: number;
+}
+
 /** The body of `POST /sessions`. @public */
 export interface CreateChatSessionRequest {
   agentId?: string;

@@ -5,7 +5,7 @@ info:
   description: |-
     The HTTP API of the AI chat backend plugin for Backstage (`@kwkevinchan/backstage-plugin-ai-chat-backend`).
 
-    The paths are relative to the base URL of the plugin, `/api/ai-chat` in a default backend. Every route needs the Backstage credentials of a signed-in user (a user token from the identity API); a service token is refused with 403. A session belongs to the user who created it: another user gets 404 for it, as for a session that does not exist.
+    The paths are relative to the base URL of the plugin, `/api/ai-chat` in a default backend. Every route needs the Backstage credentials of a signed-in user (a user token from the identity API); a service token is refused with 403. A session belongs to the user who created it: another user gets 404 for it, as for a session that does not exist. The owner can share a session, read-only, with a user or a group: the sharee reads it (`GET /sessions/{id}`, its images and `GET /sessions/{id}/stream`) within the range of the share, and every other route answers the sharee 404 too.
 
     The routes that answer with `text/event-stream` send the AI SDK UI message stream (`ai@7`, header `x-vercel-ai-ui-message-stream: v1`): each event is a line `data: <JSON>` followed by an empty line, and the stream ends with `data: [DONE]`. A request that is refused before anything is sent (400, 404, 409, 503) gets a normal JSON error. A run that fails sends the transient `data-run` part (`status: failed`) and then an `error` part with a fixed text, and no `finish`; a run that is cancelled sends `data-run` and `abort`; a run that waits for an approval sends a `tool-approval-request` for every call that waits, `data-run` and `finish` with `finishReason: tool-calls`. The text of an error of the model server is never sent.
 
@@ -24,13 +24,15 @@ tags:
   - name: Runs
     description: Routes that start, continue or follow a run, and answer with a stream.
   - name: Attachments
-    description: The images of the messages of a session. Only the owner of the session uploads and reads them.
+    description: The images of the messages of a session. Only the owner of the session uploads them; the owner and a sharee read them.
   - name: Input
     description: What a message may carry.
   - name: Queue
     description: Messages that wait for the run of a session to end, and are sent as a new run when it ends well.
   - name: Toolsets
     description: The groups of tools the user can switch on in a session.
+  - name: Shares
+    description: Read-only shares of a session. Only the owner of the session lists, makes, changes and cancels them; each change is written to the auditor.
 security:
   - JWT: []
 components:
@@ -59,6 +61,13 @@ components:
       in: path
       required: true
       description: ID of the tool call (`callId` of the `tool_call` item). It is also the `approvalId` of the stream.
+      schema:
+        type: string
+    shareId:
+      name: shareId
+      in: path
+      required: true
+      description: ID of the share.
       schema:
         type: string
     queuedId:
@@ -520,6 +529,46 @@ components:
           type: boolean
           description: Whether its tools send data out of the organization.
       required: [id, default, egress]
+    ChatShare:
+      type: object
+      description: A read-only share of a session, as its owner sees it.
+      properties:
+        id:
+          type: string
+        subjectRef:
+          type: string
+          description: '`user:<namespace>/<name>` or `group:<namespace>/<name>`.'
+        mode:
+          type: string
+          enum: [snapshot, live]
+          description: '`snapshot`: the sharee sees the session up to `upToSeq`. `live`: the sharee sees what comes next too, until `expiresAt`.'
+        upToSeq:
+          type: integer
+          description: Snapshot only. The last `seq` the sharee sees.
+        outputsUpToSeq:
+          type: integer
+          description: The last `seq` whose tool output the sharee sees; past it a tool result has its status and the output `not shared`, and a summary is left out. `0` hides every output. Absent shows every output in the range.
+        expiresAt:
+          type: string
+          format: date-time
+          description: Live only. After it the sharee sees the session as it was then.
+        expired:
+          type: boolean
+          description: A live share past `expiresAt`.
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, subjectRef, mode, expired, createdBy, createdAt]
+    ChatShareList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatShare'
+      required: [items]
 paths:
   /sessions:
     get:
@@ -617,7 +666,7 @@ paths:
       operationId: getSession
       tags: [Sessions]
       summary: Read a session with its items and its run that has not ended.
-      description: Only the owner reads a session; anyone else gets 404. Use `afterSeq` to read only the items that are new.
+      description: 'The owner reads every item. A sharee reads the items of the share: up to `upToSeq` (or up to the expiry of a live share), with a tool result past `outputsUpToSeq` reduced to its status and the output `not shared`; the queue and the calls to decide are empty and `resumable` is false for a sharee. Anyone else gets 404. Use `afterSeq` to read only the items that are new; it never shows more than the share does.'
       parameters:
         - $ref: '#/components/parameters/afterSeq'
       responses:
@@ -750,7 +799,7 @@ paths:
       operationId: readAttachment
       tags: [Attachments]
       summary: Read an image of a session.
-      description: "Only the owner of the session reads it; any other caller, and an image of another session, gets 404. The answer has the type that was stored, `X-Content-Type-Options: nosniff`, `Content-Disposition: inline`, `Content-Security-Policy: default-src 'none'; sandbox`, `Cache-Control: private, no-cache` and an `ETag` (the SHA-256 of the bytes, quoted). Every request is checked first; `If-None-Match` with the `ETag` answers 304 for an image that still exists, and 404 for one that was deleted."
+      description: "The owner of the session reads it. A sharee reads an image of a message the share shows; an image of a message past the share, one that is in no message, and an image of another session get 404, as does any other caller. The answer has the type that was stored, `X-Content-Type-Options: nosniff`, `Content-Disposition: inline`, `Content-Security-Policy: default-src 'none'; sandbox`, `Cache-Control: private, no-cache` and an `ETag` (the SHA-256 of the bytes, quoted). Every request is checked first; `If-None-Match` with the `ETag` answers 304 for an image that still exists, and 404 for one that was deleted."
       responses:
         '200':
           description: The bytes of the image.
@@ -1174,7 +1223,7 @@ paths:
       operationId: followSession
       tags: [Runs]
       summary: Join the run that is under way.
-      description: 'The stream starts with `start` (the same message ID as the run), `data-run`, and the items of the run from its first one; then it goes on until the run ends. On the backend that runs the loop, text that was already written is sent with `text-start` and the later deltas follow. On another backend each finished item is sent about once a second, as one piece of text, with no deltas, and the stream ends when the run leaves `running`. A run that waits for an approval, a run that ended, or no run answers 204. `afterSeq` leaves out the items up to it, for a client that does not use the AI SDK.'
+      description: 'The stream starts with `start` (the same message ID as the run), `data-run`, and the items of the run from its first one; then it goes on until the run ends. On the backend that runs the loop, text that was already written is sent with `text-start` and the later deltas follow. On another backend each finished item is sent about once a second, as one piece of text, with no deltas, and the stream ends when the run leaves `running`. A run that waits for an approval, a run that ended, or no run answers 204. `afterSeq` leaves out the items up to it, for a client that does not use the AI SDK. A sharee follows only a live share that has not expired (a snapshot answers 204): the items come once a second as on another backend, with the rules of the share, and with no call to approve when the run stops for an approval; the stream ends when the share is cancelled or expires.'
       parameters:
         - $ref: '#/components/parameters/afterSeq'
       responses:
@@ -1209,6 +1258,123 @@ paths:
                     items:
                       $ref: '#/components/schemas/ChatTool'
                 required: [items]
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /sessions/{id}/shares:
+    parameters:
+      - $ref: '#/components/parameters/sessionId'
+    get:
+      operationId: listShares
+      tags: [Shares]
+      summary: List the shares of a session.
+      description: The shares that are not cancelled, oldest first. Only the owner lists them.
+      responses:
+        '200':
+          description: The shares.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatShareList'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: shareSession
+      tags: [Shares]
+      summary: Share a session, read-only, with a user or a group.
+      description: 'A snapshot (the default) shows the session up to now, with the tool output unless `includeToolOutputs` is false. A live share shows what comes next too, until it expires: `hours` from now, the default and the maximum set by the administrator; the tool output written after the share is hidden unless `includeLaterToolOutputs` is true. 400 `InvalidShare` for a subject that is not `user:` or `group:`, the owner as the subject, or a field that does not fit the mode; 400 `LiveSharingDisabled` for a live share when the administrator turned them off.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subjectRef:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
+                  description: '`user:<namespace>/<name>` or `group:<namespace>/<name>`; the namespace is `default` when left out.'
+                mode:
+                  type: string
+                  enum: [snapshot, live]
+                includeToolOutputs:
+                  type: boolean
+                  description: True by default.
+                includeLaterToolOutputs:
+                  type: boolean
+                  description: Live only. False by default.
+                hours:
+                  type: integer
+                  minimum: 1
+                  description: Live only.
+              required: [subjectRef]
+      responses:
+        '201':
+          description: The share.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatShare'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /sessions/{id}/shares/{shareId}:
+    parameters:
+      - $ref: '#/components/parameters/sessionId'
+      - $ref: '#/components/parameters/shareId'
+    patch:
+      operationId: updateShare
+      tags: [Shares]
+      summary: Change a share.
+      description: '`refresh` moves a snapshot to now. `includeToolOutputs: false` hides every tool output; `true` shows every output of a snapshot, and the output up to now of a live share. `includeLaterToolOutputs` shows (or stops at now) the later output of a live share. `hours` gives a live share a new expiry, from now. At least one field. 404 `ShareNotFound` for a share that is cancelled or does not exist.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refresh:
+                  type: boolean
+                  enum: [true]
+                  description: Snapshot only.
+                includeToolOutputs:
+                  type: boolean
+                includeLaterToolOutputs:
+                  type: boolean
+                  description: Live only.
+                hours:
+                  type: integer
+                  minimum: 1
+                  description: Live only.
+      responses:
+        '200':
+          description: The share after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatShare'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+    delete:
+      operationId: revokeShare
+      tags: [Shares]
+      summary: Cancel a share.
+      description: The sharee cannot read the session from the next request on. 404 `ShareNotFound` for a share that is cancelled or does not exist.
+      responses:
+        '204':
+          description: Cancelled.
         '403':
           $ref: '#/components/responses/Error'
         '404':

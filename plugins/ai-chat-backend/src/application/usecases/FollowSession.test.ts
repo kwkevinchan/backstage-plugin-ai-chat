@@ -19,8 +19,16 @@ import {
   type Item,
   type RunOutcome,
 } from '@kwkevinchan/ai-chat-harness';
+import { OwnerOrShareAccessControl } from '../OwnerOrShareAccessControl';
 import { RunSupervisor } from '../RunSupervisor';
 import { FollowSession } from './FollowSession';
+
+/** The session has no share: only its owner reads it. */
+const ownerOnly = {
+  shares: { listBySession: async () => [] } as any,
+  access: new OwnerOrShareAccessControl(),
+  clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
+};
 
 const jane = { userRef: 'user:default/jane' } as any;
 const base = (seq: number) => ({
@@ -43,6 +51,7 @@ const output = (seq: number, readUpToSeq: number): Item =>
 
 function follow(log: Item[], afterSeq?: number) {
   const useCase = new FollowSession({
+    ...ownerOnly,
     sessions: {
       get: async () => ({ id: 's1', ownerRef: 'user:default/jane' }),
     } as any,
@@ -99,6 +108,7 @@ function sessionDeps(
   const readCalls: Array<{ afterSeq?: number } | undefined> = [];
   let log = over.log ?? [];
   const useCase = new FollowSession({
+    ...ownerOnly,
     sessions: { get: async () => owner } as any,
     runs: {
       findActive: async () =>
@@ -147,6 +157,7 @@ describe('FollowSession reconnect', () => {
     let subscribed = false;
     const events = (async function* () {})();
     const useCase = new FollowSession({
+      ...ownerOnly,
       sessions: { get: async () => owner } as any,
       runs: {
         findActive: async () => ({ id: 'r1', status: 'running' }),
@@ -359,7 +370,10 @@ describe('FollowSession reconnect', () => {
     const { useCase } = sessionDeps();
     await expect(
       useCase.execute({
-        principal: { userRef: 'user:default/mallory' } as any,
+        principal: {
+          userRef: 'user:default/mallory',
+          ownershipRefs: ['user:default/mallory'],
+        } as any,
         sessionId: 's1',
       }),
     ).rejects.toMatchObject({ name: 'NotSessionOwner', sessionId: 's1' });
@@ -598,6 +612,7 @@ describe('FollowSession reconnect', () => {
     await appended;
 
     const useCase = new FollowSession({
+      ...ownerOnly,
       sessions: { get: async () => owner } as any,
       runs: {
         findActive: async () => ({ id: 'r1', status: 'running' }),
@@ -681,6 +696,7 @@ describe('FollowSession reconnect', () => {
     await draftOpen;
 
     const useCase = new FollowSession({
+      ...ownerOnly,
       sessions: { get: async () => owner } as any,
       runs: {
         findActive: async () => ({ id: 'r1', status: 'running' }),
