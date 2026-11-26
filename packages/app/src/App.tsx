@@ -24,15 +24,27 @@ import {
 } from '@backstage/core-components';
 import { createApp } from '@backstage/app-defaults';
 import { AppRouter, FlatRoutes } from '@backstage/core-app-api';
+import { createApiFactory } from '@backstage/core-plugin-api';
 import {
   AiChatPage,
   AiChatPanel,
   aiChatPlugin,
+  createAiChatToolResultsApi,
 } from '@kwkevinchan/backstage-plugin-ai-chat';
+import { aiChatToolResultsApiRef } from '@kwkevinchan/backstage-plugin-ai-chat-react';
+import { listServicesResult } from './components/aiChat/listServicesResult';
 import { Root } from './components/Root';
 
 const app = createApp({
   plugins: [aiChatPlugin],
+  apis: [
+    // The result components of the chat, first one for an action id wins.
+    createApiFactory({
+      api: aiChatToolResultsApiRef,
+      deps: {},
+      factory: () => createAiChatToolResultsApi([listServicesResult]),
+    }),
+  ],
   components: {
     SignInPage: props => <SignInPage {...props} providers={['guest']} />,
   },

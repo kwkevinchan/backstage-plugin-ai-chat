@@ -470,3 +470,28 @@ test('the conversation follows the answer to its end, and shows a table', async 
   ).toBe(true);
   await shot('14-long-conversation-and-table');
 });
+
+test('a plugin shows the result of an action with its own component', async ({
+  page,
+}) => {
+  const shot = watch(page);
+  await signIn(page);
+
+  await say(page, 'list services');
+  // The row of the call stays, with its status and the raw output folded.
+  const row = page.locator('details', { hasText: 'List services' });
+  await expect(row.getByText('Done')).toBeVisible();
+  await expect(row.getByText('"restarts":').first()).toBeHidden();
+
+  // Under it, the component that the app registered for the action.
+  const result = page.getByRole('group', { name: 'Result: List services' });
+  await expect(
+    result.getByRole('columnheader', { name: 'Restarts' }),
+  ).toBeVisible();
+  const payments = result.getByRole('row', { name: /payments/ });
+  await expect(payments).toContainText('running');
+  await expect(
+    payments.getByRole('link', { name: 'payments' }),
+  ).toHaveAttribute('href', /\/catalog\/default\/component\/example-payments$/);
+  await shot('16-result-component');
+});

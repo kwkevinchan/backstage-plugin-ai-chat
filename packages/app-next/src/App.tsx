@@ -18,6 +18,7 @@ import { createApp } from '@backstage/frontend-defaults';
 import catalogPlugin from '@backstage/plugin-catalog/alpha';
 import userSettingsPlugin from '@backstage/plugin-user-settings/alpha';
 import aiChatPlugin from '@kwkevinchan/backstage-plugin-ai-chat/alpha';
+import { devActionsPlugin } from './modules/devActions';
 import { navModule } from './modules/nav';
 import { signInModule } from './modules/signIn';
 
@@ -26,6 +27,7 @@ export default createApp({
     catalogPlugin,
     userSettingsPlugin,
     aiChatPlugin,
+    devActionsPlugin,
     navModule,
     signInModule,
   ],
