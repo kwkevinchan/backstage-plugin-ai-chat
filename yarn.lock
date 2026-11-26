@@ -5358,6 +5358,8 @@ __metadata:
   dependencies:
     "@backstage/cli": "backstage:^"
     "@backstage/core-plugin-api": "backstage:^"
+    "@backstage/frontend-plugin-api": "backstage:^"
+    "@backstage/frontend-test-utils": "backstage:^"
     "@backstage/test-utils": "backstage:^"
     "@testing-library/jest-dom": "npm:^6.0.0"
     "@testing-library/react": "npm:^14.0.0"

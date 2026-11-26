@@ -23,6 +23,7 @@ describe('ai-chat-react package', () => {
     expect(pkg.backstage.role).toBe('web-library');
     expect(pkg.dependencies).toEqual({
       '@backstage/core-plugin-api': 'backstage:^',
+      '@backstage/frontend-plugin-api': 'backstage:^',
     });
     expect(pkg.dependencies).not.toHaveProperty(
       '@kwkevinchan/backstage-plugin-ai-chat',
@@ -36,12 +37,18 @@ describe('ai-chat-react package', () => {
     expect(pkg.dependencies).not.toHaveProperty('@kwkevinchan/ai-chat-harness');
   });
 
-  it('exports only the panel API ref, launcher, and panel hook', () => {
+  it('exports the panel entry points and the result component API', () => {
     expect(Object.keys(published).sort()).toEqual([
       'AiChatLauncher',
+      'AiChatSafeLink',
       'aiChatPanelApiRef',
+      'aiChatToolResultsApiRef',
+      'isSafeLinkHref',
       'useAiChatPanel',
     ]);
+    expect(published.aiChatToolResultsApiRef.id).toBe(
+      'plugin.ai-chat.tool-results',
+    );
     expect(published.aiChatPanelApiRef.id).toBe('plugin.ai-chat.panel');
     expect(typeof published.AiChatLauncher).toBe('function');
     expect(typeof published.useAiChatPanel).toBe('function');
@@ -51,6 +58,18 @@ describe('ai-chat-react package', () => {
     expect('launchContextOf' in published).toBe(false);
     expect('panelMessagePage' in published).toBe(false);
     expect('AiChatToolResultBlueprint' in published).toBe(false);
+    expect('createAiChatToolResultsApi' in published).toBe(false);
     expect('AiChatClientToolBlueprint' in published).toBe(false);
+  });
+
+  it('does not depend on assistant-ui', () => {
+    const all = {
+      ...pkg.dependencies,
+      ...pkg.devDependencies,
+      ...pkg.peerDependencies,
+    };
+    expect(
+      Object.keys(all).filter(name => name.startsWith('@assistant-ui/')),
+    ).toEqual([]);
   });
 });
