@@ -161,6 +161,11 @@ export class FakeEntityReader implements EntityReader {
   failing = false;
   /** Every read waits for ever, as a catalog that does not answer. */
   hanging = false;
+  private started: () => void = () => undefined;
+  /** Settles once a read began while `hanging`. */
+  readonly hangingRead = new Promise<void>(resolve => {
+    this.started = resolve;
+  });
   readonly reads: { entityRef: string; principal: Principal }[] = [];
 
   constructor(
@@ -176,7 +181,10 @@ export class FakeEntityReader implements EntityReader {
     principal: Principal,
   ): Promise<EntityFacts | undefined> {
     this.reads.push({ entityRef, principal });
-    if (this.hanging) return new Promise(() => undefined);
+    if (this.hanging) {
+      this.started();
+      return new Promise(() => undefined);
+    }
     if (this.failing) {
       throw new Error('catalog at http://catalog.internal is down');
     }

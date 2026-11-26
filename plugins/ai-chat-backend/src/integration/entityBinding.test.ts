@@ -277,9 +277,8 @@ describe('sessions bound to an entity', () => {
       const { body } = await create(b).expect(201);
       entities.hanging = true;
       const pending = send(b, body.id, { page: SHOP_PAGE }).then(res => res);
-      for (let i = 0; i < 100 && entities.reads.length === 0; i++) {
-        await jest.advanceTimersByTimeAsync(0);
-      }
+      // The database answers through its own I/O, not through timers.
+      await entities.hangingRead;
       expect(entities.reads).toHaveLength(1);
       await jest.advanceTimersByTimeAsync(CONTEXT_PROVIDER_TIMEOUT_MS - 1);
       expect(b.model.inputs).toHaveLength(0);
