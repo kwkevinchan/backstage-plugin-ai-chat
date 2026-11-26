@@ -14,13 +14,10 @@
  * limitations under the License.
  */
 
-import { useCallback, useSyncExternalStore, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { useApiHolder } from '@backstage/core-plugin-api';
 import { aiChatPanelApiRef } from '../api';
-
-const noop = () => {};
-const noopSubscribe = () => noop;
-const getClosed = () => false;
+import { useAiChatPanel } from '../application/useAiChatPanel';
 
 /**
  * Props of {@link AiChatLauncher}. Both fields are optional. A prompt starts
@@ -51,15 +48,7 @@ export interface AiChatLauncherProps {
  */
 export function AiChatLauncher(props: AiChatLauncherProps): JSX.Element | null {
   const api = useApiHolder().get(aiChatPanelApiRef);
-  const subscribe = useCallback(
-    (listener: () => void) => (api ? api.subscribe(listener) : noopSubscribe()),
-    [api],
-  );
-  const getSnapshot = useCallback(
-    () => (api ? api.isOpen() : getClosed()),
-    [api],
-  );
-  const isOpen = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const { isOpen } = useAiChatPanel();
   if (!api) return null;
   const { prompt, entityRef, className, children } = props;
   return (

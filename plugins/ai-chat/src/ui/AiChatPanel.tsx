@@ -125,25 +125,38 @@ function AiChatPanelInner() {
         asideRef.current?.querySelector<HTMLTextAreaElement>('textarea');
       input?.focus();
     } else if (!state.open && wasOpen) {
+      const active = document.activeElement;
+      const shouldRestore =
+        !active ||
+        active === document.body ||
+        Boolean(asideRef.current?.contains(active));
       const target =
         openerRef.current && openerRef.current.isConnected
           ? openerRef.current
           : tabRef.current;
       openerRef.current = null;
-      target?.focus();
+      if (shouldRestore) {
+        target?.focus();
+      }
     }
   }, [state.open]);
 
   useEffect(() => {
-    if (!state.open) return () => undefined;
+    const aside = asideRef.current;
+    if (!state.open || !aside) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !event.defaultPrevented) {
+      if (
+        event.key === 'Escape' &&
+        !event.defaultPrevented &&
+        !event.isComposing &&
+        event.keyCode !== 229
+      ) {
         panelApi.close();
       }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [panelApi, state.open]);
+    aside.addEventListener('keydown', onKeyDown);
+    return () => aside.removeEventListener('keydown', onKeyDown);
+  }, [panelApi, showConversation, state.open]);
 
   return (
     <>
@@ -180,7 +193,11 @@ function AiChatPanelInner() {
             </button>
           </div>
           <div className={cx('panel-body')}>
-            <PanelConversation store={store} state={state} />
+            <PanelConversation
+              store={store}
+              state={state}
+              asideRef={asideRef}
+            />
           </div>
         </aside>
       )}
@@ -192,8 +209,9 @@ function AiChatPanelInner() {
 function PanelConversation(props: {
   store: AiChatPanelStore;
   state: PanelState;
+  asideRef: React.RefObject<HTMLElement>;
 }) {
-  const { store, state } = props;
+  const { store, state, asideRef } = props;
   const api = useApi(aiChatApiRef);
   const toolsets = useToolsets(api);
   const inputConfig = useInputConfig(api);
@@ -205,6 +223,21 @@ function PanelConversation(props: {
   const [error, setError] = useState<string>();
   const creating = useRef<Promise<ChatSession>>();
   const active = held && held.sessionId === state.sessionId ? held : undefined;
+
+  // Keep focus in the panel composer when DraftComposer swaps to SessionView
+  // (e.g. launching with a prompt or sending the first message).
+  const activeSessionId = active?.sessionId;
+  useEffect(() => {
+    if (!state.open || !activeSessionId) return;
+    const focused = document.activeElement;
+    if (
+      !focused ||
+      focused === document.body ||
+      asideRef.current?.contains(focused)
+    ) {
+      asideRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus();
+    }
+  }, [activeSessionId, asideRef, state.open]);
 
   const prompt = state.launch?.prompt;
   const launchId = state.launchId;

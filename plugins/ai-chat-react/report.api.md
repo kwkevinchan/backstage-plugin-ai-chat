@@ -5,7 +5,7 @@
 ```ts
 import { ApiRef } from '@backstage/frontend-plugin-api';
 import type { ComponentType } from 'react';
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 // @public
 export function AiChatLauncher(props: AiChatLauncherProps): JSX.Element | null;
