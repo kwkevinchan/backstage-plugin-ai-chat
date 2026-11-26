@@ -324,4 +324,81 @@ describe('AiChatHarnessRegistry', () => {
       expect([...registry.modelClients().keys()]).toEqual(['echo']);
     });
   });
+
+  describe('context providers (X-03)', () => {
+    const provider = (id: string, text = `text of ${id}`) => ({
+      id,
+      provide: () => text,
+    });
+
+    it('lists the built-in providers first, then the ones of the modules in registration order', async () => {
+      const registry = new AiChatHarnessRegistry();
+      registry.addContextProvider(provider('docs-site'));
+      registry.addContextProvider(provider('oncall'));
+      const providers = registry.extensions({
+        logger,
+        maxToolOutputChars: 100,
+        builtInContextProviders: [provider('user'), provider('plan')],
+      }).contextProviders!;
+      expect(providers.map(p => p.id)).toEqual([
+        'user',
+        'plan',
+        'docs-site',
+        'oncall',
+      ]);
+      expect(await providers[2].provide(stepContext)).toBe('text of docs-site');
+      expect(registry.contextProviderCount()).toBe(2);
+    });
+
+    it.each([
+      ['a repeated id', [provider('docs-site'), provider('docs-site')], 'context provider docs-site is already registered'],
+      ['the id of the built-in user', [provider('user')], 'context provider user: the id is taken by a built-in provider'],
+      ['the id of the built-in entity', [provider('entity')], 'context provider entity: the id is taken'],
+      ['the id of the built-in plan', [provider('plan')], 'context provider plan: the id is taken'],
+      ['an id of the wrong form', [provider('1-docs')], 'context provider 1-docs: the id must start with a letter'],
+      ['an id that is not a string', [{ id: 7, provide: () => '' }], 'context provider: id must be a string'],
+      ['a provide that is not a function', [{ id: 'docs', provide: 'x' }], 'context provider docs: provide must be a function'],
+      ['a value that is not an object', [null], 'context provider must be an object'],
+    ])('refuses %s with an InputError', (_name, values, message) => {
+      const registry = new AiChatHarnessRegistry();
+      const add = () => {
+        for (const value of values) registry.addContextProvider(value as never);
+      };
+      expect(add).toThrow(expect.objectContaining({ name: 'InputError' }));
+      expect(add).toThrow(message);
+    });
+
+    it('keeps the first of two providers with the same id', async () => {
+      const registry = new AiChatHarnessRegistry();
+      registry.addContextProvider(provider('docs-site', 'first'));
+      expect(() =>
+        registry.addContextProvider(provider('docs-site', 'second')),
+      ).toThrow();
+      const [only] = registry.extensions({ logger, maxToolOutputChars: 100 })
+        .contextProviders!;
+      expect(await only.provide(stepContext)).toBe('first');
+    });
+
+    it('logs a provider that throws with its id and run, without its text, and throws again', async () => {
+      const warn = mockServices.logger.mock();
+      const registry = new AiChatHarnessRegistry();
+      registry.addContextProvider({
+        id: 'oncall',
+        provide: () => {
+          throw new Error('pager service is down');
+        },
+      });
+      const [wrapped] = registry.extensions({
+        logger: warn,
+        maxToolOutputChars: 100,
+      }).contextProviders!;
+      await expect(wrapped.provide(stepContext)).rejects.toThrow(
+        'pager service is down',
+      );
+      expect(warn.warn).toHaveBeenCalledWith(
+        'An AI chat context provider failed',
+        { contextProvider: 'oncall', runId: 'r', error: 'pager service is down' },
+      );
+    });
+  });
 });

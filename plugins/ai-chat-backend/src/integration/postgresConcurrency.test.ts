@@ -995,4 +995,25 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
       }
     });
   });
+
+  describe('bindEntityIfUnbound (SE-02)', () => {
+    it(`two bindings of one session at the same time, ${ROUNDS} rounds: exactly one is written, and it stays`, async () => {
+      for (let round = 0; round < ROUNDS; round++) {
+        const session = await db.sessions.create({
+          ownerRef: owner.userRef,
+          agentId: 'default',
+        });
+        const bind = (ref: string) =>
+          jitter().then(() => db.sessions.bindEntityIfUnbound(session.id, ref));
+        const [a, b] = await Promise.all([
+          bind('component:default/a'),
+          bind('component:default/b'),
+        ]);
+        expect([a, b].filter(Boolean)).toHaveLength(1);
+        expect((await db.sessions.get(session.id)).entityRef).toBe(
+          a ? 'component:default/a' : 'component:default/b',
+        );
+      }
+    });
+  });
 });
