@@ -2,18 +2,18 @@
 
 | 欄位     | 內容                                                                                                                                                                                                       |
 | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 狀態     | PI 文件與設定收尾完成（2026-11-25）；PI-01 到 PI-05 完成，PI-06 完成（畫面在 PU-04），PI-07 端對端和用途說明頁在 PU 之後                                                                                   |
+| 狀態     | PI 全部完成（2026-11-26）；PI-01 到 PI-07 完成（前端畫面與綜合端對端於 PU-03、PU-04 與 PI-07 後半補齊）                                                                                                    |
 | 對應文件 | 規格：[harness-spec.zh-TW.md](harness-spec.zh-TW.md) 4.11 節。程式架構：[architecture.zh-TW.md](architecture.zh-TW.md) 第 13 節。實作規劃：[implementation-plan.zh-TW.md](implementation-plan.zh-TW.md) PI |
 
-規格裡所有標 PI 的需求（`IN-01` 到 `IN-18`），各自對到哪些測試。這是 PI-07 文件與設定收尾的對照表；前端依 D-31 改用 `assistant-ui` 時，畫面與綜合端對端按分工切齊到 PU-03、PU-04。
+規格裡所有標 PI 的需求（`IN-01` 到 `IN-18`），各自對到哪些測試。前端依 D-31 改用 `assistant-ui` 後，畫面與綜合端對端皆已完成並對到測試。
 
 ## 結論
 
 - PI 需求共 **18 條**（`IN-01` 到 `IN-18`；`IN-19` 屬 P2、`IN-20` 屬 PU）。**18 條的核心與後端（領域規則、設定、持久層、HTTP 路由、模型轉接與並行保護）皆有測試**。
-- 前端依 `assistant-ui` 重做（D-31）：
+- 前端依 `assistant-ui` 完成（D-31）：
   - **IN-05（畫面按鈕隱藏）、IN-08（訊息縮圖）、IN-09（附加／貼上／拖放／草稿縮圖）**：後端、核心與 `AiChatClient`／`AiChatTransport` 測試，加上 **PU-04** 的畫面測試與端對端 `e2e-tests/images.test.ts`。
   - **IN-12、IN-13、IN-15、IN-18（插入、佇列、重送與暫停畫面）**：畫面用 `assistant-ui` 的佇列（`queueAdapter`、`ComposerPrimitive.Queue`、`QueueItemPrimitive`，PU-03）。對到的測試見下表；`IN-20`（「現在就送」）的前端測試是 `adapters/assistantUi/queueAdapter.test.tsx`：`queue adapter: move to the steer lane ("send now")`、`ui/SessionView.test.tsx`：`the queue while a run is running`、`e2e`：`Send now moves a queued message into the run…`。
-- PI-07 的**綜合端對端（圖片＋插入＋排隊）**與 [usage.zh-TW.html](usage.zh-TW.html) 的畫面說明延後到 PU-03、PU-04 完成後補齊。
+- PI-07 的**綜合端對端（圖片＋插入＋排隊）**在 `e2e-tests/images.test.ts`：`images, insert and queue work together in one conversation`；[usage.zh-TW.html](usage.zh-TW.html) 已補上圖片、進行中插入與排隊的畫面示意與說明。
 - 設定與安全檢查：兩份 README 的 YAML 設定範例（含 `llm.images` 與 `input`）由宿主 `config.test.ts` 驗證；[usage.zh-TW.html](usage.zh-TW.html) 不載入任何外部資源亦由 `config.test.ts` 檢查。
 
 ## 縮寫
@@ -50,12 +50,12 @@
 
 ## PI 的 PR
 
-| 工作項目 | PR       | 狀態                                   |
-| -------- | -------- | -------------------------------------- |
-| PI-01    | #18      | 完成                                   |
-| PI-02    | #25      | 完成                                   |
-| PI-03    | #26、#29 | 完成                                   |
-| PI-04    | #28      | 完成（畫面在 PU-03 重做）              |
-| PI-05    | #30、#32 | 完成                                   |
-| PI-06    | #41      | 完成（畫面在 PU-04）                   |
-| PI-07    | #49      | 文件完成，端對端和用途說明頁在 PU 之後 |
+| 工作項目 | PR       | 狀態                 |
+| -------- | -------- | -------------------- |
+| PI-01    | #18      | 完成                 |
+| PI-02    | #25      | 完成                 |
+| PI-03    | #26、#29 | 完成                 |
+| PI-04    | #28、#63 | 完成（畫面在 PU-03） |
+| PI-05    | #30、#32 | 完成                 |
+| PI-06    | #41、#64 | 完成（畫面在 PU-04） |
+| PI-07    | #49      | 完成                 |

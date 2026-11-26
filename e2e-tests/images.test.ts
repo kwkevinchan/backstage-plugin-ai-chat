@@ -142,3 +142,78 @@ test('inserts a message with an image while a run goes on', async ({
   ).toHaveCount(1);
   await shot('images-inserted');
 });
+
+test('images, insert and queue work together in one conversation', async ({
+  page,
+}) => {
+  const shot = watch(page);
+  await signIn(page);
+
+  await box(page).fill('hold 10');
+  await box(page).press('Enter');
+  await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
+  await expect(page.getByText(/\bheld2\b/)).toBeVisible();
+
+  // Insert a message with an image into the running run.
+  await attach(page, 'inserted.png');
+  await box(page).fill('check this image now');
+  await box(page).press('Enter');
+  const waiting = page.getByRole('list', { name: 'Waiting to be read' });
+  await expect(waiting).toContainText('check this image now');
+  await expect(
+    waiting.getByRole('img', { name: 'inserted.png' }),
+  ).toBeVisible();
+
+  // Queue a message with an image and a follow-up text message.
+  await attach(page, 'queued.png');
+  await box(page).fill('queued with image');
+  await box(page).press('Control+Enter');
+  await box(page).fill('also after the image');
+  await box(page).press('Control+Enter');
+
+  const queue = page.getByRole('region', { name: 'Queue' });
+  await expect(queue).toContainText('Queued (2)');
+  await expect(queue).toContainText('queued with image');
+  await expect(queue.getByRole('img', { name: 'queued.png' })).toBeVisible();
+  await expect(queue).toContainText('also after the image');
+  await snapshot(page, 'pi-combined-in-progress');
+
+  // The run reads the inserted image, then the queue drains in order.
+  await expect(waiting).toBeHidden();
+  await expect(
+    timeline(page).getByText('Got your addition: after the image'),
+  ).toBeVisible({ timeout: 60_000 });
+  await expect(queue).toBeHidden();
+  await expect(
+    timeline(page).getByText(/I can see 1 image\(s\): image\/png/),
+  ).toHaveCount(2);
+  await expect(
+    timeline(page).getByRole('img', { name: 'inserted.png' }),
+  ).toBeVisible();
+  await expect(
+    timeline(page).getByRole('img', { name: 'queued.png' }),
+  ).toBeVisible();
+
+  const text = await timeline(page).innerText();
+  const positions = [
+    'check this image now',
+    'queued with image',
+    'also after the image',
+    'Got your addition: after the image',
+  ].map(part => text.indexOf(part));
+  expect(positions).not.toContain(-1);
+  expect(positions).toEqual([...positions].sort((a, b) => a - b));
+
+  // Everything stays after a reload.
+  await page.reload();
+  await expect(
+    timeline(page).getByRole('img', { name: 'inserted.png' }),
+  ).toBeVisible();
+  await expect(
+    timeline(page).getByRole('img', { name: 'queued.png' }),
+  ).toBeVisible();
+  await expect(
+    timeline(page).getByText('Got your addition: after the image'),
+  ).toBeVisible();
+  await shot('pi-combined-after-reload');
+});
