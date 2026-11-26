@@ -233,6 +233,9 @@ export type ToolStartedItem = Item & ToolStartedBody;
 /** @public */
 export type ToolResultItem = Item & ToolResultBody;
 
+/** @public */
+export type PlanUpdateItem = Item & PlanUpdateBody;
+
 /**
  * The key that makes a write happen once: the kind plus the call id, for the
  * items that may be written only once per call (T-07, D-25). The log rejects a

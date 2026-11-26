@@ -22,6 +22,7 @@ import {
   type Item,
   type ItemDraft,
   type ItemLog,
+  type PlanUpdateItem,
   type RunFence,
 } from '@kwkevinchan/ai-chat-harness';
 
@@ -76,6 +77,16 @@ export class InMemoryItemLog implements ItemLog {
     return items
       .filter(item => item.seq > afterSeq)
       .map(item => structuredClone(item));
+  }
+
+  async latestPlanUpdate(
+    sessionId: string,
+  ): Promise<PlanUpdateItem | undefined> {
+    const items = this.sessions.get(sessionId) ?? [];
+    const latest = [...items]
+      .reverse()
+      .find((item): item is PlanUpdateItem => item.kind === 'plan_update');
+    return latest ? structuredClone(latest) : undefined;
   }
 
   async append(

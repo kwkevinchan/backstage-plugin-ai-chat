@@ -28,6 +28,8 @@
  *   user: "story"             -> a long text that arrives word by word
  *   user: "catalog ..."       -> calls the tool that ends in `query-catalog-entities`
  *   user: "loop ..."          -> calls `list-services` again after every result
+ *   user: "plan ..."          -> calls `update_plan` with a plan of three steps, then says
+ *                                that the plan is written
  *   user: "hold [n]"          -> a text that arrives word by word for n seconds (default 5),
  *                                then lists the user messages it was given, so a test has
  *                                time to add a message while the model is still answering
@@ -177,6 +179,13 @@ export function scriptedReply(body) {
     if (content.startsWith('Error:')) {
       return { text: `The action failed. ${content.slice(0, 200)}` };
     }
+    const asked = [...messages]
+      .reverse()
+      .find(m => m.role === 'assistant')
+      ?.tool_calls?.map(c => c.function?.name);
+    if (asked?.some(name => name?.endsWith('update_plan'))) {
+      return { text: 'The plan is written. I start with the first open step.' };
+    }
     const lastUser = [...messages].reverse().find(m => m.role === 'user');
     if (/^loop/i.test(splitContext(contentText(lastUser?.content)).text)) {
       return call('list-services', {});
@@ -228,6 +237,15 @@ export function scriptedReply(body) {
   if (/^catalog/i.test(text))
     return call('query-catalog-entities', { limit: 3 });
   if (/^loop/i.test(text)) return call('list-services', {});
+  if (/^plan/i.test(text)) {
+    return call('update_plan', {
+      items: [
+        { text: 'Find the service in the catalog', status: 'completed' },
+        { text: 'Read its recent restarts', status: 'in_progress' },
+        { text: 'Restart it if it is stuck', status: 'pending' },
+      ],
+    });
+  }
   return {
     text: 'I can **list** the services, **restart** a service by name, or read the **catalog**. Try: `list services` or `restart payments`.',
   };

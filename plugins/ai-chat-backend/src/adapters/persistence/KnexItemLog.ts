@@ -23,6 +23,7 @@ import {
   type Item,
   type ItemDraft,
   type ItemLog,
+  type PlanUpdateItem,
   type RunFence,
   type RunStatus,
 } from '@kwkevinchan/ai-chat-harness';
@@ -181,6 +182,17 @@ export class KnexItemLog implements ItemLog {
       .andWhere('seq', '>', afterSeq)
       .orderBy('seq', 'asc');
     return rows.map(toItem);
+  }
+
+  async latestPlanUpdate(
+    sessionId: string,
+  ): Promise<PlanUpdateItem | undefined> {
+    // The key `(session_id, seq)` walks back from the end, as for the summary.
+    const row = await this.knex<ItemRow>('items')
+      .where({ session_id: sessionId, kind: 'plan_update' })
+      .orderBy('seq', 'desc')
+      .first();
+    return row ? (toItem(row) as PlanUpdateItem) : undefined;
   }
 
   async append(

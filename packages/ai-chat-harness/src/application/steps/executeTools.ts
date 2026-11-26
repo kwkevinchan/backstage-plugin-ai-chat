@@ -26,6 +26,7 @@ import type { ItemDraft } from '../ports/ItemLog';
 import type { ToolOutput } from '../ports/ToolGateway';
 import type { AdvanceRunDeps, AdvanceRunRequest } from '../types';
 import { runAfterToolCall, settle } from './hooks';
+import { UPDATE_PLAN_TOOL_ID, executeUpdatePlan } from './plan';
 import {
   LOAD_SKILL_TOOL_ID,
   executeLoadSkill,
@@ -45,7 +46,7 @@ type Batch = { calls: ToolCallItem[]; concurrent: boolean };
  * call had a result.
  */
 type Outcome =
-  | { kind: 'write'; draft: ItemDraft; timedOut?: true }
+  | { kind: 'write'; drafts: ItemDraft[]; timedOut?: true }
   | { kind: 'skip' }
   | { kind: 'aborted' };
 
@@ -86,6 +87,9 @@ const MAX_TIMER_MS = 2 ** 31 - 1;
  *   not end the run. When the signal of the run aborts, the calls without a
  *   result are left as they are; the results that are in are written, in
  *   order, and no call starts.
+ * - `update_plan` runs in the core: a valid call writes a `plan_update` item
+ *   and its result in one append, at the place of the call. Its
+ *   `afterToolCall` hooks run before that append.
  * - The `afterToolCall` hooks may change the result before it is written. They
  *   run when the tool of their call ended, so the hooks of the calls of one
  *   stretch may run at the same time. The tool has run by then, so a stop
@@ -102,13 +106,15 @@ export async function* executeTools(
   items: readonly Item[],
   action: { calls: ToolCallItem[]; interrupted: ToolCallItem[] },
 ): AsyncGenerator<HarnessEvent, 'cancelled' | undefined> {
-  async function* write(draft: ItemDraft): AsyncGenerator<HarnessEvent, void> {
-    const [item] = await deps.items.append(
+  async function* write(
+    ...drafts: ItemDraft[]
+  ): AsyncGenerator<HarnessEvent, void> {
+    const written = await deps.items.append(
       req.ctx.sessionId,
-      [draft],
+      drafts,
       req.fence,
     );
-    yield { type: 'item.completed', item };
+    for (const item of written) yield { type: 'item.completed', item };
   }
 
   if (action.interrupted.length > 0) {
@@ -161,7 +167,7 @@ export async function* executeTools(
     if (outcome.kind === 'aborted') return undefined;
     if (outcome.kind === 'write') {
       if (outcome.timedOut) writeTimedOut = true;
-      yield* write(outcome.draft);
+      yield* write(...outcome.drafts);
     }
   }
   return undefined;
@@ -206,7 +212,7 @@ async function* runConcurrently(
   req: AdvanceRunRequest,
   items: readonly Item[],
   calls: readonly ToolCallItem[],
-  write: (draft: ItemDraft) => AsyncGenerator<HarnessEvent, void>,
+  write: (...drafts: ItemDraft[]) => AsyncGenerator<HarnessEvent, void>,
 ): AsyncGenerator<HarnessEvent, 'aborted' | undefined> {
   const limit = Math.max(1, req.limits.readConcurrency);
   const decisions = calls.map(call => decisionFor(items, call));
@@ -225,7 +231,7 @@ async function* runConcurrently(
     for (;;) {
       while (written < calls.length && outcomes[written] !== undefined) {
         const outcome = outcomes[written++]!;
-        if (outcome.kind === 'write') yield* write(outcome.draft);
+        if (outcome.kind === 'write') yield* write(...outcome.drafts);
       }
       if (written === calls.length) return undefined;
       if (req.signal.aborted) {
@@ -236,7 +242,7 @@ async function* runConcurrently(
         await Promise.all(running);
         for (let i = written; i < calls.length; i++) {
           const outcome = outcomes[i];
-          if (outcome?.kind === 'write') yield* write(outcome.draft);
+          if (outcome?.kind === 'write') yield* write(...outcome.drafts);
         }
         return 'aborted';
       }
@@ -292,12 +298,34 @@ async function settleCall(
   if (decision === 'deny') {
     return {
       kind: 'write',
-      draft: {
-        kind: 'tool_result',
-        callId: call.callId,
-        status: 'denied',
-        message: 'The user denied this call.',
-      },
+      drafts: [
+        {
+          kind: 'tool_result',
+          callId: call.callId,
+          status: 'denied',
+          message: 'The user denied this call.',
+        },
+      ],
+    };
+  }
+  if (call.toolId === UPDATE_PLAN_TOOL_ID) {
+    // The plan is the effect of the call, written with its result at the
+    // place of the call. The hooks see the result before that write.
+    const updated = executeUpdatePlan(call);
+    const output = await runAfterToolCall(
+      deps.extensions,
+      call,
+      updated.output,
+      req.signal,
+    );
+    return {
+      kind: 'write',
+      drafts: [
+        ...(updated.plan
+          ? [{ kind: 'plan_update' as const, plan: updated.plan }]
+          : []),
+        resultOf(call, output),
+      ],
     };
   }
   const raw = await runInTime(deps, req, call);
@@ -305,7 +333,7 @@ async function settleCall(
   const output = await runAfterToolCall(deps.extensions, call, raw, req.signal);
   return {
     kind: 'write',
-    draft: resultOf(call, output),
+    drafts: [resultOf(call, output)],
     ...(raw.status === 'timeout' && { timedOut: true as const }),
   };
 }

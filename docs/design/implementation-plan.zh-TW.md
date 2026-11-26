@@ -707,7 +707,7 @@ flowchart LR
 | ----- | ------------------------------------------------------- | ---- | ---------------------------------- | --- | ---- |
 | P3-01 | `ai-chat-node`、擴充點、設定檔裡的 Agent                | M    | X-01、X-02                         | #39 | 完成 |
 | P3-02 | Context provider 和 entity 綁定                         | M    | X-03、SE-02、SE-06                 |
-| P3-03 | 計畫：`update_plan`、`planning: required`、畫面上的清單 | M    | X-06、X-07、D-07                   |
+| P3-03 | 計畫：`update_plan`、`planning: required`、畫面上的清單 | M    | X-06、X-07、D-07                   | #56 | 完成 |
 | P3-04 | Skills：讀 `SKILL.md`、`load_skill`                     | M    | X-04、D-22                         | #53 | 完成 |
 | P3-05 | Hooks                                                   | M    | X-05                               | #52 | 完成 |
 | P3-06 | TechDocs 搜尋的 action                                  | M    | X-08                               | #54 | 完成 |
@@ -722,7 +722,7 @@ flowchart LR
 
 - **P3-01**：一個範例 module 註冊 Agent，不 import 宿主的任何內部檔案。逐項驗收見下方 P3-01。
 - **P3-02**：在擴充點加上 `addContextProvider`。Context provider 和 entity 綁定的執行行為見這一項的其餘範圍。
-- **P3-03**：`planning: required` 的 Agent，第一步送給模型的工具只有 `update_plan`。舊的 `plan_update` 可能在摘要涵蓋的範圍內，所以 `update_plan` 取目前的計畫要另外讀（例如查最新的 `plan_update`），或做摘要時把當時的計畫帶進摘要的輸入。
+- **P3-03**：`planning: required` 的 Agent，第一步送給模型的工具只有 `update_plan`。舊的 `plan_update` 可能在摘要涵蓋的範圍內，所以目前的計畫另外讀（最新的 `plan_update`）。逐項驗收見下方 P3-03。
 - **P3-04**：在擴充點加上 `addSkill`。上下文裡只有 Skill 的名稱和說明。載入全文之後才出現內容。
 - **P3-05**：在擴充點加上 `addHook`。Hook 回傳 `continue` 時，`ask` 的工具仍然要核准。Hook 丟例外時，這個工具呼叫被拒絕，Run 繼續。
 - **P3-06**：搜尋結果只有使用者有權限看的文件。先確認 Backstage 有沒有官方的 search action，有就直接用。
@@ -752,6 +752,57 @@ flowchart LR
   - `model` 只檢查 id 的寫法，不讀 `aiChat.models`（模型轉接是 P3-07）。`skills` 只檢查 id 的寫法，不讀 `aiChat.skills.directories`，也不要求擴充點已經註冊同名 Skill（載入全文是 P3-04）。
   - 設定檔裡的 Agent，系統提示一律是內建規則再加上該 Agent 的 `systemPrompt`；該欄沒寫就用全站的 `aiChat.systemPrompt`。兩段額外說明不疊加。擴充點註冊的 Agent 也套 `buildSystemPrompt(systemPrompt)`，和設定檔同一條規則。
   - 沒有人定義 `default` 時才放內建的那一個。設定檔的 `agents.default` 取代它。擴充點再註冊 `default` 算重複，啟動失敗。
+
+### P3-03 計畫：`update_plan`、`planning: required`、畫面上的清單
+
+- **範圍**：
+  - 核心（`@kwkevinchan/ai-chat-harness`）：
+    - `application/steps/plan.ts`：內建常數 `UPDATE_PLAN_TOOL_ID = 'update_plan'`、`updatePlanDescriptor()`（`readOnly: true`，預設政策 `allow`）、參數驗證、執行（寫入 `plan_update`），以及放進上下文的計畫文字。
+    - `application/plan.ts`：`readCurrentPlan(log, sessionId)` 讀出目前的計畫，摘要涵蓋了最後一筆 `plan_update` 也讀得到。P3-02 內建的 Context provider「目前的計畫」用它。從套件的入口匯出。
+    - `ItemLog` 加上 `latestPlanUpdate(sessionId)`：回傳這段 Session 最後一筆 `plan_update`，不受摘要影響。`InMemoryItemLog` 實作，`itemLogContract` 加上這個方法的測試。
+    - `callModel.ts`：每一步把 `update_plan` 和其他工具一起提供（政策 `deny` 時不提供）。有計畫時，把目前的計畫放進上下文。Agent 是 `planning: 'required'` 時，Run 的第一步只提供 `update_plan`。
+    - `executeTools.ts`：`update_plan` 不經過 tool gateway，由核心執行。
+  - 宿主（`@kwkevinchan/backstage-plugin-ai-chat-backend`）：`KnexItemLog` 實作 `latestPlanUpdate`。`ListSessionTools` 列出 `update_plan`（政策 `deny` 時不列）。
+  - 前端（`@kwkevinchan/backstage-plugin-ai-chat`）：`ui/` 用 assistant-ui 的工具畫面（`MessagePrimitive.Parts` 的 `tools.by_name`）把 `update_plan` 的呼叫顯示成清單。其他套件不 import `@assistant-ui/*`。
+  - 開發用的假模型（`scripts/fake-llm.mjs`）：使用者訊息以 `plan` 開頭時呼叫 `update_plan`。
+  - 不做：Context provider 的擴充點（P3-02）、強制模型呼叫工具的 `tool_choice`、計畫的分享和複製（P2）、Agent 的其他欄位（`toolsets`、`model`、`limits`）的執行。
+- **依賴**：P3-01（`AgentDefinition.planning`）。
+- **驗收**：
+  - `update_plan`（X-06、D-07）：
+    - 每個 Agent 每一步都拿得到 `update_plan`，標成 `readOnly: true`。政策沒寫時直接執行，不等核准。
+    - 參數是 `{ items: [{ text, status }] }`：`status` 是 `pending`、`in_progress`、`completed`；最多 20 項；`text` 去掉前後空白後是 1 到 300 個字元；沒有其他欄位。不合格時結果是 `invalid`，不寫 `plan_update`，不產生核准卡片。
+    - 合格的呼叫寫入一筆 `plan_update`（整份計畫，`text` 去掉前後空白），再寫入 `ok` 的 `tool_result`。下一次呼叫 `update_plan` 取代整份計畫。
+    - 有計畫之後，每一步的上下文都有目前的計畫（每一項的狀態和文字）。沒有計畫時不放。
+    - `policy['update_plan'] = 'deny'` 時不提供 `update_plan`，模型硬要呼叫的結果是 `denied`。`ask` 時等核准，允許之後才寫 `plan_update`。
+    - Hook 照常作用：`beforeToolCall` 可以拒絕 `update_plan`（不寫 `plan_update`）；`afterToolCall` 收到它的結果。
+    - 工具清單（`GET /sessions/:id/tools`）列出 `update_plan`，政策 `deny` 時不列。
+  - 目前的計畫：
+    - `readCurrentPlan` 回傳最後一筆 `plan_update` 的計畫；沒有計畫時回傳 `undefined`。只看傳入 Item 的 `currentPlan(items)` 移除，避免讀到被摘要截掉的範圍。
+    - 上下文裡每一項計畫只佔一行：文字裡的換行換成空白。
+    - 摘要涵蓋了最後一筆 `plan_update`（迴圈用 `fromLatestSummary` 讀不到它）時，`readCurrentPlan` 仍回傳那份計畫，上下文也仍有它。
+    - `latestPlanUpdate` 在 SQLite 和 PostgreSQL 16 上通過 `itemLogContract`。
+  - `planning: required`（X-07）：
+    - 這種 Agent 的 Run，第一步送給模型的工具只有 `update_plan`，上下文寫明這一步要先寫計畫。第二步起，工具照常。
+    - 第一步模型呼叫別的工具：結果是 `invalid`，工具不執行。
+    - 沒有 `planning` 的 Agent，第一步的工具照常。
+    - 透過 HTTP：範例 module 的 `guide`（`planning: 'required'`）的 Session，第一次呼叫模型只收到 `update_plan`。
+  - 畫面上的清單（X-06）：
+    - `update_plan` 的呼叫顯示成一份清單：每一項的文字和狀態（待辦、進行中、完成），狀態有文字，不只靠顏色。
+    - 呼叫失敗或被拒絕時，照一般的工具列顯示，看得到錯誤。
+    - 重新整理之後，從存下的紀錄顯示同一份清單。
+    - 煙霧測試（兩個 app）：`plan` 開頭的訊息讓假模型呼叫 `update_plan`，畫面出現清單。
+- **規格沒寫、實作選定的地方**：
+  - `update_plan` 給每個 Agent，不只給 `planning: required` 的 Agent（D-07：計畫是工具，不是階段）。管理員可以用 `policy` 設成 `deny` 關掉。
+  - 「第一步」是每個 Run 的第一步。使用者每送一則訊息，`planning: required` 的 Agent 就先寫（或改）計畫。核准之後接著跑的是同一個 Run，從下一步算起，不再限制。
+  - 第一步只回答文字、不呼叫 `update_plan` 時，Run 照常結束。模型 API 的 `tool_choice` 不在這一項。
+  - `planning: required` 的 Agent 而且 `update_plan` 被 `deny` 時，第一步不提供任何工具。模型硬要呼叫工具時，結果是 `invalid`，訊息是這一步沒有可用的工具。
+  - 計畫的長度上限（20 項、每項 300 字元）讓上下文裡的計畫有上限。已經存下的計畫照原樣讀。
+  - `update_plan` 的工具輸出是固定的 `Plan updated.`，計畫本身在 `plan_update` 和呼叫的參數裡。
+  - 先跑 `afterToolCall`，再把 `plan_update` 和 `tool_result` 在同一次寫入、照呼叫的位置寫進紀錄（P3-07 的平行唯讀呼叫照 `position` 寫入）。Hook 把結果改成失敗時，計畫仍是已更新：工具已經執行過，跟其他工具一樣。兩筆一起寫入，所以不會只有計畫沒有結果。同一步有兩個 `update_plan` 時，位置較後的那份是最後的計畫。`update_plan` 照算進 `maxToolCallsPerStep` 和 `maxToolCallsPerRun`。
+  - 上下文裡的計畫寫明是模型自己寫的筆記，不是使用者或管理員的指示：參數可能受工具輸出影響（S-03）。
+  - 目前的計畫用 `ItemLog.latestPlanUpdate` 另外讀，不放進摘要，`summary` 的內容不變。規格「計畫不另外存」照舊。
+  - 在 P3-02 之前，計畫由迴圈直接放進上下文。P3-02 的內建 Context provider 改用 `readCurrentPlan`。
+  - 畫面用呼叫的參數畫清單（assistant-ui 的工具畫面），每次更新各自是一份清單，留在它出現的位置。`data-plan` 照舊在串流裡，畫面不另外顯示。
 
 ### P3-04 Skills：讀 `SKILL.md`、`load_skill`
 
@@ -1083,3 +1134,4 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-25 | 1.2  | P3-05 完成（X-05，#52）：擴充點加入 `addHook`。迴圈依序呼叫 `beforeModelCall`、`beforeToolCall`、`afterToolCall`，宿主在寫入 Run 的終態之後呼叫 `onRunEnd`。政策只能調嚴；Hook 失敗時 fail closed；停止時不再等 Hook                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 2026-11-25 | 1.2  | P3-04 完成（X-04、D-22，#53）：加入 `aiChat.skills.directories`（`SKILL.md`）、擴充點加入 `addSkill`、內建 `load_skill` 工具（`readOnly: true`，預設 `allow`），依 Agent 過濾並在呼叫時才延遲載入全文                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 2026-11-25 | 1.2  | P3-06 完成（X-08，#54）：V-05 確認 Backstage 1.56.2 有官方的 `search:query`（`@backstage/plugin-search-backend` 2.1.8），直接用，不另外寫 action。新增整合測試（真的 search backend、actions registry 與 permission 過濾）和 README 的設定說明                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 2026-11-26 | 1.2  | P3-03 完成（X-06、X-07、D-07，#56）：內建 `update_plan`（`readOnly: true`，預設 `allow`）、`planning: required` 的第一步只提供 `update_plan`、`readCurrentPlan` 和 `ItemLog.latestPlanUpdate`（摘要涵蓋舊的 `plan_update` 也讀得到）、畫面用 assistant-ui 的工具畫面把計畫顯示成清單。逐項驗收見 P3-03                                                                                                                                                                                                                                                                                                                                                                                               |

@@ -279,11 +279,12 @@ export interface Config {
      *
      * `skills` chooses which configured and module-registered skills the
      * agent offers through `load_skill` (omitting it offers all registered
-     * skills; an empty list offers none). `model` chooses the model of the
-     * agent's runs and titles. `toolsets`, `limits` and `planning` are
-     * recorded. The loop still uses the limits of the installation, and does
-     * not filter tools by the agent's toolsets or require a plan yet. A value
-     * that is not valid stops the backend at startup.
+     * skills; an empty list offers none). `planning: required` gives the
+     * agent only `update_plan` in the first step of every run. `model`
+     * chooses the model of the agent's runs and titles. `toolsets` and
+     * `limits` are recorded. The loop still uses the limits of the
+     * installation, and does not filter tools by the agent's toolsets yet. A
+     * value that is not valid stops the backend at startup.
      *
      * A backend module can register further agents and skills through
      * `@kwkevinchan/backstage-plugin-ai-chat-node`. An id that both this block
@@ -314,8 +315,8 @@ export interface Config {
          */
         model?: string;
         /**
-         * `required`: a run of this agent is meant to plan first. That is not
-         * enforced yet.
+         * `required`: the first step of every run of this agent offers only
+         * `update_plan`, so the agent writes a plan first.
          */
         planning?: 'required';
         /**

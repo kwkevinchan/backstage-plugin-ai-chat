@@ -144,8 +144,8 @@
 | X-03 | Context provider：每一步回傳一段要加進上下文的文字，有長度上限。內建：使用者身分、綁定的 entity、目前的計畫                    | P3         |
 | X-04 | Skill：格式是 `SKILL.md`。上下文只放名稱和一句說明。`load_skill` 載入全文，唯讀，`allow`                                       | P3（完成） |
 | X-05 | Hook 的時機：`beforeModelCall`、`beforeToolCall`、`afterToolCall`、`onRunEnd`。`beforeToolCall` 可以拒絕或把政策調嚴，不能調鬆 | P3（完成） |
-| X-06 | `update_plan`：模型寫入或更新計畫。計畫是一筆 Item，每一步放進上下文，畫面顯示成清單                                           | P3         |
-| X-07 | Agent 的 `planning: required`：第一步只提供 `update_plan`                                                                      | P3         |
+| X-06 | `update_plan`：模型寫入或更新計畫。計畫是一筆 Item，每一步放進上下文，畫面顯示成清單                                           | P3（完成） |
+| X-07 | Agent 的 `planning: required`：第一步只提供 `update_plan`                                                                      | P3（完成） |
 | X-08 | TechDocs 搜尋和讀取做成 action，透過 Backstage Search，用使用者的身分。回答要附來源連結                                        | P3（完成） |
 | X-09 | 模型轉接可以替換。每個模型可以宣告能力，例如是否支援平行工具呼叫、是否能讀圖片（圖片這一項在 PI，見 IN-05）                    | P3         |
 
@@ -499,6 +499,7 @@ interface Hooks {
 | 2026-11-25 | 1.2  | X-05 完成（P3-05）：`aiChatHarnessExtensionPoint` 公開 `addHook`。迴圈依序呼叫 `beforeModelCall`、`beforeToolCall`、`afterToolCall`；宿主寫入 Run 的終態之後呼叫 `onRunEnd`，每個 Run 一次。政策只能調嚴，Hook 失敗時 fail closed                                                                                                                                        |
 | 2026-11-25 | 1.2  | X-04、D-22 完成（P3-04）：`aiChat.skills.directories` 載入 `SKILL.md`、`aiChatHarnessExtensionPoint` 公開 `addSkill`、`load_skill`（`readOnly: true`、預設 `allow`）延遲載入全文                                                                                                                                                                                         |
 | 2026-11-25 | 1.2  | X-08 完成（P3-06）：用 Backstage search backend 官方的 `search:query`（唯讀），以使用者的身分搜尋；`permission.enabled: true` 時只回傳使用者能讀的文件，每筆結果帶 `document.location`。不另外寫 action（V-05）                                                                                                                                                          |
+| 2026-11-26 | 1.2  | X-06、X-07 完成（P3-03）：內建 `update_plan`（`readOnly: true`，預設 `allow`）給每個 Agent，寫入 `plan_update`；有計畫時每一步的上下文都有目前的計畫，畫面把每次更新顯示成清單。`planning: required` 的 Agent，每個 Run 的第一步只提供 `update_plan`。目前的計畫用 `ItemLog.latestPlanUpdate` 讀，摘要涵蓋舊的 `plan_update` 也讀得到（D-07）                            |
 
 ## 12. 對照的開源專案
 

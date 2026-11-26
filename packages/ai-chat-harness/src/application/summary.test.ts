@@ -24,9 +24,18 @@ import {
 } from '../domain';
 import { agentSays, call, result, tool, user } from '../domain/fixtures';
 import { callTool, say, waitForAbort } from '../testing';
-import { kit } from '../testing/fixture';
+import { kit as baseKit } from '../testing/fixture';
 import type { FakeTool } from '../testing';
 import type { HarnessEvent } from './events';
+import { UPDATE_PLAN_TOOL_ID } from './steps/plan';
+
+// The budgets of these tests are sized for the tools each test gives. The
+// built-in `update_plan` is denied, so that it is not offered and not counted.
+const kit = (options: Parameters<typeof baseKit>[0]) =>
+  baseKit({
+    policy: { byTool: { [UPDATE_PLAN_TOOL_ID]: 'deny' } },
+    ...options,
+  });
 
 const readTool: FakeTool = {
   descriptor: tool({ id: 'catalog:get-entity', readOnly: true }),

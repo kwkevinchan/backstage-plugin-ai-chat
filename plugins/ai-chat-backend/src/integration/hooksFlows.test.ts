@@ -371,6 +371,7 @@ describe('harness hooks through host and supervisor (X-05)', () => {
         extensions,
         items: (inner: ItemLog): ItemLog => ({
           read: (...args) => inner.read(...args),
+          latestPlanUpdate: (...args) => inner.latestPlanUpdate(...args),
           append: async (sessionId, drafts, fence) => {
             if (drafts.some(d => d.kind === 'agent_message')) {
               throw new Error('database is down');

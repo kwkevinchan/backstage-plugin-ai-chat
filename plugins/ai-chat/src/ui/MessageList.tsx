@@ -29,8 +29,10 @@ import type {
   ChatTool,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { DecisionInfo } from '../domain/itemsToMessages';
+import { UPDATE_PLAN_TOOL } from '../domain/plan';
 import type { ChatUnreadData } from '../domain/types';
 import { MarkdownText } from './MarkdownText';
+import { PlanToolCall } from './PlanCard';
 import { cx } from './styles';
 import { ToolCall, ToolCallViewContext } from './ToolCallCard';
 
@@ -118,7 +120,7 @@ function Unread({ data }: DataMessagePartProps<ChatUnreadData>) {
 }
 
 // The run, the notices and the other data parts are shown outside the
-// messages or not at all.
+// messages or not at all. The plan is shown with its `update_plan` call.
 const Hidden = () => null;
 
 const data = {
@@ -141,7 +143,10 @@ function AssistantMessage() {
         components={{
           Text: AssistantText,
           data,
-          tools: { Fallback: ToolCall },
+          tools: {
+            by_name: { [UPDATE_PLAN_TOOL]: PlanToolCall },
+            Fallback: ToolCall,
+          },
         }}
       />
     </MessagePrimitive.Root>

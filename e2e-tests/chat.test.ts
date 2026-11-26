@@ -395,6 +395,32 @@ test('switching off a toolset takes its tools away from the session', async ({
   ).not.toBeChecked();
 });
 
+test('the plan of the model is a checklist, also after a reload', async ({
+  page,
+}) => {
+  const shot = watch(page);
+  await signIn(page);
+
+  await say(page, 'plan the check of the payments service');
+  const plan = page.getByRole('region', { name: 'Plan' });
+  await expect(plan).toBeVisible();
+  await expect(plan.getByText('1 of 3 done')).toBeVisible();
+  const steps = plan.getByRole('listitem');
+  await expect(steps).toHaveCount(3);
+  await expect(steps.nth(0)).toContainText('Find the service in the catalog');
+  await expect(steps.nth(0)).toContainText('Done');
+  await expect(steps.nth(1)).toContainText('In progress');
+  await expect(steps.nth(2)).toContainText('To do');
+  await expect(page.getByText('The plan is written.')).toBeVisible();
+  await shot('15-plan');
+
+  await page.reload();
+  await expect(
+    page.getByRole('region', { name: 'Plan' }).getByRole('listitem'),
+  ).toHaveCount(3);
+  await expect(page.getByText('The plan is written.')).toBeVisible();
+});
+
 test('the conversation follows the answer to its end, and shows a table', async ({
   page,
 }) => {

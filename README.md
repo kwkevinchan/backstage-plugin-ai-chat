@@ -381,14 +381,21 @@ agent's `systemPrompt`. When the agent omits `systemPrompt`, the installation
 `aiChat.systemPrompt` is used instead. The two extra texts are not combined.
 `toolsets` names toolsets from `aiChat.toolsets` (or `default`, when no
 toolsets are configured). `skills` chooses the skills the agent offers (see
-below); an id that no skill has stops the backend. `model` chooses the model
-of the agent's runs and titles: `default` (`aiChat.llm`), a key of
-`aiChat.models`, or a model client a module added; an unknown id stops the
-backend. `limits` and `planning: required` are recorded on the agent. A wrong
-value stops the backend at startup.
+below); an id that no skill has stops the backend. `planning: required`
+gives the agent only the `update_plan` tool in the first step of every run, so
+it writes a plan before it does anything else. `model` chooses the model of the
+agent's runs and titles: `default` (`aiChat.llm`), a key of `aiChat.models`,
+or a model client a module added; an unknown id stops the backend. `limits`
+are recorded on the agent. A wrong value stops the backend at startup.
+
+Every agent has the read-only built-in `update_plan` tool (`allow` by default;
+`policy: { update_plan: deny }` turns it off). Each call replaces the whole plan
+(at most 20 steps, each `pending`, `in_progress` or `completed`), the current
+plan is in the context of every step, and the chat shows each update as a
+checklist.
 
 The loop still uses the limits of the installation. It does not filter tools
-by the agent's toolsets or require a plan on the first step. When skills
+by the agent's toolsets. When skills
 are registered through `aiChat.skills.directories` (`SKILL.md`) or `addSkill`,
 the prompt lists only each allowed skill's `id` and short `description`; the
 full instructions are loaded on demand by the read-only built-in `load_skill`
@@ -706,7 +713,7 @@ this plugin until it is updated.
 
 An entity tab or sidebar widget, file uploads,
 several model providers at once, MCP servers outside Backstage, sharing a
-conversation, planning or an agent's model (those
+conversation, or an agent's model and limits (those
 fields can be set, and a module can register them; the loop does not use them
 yet), and a session list that can search, pin or archive (the page still lists
 recent sessions; a title is stored after the first round ends normally).

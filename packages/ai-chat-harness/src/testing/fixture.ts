@@ -28,6 +28,7 @@ import {
   type RunOutcome,
 } from '../application';
 import type {
+  AgentDefinition,
   ContextBudget,
   Item,
   ItemBody,
@@ -64,6 +65,7 @@ export async function kit(options: {
   log?: ItemBody[];
   /** Registrations the loop receives and does not call. */
   extensions?: Extensions;
+  agent?: AgentDefinition;
 }) {
   const clock = new FakeClock();
   const items = new InMemoryItemLog({ clock });
@@ -97,7 +99,10 @@ export async function kit(options: {
     usage: RunUsage = lastUsage(),
     runFence: RunFence = fence,
   ): AdvanceRunRequest => ({
-    agent: { id: 'default', systemPrompt: 'You are a helpful agent.' },
+    agent: options.agent ?? {
+      id: 'default',
+      systemPrompt: 'You are a helpful agent.',
+    },
     model,
     limits,
     budget: options.budget ?? { tokenBudget: 24000, keepRecentSteps: 6 },

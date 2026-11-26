@@ -70,7 +70,10 @@ describe('aiChatPlugin', () => {
     await llm?.close();
   });
 
-  async function startBackend(respond?: Parameters<typeof startLlmServer>[0]) {
+  async function startBackend(
+    respond?: Parameters<typeof startLlmServer>[0],
+    features: Parameters<typeof startTestBackend>[0]['features'] = [],
+  ) {
     answers = [];
     // A title call is not one of the scripted answers. It gets a fixed title
     // so the next step of the conversation still gets the answer it expects.
@@ -109,6 +112,7 @@ describe('aiChatPlugin', () => {
     const { server } = await startTestBackend({
       features: [
         aiChatPlugin,
+        ...features,
         mockServices.rootConfig.factory({
           data: {
             aiChat: { llm: { baseUrl: llm.url, model: 'test-model' } },
@@ -410,6 +414,92 @@ describe('aiChatPlugin', () => {
     expect(again.body).toEqual({ approved: true });
     expect(actions.invocations).toHaveLength(2);
     expect(auditEvents).toEqual(['tool-call-approve', 'tool-call-invoke']);
+  });
+
+  it('offers only update_plan in the first step of an agent with planning: required, then every tool, and streams the plan (X-06, X-07)', async () => {
+    const server = await startBackend(undefined, [exampleModule]);
+    const plan = {
+      items: [
+        { text: 'Find the documentation', status: 'in_progress' },
+        { text: 'Answer with the link', status: 'pending' },
+      ],
+    };
+    answers = [
+      call('update_plan', plan),
+      call('demo_list-things', {}),
+      text('Done.'),
+    ];
+    const toolNames = () =>
+      llm.requests
+        .map(r => r.body)
+        .filter(
+          body =>
+            !String(
+              body.messages?.find(
+                (message: { role?: string }) => message.role === 'system',
+              )?.content,
+            ).startsWith(TITLE_PROMPT_MARK),
+        )
+        .map(body =>
+          (body.tools ?? []).map(
+            (t: { function: { name: string } }) => t.function.name,
+          ),
+        );
+
+    const created = await request(server)
+      .post('/api/ai-chat/sessions')
+      .set('Authorization', alice)
+      .send({ agentId: 'guide' })
+      .expect(201);
+    const base = `/api/ai-chat/sessions/${created.body.id}`;
+    const res = await request(server)
+      .post(`${base}/runs`)
+      .set('Authorization', alice)
+      .send({ text: 'how do I start?' })
+      .expect(200);
+    const message = await readMessage(await parseSse(res.text));
+
+    const [first, second] = toolNames();
+    expect(first).toEqual(['update_plan']);
+    expect(second).toEqual(
+      expect.arrayContaining(['demo_list-things', 'load_skill', 'update_plan']),
+    );
+    expect(actions.invocations.map(i => i.id)).toEqual(['demo:list-things']);
+    expect(message.parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'data-plan', data: plan }),
+        expect.objectContaining({
+          type: 'tool-update_plan',
+          state: 'output-available',
+          input: plan,
+          output: 'Plan updated.',
+        }),
+      ]),
+    );
+
+    const tools = await request(server)
+      .get(`${base}/tools`)
+      .set('Authorization', alice)
+      .expect(200);
+    expect(tools.body.items.map((t: { id: string }) => t.id)).toContain(
+      'update_plan',
+    );
+
+    // An agent without planning gets every tool in its first step.
+    const plain = await request(server)
+      .post('/api/ai-chat/sessions')
+      .set('Authorization', alice)
+      .expect(201);
+    answers = [text('Hi.')];
+    const before = toolNames().length;
+    await request(server)
+      .post(`/api/ai-chat/sessions/${plain.body.id}/runs`)
+      .set('Authorization', alice)
+      .send({ text: 'hi' })
+      .expect(200);
+    expect(toolNames()[before]).toEqual(
+      expect.arrayContaining(['demo_list-things', 'update_plan']),
+    );
   });
 
   it('denies through the route', async () => {

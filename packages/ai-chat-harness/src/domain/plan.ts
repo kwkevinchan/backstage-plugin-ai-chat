@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-import type { Item } from './item';
-
 /** @public */
 export type PlanItemStatus = 'pending' | 'in_progress' | 'completed';
 
@@ -24,18 +22,3 @@ export type PlanItem = { text: string; status: PlanItemStatus };
 
 /** The whole plan; an update replaces it. @public */
 export type Plan = { items: PlanItem[] };
-
-/**
- * The current plan of a session: the one in the last `plan_update` item.
- *
- * @public
- */
-export function currentPlan(items: readonly Item[]): Plan | undefined {
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i];
-    if (item.kind === 'plan_update') {
-      return item.plan;
-    }
-  }
-  return undefined;
-}

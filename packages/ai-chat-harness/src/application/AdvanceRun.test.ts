@@ -23,6 +23,7 @@ import { kit, fence, sessionId } from '../testing/fixture';
 import { AdvanceRun } from './AdvanceRun';
 import { emptyExtensions } from './ports/extensions';
 import { executeTools } from './steps/executeTools';
+import { UPDATE_PLAN_TOOL_ID } from './steps/plan';
 
 const readTool: FakeTool = {
   descriptor: tool({ id: 'catalog:get-entity', readOnly: true }),
@@ -711,7 +712,9 @@ describe('AdvanceRun: a call that is refused when it is written', () => {
     });
     const { outcome } = await t.execute();
     expect(outcome).toEqual({ status: 'completed' });
-    expect(t.model.inputs[0].tools).toEqual([]);
+    expect(t.model.inputs[0].tools.map(x => x.id)).toEqual([
+      UPDATE_PLAN_TOOL_ID,
+    ]);
     expect(t.tools.executed).toHaveLength(0);
     expect((await t.read())[2]).toMatchObject({ status: 'denied' });
   });
@@ -725,6 +728,7 @@ describe('AdvanceRun: a call that is refused when it is written', () => {
     await t.execute();
     expect(t.model.inputs[0].tools.map(x => x.id)).toEqual([
       'temporal:start-workflow',
+      UPDATE_PLAN_TOOL_ID,
     ]);
   });
 });

@@ -6,8 +6,9 @@ Extension point for backend modules of the unofficial
 A module depends on this package, and not on the backend plugin or the
 harness. It receives `aiChatHarnessExtensionPoint` and can call `addAgent`
 to register an agent (a system prompt, toolsets, skills, a model, limits and
-`planning: required`; `limits` and `planning` are recorded on the agent and
-are not applied yet) and `addSkill` to register a skill whose full
+`planning: required`, which gives the agent only `update_plan` in the first
+step of a run; `limits` are recorded on the agent and are not applied yet) and
+`addSkill` to register a skill whose full
 instructions are loaded lazily when the model calls `load_skill`.
 
 An id that the configuration also defines, or that another module already

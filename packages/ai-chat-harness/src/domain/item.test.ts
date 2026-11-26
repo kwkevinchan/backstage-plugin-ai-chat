@@ -18,14 +18,12 @@ import { dedupeKeyOf } from './item';
 import {
   approve,
   call,
-  log,
   note,
   result,
   started,
   summary,
   user,
 } from './fixtures';
-import { currentPlan } from './plan';
 
 describe('dedupeKeyOf (T-07, D-25)', () => {
   it.each([
@@ -54,25 +52,5 @@ describe('dedupeKeyOf (T-07, D-25)', () => {
       result('c1'),
     ].map(dedupeKeyOf);
     expect(new Set(keys).size).toBe(4);
-  });
-});
-
-describe('currentPlan', () => {
-  const plan = (text: string) => ({
-    kind: 'plan_update' as const,
-    plan: { items: [{ text, status: 'pending' as const }] },
-  });
-
-  it('is the plan of the last plan_update', () => {
-    expect(
-      currentPlan(log(user(), plan('first'), user(), plan('second'))),
-    ).toEqual({
-      items: [{ text: 'second', status: 'pending' }],
-    });
-  });
-
-  it('is undefined without a plan_update', () => {
-    expect(currentPlan(log(user()))).toBeUndefined();
-    expect(currentPlan([])).toBeUndefined();
   });
 });

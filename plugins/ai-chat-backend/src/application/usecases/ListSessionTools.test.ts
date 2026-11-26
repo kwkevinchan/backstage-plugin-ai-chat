@@ -73,7 +73,36 @@ describe('ListSessionTools', () => {
         description: 'Lists the things.',
         readOnly: true,
       },
+      expect.objectContaining({ id: 'update_plan', readOnly: true }),
     ]);
+  });
+
+  it('lists update_plan after the other tools, and leaves it out when the policy denies it', async () => {
+    const policy = { byTool: {} as Record<string, 'deny'> };
+    const agents: Pick<AgentCatalog, 'agent' | 'policy'> = {
+      agent: async id => ({ id, systemPrompt: 'Help.' }),
+      policy: async () => policy,
+    };
+    const list = new ListSessionTools({ sessions, tools, agents });
+
+    const listed = await list.execute({ principal: jane, sessionId: 's1' });
+    expect(listed.map(tool => tool.id)).toEqual([
+      'demo:list-things',
+      'update_plan',
+    ]);
+    expect(listed[1]).toEqual({
+      id: 'update_plan',
+      title: 'Update plan',
+      description: expect.stringContaining('Write the plan of the work'),
+      readOnly: true,
+    });
+
+    policy.byTool.update_plan = 'deny';
+    expect(
+      (await list.execute({ principal: jane, sessionId: 's1' })).map(
+        tool => tool.id,
+      ),
+    ).toEqual(['demo:list-things']);
   });
 
   it('passes on other errors of the agent catalog', async () => {
