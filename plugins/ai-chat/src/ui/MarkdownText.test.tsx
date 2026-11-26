@@ -15,9 +15,15 @@
  */
 
 import { render, screen } from '@testing-library/react';
+import { configApiRef, type ConfigApi } from '@backstage/core-plugin-api';
+import { TestApiProvider } from '@backstage/test-utils';
 import { LinkedText } from './LinkedText';
 import { safeUrl } from './MarkdownText';
-import { assistantText, renderThread } from './__testUtils__/renderThread';
+import {
+  assistantText,
+  renderThread,
+  ThreadHarness,
+} from './__testUtils__/renderThread';
 
 // The text of an assistant message goes through the runtime and
 // `MarkdownText`, as on the page. S-02: these tests lock that the Markdown
@@ -170,6 +176,91 @@ describe('safeUrl', () => {
     ['//example.test/a', ''],
   ])('%s becomes %j', (url, expected) => {
     expect(safeUrl(url)).toBe(expected);
+  });
+});
+
+describe('safeUrl with appBaseUrl', () => {
+  it.each([
+    [
+      '/docs/default/component/orders/deploy/',
+      'https://backstage.example.com',
+      'https://backstage.example.com/docs/default/component/orders/deploy/',
+    ],
+    [
+      '/docs/default/component/orders/deploy/?tab=a#top',
+      'https://backstage.example.com/',
+      'https://backstage.example.com/docs/default/component/orders/deploy/?tab=a#top',
+    ],
+    [
+      '/docs/default/component/orders/deploy/',
+      'https://backstage.example.com/portal',
+      'https://backstage.example.com/portal/docs/default/component/orders/deploy/',
+    ],
+    [
+      '/docs/default/component/orders/deploy/',
+      'https://backstage.example.com/portal/',
+      'https://backstage.example.com/portal/docs/default/component/orders/deploy/',
+    ],
+    ['//evil.test/phish', 'https://backstage.example.com', ''],
+    ['/\\evil.test/phish', 'https://backstage.example.com', ''],
+    ['/\\evil.test/phish', 'https://backstage.example.com/portal', ''],
+    ['/%5Cevil.test/phish', 'https://backstage.example.com', ''],
+    ['/%2Fevil.test/phish', 'https://backstage.example.com', ''],
+    ['/\t/evil.test', 'https://backstage.example.com', ''],
+    // eslint-disable-next-line no-script-url -- the target the test refuses
+    ['javascript:alert(1)', 'https://backstage.example.com', ''],
+    ['data:text/html,x', 'https://backstage.example.com', ''],
+    ['docs/relative-no-slash', 'https://backstage.example.com', ''],
+    ['/docs/a', 'not-a-url', ''],
+    // eslint-disable-next-line no-script-url -- the base URL the test refuses
+    ['/docs/a', 'javascript:alert(1)', ''],
+  ])('%s with base %s becomes %j', (url, baseUrl, expected) => {
+    expect(safeUrl(url, baseUrl)).toBe(expected);
+  });
+});
+
+describe('MarkdownText with app.baseUrl', () => {
+  function renderWithBaseUrl(text: string, baseUrl: string) {
+    const config = {
+      getOptionalString: (key: string) =>
+        key === 'app.baseUrl' ? baseUrl : undefined,
+    } as unknown as ConfigApi;
+    return render(
+      <TestApiProvider apis={[[configApiRef, config]]}>
+        <ThreadHarness messages={[assistantText(text)]} options={{}} />
+      </TestApiProvider>,
+    );
+  }
+
+  it('resolves root-relative links against app.baseUrl and blocks unsafe targets', () => {
+    renderWithBaseUrl(
+      '[doc](/docs/default/component/orders/deploy/) [proto](//evil.test) [backslash](/\\evil.test) [js](javascript:alert(1)) [data](data:text/html,x)',
+      'https://backstage.example.com',
+    );
+    const links = screen.getAllByRole('link');
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute(
+      'href',
+      'https://backstage.example.com/docs/default/component/orders/deploy/',
+    );
+    expect(links[0]).toHaveAttribute('target', '_blank');
+    expect(links[0]).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(screen.queryByRole('link', { name: 'proto' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'backslash' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'js' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'data' })).toBeNull();
+  });
+
+  it('preserves a subpath configured in app.baseUrl', () => {
+    renderWithBaseUrl(
+      '[doc](/docs/default/component/orders/deploy/)',
+      'https://backstage.example.com/portal/',
+    );
+    const link = screen.getByRole('link', { name: 'doc' });
+    expect(link).toHaveAttribute(
+      'href',
+      'https://backstage.example.com/portal/docs/default/component/orders/deploy/',
+    );
   });
 });
 

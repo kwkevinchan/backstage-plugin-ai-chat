@@ -555,9 +555,7 @@ aiChat:
       title: Docs
       systemPrompt: >-
         Answer from TechDocs. Search with the type techdocs and a pageLimit of
-        5. The location of a result is a path under https://backstage.example.com;
-        cite every result you use as a full link, for example
-        https://backstage.example.com/docs/default/component/payments/deploy/.
+        5. Cite every result you use with a Markdown link to its location.
 ```
 
 - The action runs as the user who sends the message. The search backend
@@ -578,9 +576,9 @@ aiChat:
   its text. To offer it, add `techdocs` to `backend.actions.pluginSources` and
   the action to a toolset.
 - Every result has `document.title` and `document.location`. The location is
-  a path (`/docs/...`), and the chat makes links only of `http`, `https` and
-  `mailto` addresses, so the system prompt above asks the model to write the
-  full address. Keep the default `search.collators.techdocs.locationTemplate`:
+  a path (`/docs/...`), and the chat resolves single-`/` Markdown links against
+  `app.baseUrl` (same-origin only), so the model can cite `document.location`
+  directly. Keep the default `search.collators.techdocs.locationTemplate`:
   it applies to the whole search index, and the search box of the TechDocs
   reader goes to the location as a path inside the app.
 - The input schema of the action has recursive `$ref` entries (in `filters`).

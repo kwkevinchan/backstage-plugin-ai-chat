@@ -14,21 +14,59 @@
  * limitations under the License.
  */
 
-import type { ComponentProps } from 'react';
+import { useCallback, type ComponentProps } from 'react';
+import { configApiRef, useApiHolder } from '@backstage/core-plugin-api';
 import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Anchor } from './LinkedText';
 import { cx } from './styles';
 
 const SAFE_URL = /^(https?:\/\/|mailto:)/i;
+// eslint-disable-next-line no-control-regex -- reject control characters stripped by URL parsers
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+const UNSAFE_ROOT_PREFIX = /^\/(?:[/\\]|%2f|%5c)/i;
 
 /**
- * Only `http:`, `https:` and `mailto:` targets are kept (S-02). Any other
- * target, such as `javascript:`, `data:` or a relative path, becomes empty,
- * and the link shows its label only.
+ * Only `http:`, `https:` and `mailto:` targets are kept (S-02). When
+ * `appBaseUrl` is given, a root-relative path starting with a single `/`
+ * (not `//`, `/\`, or their percent-encoded forms) is resolved under
+ * `appBaseUrl` and kept only when the result is same-origin with `appBaseUrl`
+ * and passes the scheme check. Any other target, such as `javascript:`,
+ * `data:` or a relative path without `appBaseUrl`, becomes empty, and the link
+ * shows its label only.
  */
-export function safeUrl(url: string): string {
-  return SAFE_URL.test(url) ? url : '';
+export function safeUrl(url: string, appBaseUrl?: string): string {
+  if (SAFE_URL.test(url)) {
+    return url;
+  }
+  if (
+    !appBaseUrl ||
+    !url.startsWith('/') ||
+    UNSAFE_ROOT_PREFIX.test(url) ||
+    CONTROL_CHARS.test(url)
+  ) {
+    return '';
+  }
+  let base: URL;
+  try {
+    base = new URL(appBaseUrl);
+  } catch {
+    return '';
+  }
+  if (base.protocol !== 'http:' && base.protocol !== 'https:') {
+    return '';
+  }
+  const basePath = base.pathname.replace(/\/+$/, '');
+  let resolved: URL;
+  try {
+    resolved = new URL(`${base.origin}${basePath}${url}`);
+  } catch {
+    return '';
+  }
+  if (resolved.origin !== base.origin) {
+    return '';
+  }
+  return SAFE_URL.test(resolved.href) ? resolved.href : '';
 }
 
 type Props<T extends 'a' | 'h2' | 'li' | 'section'> = ComponentProps<T> & {
@@ -72,16 +110,24 @@ const components = { a: Link, section: Section, h2: Heading2, li: ListItem };
  * strike-through, bare addresses as links). It loads nothing (S-02): images
  * are not rendered, HTML in the text is shown as text (there is no
  * `rehype-raw`), and a link keeps only an `http:`, `https:` or `mailto:`
- * target. Code is shown without highlighting.
+ * target (with single-`/` paths resolved under `app.baseUrl` when same-origin).
+ * Code is shown without highlighting.
  */
 export function MarkdownText() {
+  const appBaseUrl = useApiHolder()
+    .get(configApiRef)
+    ?.getOptionalString('app.baseUrl');
+  const urlTransform = useCallback(
+    (url: string) => safeUrl(url, appBaseUrl),
+    [appBaseUrl],
+  );
   return (
     <MarkdownTextPrimitive
       className={cx('chat-markdown')}
       smooth={false}
       remarkPlugins={plugins}
       disallowedElements={disallowed}
-      urlTransform={safeUrl}
+      urlTransform={urlTransform}
       components={components}
     />
   );

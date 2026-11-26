@@ -1058,8 +1058,7 @@ flowchart LR
 - **規格沒寫、實作選定的地方**：
   - 官方已經有 action，所以不重做（V-05）。X-08 的「搜尋」是 `search:query`，「讀取」是搜尋結果的 `document.text`。TechDocs backend 的 `techdocs:get-techdocs-metadata` 只回傳網站的目錄和中繼資料，不回傳內容；要用的話可以放進同一個工具組。
   - 使用者的權限由 search backend 套用。它只在 `permission.enabled: true` 時才用 `AuthorizedSearchEngine` 過濾結果；沒有開 permission 時，每個人都看得到全部的結果。README 寫明這一條。TechDocs 文件的權限是 `catalog.entity.read`，對象是文件所屬的 entity。
-  - 連結：TechDocs 的 collator 的 `location` 是相對路徑（預設 `/docs/:namespace/:kind/:name/:path`）。對話的 Markdown 只把 `http`、`https`、`mailto` 做成連結（S-02），所以相對路徑只顯示成文字。選定的做法：保留預設的 `search.collators.techdocs.locationTemplate`，在 Agent 的系統提示寫明「location 是 `https://backstage.example.com` 底下的路徑，引用時寫成完整連結」。README 有這段系統提示的範例。理由：`locationTemplate` 套用在整個 Backstage 的 TechDocs 搜尋索引；TechDocs 閱讀頁的搜尋用 `navigate(location)` 換頁（`@backstage/plugin-techdocs` 1.19.0 的 `TechDocsSearch`），完整網址會跳到錯的頁面。
-  - 之後的版本：前端把 `/` 開頭的連結套上 app 的網址，做成站內連結。這一項不做。
+  - 連結：TechDocs 的 collator 的 `location` 是相對路徑（預設 `/docs/:namespace/:kind/:name/:path`）。前端的 `MarkdownText` 會把單一 `/` 開頭（非 `//`、非 `/\`）的連結用 `app.baseUrl` 補成同源的完整網址，再交由 `safeUrl` 檢查（S-02），所以模型直接引用 `document.location` 就會變成可點擊的站內連結。仍保留預設的 `search.collators.techdocs.locationTemplate`，因為它套用在整個 Backstage 的 TechDocs 搜尋索引，而 TechDocs 閱讀頁的搜尋用 `navigate(location)` 換頁（`@backstage/plugin-techdocs` 1.19.0 的 `TechDocsSearch`），完整網址會跳到錯的頁面。
   - 工具名稱：模型看到的是 `search_query`（模型轉接把 `:` 換成 `_`）。系統提示的範例不寫 action 的 id。
   - `search:query` 的 input schema 在 `filters` 有遞迴的 `$ref`（`#/properties/filters`）。這是在測試 backend 裡由 actions registry 轉出、送給模型伺服器的 schema 確認的。不接受 `$ref` 的模型伺服器會拒絕請求；README 寫明這一條。
   - `permission.enabled: true` 會讓整個 Backstage 進入權限模式：`PermissionClient` 只在這個設定開著時向 permission backend 要決定，關著時一律允許。所以要裝 permission backend，政策要判斷 `catalog.entity.read`。README 寫明這一條。
