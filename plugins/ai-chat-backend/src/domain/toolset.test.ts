@@ -20,6 +20,7 @@ import {
   enabledTools,
   isEgress,
   matchesActionPattern,
+  offeredToolsetIds,
   unsafeAllows,
   type Toolset,
 } from './toolset';
@@ -149,5 +150,23 @@ describe('unsafeAllows', () => {
 
   it('is empty without settings', () => {
     expect(unsafeAllows([tool('a:write', false)], {})).toEqual([]);
+  });
+});
+
+describe('offeredToolsetIds (T-08, X-01)', () => {
+  it('keeps the toolsets of the session that the user may use', () => {
+    expect(offeredToolsetIds(['a', 'b', 'c'], undefined, ['c', 'a'])).toEqual([
+      'a',
+      'c',
+    ]);
+  });
+
+  it('keeps only the toolsets the agent names, when it names any', () => {
+    expect(offeredToolsetIds(['a', 'b'], ['b'], ['a', 'b'])).toEqual(['b']);
+    expect(offeredToolsetIds(['a', 'b'], [], ['a', 'b'])).toEqual([]);
+  });
+
+  it('never adds a toolset the session did not switch on', () => {
+    expect(offeredToolsetIds(['a'], ['a', 'b'], ['a', 'b'])).toEqual(['a']);
   });
 });

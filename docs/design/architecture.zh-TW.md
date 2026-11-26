@@ -565,7 +565,8 @@ plugins/ai-chat-backend/
       share.ts                         Share、ShareMode、到期的處理
       visibility.ts                    visibleItems()：某個檢視者看得到哪些 Item
       fork.ts                          forkItems()：複製時帶走哪些 Item
-      toolset.ts                       Toolset、enabledTools()
+      toolset.ts                       Toolset、enabledTools()、offeredToolsetIds()（T-08）
+      toolOutput.ts                    ToolOutputRule、toolOutputLimits()、redactFields()（T-09）
       retention.ts                     保存期限：updated_at 早於現在減 days 天（SE-05）
       errors.ts                        SessionNotFound、RunNotFound、RunAlreadyActive（P1-05）；NotSessionOwner、ToolCallNotFound、ToolCallNotWaiting、RunNotWaiting、AgentNotFound、UnknownToolset、ShuttingDown（P1-08）
     application/                       第 2 圈
@@ -573,12 +574,14 @@ plugins/ai-chat-backend/
         SessionRepository.ts           create、get、listByOwner（搜尋、釘選在前）、update、setTitleIfAbsent、delete
         RunRepository.ts               start、acquireLease、transition、requestCancel、expireStale、hasOtherNormalEnd。也實作核心的 RunControl（heartbeat、recordUsage）
         ShareRepository.ts             P2
-        AccessControl.ts               P2：能不能讀這段 Session、能不能用這個 Toolset。P1 只檢查擁有者（domain 的 assertOwner）
+        AccessControl.ts               能不能讀這段 Session（SH-05）、能用哪些 Toolset（usableToolsets，T-08）
+        WriteQuota.ts                  tryTake：每個使用者每分鐘的寫入次數（T-10）
         AuditLog.ts                    begin() 回傳 AuditSpan（success、fail）
         Logger.ts
         Metrics.ts                     counter、histogram（O-01）；NoopMetrics 什麼都不記
         Notifier.ts                    通知擁有者處理中、等核准、有新回覆。沒有 Signals 時不做事
         AgentCatalog.ts                agent()、defaultAgentId()、toolsets()、policy()
+      ToolsetScope.ts                  usableToolsets()、ToolsetScope.offered()：Session 給模型哪些 Toolset 的工具（T-08、X-01）
         Scheduler.ts                   P2：定期工作。P1 的 `plugin.ts` 直接用 `coreServices.scheduler` 排 ExpireStaleRuns
       usecases/
         CreateSession.ts
@@ -592,7 +595,7 @@ plugins/ai-chat-backend/
         ResumeRun.ts                   全部已決定但迴圈沒有啟動時接續（不帶新的決定）
         CancelRun.ts
         FollowSession.ts               接回（從目前 Run 的第一個 Item 重送）。這一台即時；別台每秒讀已完成的 Item
-        ListToolsets.ts                管理者定義的 Toolset 清單
+        ListToolsets.ts                管理者定義、而且使用者能用的 Toolset 清單（T-08）
         ShareSession.ts                P2
         UpdateShare.ts                 P2：更新快照、開關工具輸出、停止
         ForkSession.ts                 P2
@@ -623,10 +626,12 @@ plugins/ai-chat-backend/
         KnexSessionRepository.ts
         KnexRunRepository.ts
         KnexShareRepository.ts         P2
+        KnexWriteQuota.ts              `write_quota_windows`，每人每分鐘一格（T-10）
         uniqueViolation.ts             判斷資料庫的唯一性錯誤（SQLite、PostgreSQL 各一種格式）
       backstage/
         ActionsToolGateway.ts          Actions Registry 轉成 ToolGateway
         PermissionAccessControl.ts
+        toolsetAccess.ts               resource type `ai-chat-toolset`、規則 `IS_TOOLSET`、條件的工廠函式（T-08）
         AuditorAuditLog.ts
         BackstageMetrics.ts            Metrics 接到 metricsServiceRef（OpenTelemetry）
         SignalsNotifier.ts             頻道 `ai-chat`。由 `ai-chat` 的 signals module 裝上，plugin 本身不依賴 Signals
@@ -760,7 +765,7 @@ export class SendMessage {
 - **`GetSession`**：除了 Item，還回傳 `awaitingDecision`（還在等決定的 `callId`，用 `callsAwaitingDecision`，不受 `afterSeq` 影響，另外讀整段紀錄）和 `resumable`（Run 是 `waiting_approval` 而且沒有呼叫要決定，表示要送接續請求）。路由 `POST /sessions/:id/resume` 對應 `ResumeRun`（SSE，沒有東西可接續時 204）；P1-10 的畫面開啟 Session 看到 `resumable` 時自動送接續請求，但自己剛送出決定之後不要自動接續（見實作規劃 P1-10）。
 - **`CancelRun`**：`requestCancel` 存下停止要求；這一台有迴圈就 `abort`；然後一律再查一次狀態，是 `waiting_approval`（沒有迴圈）就直接 `transition` 成 `cancelled`（`end_reason` 是 `user`）；別台的迴圈在下一次續租看到停止要求。停止要求在迴圈最後一次 `heartbeat` 之後才存進來、迴圈照樣寫成 `waiting_approval` 的情形，由 `RunSupervisor` 收尾時處理（見 5.4）。
 - **`DeleteSession`**：有進行中的 Run 就丟 `RunAlreadyActive`（鎖的順序見規劃的 P1-08）。檢查和刪除之間仍有一個很短的空隙：這時新開的 Run 會在刪除時被連帶刪掉，它的迴圈下一次寫入得到 `LeaseLost` 而結束。
-- **`CreateSession`**：一定把 Toolset 存進 `enabled_toolsets`：沒給就用 `default: true` 的組，也可能是空陣列；不認得的 id 丟 `UnknownToolset`。`UpdateSession` 同樣檢查。
+- **`CreateSession`**：一定把 Toolset 存進 `enabled_toolsets`：沒給就用 `default: true` 而且使用者能用的組，也可能是空陣列；不認得的 id 和使用者不能用的 id 都丟 `UnknownToolset`（T-08）。`UpdateSession` 同樣檢查，但使用者不能用的 id 只擋新加入的：原本存著的留著，它的工具在權限恢復前不送給模型。兩者都不檢查 Agent 的 `toolsets`（畫面建立 Session 時不知道 Agent），Agent 的限制在列出工具時才套用。
 - **entity 綁定（SE-02）**：`CreateSession` 收到 `entityRef` 時，正規化成 `kind:namespace/name`（全部小寫，沒有 namespace 補 `default`，沒有 kind 不行），用使用者的 credentials 經過 `EntityReader` 讀一次；不存在和讀不到都丟 `UnknownEntity`（400，訊息相同）。`SendMessage` 在 Run 開始之後、寫入訊息之前，Session 沒有綁定、紀錄是空的、訊息帶 `page.entityRef` 而且讀得到時，用 `bindEntityIfUnbound` 綁定（`UPDATE … WHERE entity_ref IS NULL`）；讀不到或 catalog 失敗時不綁，訊息照常送。綁定之後不改。`ListSessions` 收 `entityRef`，只列自己的、綁定那個 entity 的 Session（SE-06 的後端）。
 - **`ExpireStaleRuns`**：`plugin.ts` 每 30 秒排一次。
 - **`ListSessions`**：自己的 Session。釘選的在前，然後 `updated_at` 新的在前，再以 `id`。`query` 比對存下的 `title`（不分 ASCII 大小寫的子字串，`%` 和 `_` 是字面字）；沒有標題的對不上。預設不含已封存。`entityRef` 只留綁定那個 entity 的 Session（正規化後比對，SE-06 的後端）。
@@ -794,29 +799,30 @@ export class SendMessage {
 
 ### 5.5 Adapters
 
-| Port                                                               | Adapter                        | 用到的 Backstage 服務                                                             |
-| ------------------------------------------------------------------ | ------------------------------ | --------------------------------------------------------------------------------- |
-| `ItemLog`、`SessionRepository`、`RunRepository`、`ShareRepository` | `Knex*`                        | `coreServices.database`                                                           |
-| `ToolGateway`                                                      | `ActionsToolGateway`           | `actionsServiceRef`（`@backstage/backend-plugin-api/alpha`）的 `list` 和 `invoke` |
-| `ModelClient`                                                      | `OpenAiCompatibleModelClient`  | 沒有。包住 `llm/` 裡用 `fetch` 的 client                                          |
-| `AccessControl`                                                    | `PermissionAccessControl`      | `coreServices.permissions`（P2。P1 只檢查擁有者，是 domain 的 `assertOwner`）     |
-| `AuditLog`                                                         | `AuditorAuditLog`              | `coreServices.auditor`                                                            |
-| `Metrics`                                                          | `BackstageMetrics`             | `metricsServiceRef`（`@backstage/backend-plugin-api/alpha`）                      |
-| `Notifier`                                                         | `SignalsNotifier`              | `signalsServiceRef`，由 signals module 裝上。沒有安裝時不做事，畫面改為輪詢       |
-| `AgentCatalog`                                                     | `ConfigAgentCatalog`           | `coreServices.rootConfig`，加上擴充點註冊的內容                                   |
-| `Scheduler`                                                        | `BackstageScheduler`           | `coreServices.scheduler`                                                          |
-| `Clock`、`IdGenerator`                                             | `SystemClock`、`UuidGenerator` | 沒有                                                                              |
-| （HTTP 的身分）                                                    | `principalFromRequest`         | `coreServices.httpAuth`、`userInfo`、`auth`                                       |
+| Port                                                               | Adapter                        | 用到的 Backstage 服務                                                                      |
+| ------------------------------------------------------------------ | ------------------------------ | ------------------------------------------------------------------------------------------ |
+| `ItemLog`、`SessionRepository`、`RunRepository`、`ShareRepository` | `Knex*`                        | `coreServices.database`                                                                    |
+| `ToolGateway`                                                      | `ActionsToolGateway`           | `actionsServiceRef`（`@backstage/backend-plugin-api/alpha`）的 `list` 和 `invoke`          |
+| `ModelClient`                                                      | `OpenAiCompatibleModelClient`  | 沒有。包住 `llm/` 裡用 `fetch` 的 client                                                   |
+| `AccessControl`                                                    | `PermissionAccessControl`      | `coreServices.permissions`：`ai-chat.session.read`（SH-05）、`ai-chat.toolset.use`（T-08） |
+| `WriteQuota`                                                       | `KnexWriteQuota`               | `coreServices.database`                                                                    |
+| `AuditLog`                                                         | `AuditorAuditLog`              | `coreServices.auditor`                                                                     |
+| `Metrics`                                                          | `BackstageMetrics`             | `metricsServiceRef`（`@backstage/backend-plugin-api/alpha`）                               |
+| `Notifier`                                                         | `SignalsNotifier`              | `signalsServiceRef`，由 signals module 裝上。沒有安裝時不做事，畫面改為輪詢                |
+| `AgentCatalog`                                                     | `ConfigAgentCatalog`           | `coreServices.rootConfig`，加上擴充點註冊的內容                                            |
+| `Scheduler`                                                        | `BackstageScheduler`           | `coreServices.scheduler`                                                                   |
+| `Clock`、`IdGenerator`                                             | `SystemClock`、`UuidGenerator` | 沒有                                                                                       |
+| （HTTP 的身分）                                                    | `principalFromRequest`         | `coreServices.httpAuth`、`userInfo`、`auth`                                                |
 
 `ActionsToolGateway` 負責的轉換。它是 adapter 裡唯一用到 `actionsServiceRef` 的檔案（V-02）。`plugin.ts` 的組裝把它交進來：
 
-- 建構時收到 `actions`（`ActionsService`）、`catalog`（`AgentCatalog`）、`logger`、`maxOutputChars`，以及 `enabledToolsets(ctx)`：回傳這個 Session 開啟的 Toolset id，`undefined` 表示沒選過，用預設值（`default: true` 的組）。
+- 建構時收到 `actions`（`ActionsService`）、`catalog`（`AgentCatalog`）、`logger`、`maxOutputChars`、`toolOutput`（T-09，可省略）、`writeQuota`（T-10，可省略），以及 `enabledToolsets(ctx)`：回傳這個 Session 現在給模型的 Toolset id。`plugin.ts` 接上 `ToolsetScope.offered`：Session 開啟的、Agent 的 `toolsets` 列的（沒寫就不限）、使用者能用的（`AccessControl.usableToolsets`）三者的交集。`undefined` 表示用預設值（`default: true` 的組）。
 - `list`：用呼叫者的憑證呼叫 `actions.list`。要 `secrets` 的 action 不給（聊天沒辦法提供）。每個 action 轉成 `ToolDescriptor`：`id` 是 action id，`readOnly` 只有 `attributes.readOnly === true` 才是 `true`，沒有標的當成不是唯讀（D-06）；`egress` 由 Toolset 算出（所屬的任一組標了 `egress` 就是）；`inputSchema` 是 action 的 input schema 去掉 `$schema`，不是 object 型別時換成空的 object schema；`schemaHash` 是這份 schema 排序鍵之後的 SHA-256（T-06）。最後用 domain 的 `enabledTools` 只留下 Session 開啟的 Toolset 裡的工具（T-02、T-11）；不在任何 Toolset 的 action 不會出現。
 - `validate`：用 `ajv`（draft-07，不檢查 `format`）驗證參數。找不到工具、schema 編不出來，都回傳不合格；訊息是 ajv 的錯誤文字，最多 2000 字（T-05）。
-- `execute`：先用現在的 action 和政策檢查這筆存下來的呼叫（T-06）。政策在提出呼叫時和執行前各檢查一次。工具已經不在清單裡、呼叫存成唯讀但 action 現在不是唯讀、`schemaHash` 變了而存下的輸入不符合新 schema、現在的政策是 `deny`、或存下時不需核准而現在政策要 `ask`（例如事後改成 `egress`），都不執行，回傳 `error` 結果。存下時要核准的呼叫，核准之後現在的政策仍是 `ask` 就照常執行。通過就把 `CallContext.principal` 的 `credentials` 交給 `actions.invoke`。`invoke` 沒有 signal 參數，所以 signal 中止時不再等它並丟出例外（核心看到 signal 已中止就不寫結果）；action 本身可能仍會跑完。action 丟出的例外轉成 `error` 結果。回傳值一律整理成 `ToolOutput` 物件：沒有值是 `{ status: 'ok' }`，字串、數字、`null`、陣列放進 `output`；序列化後超過 `maxOutputChars` 的，`output` 換成 `{ text, originalLength }`（序列化後不超過 `maxOutputChars`），`truncated: true`。
+- `execute`：先用現在的 action 和政策檢查這筆存下來的呼叫（T-06）。政策在提出呼叫時和執行前各檢查一次。工具已經不在清單裡、呼叫存成唯讀但 action 現在不是唯讀、`schemaHash` 變了而存下的輸入不符合新 schema、現在的政策是 `deny`、或存下時不需核准而現在政策要 `ask`（例如事後改成 `egress`），都不執行，回傳 `error` 結果。存下時要核准的呼叫，核准之後現在的政策仍是 `ask` 就照常執行。通過之後，不是唯讀的呼叫先向 `writeQuota` 拿這個使用者這一分鐘的一次額度（T-10）；拿不到就不執行，回傳 `error`（`Not run: you reached the limit of <N> changes per minute. …`）。再把 `CallContext.principal` 的 `credentials` 交給 `actions.invoke`。`invoke` 沒有 signal 參數，所以 signal 中止時不再等它並丟出例外（核心看到 signal 已中止就不寫結果）；action 本身可能仍會跑完。action 丟出的例外轉成 `error` 結果。回傳值一律整理成 `ToolOutput` 物件：沒有值是 `{ status: 'ok' }`，字串、數字、`null`、陣列放進 `output`；先把這個 action 符合的 `toolOutput` 規則的 `redact` 欄位（任何深度）換成 `"[redacted]"`，再裁切：序列化後超過這個 action 的上限（符合的規則的 `maxOutputChars` 和 `maxOutputChars` 取最小）的，`output` 換成 `{ text, originalLength }`（序列化後不超過上限），`truncated: true`。輸出超過 100 層時不保留，回傳 `error`（`The output could not be checked for redaction, so it is not kept.`）。`AiChatHarnessRegistry.extensions` 在最後一個 `afterToolCall` 之後用同一個函式（`limitToolResult`）再做一次；`update_plan`、`load_skill` 不套 `toolOutput`。
 - 政策的警告：政策把不是唯讀或屬於 `egress` Toolset 的 action 設成 `allow` 時，第一次在 `list` 看到它就記一筆警告，同一個工具只記一次。執行時 `decidePolicy` 仍然算出 `ask`。Actions Registry 要用憑證才能列出 action，所以啟動時沒有清單可查。
 
-`ConfigAgentCatalog` 在建構時讀取並檢查 `aiChat.toolsets`、`aiChat.policy` 和 `aiChat.agents`，值不對就丟 `InputError`，後端啟動失敗。它實作 `AgentCatalog { agent(); defaultAgentId(); toolsets(); policy() }`。沒有人定義 `default` 時，只有內建的那一個（內建的系統提示加 `aiChat.systemPrompt`）。設定檔的 `agents.default` 取代它。其他 id 來自設定檔或擴充點。擴充點註冊的 Agent 也套 `buildSystemPrompt`，和設定檔同一條規則。`skills` 決定 `load_skill` 提供哪些 Skill；`model` 決定 Run 和自動標題用哪個 model client，必須是已知的模型 id（`knownModels`），不然丟 `InputError`。`toolsets`、`limits`、`planning` 記在定義上；迴圈還不使用它們。同一個 id 出現兩次就丟 `InputError`。
+`ConfigAgentCatalog` 在建構時讀取並檢查 `aiChat.toolsets`、`aiChat.policy` 和 `aiChat.agents`，值不對就丟 `InputError`，後端啟動失敗。它實作 `AgentCatalog { agent(); defaultAgentId(); toolsets(); policy() }`。沒有人定義 `default` 時，只有內建的那一個（內建的系統提示加 `aiChat.systemPrompt`）。設定檔的 `agents.default` 取代它。其他 id 來自設定檔或擴充點。擴充點註冊的 Agent 也套 `buildSystemPrompt`，和設定檔同一條規則。`skills` 決定 `load_skill` 提供哪些 Skill；`model` 決定 Run 和自動標題用哪個 model client，必須是已知的模型 id（`knownModels`），不然丟 `InputError`。`toolsets` 決定這個 Agent 的 Session 給模型哪些 Toolset 的工具（`ToolsetScope`；`[]` 是沒有）。`limits` 記在定義上；迴圈還不使用它。同一個 id 出現兩次就丟 `InputError`。
 
 - Toolset 的欄位：`actions`（樣式，不可為空）、`exclude`（不屬於這組的樣式）、`title`、`default`（預設 `false`）、`egress`（預設 `false`）。id 以字母開頭，只能是字母、數字，以及夾在中間的 `-`、`_`。`policy` 的鍵只接受完整的 action id，含 `*` 會丟 `InputError`。
 - `policy` 在設定檔是平的 `{ toolId: allow|ask|deny }`，轉成 domain 的 `PolicySettings { byTool }`。
@@ -1839,6 +1845,7 @@ controller 依序做（`controllers/attachments.ts`；`route()` 先取出身分�
 - `startNext` 的實際順序：先鎖附件（為了把中繼資料寫進 `user_message`），再取序號、寫 `items`，最後標記附件。不會死結：同一段 Session 的寫入都先排在 `sessions` 的列鎖後面，所以不會有兩個 transaction 同時持有同一段 Session 的 `attachments` 鎖；`PurgeUnusedAttachments` 不碰 `sessions`，只持有 `attachments` 的鎖，而且用 `SKIP LOCKED` 不等任何鎖。
 - 每人同時的 Run 數（P-05，`insertRun`）：建立 Run 的 transaction 第一個鎖是這個使用者的 `pg_advisory_xact_lock`，再數他在其他 Session 進行中的 Run，再 INSERT。只有建立 Run 的 transaction 取這個鎖，而且它在所有列鎖之前，所以不會和上表的順序形成循環。SQLite 只有一條連線，不取鎖。
 - 限流（P-06）的 `model_call_windows` 不在任何 transaction 裡：一句 `INSERT … ON CONFLICT DO UPDATE … WHERE calls < 上限 RETURNING` 決定拿到沒有。
+- 寫入配額（T-10）的 `write_quota_windows` 也一樣：不在任何 transaction 裡，`(user_ref, window_start)` 一列一個計數，一句 `INSERT … ON CONFLICT DO UPDATE … WHERE writes < 上限 RETURNING` 決定拿到沒有。
 - 沒有新的唯一索引：同一則排隊訊息只送一次靠 transaction 內「刪除影響 1 列」和 `runs.active_session_id` 的唯一索引。
 
 ### 13.9 前端

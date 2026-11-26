@@ -41,8 +41,8 @@ export type AgentLimits = {
 /**
  * One agent (X-01). The loop applies `systemPrompt`, `skills` (which skills
  * `load_skill` offers) and `planning`; the host chooses the model client of
- * the run by `model` (X-09). `toolsets` and `limits` are recorded here;
- * applying them is later work.
+ * the run by `model` (X-09) and offers only the tools of its `toolsets`.
+ * `limits` are recorded here; applying them is later work.
  *
  * @public
  */

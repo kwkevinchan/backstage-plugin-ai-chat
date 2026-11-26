@@ -62,6 +62,8 @@ describe('readAiChatConfig', () => {
       systemPrompt: undefined,
       actions: { include: [], exclude: [] },
       maxToolOutputChars: 20000,
+      toolOutput: [],
+      writesPerMinute: undefined,
       sharing: { live: { enabled: true, defaultHours: 24, maxHours: 72 } },
       retentionDays: 90,
       skills: { directories: [] },
@@ -433,6 +435,93 @@ describe('readAiChatConfig', () => {
         }),
       ),
     ).toThrow(/aiChat\.skills\.directories/);
+  });
+});
+
+describe('aiChat.toolOutput (T-09)', () => {
+  const read = (toolOutput: unknown, extra: object = {}) =>
+    readAiChatConfig(
+      mockServices.rootConfig({
+        data: { aiChat: { llm, toolOutput, ...extra } as any },
+      }),
+    ).toolOutput;
+
+  it('reads the patterns with their limit and the fields to hide', () => {
+    expect(
+      read({
+        '*': { redact: ['password', 'token', 'token'] },
+        'catalog:get-entity': { maxOutputChars: 4000, redact: ['annotations'] },
+      }),
+    ).toEqual([
+      { pattern: '*', redact: ['password', 'token'] },
+      {
+        pattern: 'catalog:get-entity',
+        maxOutputChars: 4000,
+        redact: ['annotations'],
+      },
+    ]);
+  });
+
+  it('refuses what is wrong, with the path in the message', () => {
+    const cases: [unknown, RegExp][] = [
+      ['all', /aiChat\.toolOutput must map/],
+      [['*'], /aiChat\.toolOutput must map/],
+      [{ ' ': {} }, /must not be empty/],
+      [{ update_plan: { redact: ['x'] } }, /built-in tool update_plan/],
+      [{ load_skill: { redact: ['x'] } }, /built-in tool load_skill/],
+      [{ 'a:*': 'x' }, /aiChat\.toolOutput\.a:\* must be an object/],
+      [{ 'a:*': { maxOutputChars: 99 } }, /maxOutputChars must be an integer/],
+      [
+        { 'a:*': { maxOutputChars: 20001 } },
+        /from 100 to aiChat\.maxToolOutputChars \(20000\)/,
+      ],
+      [{ 'a:*': { maxOutputChars: 1.5 } }, /maxOutputChars/],
+      [{ 'a:*': { maxOutputChars: '500' } }, /maxOutputChars/],
+      [{ 'a:*': { redact: 'token' } }, /redact must be a list/],
+      [{ 'a:*': { redact: [''] } }, /redact must be a list/],
+      [{ 'a:*': { redact: ['x'.repeat(201)] } }, /redact must be a list/],
+      [{ 'a:*': { redact: [1] } }, /redact must be a list/],
+      [
+        { 'a:*': { hide: ['x'] } },
+        /aiChat\.toolOutput\.a:\*\.hide is not a setting/,
+      ],
+    ];
+    for (const [value, message] of cases) {
+      expect(() => read(value)).toThrow(message);
+    }
+  });
+
+  it('takes a limit up to a lower maxToolOutputChars, not above it', () => {
+    expect(
+      read({ 'a:*': { maxOutputChars: 500 } }, { maxToolOutputChars: 500 }),
+    ).toEqual([{ pattern: 'a:*', maxOutputChars: 500, redact: [] }]);
+    expect(() =>
+      read({ 'a:*': { maxOutputChars: 501 } }, { maxToolOutputChars: 500 }),
+    ).toThrow(/at most|from 100 to/);
+  });
+});
+
+describe('aiChat.writesPerMinute (T-10)', () => {
+  const read = (value: unknown) =>
+    readAiChatConfig(
+      mockServices.rootConfig({
+        data: { aiChat: { llm, writesPerMinute: value } as any },
+      }),
+    ).writesPerMinute;
+
+  it('is no limit when not set, and the number when set', () => {
+    expect(
+      readAiChatConfig(mockServices.rootConfig({ data: { aiChat: { llm } } }))
+        .writesPerMinute,
+    ).toBeUndefined();
+    expect(read(1)).toBe(1);
+    expect(read(10000)).toBe(10000);
+  });
+
+  it.each([0, -1, 1.5, 10001, '5'])('refuses %p', value => {
+    expect(() => read(value)).toThrow(
+      /aiChat\.writesPerMinute must be an integer from 1 to 10000/,
+    );
   });
 });
 

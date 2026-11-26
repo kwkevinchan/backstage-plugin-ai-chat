@@ -101,7 +101,16 @@ export {
   enabledTools,
   isEgress,
   matchesActionPattern,
+  offeredToolsetIds,
   toolsetsOf,
   unsafeAllows,
 } from './toolset';
 export type { Toolset } from './toolset';
+export {
+  MAX_REDACT_DEPTH,
+  OutputTooDeep,
+  REDACTED,
+  redactFields,
+  toolOutputLimits,
+} from './toolOutput';
+export type { ToolOutputLimits, ToolOutputRule } from './toolOutput';

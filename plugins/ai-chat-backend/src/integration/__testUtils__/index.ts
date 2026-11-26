@@ -42,15 +42,18 @@ import { KnexQueuedMessageRepository } from '../../adapters/persistence/KnexQueu
 import { KnexRunRepository } from '../../adapters/persistence/KnexRunRepository';
 import { KnexSessionRepository } from '../../adapters/persistence/KnexSessionRepository';
 import { KnexShareRepository } from '../../adapters/persistence/KnexShareRepository';
+import { KnexWriteQuota } from '../../adapters/persistence/KnexWriteQuota';
 import {
   CreateSession,
   OwnerOrShareAccessControl,
   TITLE_PROMPT_MARK,
+  ToolsetScope,
   type HostEvent,
   type ImageSettings,
   type RunHandle,
 } from '../../application';
 import type {
+  AccessControl,
   AuditEvent,
   AuditLog,
   EntityReader,
@@ -64,6 +67,7 @@ import {
   type EntityFacts,
   type Principal,
   type Run,
+  type ToolOutputRule,
 } from '../../domain';
 import { createHost, type HostPorts } from '../../host';
 import { createMigratedDb } from '../../__testUtils__';
@@ -266,6 +270,16 @@ export async function createWorld(
     runsPerUser?: number;
     /** The catalog the sessions are bound with; empty by default. */
     entities?: EntityReader;
+    /** `aiChat.toolsets`; one `demo` toolset with every action by default. */
+    toolsets?: JsonObject;
+    /** Who may use which toolset; everyone may use every toolset by default. */
+    access?: AccessControl;
+    /** `aiChat.maxToolOutputChars`; 20000 by default. */
+    maxToolOutputChars?: number;
+    /** `aiChat.toolOutput`, as read from the configuration. */
+    toolOutput?: ToolOutputRule[];
+    /** `aiChat.writesPerMinute`; no limit by default. */
+    writesPerMinute?: number;
   } = {},
 ) {
   const entities = options.entities ?? new FakeEntityReader();
@@ -293,7 +307,9 @@ export async function createWorld(
     mockServices.rootConfig({
       data: {
         aiChat: {
-          toolsets: { demo: { actions: ['demo:*'], default: true } },
+          toolsets: options.toolsets ?? {
+            demo: { actions: ['demo:*'], default: true },
+          },
           ...(options.agents && { agents: options.agents }),
           ...(options.policy && { policy: options.policy }),
         },
@@ -301,6 +317,8 @@ export async function createWorld(
     }),
     mockServices.logger.mock(),
   );
+  const access = options.access ?? new OwnerOrShareAccessControl();
+  const toolsetScope = new ToolsetScope({ sessions, agents: catalog, access });
   const limits: Limits = {
     maxSteps: 10,
     maxToolCallsPerRun: 30,
@@ -365,7 +383,7 @@ export async function createWorld(
       queue,
       attachments,
       shares: new KnexShareRepository(knex, clock, ids),
-      access: new OwnerOrShareAccessControl(),
+      access,
       entities,
       images,
       insertMaxPerRun: options.insertMaxPerRun,
@@ -374,9 +392,20 @@ export async function createWorld(
         actions,
         catalog,
         logger,
-        enabledToolsets: async ctx =>
-          (await sessions.get(ctx.sessionId)).enabledToolsets,
-        maxOutputChars: 20000,
+        enabledToolsets: ctx =>
+          toolsetScope.offered({
+            sessionId: ctx.sessionId,
+            principal: ctx.principal as Principal,
+          }),
+        maxOutputChars: options.maxToolOutputChars ?? 20000,
+        ...(options.toolOutput && { toolOutput: options.toolOutput }),
+        ...(options.writesPerMinute !== undefined && {
+          writeQuota: {
+            quota: new KnexWriteQuota(knex),
+            perMinute: options.writesPerMinute,
+            clock,
+          },
+        }),
       }),
       model: extra.model ?? modelForHost,
       ...(extra.models && { models: extra.models }),
@@ -412,6 +441,7 @@ export async function createWorld(
         sessions,
         agents: catalog,
         entities,
+        access,
       }).execute({
         principal,
         ...(agentId !== undefined && { agentId }),

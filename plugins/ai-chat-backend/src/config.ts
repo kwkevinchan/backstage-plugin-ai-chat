@@ -16,6 +16,10 @@
 
 import { Config } from '@backstage/config';
 import { InputError } from '@backstage/errors';
+import {
+  LOAD_SKILL_TOOL_ID,
+  UPDATE_PLAN_TOOL_ID,
+} from '@kwkevinchan/ai-chat-harness';
 import { DEFAULT_MODEL_ID } from './application';
 import {
   DEFAULT_IMAGE_LIMITS,
@@ -23,6 +27,7 @@ import {
   DEFAULT_QUEUE_MAX_MESSAGES,
   DEFAULT_RETENTION_DAYS,
   type ImageLimits,
+  type ToolOutputRule,
 } from './domain';
 
 /** One model server (X-09): `aiChat.llm`, or an entry of `aiChat.models`. */
@@ -76,6 +81,10 @@ export interface AiChatConfig {
     exclude: string[];
   };
   maxToolOutputChars: number;
+  /** Lower limits and fields to hide for the output of actions (T-09). */
+  toolOutput: ToolOutputRule[];
+  /** Changes one user may make per minute (T-10). No limit when absent. */
+  writesPerMinute?: number;
   /**
    * Limits for a share that keeps updating. Always filled in: a missing block
    * uses the defaults.
@@ -132,6 +141,10 @@ const DEFAULT_LIVE_HOURS = 24;
 const DEFAULT_LIVE_MAX_HOURS = 72;
 /** A cut output keeps a wrapper of about 30 characters, so a smaller limit keeps no text. */
 const MIN_MAX_TOOL_OUTPUT_CHARS = 100;
+const MAX_REDACT_FIELD_LENGTH = 200;
+const MAX_WRITES_PER_MINUTE = 10000;
+/** The tools of the core: `toolOutput` does not apply to them. */
+const BUILT_IN_TOOL_IDS = [UPDATE_PLAN_TOOL_ID, LOAD_SKILL_TOOL_ID];
 
 function positiveInt(
   config: Config,
@@ -292,6 +305,101 @@ function readModels(config: Config): Map<string, ModelSettings> {
   return models;
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * `aiChat.toolOutput`: action ID patterns to `{ maxOutputChars, redact }`
+ * (T-09). A limit may only be lower than `maxToolOutputChars`.
+ */
+function readToolOutput(
+  value: unknown,
+  maxToolOutputChars: number,
+): ToolOutputRule[] {
+  if (value === undefined) return [];
+  if (!isObject(value)) {
+    throw new InputError(
+      'aiChat.toolOutput must map action ID patterns to an object',
+    );
+  }
+  return Object.entries(value).map(([pattern, entry]) => {
+    const path = `aiChat.toolOutput.${pattern}`;
+    if (pattern.trim() === '') {
+      throw new InputError(
+        'aiChat.toolOutput: an action ID pattern must not be empty',
+      );
+    }
+    if (BUILT_IN_TOOL_IDS.includes(pattern)) {
+      throw new InputError(
+        `${path}: toolOutput applies to actions, not to the built-in tool ${pattern}`,
+      );
+    }
+    if (!isObject(entry)) {
+      throw new InputError(`${path} must be an object`);
+    }
+    for (const key of Object.keys(entry)) {
+      if (key !== 'maxOutputChars' && key !== 'redact') {
+        throw new InputError(
+          `${path}.${key} is not a setting; use maxOutputChars or redact`,
+        );
+      }
+    }
+    const max = entry.maxOutputChars;
+    if (
+      max !== undefined &&
+      (typeof max !== 'number' ||
+        !Number.isInteger(max) ||
+        max < MIN_MAX_TOOL_OUTPUT_CHARS ||
+        max > maxToolOutputChars)
+    ) {
+      throw new InputError(
+        `${path}.maxOutputChars must be an integer from ${MIN_MAX_TOOL_OUTPUT_CHARS} to aiChat.maxToolOutputChars (${maxToolOutputChars}), got ${String(
+          max,
+        )}`,
+      );
+    }
+    const redact = entry.redact ?? [];
+    if (
+      !Array.isArray(redact) ||
+      redact.some(
+        field =>
+          typeof field !== 'string' ||
+          field === '' ||
+          field.length > MAX_REDACT_FIELD_LENGTH,
+      )
+    ) {
+      throw new InputError(
+        `${path}.redact must be a list of field names of 1 to ${MAX_REDACT_FIELD_LENGTH} characters`,
+      );
+    }
+    return {
+      pattern,
+      ...(max !== undefined && { maxOutputChars: max }),
+      redact: [...new Set(redact as string[])],
+    };
+  });
+}
+
+/** `aiChat.writesPerMinute` (T-10); `undefined` when it is not set. */
+function readWritesPerMinute(config: Config): number | undefined {
+  if (!config.has('writesPerMinute')) return undefined;
+  const value = config.get('writesPerMinute');
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value < 1 ||
+    value > MAX_WRITES_PER_MINUTE
+  ) {
+    throw new InputError(
+      `aiChat.writesPerMinute must be an integer from 1 to ${MAX_WRITES_PER_MINUTE}, got ${String(
+        value,
+      )}`,
+    );
+  }
+  return value;
+}
+
 /** Reads and checks the `aiChat` section of the configuration. */
 export function readAiChatConfig(root: Config): AiChatConfig {
   const config = root.getConfig('aiChat');
@@ -301,6 +409,12 @@ export function readAiChatConfig(root: Config): AiChatConfig {
     DEFAULT_RUN_TIMEOUT_SECONDS,
     1,
     MAX_RUN_TIMEOUT_SECONDS,
+  );
+  const maxToolOutputChars = positiveInt(
+    config,
+    'maxToolOutputChars',
+    DEFAULT_MAX_TOOL_OUTPUT_CHARS,
+    MIN_MAX_TOOL_OUTPUT_CHARS,
   );
   return {
     llm: readModel(config, 'llm'),
@@ -362,12 +476,12 @@ export function readAiChatConfig(root: Config): AiChatConfig {
       include: config.getOptionalStringArray('actions.include') ?? [],
       exclude: config.getOptionalStringArray('actions.exclude') ?? [],
     },
-    maxToolOutputChars: positiveInt(
-      config,
-      'maxToolOutputChars',
-      DEFAULT_MAX_TOOL_OUTPUT_CHARS,
-      MIN_MAX_TOOL_OUTPUT_CHARS,
+    maxToolOutputChars,
+    toolOutput: readToolOutput(
+      config.getOptional('toolOutput'),
+      maxToolOutputChars,
     ),
+    writesPerMinute: readWritesPerMinute(config),
     sharing: readSharing(config),
     // 0 keeps every session. Any other integer is a number of days.
     retentionDays: positiveInt(

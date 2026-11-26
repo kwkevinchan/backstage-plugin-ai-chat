@@ -34,6 +34,7 @@ export type {
 } from './Metrics';
 export { NoopMetrics } from './Metrics';
 export type { ModelCallLimiter } from './ModelCallLimiter';
+export type { WriteQuota } from './WriteQuota';
 export type { Notifier, SessionActivity } from './Notifier';
 export { DelegatingNotifier, NoopNotifier } from './Notifier';
 export type { QueuedMessageRepository } from './QueuedMessageRepository';

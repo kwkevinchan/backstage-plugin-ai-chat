@@ -287,6 +287,7 @@ describe('GetSession', () => {
   it('access without a granting share is NotSessionOwner', async () => {
     const access: AccessControl = {
       canReadSession: async () => true,
+      usableToolsets: async ({ toolsetIds }) => [...toolsetIds],
     };
     const { result } = readSession({
       principal: cara,

@@ -290,7 +290,12 @@ export function createHost(ports: HostPorts) {
   return {
     supervisor,
     useCases: {
-      createSession: new CreateSession({ sessions, agents, entities }),
+      createSession: new CreateSession({
+        sessions,
+        agents,
+        entities,
+        access,
+      }),
       getSession: new GetSession({
         sessions,
         runs,
@@ -301,7 +306,7 @@ export function createHost(ports: HostPorts) {
         clock,
       }),
       listSessions: new ListSessions({ sessions, runs }),
-      updateSession: new UpdateSession({ sessions, agents }),
+      updateSession: new UpdateSession({ sessions, agents, access }),
       deleteSession: new DeleteSession({ sessions, runs }),
       sendMessage: new SendMessage({
         sessions,
@@ -389,7 +394,7 @@ export function createHost(ports: HostPorts) {
         supervisor,
         logger,
       }),
-      listToolsets: new ListToolsets({ agents }),
+      listToolsets: new ListToolsets({ agents, access }),
       listSessionTools: new ListSessionTools({
         sessions,
         tools: ports.tools,

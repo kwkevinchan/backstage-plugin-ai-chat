@@ -20,6 +20,9 @@ chat should offer to `backend.actions.pluginSources`. The settings (`llm`,
 `toolsets`, `policy`, `agents`, the limits of a run and the context budget),
 the approval model, the security notes and the HTTP API are in the
 [README of the repository](https://github.com/kwkevinchan/backstage-plugin-ai-chat#readme).
+Who may use which toolset is the permission `ai-chat.toolset.use`; a
+permission policy narrows it with `aiChatToolsetConditions.isToolset`, which
+this package exports.
 To search TechDocs, offer the `search:query` action of the Backstage search
 backend; the setup is in the README of the repository.
 Each model call, tool result and run that ends is logged, and measured with

@@ -109,3 +109,21 @@ export function unsafeAllows(
     )
     .map(tool => tool.id);
 }
+
+/**
+ * The toolsets whose tools go to the model for one session (T-08, T-11, X-01):
+ * the ones the session switched on, that the agent names (an agent without
+ * `toolsets` names all of them) and that the user may use.
+ */
+export function offeredToolsetIds(
+  sessionChoice: readonly string[],
+  agentToolsets: readonly string[] | undefined,
+  usable: readonly string[],
+): string[] {
+  const allowed = new Set(usable);
+  const named =
+    agentToolsets === undefined ? undefined : new Set(agentToolsets);
+  return sessionChoice.filter(
+    id => allowed.has(id) && (named === undefined || named.has(id)),
+  );
+}

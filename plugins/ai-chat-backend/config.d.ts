@@ -290,10 +290,10 @@ export interface Config {
      * agent offers through `load_skill` (omitting it offers all registered
      * skills; an empty list offers none). `planning: required` gives the
      * agent only `update_plan` in the first step of every run. `model`
-     * chooses the model of the agent's runs and titles. `toolsets` and
-     * `limits` are recorded. The loop still uses the limits of the
-     * installation, and does not filter tools by the agent's toolsets yet. A
-     * value that is not valid stops the backend at startup.
+     * chooses the model of the agent's runs and titles. `toolsets` limits
+     * the tools of the agent. `limits` are recorded; the loop still uses the
+     * limits of the installation. A value that is not valid stops the
+     * backend at startup.
      *
      * A backend module can register further agents and skills through
      * `@kwkevinchan/backstage-plugin-ai-chat-node`. An id that both this block
@@ -310,7 +310,9 @@ export interface Config {
         systemPrompt?: string;
         /**
          * Toolset ids this agent names. Each one has to exist in `toolsets`
-         * (or be `default`, when `toolsets` is not set).
+         * (or be `default`, when `toolsets` is not set). Only the tools of
+         * these toolsets go to the model; `[]` gives none. Omit to allow every
+         * toolset.
          */
         toolsets?: string[];
         /**
@@ -350,6 +352,34 @@ export interface Config {
      * Defaults to 20000.
      */
     maxToolOutputChars?: number;
+    /**
+     * The output of the actions that match an action ID pattern (`*` matches
+     * any characters). When patterns overlap, the smallest limit and every
+     * field apply. `update_plan` and `load_skill` are not actions, and a key
+     * with one of their names stops the backend at startup.
+     */
+    toolOutput?: {
+      [actionIdPattern: string]: {
+        /**
+         * Most characters of the output that are kept, from 100 up to
+         * `maxToolOutputChars`.
+         */
+        maxOutputChars?: number;
+        /**
+         * Field names whose values become `"[redacted]"`, at any depth, before
+         * the output is cut. They are not stored, streamed or sent to the
+         * model. An output nested deeper than 100 levels is not kept.
+         */
+        redact?: string[];
+      };
+    };
+    /**
+     * Most actions that are not read-only one user may run per minute, over
+     * all sessions and backends, from 1 to 10000. A change over the limit
+     * does not run, even after the approval, and the run goes on. No limit
+     * when not set.
+     */
+    writesPerMinute?: number;
     /**
      * How long a session is kept. A task runs every hour and deletes a
      * session whose last change is older than `days`, with its runs,

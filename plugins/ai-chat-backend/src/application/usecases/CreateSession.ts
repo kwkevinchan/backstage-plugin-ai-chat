@@ -22,7 +22,13 @@ import {
   type Session,
 } from '../../domain';
 import { readableEntityRef } from '../entityContext';
-import type { AgentCatalog, EntityReader, SessionRepository } from '../ports';
+import type {
+  AccessControl,
+  AgentCatalog,
+  EntityReader,
+  SessionRepository,
+} from '../ports';
+import { usableToolsets } from '../ToolsetScope';
 
 /** Makes a session for the signed-in user (SE-01). */
 export class CreateSession {
@@ -31,12 +37,13 @@ export class CreateSession {
       sessions: SessionRepository;
       agents: AgentCatalog;
       entities: EntityReader;
+      access: Pick<AccessControl, 'usableToolsets'>;
     },
   ) {}
 
   /**
    * The session has the toolsets the user gave, or else the ones that are on
-   * by default (D-24). They are always stored: a session never has "no
+   * by default and that the user may use (D-24, T-08). They are always stored: a session never has "no
    * choice", so a later change of the defaults does not change it.
    *
    * `entityRef` binds the session to that entity (SE-02), stored normalized.
@@ -53,7 +60,9 @@ export class CreateSession {
     const { sessions, agents } = this.deps;
     const agentId = input.agentId ?? agents.defaultAgentId();
     await agents.agent(agentId);
-    const toolsets = await agents.toolsets();
+    // A toolset the user may not use is the same as one that does not exist
+    // (T-08).
+    const toolsets = await usableToolsets(this.deps, input.principal);
     const enabledToolsets =
       input.enabledToolsets ?? defaultToolsetIds(toolsets);
     for (const id of enabledToolsets) {

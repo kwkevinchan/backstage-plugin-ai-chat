@@ -241,10 +241,39 @@ describe('aiChatPlugin', () => {
       ]),
     );
     expect(
-      metadata.body.rules.map((rule: { name: string }) => rule.name).sort(),
+      metadata.body.rules
+        .filter(
+          (rule: { resourceType: string }) =>
+            rule.resourceType === 'ai-chat-session',
+        )
+        .map((rule: { name: string }) => rule.name)
+        .sort(),
     ).toEqual(['IS_SESSION_OWNER', 'IS_SHARED_WITH']);
   });
 
+  it('registers the toolset use permission and its rule (T-08)', async () => {
+    const server = await startBackend();
+    const metadata = await request(server)
+      .get('/api/ai-chat/.well-known/backstage/permissions/metadata')
+      .set('Authorization', alice);
+    expect(metadata.status).toBe(200);
+    expect(metadata.body.permissions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'ai-chat.toolset.use',
+          resourceType: 'ai-chat-toolset',
+        }),
+      ]),
+    );
+    expect(
+      metadata.body.rules
+        .filter(
+          (rule: { resourceType: string }) =>
+            rule.resourceType === 'ai-chat-toolset',
+        )
+        .map((rule: { name: string }) => rule.name),
+    ).toEqual(['IS_TOOLSET']);
+  });
   it('refuses a request without credentials (401) and a service token (403)', async () => {
     const server = await startBackend();
     const none = await request(server).get('/api/ai-chat/sessions');

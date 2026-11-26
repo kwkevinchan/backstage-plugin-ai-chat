@@ -116,6 +116,12 @@ aiChat:
     tokenBudget: 100000 # 送給模型的內容的 token 預算（估計值）；預設 100000
     keepRecentSteps: 6 # 最近幾步一律保留；預設 6
   maxToolOutputChars: 20000 # 工具輸出（含 load_skill 回傳的 Skill 全文）存下並送給模型的字元上限；預設 20000，最小 100
+  toolOutput: # 選填；鍵是 action ID 樣式（* 符合任何字元）
+    '*':
+      redact: [password, token] # 任何深度的這些欄位換成 "[redacted]"
+    'catalog:get-entity':
+      maxOutputChars: 4000 # 這個 action 的上限，只能比 maxToolOutputChars 小
+  writesPerMinute: 20 # 選填；一個使用者每分鐘最多執行幾次不是唯讀的 action，所有後端合計
   input: # Run 進行中使用者可以加的訊息
     insert:
       maxPerRun: 5 # 一次 Run 最多插入幾則，最大 20；預設 5
@@ -153,6 +159,19 @@ backend:
 - **Toolset**：對話只看得到自己開啟的工具組裡的 action。不在任何一組裡的 action 不會出現。
   使用者在自己的對話裡開關工具組（對話欄最上面、訊息列表之上的 **Toolsets**），範圍不超過你定義的。
   沒設定 `toolsets` 時，所有 action 在同一組，預設開啟。
+- **Toolset 的權限**：誰能用哪個工具組由 permission `ai-chat.toolset.use`（resource type 是
+  `ai-chat-toolset`，resource 是工具組 id）決定。用不了的工具組，它的工具不送給模型，`GET /toolsets` 不列出，
+  對話也不能新開它。沒有開 permission framework 時（Backstage 預設 `permission.enabled: false`），每個人都能用全部的工具組。
+  policy 用 `aiChatToolsetConditions.isToolset({ toolsetIds })` 和 `createAiChatToolsetConditionalDecision`
+  （從 `@kwkevinchan/backstage-plugin-ai-chat-backend` 匯入）限定工具組，範例見英文 README。
+- **升級前**：有開 permission framework、policy 預設拒絕的安裝，要先允許 `ai-chat.toolset.use`（或回 CONDITIONAL），
+  不然升級後對話沒有任何工具；這段期間新建的對話存下的是空的工具組，之後要由使用者自己打開。
+- **輸出上限和遮蔽**：`toolOutput` 的 `redact` 列出的欄位，在任何深度都換成 `"[redacted]"`，先遮蔽再裁切；
+  遮蔽掉的值不存、不串流、不送給模型。超過 100 層的輸出不保留，結果是錯誤。`maxOutputChars` 是比
+  `maxToolOutputChars` 小的上限（至少 100）。樣式重疊時，上限取最小的，欄位全部都遮蔽。`update_plan`、
+  `load_skill` 不是 action，不受影響。
+- **寫入配額**：`writesPerMinute` 是一個使用者每分鐘最多執行幾次不是唯讀的 action（1 到 10000，沒寫就不限），
+  跨所有對話和後端合計。超過時，即使已經核准也不執行，結果是說明原因的錯誤，Run 繼續。分鐘交界前後最多可能到兩倍。
 - **Policy**：`deny` 永遠不執行也不提供；`ask` 每次都問；`allow` 只對標了
   `readOnly: true` 而且不在 `egress` 工具組的 action 有效。沒標 `readOnly` 的
   action 當成不是唯讀，仍然要核准；只有 `policy` 把這種 action（或 `egress` 工具組裡的唯讀 action）設成
@@ -165,12 +184,13 @@ backend:
   有設定時被忽略，啟動時會記警告。
 - **Agent**：沒有 `aiChat.agents` 時只有 `default`（內建規則加上 `aiChat.systemPrompt`）。
   設定檔裡的 Agent，系統提示是內建規則再加上該 Agent 的 `systemPrompt`；沒寫就改用全站的
-  `aiChat.systemPrompt`，兩段額外說明不疊加。`toolsets` 必須是已經定義的工具組。
+  `aiChat.systemPrompt`，兩段額外說明不疊加。`toolsets` 必須是已經定義的工具組，只有這些工具組的工具送給模型（`[]` 就是沒有，沒填就是全部）；
+  對話開著別的工具組也不會給這個 Agent。
   Agent 的 `skills` 已經生效：決定這個 Agent 能用哪些已註冊的 Skill（沒填就是全部，`[]` 就是沒有），
   填了不存在的 Skill id 時後端無法啟動。`planning: required` 已經生效：這個 Agent 每個 Run 的第一步只拿得到
   `update_plan`，先寫計畫再做事。`model` 決定這個 Agent 的 Run 和自動標題用哪個模型：`default`（`aiChat.llm`）、
-  `aiChat.models` 的 id，或 module 加的 model client；不存在的 id 讓後端無法啟動。`toolsets`、`limits`
-  只記在 Agent 上，這一版還不執行：迴圈仍用全站的上限，不依 Agent 的 `toolsets` 過濾工具。
+  `aiChat.models` 的 id，或 module 加的 model client；不存在的 id 讓後端無法啟動。`limits`
+  只記在 Agent 上，這一版還不執行：迴圈仍用全站的上限。
 - **計畫**：每個 Agent 都有唯讀的內建工具 `update_plan`（預設 `allow`，`policy` 設成 `update_plan: deny` 就關掉）。
   每次呼叫取代整份計畫（最多 20 項，狀態是 `pending`、`in_progress`、`completed`），目前的計畫每一步都放進上下文，畫面把每次更新顯示成清單。
   `aiChat.skills.directories` 可載入子目錄內的 `SKILL.md`（上下文只含 id 與一句說明，由唯讀內建工具 `load_skill` 延遲載入全文；相對路徑以後端的工作目錄為基準；符號連結會跟過去，但子目錄或 `SKILL.md` 解析後在設定的目錄外面時，後端無法啟動）。值不對會讓後端無法啟動。

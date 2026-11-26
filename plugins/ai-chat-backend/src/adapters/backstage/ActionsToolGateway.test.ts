@@ -27,14 +27,20 @@ import {
   type ToolCallItem,
 } from '@kwkevinchan/ai-chat-harness';
 import type { AgentCatalog } from '../../application/ports/AgentCatalog';
+import type { WriteQuota } from '../../application/ports/WriteQuota';
+import type { ToolOutputRule } from '../../domain/toolOutput';
 import type { Toolset } from '../../domain/toolset';
-import { ActionsToolGateway } from './ActionsToolGateway';
+import {
+  ActionsToolGateway,
+  REDACTION_FAILED_MESSAGE,
+  limitToolResult,
+} from './ActionsToolGateway';
 
 const credentials = mockCredentials.user('user:default/alice');
 const ctx: CallContext = {
   sessionId: 's1',
   runId: 'r1',
-  principal: { credentials },
+  principal: { userRef: 'user:default/alice', credentials },
 };
 
 const inputSchema = {
@@ -99,6 +105,8 @@ function setup(options: {
   policy?: PolicySettings;
   chosen?: string[];
   maxOutputChars?: number;
+  toolOutput?: ToolOutputRule[];
+  writeQuota?: { quota: WriteQuota; perMinute: number };
 }) {
   const state = {
     chosen: options.chosen,
@@ -118,6 +126,13 @@ function setup(options: {
     logger,
     enabledToolsets: async () => state.chosen,
     maxOutputChars: options.maxOutputChars ?? 1000,
+    ...(options.toolOutput && { toolOutput: options.toolOutput }),
+    ...(options.writeQuota && {
+      writeQuota: {
+        ...options.writeQuota,
+        clock: { now: () => new Date('2026-01-01T00:00:30.000Z') },
+      },
+    }),
   });
   return { actions, logger, gateway, state };
 }
@@ -658,5 +673,183 @@ describe('ActionsToolGateway.execute, more checks', () => {
     await expect(pending).rejects.toThrow();
     expect(reads).toBe(2);
     expect(actions.invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe('ActionsToolGateway.execute, the output rules (T-09)', () => {
+  const signal = () => new AbortController().signal;
+  async function prepared(options: Parameters<typeof setup>[0]) {
+    const s = setup(options);
+    s.actions.actions = [action('catalog:get'), action('catalog:list')];
+    const tools = await s.gateway.list(ctx);
+    const hash = (id: string) => tools.find(t => t.id === id)!.schemaHash;
+    return { ...s, hash };
+  }
+
+  it('hides the fields of the rules that match, at any depth', async () => {
+    const { actions, gateway, hash } = await prepared({
+      toolOutput: [{ pattern: 'catalog:*', redact: ['token'] }],
+    });
+    actions.invoke.mockResolvedValueOnce({
+      output: { a: { token: 'S' }, list: [{ token: 'S', keep: 1 }] },
+    });
+    expect(
+      await gateway.execute(callOf('catalog:get', hash('catalog:get')), ctx, {
+        signal: signal(),
+      }),
+    ).toEqual({
+      status: 'ok',
+      output: {
+        a: { token: '[redacted]' },
+        list: [{ token: '[redacted]', keep: 1 }],
+      },
+    });
+  });
+
+  it('hides before it cuts, so a cut output has no part of the secret', async () => {
+    const { actions, gateway, hash } = await prepared({
+      maxOutputChars: 200,
+      toolOutput: [{ pattern: '*', redact: ['secret'] }],
+    });
+    actions.invoke.mockResolvedValueOnce({
+      // The secret comes first, so a cut that came first would keep it.
+      output: { secret: 'sk-test-secret-value', text: 'a'.repeat(300) },
+    });
+    const result = await gateway.execute(
+      callOf('catalog:get', hash('catalog:get')),
+      ctx,
+      { signal: signal() },
+    );
+    expect(result.truncated).toBe(true);
+    expect(JSON.stringify(result)).not.toContain('sk-test');
+    expect(JSON.stringify(result.output).length).toBeLessThanOrEqual(200);
+  });
+
+  it('cuts each action to its own limit, and the others to the limit of the installation', async () => {
+    const { actions, gateway, hash } = await prepared({
+      maxOutputChars: 1000,
+      toolOutput: [{ pattern: 'catalog:get', maxOutputChars: 120, redact: [] }],
+    });
+    actions.invoke.mockResolvedValue({ output: { text: 'a'.repeat(500) } });
+    const get = await gateway.execute(
+      callOf('catalog:get', hash('catalog:get')),
+      ctx,
+      { signal: signal() },
+    );
+    const list = await gateway.execute(
+      callOf('catalog:list', hash('catalog:list')),
+      ctx,
+      { signal: signal() },
+    );
+    expect(get.truncated).toBe(true);
+    expect(JSON.stringify(get.output).length).toBeLessThanOrEqual(120);
+    expect(list).toEqual({ status: 'ok', output: { text: 'a'.repeat(500) } });
+  });
+
+  it('keeps no output that is nested too deep to check (fail closed)', async () => {
+    const { actions, gateway, hash } = await prepared({
+      toolOutput: [{ pattern: '*', redact: ['token'] }],
+    });
+    let deep: unknown = { token: 'S' };
+    for (let i = 0; i < 100; i++) deep = { next: deep };
+    actions.invoke.mockResolvedValueOnce({ output: deep });
+    expect(
+      await gateway.execute(callOf('catalog:get', hash('catalog:get')), ctx, {
+        signal: signal(),
+      }),
+    ).toEqual({ status: 'error', message: REDACTION_FAILED_MESSAGE });
+  });
+
+  it('limitToolResult keeps the built-in tools out of the rules', () => {
+    // The gateway never runs them; the step after the last afterToolCall
+    // hook gets their results too.
+    const result = { status: 'ok' as const, output: { token: 'S' } };
+    expect(
+      limitToolResult(result, { maxChars: 1000, redact: ['token'] }),
+    ).toEqual({ status: 'ok', output: { token: '[redacted]' } });
+    expect(limitToolResult(result, { maxChars: 1000, redact: [] })).toBe(
+      result,
+    );
+  });
+});
+
+describe('ActionsToolGateway.execute, the quota of changes (T-10)', () => {
+  const signal = () => new AbortController().signal;
+  const write = { readOnly: false, destructive: true, idempotent: false };
+
+  async function prepared(available: number) {
+    const taken: { userRef: string; perMinute: number; now: Date }[] = [];
+    const quota: WriteQuota = {
+      tryTake: async (userRef, perMinute, now) => {
+        taken.push({ userRef, perMinute, now });
+        return taken.length <= available;
+      },
+    };
+    const s = setup({
+      writeQuota: { quota, perMinute: 2 },
+      policy: { byTool: {} },
+    });
+    s.actions.actions = [
+      action('catalog:get'),
+      action('catalog:change', { attributes: write }),
+    ];
+    const tools = await s.gateway.list(ctx);
+    const hash = (id: string) => tools.find(t => t.id === id)!.schemaHash;
+    return { ...s, hash, taken };
+  }
+  const change = (hash: string) =>
+    callOf('catalog:change', hash, { readOnly: false, policy: 'ask' });
+
+  it('takes one change of the user right before a change runs', async () => {
+    const { actions, gateway, hash, taken } = await prepared(1);
+    const result = await gateway.execute(change(hash('catalog:change')), ctx, {
+      signal: signal(),
+    });
+    expect(result.status).toBe('ok');
+    expect(actions.invoke).toHaveBeenCalledTimes(1);
+    expect(taken).toEqual([
+      {
+        userRef: 'user:default/alice',
+        perMinute: 2,
+        now: new Date('2026-01-01T00:00:30.000Z'),
+      },
+    ]);
+  });
+
+  it('does not run a change without one, and says why', async () => {
+    const { actions, gateway, hash } = await prepared(0);
+    expect(
+      await gateway.execute(change(hash('catalog:change')), ctx, {
+        signal: signal(),
+      }),
+    ).toEqual({
+      status: 'error',
+      message:
+        'Not run: you reached the limit of 2 changes per minute. Try again in a minute.',
+    });
+    expect(actions.invoke).not.toHaveBeenCalled();
+  });
+
+  it('takes nothing for a read-only call', async () => {
+    const { actions, gateway, hash, taken } = await prepared(0);
+    const result = await gateway.execute(
+      callOf('catalog:get', hash('catalog:get')),
+      ctx,
+      { signal: signal() },
+    );
+    expect(result.status).toBe('ok');
+    expect(actions.invoke).toHaveBeenCalledTimes(1);
+    expect(taken).toEqual([]);
+  });
+
+  it('takes nothing for a change that an earlier check stops', async () => {
+    const { actions, gateway, hash, taken, state } = await prepared(5);
+    state.policy = { byTool: { 'catalog:change': 'deny' } };
+    const result = await gateway.execute(change(hash('catalog:change')), ctx, {
+      signal: signal(),
+    });
+    expect(result.status).toBe('error');
+    expect(actions.invoke).not.toHaveBeenCalled();
+    expect(taken).toEqual([]);
   });
 });

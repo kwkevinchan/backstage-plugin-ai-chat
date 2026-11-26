@@ -16,14 +16,23 @@
 
 import type { Principal, Share, Session } from '../../domain';
 
-/**
- * Whether a principal may read a session (SH-05). `false` is the same as the
- * session not existing: the caller gets `NotSessionOwner`.
- */
+/** What a principal may do with sessions and toolsets. */
 export interface AccessControl {
+  /**
+   * Whether a principal may read a session (SH-05). `false` is the same as
+   * the session not existing: the caller gets `NotSessionOwner`.
+   */
   canReadSession(input: {
     session: Pick<Session, 'id' | 'ownerRef'>;
     principal: Principal;
     shares: readonly Share[];
   }): Promise<boolean>;
+  /**
+   * The ids among `toolsetIds` whose tools the principal may use (T-08), in
+   * the order given. A failure to decide throws; it never allows more.
+   */
+  usableToolsets(input: {
+    principal: Principal;
+    toolsetIds: readonly string[];
+  }): Promise<string[]>;
 }

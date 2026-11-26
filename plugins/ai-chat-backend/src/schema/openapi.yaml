@@ -577,7 +577,7 @@ paths:
       operationId: createSession
       tags: [Sessions]
       summary: Create an empty session.
-      description: Without `enabledToolsets` the session has the toolsets that are on by default. 400 for a toolset or an agent that does not exist. `entityRef` binds the session to that entity, for good; it needs a kind, and is stored in lower case with `default` when the namespace is left out. 400 when the entity does not exist or the user cannot read it, with the same message for both.
+      description: Without `enabledToolsets` the session has the toolsets that are on by default and that the user may use. 400 for a toolset that does not exist or that the user may not use, and for an agent that does not exist. `entityRef` binds the session to that entity, for good; it needs a kind, and is stored in lower case with `default` when the namespace is left out. 400 when the entity does not exist or the user cannot read it, with the same message for both.
       requestBody:
         required: false
         content:
@@ -637,7 +637,7 @@ paths:
       operationId: updateSession
       tags: [Sessions]
       summary: Change the title, the pin, the archive state or the toolsets of a session.
-      description: Only the fields in the body change. 400 for a toolset that does not exist.
+      description: Only the fields in the body change. 400 for a toolset that does not exist, and for a toolset added to `enabledToolsets` that the user may not use; one the session already has stays.
       requestBody:
         required: true
         content:
@@ -1217,8 +1217,8 @@ paths:
     get:
       operationId: listToolsets
       tags: [Toolsets]
-      summary: List the toolsets the administrator defined.
-      description: The user switches these on or off in a session (`enabledToolsets`), and only these. `default` says whether a new session has the toolset switched on.
+      summary: List the toolsets the administrator defined that the user may use.
+      description: The user switches these on or off in a session (`enabledToolsets`), and only these. `default` says whether a new session has the toolset switched on. A toolset the permission `ai-chat.toolset.use` does not allow for the user is not listed.
       responses:
         '200':
           description: The toolsets.

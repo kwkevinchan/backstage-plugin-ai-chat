@@ -19,9 +19,8 @@
  * in the harness and re-exported here, so a module does not import the
  * harness or the backend plugin.
  *
- * This version exposes `addAgent`, `addContextProvider`, `addHook` and
- * `addSkill`. A model client is added on a later item, together with the loop
- * calling it.
+ * This version exposes `addAgent`, `addContextProvider`, `addHook`,
+ * `addModelClient` and `addSkill`.
  *
  * @packageDocumentation
  */

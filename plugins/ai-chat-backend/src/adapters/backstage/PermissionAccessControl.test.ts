@@ -20,7 +20,10 @@ import {
   type PolicyDecision,
 } from '@backstage/plugin-permission-common';
 import { createConditionAuthorizer } from '@backstage/plugin-permission-node';
-import { aiChatSessionReadPermission } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import {
+  aiChatSessionReadPermission,
+  aiChatToolsetUsePermission,
+} from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { Principal, Share } from '../../domain';
 import { PermissionAccessControl } from './PermissionAccessControl';
 import {
@@ -29,6 +32,11 @@ import {
   isSessionOwnerRule,
   isSharedWithRule,
 } from './sessionAccess';
+import {
+  aiChatToolsetConditions,
+  createAiChatToolsetConditionalDecision,
+  isToolsetRule,
+} from './toolsetAccess';
 
 const session = { id: 's1', ownerRef: 'user:default/jane' };
 
@@ -63,7 +71,8 @@ function permissionsReturning(decision: PolicyDecision): PermissionsService {
       const [requests, options] = args;
       if (
         requests.length !== 1 ||
-        requests[0]?.permission !== aiChatSessionReadPermission
+        (requests[0]?.permission !== aiChatSessionReadPermission &&
+          requests[0]?.permission !== aiChatToolsetUsePermission)
       ) {
         throw new Error('authorizeConditional received the wrong permission');
       }
@@ -79,11 +88,13 @@ const authorizer = createConditionAuthorizer([
   isSessionOwnerRule,
   isSharedWithRule,
 ]);
+const toolsetAuthorizer = createConditionAuthorizer([isToolsetRule]);
 
 function control(decision: PolicyDecision) {
   return new PermissionAccessControl({
     permissions: permissionsReturning(decision),
     authorizer,
+    toolsetAuthorizer,
   });
 }
 
@@ -100,6 +111,7 @@ describe('PermissionAccessControl', () => {
     await new PermissionAccessControl({
       permissions,
       authorizer,
+      toolsetAuthorizer,
     }).canReadSession({ session, principal: jane, shares: [] });
     expect(seen).toEqual([
       {
@@ -200,5 +212,75 @@ describe('PermissionAccessControl', () => {
         shares: [share({ subjectRef: 'group:default/team' })],
       }),
     ).toBe(false);
+  });
+
+  describe('usableToolsets (T-08)', () => {
+    const toolsetIds = ['catalog', 'temporal', 'web'];
+
+    it('asks for the toolset permission with the credentials of the principal', async () => {
+      const seen: unknown[] = [];
+      const permissions = {
+        authorize: async () => [{ result: AuthorizeResult.DENY }],
+        authorizeConditional: async (requests: unknown, options: unknown) => {
+          seen.push({ requests, options });
+          return [{ result: AuthorizeResult.ALLOW }];
+        },
+      } as unknown as PermissionsService;
+      await new PermissionAccessControl({
+        permissions,
+        authorizer,
+        toolsetAuthorizer,
+      }).usableToolsets({ principal: jane, toolsetIds });
+      expect(seen).toEqual([
+        {
+          requests: [{ permission: aiChatToolsetUsePermission }],
+          options: { credentials: jane.credentials },
+        },
+      ]);
+    });
+
+    it('ALLOW gives every toolset, as when the framework is off', async () => {
+      expect(
+        await control({ result: AuthorizeResult.ALLOW }).usableToolsets({
+          principal: jane,
+          toolsetIds,
+        }),
+      ).toEqual(toolsetIds);
+    });
+
+    it('DENY gives none', async () => {
+      expect(
+        await control({ result: AuthorizeResult.DENY }).usableToolsets({
+          principal: jane,
+          toolsetIds,
+        }),
+      ).toEqual([]);
+    });
+
+    it('CONDITIONAL applies IS_TOOLSET to each toolset', async () => {
+      const decision = createAiChatToolsetConditionalDecision(
+        aiChatToolsetUsePermission,
+        aiChatToolsetConditions.isToolset({ toolsetIds: ['web', 'catalog'] }),
+      );
+      expect(
+        await control(decision).usableToolsets({ principal: jane, toolsetIds }),
+      ).toEqual(['catalog', 'web']);
+    });
+
+    it('a failure of the permission backend throws instead of allowing', async () => {
+      const permissions = {
+        authorize: async () => [],
+        authorizeConditional: async () => {
+          throw new Error('permission backend is down');
+        },
+      } as unknown as PermissionsService;
+      await expect(
+        new PermissionAccessControl({
+          permissions,
+          authorizer,
+          toolsetAuthorizer,
+        }).usableToolsets({ principal: jane, toolsetIds }),
+      ).rejects.toThrow('permission backend is down');
+    });
   });
 });
