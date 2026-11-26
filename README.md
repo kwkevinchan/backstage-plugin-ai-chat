@@ -593,7 +593,7 @@ of its error only, as its text may repeat what the conversation said.
   have the ids, so a run can be followed there and matched with the auditor
   records by `runId` and `callId`.
 - The meter is `backstage-plugin-ai-chat`. Without an OpenTelemetry SDK in the
-  backend, the metrics go nowhere and cost nothing; to export them, set up
+  backend, the meter does nothing with the metrics and sends nothing; to export them, set up
   OpenTelemetry as the Backstage documentation describes.
 - There are no traces.
 

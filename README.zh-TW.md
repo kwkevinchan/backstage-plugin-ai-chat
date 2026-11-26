@@ -270,7 +270,7 @@ aiChat:
 
 - token 是模型伺服器回報的數字（`reportUsage`）；沒有回報的伺服器就沒有這兩個欄位。上下文的大小是外掛算預算用的估計值。
 - metric 沒有 Session、Run、呼叫和使用者的屬性；log 有這些 id，可以追一個 Run，也可以用 `runId`、`callId` 對照 auditor 的紀錄。
-- meter 的名稱是 `backstage-plugin-ai-chat`。backend 沒有裝 OpenTelemetry SDK 時，metric 不會送到任何地方，也沒有額外的成本；要匯出時，照 Backstage 文件的說明設定 OpenTelemetry。
+- meter 的名稱是 `backstage-plugin-ai-chat`。backend 沒有裝 OpenTelemetry SDK 時，meter 不處理 metric，也不送出任何東西；要匯出時，照 Backstage 文件的說明設定 OpenTelemetry。
 - 沒有 trace。
 
 ## 多台 backend
