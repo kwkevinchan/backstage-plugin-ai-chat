@@ -14,8 +14,13 @@
  * limitations under the License.
  */
 
-import { coreExtensionData } from '@backstage/frontend-plugin-api';
+import {
+  ApiBlueprint,
+  coreExtensionData,
+} from '@backstage/frontend-plugin-api';
 import { createExtensionTester } from '@backstage/frontend-test-utils';
+import type { AiChatToolResultsApi } from '@kwkevinchan/backstage-plugin-ai-chat-react';
+import { AiChatToolResultBlueprint } from '@kwkevinchan/backstage-plugin-ai-chat-react/alpha';
 import aiChatPlugin from './alpha';
 
 describe('ai-chat (new frontend system)', () => {
@@ -35,6 +40,43 @@ describe('ai-chat (new frontend system)', () => {
   it('adds the API of the chat backend and the side panel API', () => {
     expect(aiChatPlugin.getExtension('api:ai-chat')).toBeDefined();
     expect(aiChatPlugin.getExtension('api:ai-chat/panel')).toBeDefined();
+    expect(aiChatPlugin.getExtension('api:ai-chat/tool-results')).toBeDefined();
+  });
+
+  it('collects the result components of AiChatToolResultBlueprint, the first one for an id wins', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const First = () => null;
+    const Later = () => null;
+    const Other = () => null;
+    const tester = createExtensionTester(
+      aiChatPlugin.getExtension('api:ai-chat/tool-results'),
+    )
+      .add(
+        AiChatToolResultBlueprint.make({
+          name: 'first',
+          params: { actionId: 'example:list', component: First },
+        }),
+      )
+      .add(
+        AiChatToolResultBlueprint.make({
+          name: 'later',
+          params: { actionId: 'example:list', component: Later },
+        }),
+      )
+      .add(
+        AiChatToolResultBlueprint.make({
+          name: 'other',
+          params: { actionId: 'example:other', component: Other },
+        }),
+      );
+    const factory = tester.get(ApiBlueprint.dataRefs.factory);
+    const api = factory.factory({}) as AiChatToolResultsApi;
+    expect(api.getComponent('example:list')).toBe(First);
+    expect(api.getComponent('example:other')).toBe(Other);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('example:list is registered already'),
+    );
+    warn.mockRestore();
   });
 
   it('mounts the side panel at the app root', () => {

@@ -964,14 +964,14 @@ export default createBackendModule({
 
 ### 6.2 Frontend：`ai-chat-react`
 
-| 擴充點       | 形式                                                                                                     | 分期 |
-| ------------ | -------------------------------------------------------------------------------------------------------- | ---- |
-| 頁面上下文   | 內建。前端從 router 和 entity context 讀取，每則訊息帶上                                                 | P1   |
-| 入口         | `aiChatPanelApiRef`、`AiChatPanelApi`、`useAiChatPanel()`、`<AiChatLauncher prompt="…" entityRef="…" />` | P2   |
-| 結果顯示元件 | `AiChatToolResultBlueprint`：為某個 action id 註冊一個元件                                               | P3   |
-| Client tool  | `AiChatClientToolBlueprint`：在瀏覽器執行的工具                                                          | P4   |
+| 擴充點       | 形式                                                                                                           | 分期 |
+| ------------ | -------------------------------------------------------------------------------------------------------------- | ---- |
+| 頁面上下文   | 內建。前端從 router 和 entity context 讀取，每則訊息帶上                                                       | P1   |
+| 入口         | `aiChatPanelApiRef`、`AiChatPanelApi`、`useAiChatPanel()`、`<AiChatLauncher prompt="…" entityRef="…" />`       | P2   |
+| 結果顯示元件 | `aiChatToolResultsApiRef`；新前端系統用 `/alpha` 的 `AiChatToolResultBlueprint`：為某個 action id 註冊一個元件 | P3   |
+| Client tool  | `AiChatClientToolBlueprint`：在瀏覽器執行的工具                                                                | P4   |
 
-P2 先做入口。別的 frontend plugin 從 `ai-chat-react` import，不 import 宿主。`ai-chat-react` 透過 Backstage Utility API（`aiChatPanelApiRef` / `AiChatPanelApi`）溝通，只匯出 `aiChatPanelApiRef`、`AiChatPanelApi`（`isOpen`、`open`、`close`、`subscribe`）、`useAiChatPanel()` 和 `<AiChatLauncher>`（可選 `className`）；當 `aiChatPanelApiRef` 未註冊（app 未安裝 chat 外掛）時，`<AiChatLauncher>` 不畫按鈕。
+別的 frontend plugin 從 `ai-chat-react` import，不 import 宿主。`ai-chat-react` 透過 Backstage Utility API（`aiChatPanelApiRef` / `AiChatPanelApi`）溝通，入口匯出 `aiChatPanelApiRef`、`AiChatPanelApi`（`isOpen`、`open`、`close`、`subscribe`）、`useAiChatPanel()` 和 `<AiChatLauncher>`（可選 `className`），以及結果顯示元件的型別、`aiChatToolResultsApiRef` 和 `AiChatSafeLink`；當 `aiChatPanelApiRef` 未註冊（app 未安裝 chat 外掛）時，`<AiChatLauncher>` 不畫按鈕。
 
 `ai-chat` 在新前端系統透過 `ApiBlueprint`、舊前端系統透過 plugin 的 `apis` 註冊並實作這份 API。`<AiChatLauncher>` 是一顆按鈕：
 
@@ -985,7 +985,9 @@ P2 先做入口。別的 frontend plugin 從 `ai-chat-react` import，不 import
 
 面板在右側，等 `identityApiRef.getBackstageIdentity()` 解析（登入完成）後才顯示，預設關上，邊上有「AI chat」。一次一段對話，沒有列表（列表是 P2-01）。`/ai-chat` 整頁不變。舊前端系統在 router 裡、路由外面掛一次 `<AiChatPanel>`（`plugins/ai-chat` 匯出）。新前端系統用 app root element 掛同一塊，註冊 plugin 就有。
 
-結果顯示元件和 client tool 仍是 P3、P4。這個套件現在沒有那兩個 Blueprint。
+結果顯示元件（B-03）：別的 plugin 匯出一份 `AiChatToolResult`（`actionId` 和 `component`）。新前端系統用 `ai-chat-react/alpha` 的 `AiChatToolResultBlueprint` 做 extension，掛在 `api:ai-chat/tool-results` 的 `toolResults` 輸入；舊前端系統由 app 在 `apis` 用 `createAiChatToolResultsApi([...])`（`ai-chat` 匯出）覆蓋 `aiChatToolResultsApiRef`。整頁和側邊面板都從這個 API 查元件。同一個 id 先註冊的有效，後的不用並在 console 警告；內建工具（`update_plan`、`load_skill`）的 id 不用。元件畫在內建的那一列或核准卡片下面，不取代它們；等核准和「沒有執行」的呼叫不畫；元件丟例外時由 error boundary 拿掉，只剩內建的列。元件拿到的輸入和結果是不可信的資料（S-02），`AiChatSafeLink` 只把 `http`、`https`、`mailto` 畫成連結。
+
+Client tool 仍是 P4，這個套件沒有 `AiChatClientToolBlueprint`。
 
 ## 7. 資料庫
 
@@ -1196,11 +1198,14 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 ```
 plugins/ai-chat-react/src/
   api.ts                    aiChatPanelApiRef、AiChatPanelApi、AiChatLaunchRequest
+  toolResults.ts            結果顯示元件的型別、aiChatToolResultsApiRef
   application/
     useAiChatPanel.ts       useAiChatPanel()
   ui/
     AiChatLauncher.tsx      別的 plugin 用的按鈕（沒有 API 時不畫）
+    AiChatSafeLink.tsx      只放行 http、https、mailto 的連結
   index.ts
+  alpha.ts                  新前端系統：AiChatToolResultBlueprint
 
 plugins/ai-chat/src/
   domain/
@@ -1208,6 +1213,7 @@ plugins/ai-chat/src/
     itemsToMessages.ts      把 GET /sessions/:id 的 Item 轉成 UIMessage；lastRunInterrupted、lastUserText（純函式）
     approval.ts             還在等的呼叫、是不是最後一個要決定的呼叫（讀 UIMessage 的 part，純函式）
     toolView.ts             呼叫的狀態（等核准、已允許、完成、失敗、拒絕、結果不明、沒有執行）和標題
+    toolResults.ts          內建工具的 id；呼叫的狀態 → 結果顯示元件拿到的狀態
     launch.ts               launchContextOf、panelMessagePage（純函式）
     panel.ts                applyOpen、applyLaunch、applyClose、applySession（純函式；狀態裡沒有路由）
   api/                      aiChatApiRef 和 AiChatApi（port）
@@ -1223,6 +1229,7 @@ plugins/ai-chat/src/
       attachmentAdapter.ts  我們的上傳 → AttachmentAdapter
   application/              不動：React hooks，包 useChat
     panelStore.ts           實作 aiChatPanelApiRef 的面板狀態與 launch 協調
+    toolResultsApi.ts       createAiChatToolResultsApi：實作 aiChatToolResultsApiRef（先註冊的有效）
     useSessionChat.ts       一個 Session 的 useChat：還原、決定、接續、停止、重新讀取
     useSessionList.ts       Session 列表（PU-05 之後刪掉，改由 threadListAdapter 負責）
     useToolsets.ts          GET /toolsets
@@ -1235,8 +1242,9 @@ plugins/ai-chat/src/
     ToolsetPanel.tsx        自己畫（assistant-ui 的模型裡沒有工具組）
     ToolCallCard.tsx        吃工具元件的 props：核准、拒絕、誰決定的、等待中、失敗
     PlanCard.tsx            update_plan 的工具元件（tools.by_name）：把呼叫的參數畫成清單
+    ToolResult.tsx          別的 plugin 註冊的結果顯示元件，包在 error boundary 裡
     ShareDialog.tsx（P2）  SharedBanner.tsx（P2）
-  alpha.tsx                 新 frontend system 的 extension（頁面、API、app root 的面板）
+  alpha.tsx                 新 frontend system 的 extension（頁面、API、結果顯示元件的 API、app root 的面板）
   plugin.ts                 舊 frontend system
 ```
 

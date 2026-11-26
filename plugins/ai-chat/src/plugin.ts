@@ -21,10 +21,14 @@ import {
   discoveryApiRef,
   fetchApiRef,
 } from '@backstage/core-plugin-api';
-import { aiChatPanelApiRef } from '@kwkevinchan/backstage-plugin-ai-chat-react';
+import {
+  aiChatPanelApiRef,
+  aiChatToolResultsApiRef,
+} from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import { aiChatApiRef } from './api';
 import { AiChatClient } from './adapters/AiChatClient';
 import { createAiChatPanelStore } from './application/panelStore';
+import { createAiChatToolResultsApi } from './application/toolResultsApi';
 import { rootRouteRef } from './routes';
 
 /**
@@ -45,6 +49,12 @@ export const aiChatPlugin = createPlugin({
       api: aiChatPanelApiRef,
       deps: {},
       factory: () => createAiChatPanelStore(),
+    }),
+    // No result components. The app replaces this API to add some.
+    createApiFactory({
+      api: aiChatToolResultsApiRef,
+      deps: {},
+      factory: () => createAiChatToolResultsApi([]),
     }),
   ],
   routes: {

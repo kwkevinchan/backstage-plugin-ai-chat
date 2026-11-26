@@ -28,4 +28,11 @@ Another plugin opens that panel with `AiChatLauncher`, `useAiChatPanel`, or
 prompt starts a new conversation and is sent at once. An entity reference is
 sent with the messages.
 
+A plugin shows the result of an action with its own component through
+`aiChatToolResultsApiRef`: on the new frontend system with
+`AiChatToolResultBlueprint` (`@kwkevinchan/backstage-plugin-ai-chat-react/alpha`),
+on the legacy frontend system by replacing that API with
+`createAiChatToolResultsApi([...])` from this package. The approval card stays.
+See the README of `@kwkevinchan/backstage-plugin-ai-chat-react`.
+
 More in the [README of the repository](https://github.com/kwkevinchan/backstage-plugin-ai-chat#readme).
