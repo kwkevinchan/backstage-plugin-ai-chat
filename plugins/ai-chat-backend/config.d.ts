@@ -244,16 +244,14 @@ export interface Config {
       [actionId: string]: 'allow' | 'ask' | 'deny';
     };
     /**
-     * Limits for a share that keeps updating. Read at startup. Creating or
-     * changing a share is not in this version, so these values are only
-     * checked and kept. When `sharing` or `live` is left out, the defaults
-     * are used.
+     * Limits for a share that keeps updating. Read at startup. When
+     * `sharing` or `live` is left out, the defaults are used.
      */
     sharing?: {
       live?: {
         /**
-         * Whether a share may keep updating. Defaults to true. `false` is
-         * stored as false.
+         * Whether a share may keep updating. Defaults to true. `false`
+         * refuses a new live share and a new life for one.
          */
         enabled?: boolean;
         /**
