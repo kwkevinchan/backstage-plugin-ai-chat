@@ -68,6 +68,36 @@ describe('AiChatLauncher', () => {
     expect(api.open).toHaveBeenCalledWith();
   });
 
+  it('reflects panel open state in aria-expanded', () => {
+    let open = false;
+    const listeners = new Set<() => void>();
+    const api: AiChatPanelApi = {
+      isOpen: () => open,
+      open: () => {
+        open = true;
+        listeners.forEach(l => l());
+      },
+      close: () => {
+        open = false;
+        listeners.forEach(l => l());
+      },
+      subscribe: listener => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+    render(
+      <TestApiProvider apis={[[aiChatPanelApiRef, api]]}>
+        <AiChatLauncher />
+      </TestApiProvider>,
+    );
+
+    const button = screen.getByRole('button', { name: 'Ask AI chat' });
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(button);
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+  });
+
   it('renders nothing when aiChatPanelApiRef is not registered', () => {
     const { container } = render(
       <TestApiProvider apis={[]}>

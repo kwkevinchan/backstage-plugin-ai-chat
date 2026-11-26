@@ -14,20 +14,32 @@
  * limitations under the License.
  */
 
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import {
   identityApiRef,
   useApi,
   useApiHolder,
 } from '@backstage/core-plugin-api';
-import type { ChatSessionDetail } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type {
+  ChatAttachment,
+  ChatSession,
+  ChatSessionDetail,
+} from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import { aiChatPanelApiRef } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import { aiChatApiRef } from '../api';
+import type { AttachmentSource } from '../adapters/assistantUi/attachmentAdapter';
 import { describeError } from '../adapters/describeError';
 import {
   getAiChatPanelStore,
   type AiChatPanelStore,
 } from '../application/panelStore';
+import { useInputConfig } from '../application/useInputConfig';
 import { usePageContext } from '../application/usePageContext';
 import { useToolsets } from '../application/useToolsets';
 import { panelMessagePage } from '../domain/launch';
@@ -41,6 +53,7 @@ interface HeldSession {
   sessionId: string;
   detail: ChatSessionDetail;
   firstMessage?: string;
+  firstAttachments?: ChatAttachment[];
 }
 
 /**
@@ -90,20 +103,81 @@ function AiChatPanelInner() {
     store.getSnapshot,
   );
   const showConversation = state.open || state.sessionId !== undefined;
+  const tabRef = useRef<HTMLButtonElement>(null);
+  const asideRef = useRef<HTMLElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const wasOpenRef = useRef(state.open);
+
+  useEffect(() => {
+    const wasOpen = wasOpenRef.current;
+    wasOpenRef.current = state.open;
+
+    if (state.open && !wasOpen) {
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLElement &&
+        active !== document.body &&
+        !asideRef.current?.contains(active)
+      ) {
+        openerRef.current = active;
+      }
+      const input =
+        asideRef.current?.querySelector<HTMLTextAreaElement>('textarea');
+      input?.focus();
+    } else if (!state.open && wasOpen) {
+      const active = document.activeElement;
+      const shouldRestore =
+        !active ||
+        active === document.body ||
+        Boolean(asideRef.current?.contains(active));
+      const target =
+        openerRef.current && openerRef.current.isConnected
+          ? openerRef.current
+          : tabRef.current;
+      openerRef.current = null;
+      if (shouldRestore) {
+        target?.focus();
+      }
+    }
+  }, [state.open]);
+
+  useEffect(() => {
+    const aside = asideRef.current;
+    if (!state.open || !aside) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key === 'Escape' &&
+        !event.defaultPrevented &&
+        !event.isComposing &&
+        event.keyCode !== 229
+      ) {
+        panelApi.close();
+      }
+    };
+    aside.addEventListener('keydown', onKeyDown);
+    return () => aside.removeEventListener('keydown', onKeyDown);
+  }, [panelApi, showConversation, state.open]);
+
   return (
     <>
       {!state.open && (
         <button
+          ref={tabRef}
           type="button"
           className={cx('panel-tab')}
           aria-label="Open AI chat"
-          onClick={() => panelApi.open()}
+          aria-expanded={false}
+          onClick={() => {
+            openerRef.current = null;
+            panelApi.open();
+          }}
         >
           AI chat
         </button>
       )}
       {showConversation && (
         <aside
+          ref={asideRef}
           className={cx('panel-frame')}
           hidden={!state.open}
           aria-label="AI chat"
@@ -119,7 +193,11 @@ function AiChatPanelInner() {
             </button>
           </div>
           <div className={cx('panel-body')}>
-            <PanelConversation store={store} state={state} />
+            <PanelConversation
+              store={store}
+              state={state}
+              asideRef={asideRef}
+            />
           </div>
         </aside>
       )}
@@ -131,16 +209,35 @@ function AiChatPanelInner() {
 function PanelConversation(props: {
   store: AiChatPanelStore;
   state: PanelState;
+  asideRef: React.RefObject<HTMLElement>;
 }) {
-  const { store, state } = props;
+  const { store, state, asideRef } = props;
   const api = useApi(aiChatApiRef);
   const toolsets = useToolsets(api);
+  const inputConfig = useInputConfig(api);
+  const images = inputConfig?.images;
   const live = usePageContext();
   const page = panelMessagePage(state.launch, live);
   const [held, setHeld] = useState<HeldSession>();
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState<string>();
+  const creating = useRef<Promise<ChatSession>>();
   const active = held && held.sessionId === state.sessionId ? held : undefined;
+
+  // Keep focus in the panel composer when DraftComposer swaps to SessionView
+  // (e.g. launching with a prompt or sending the first message).
+  const activeSessionId = active?.sessionId;
+  useEffect(() => {
+    if (!state.open || !activeSessionId) return;
+    const focused = document.activeElement;
+    if (
+      !focused ||
+      focused === document.body ||
+      asideRef.current?.contains(focused)
+    ) {
+      asideRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus();
+    }
+  }, [activeSessionId, asideRef, state.open]);
 
   const prompt = state.launch?.prompt;
   const launchId = state.launchId;
@@ -148,6 +245,25 @@ function PanelConversation(props: {
   const { setSession, start } = store;
   const launchIdRef = useRef(launchId);
   launchIdRef.current = launchId;
+
+  const defaultToolsets = () =>
+    toolsets.length > 0
+      ? {
+          enabledToolsets: toolsets
+            .filter(item => item.default)
+            .map(item => item.id),
+        }
+      : undefined;
+
+  const ensureDraftSession = (): Promise<ChatSession> => {
+    if (!creating.current) {
+      creating.current = api.createSession(defaultToolsets()).catch(cause => {
+        creating.current = undefined;
+        throw cause;
+      });
+    }
+    return creating.current;
+  };
 
   useEffect(() => {
     if (!prompt || sessionId) return () => undefined;
@@ -176,6 +292,7 @@ function PanelConversation(props: {
         // A remount shares the promise. Its own flag is the one that applies
         // the result. A newer launch leaves this result unused.
         if (cancelled || launchIdRef.current !== launchId) return;
+        creating.current = undefined;
         setHeld(result);
         setSession(result.sessionId);
         setOpening(false);
@@ -192,21 +309,36 @@ function PanelConversation(props: {
     };
   }, [api, launchId, prompt, sessionId, setSession, start, toolsets]);
 
-  const send = async ({ text }: OutgoingMessage) => {
+  const attachments = useMemo<AttachmentSource | undefined>(
+    () =>
+      images?.enabled
+        ? {
+            limits: images,
+            upload: async file => {
+              const created = await ensureDraftSession();
+              return api.uploadAttachment(created.id, file, file.name);
+            },
+          }
+        : undefined,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [api, images],
+  );
+
+  const send = async (message: OutgoingMessage) => {
     setOpening(true);
     setError(undefined);
     try {
-      const created = await api.createSession(
-        toolsets.length > 0
-          ? {
-              enabledToolsets: toolsets
-                .filter(item => item.default)
-                .map(item => item.id),
-            }
-          : undefined,
-      );
+      const created = await ensureDraftSession();
       const loaded = await api.getSession(created.id);
-      setHeld({ sessionId: created.id, detail: loaded, firstMessage: text });
+      creating.current = undefined;
+      setHeld({
+        sessionId: created.id,
+        detail: loaded,
+        firstMessage: message.text,
+        ...(message.attachments?.length && {
+          firstAttachments: message.attachments,
+        }),
+      });
       setSession(created.id);
       return true;
     } catch (cause) {
@@ -225,6 +357,7 @@ function PanelConversation(props: {
         detail={active.detail}
         toolsets={toolsets}
         firstMessage={active.firstMessage}
+        firstAttachments={active.firstAttachments}
         page={page}
       />
     );
@@ -242,7 +375,11 @@ function PanelConversation(props: {
           {error}
         </div>
       )}
-      <DraftComposer onSend={send} disabled={opening} />
+      <DraftComposer
+        onSend={send}
+        disabled={opening}
+        attachments={attachments}
+      />
     </div>
   );
 }
