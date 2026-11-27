@@ -56,8 +56,6 @@ import {
   UnsupportedAttachmentType,
 } from '../../domain';
 
-const UNEXPECTED_TEXT = 'The request failed.';
-
 /**
  * An error whose `name` is the name of the domain error, so a screen can tell
  * apart the errors that share a status code (`QueueFull` and `QueueChanged`
@@ -95,15 +93,11 @@ class NamedHttpError extends CustomErrorBase {
  * - The run was taken over or ended by someone else in the meantime
  *   (`LeaseLost`, `InvalidRunTransition`): 409.
  * - An error of Backstage (such as the 400 of a bad body) stays as it is.
- * - Any other error is unexpected. The error handler of Backstage sends the
- *   name and the message of such an error to the client (the message of a
- *   database error can have the SQL), so `onUnexpected` gets the error for the
- *   log, and the answer is a 500 with a fixed text.
+ * - Any other error is returned unchanged so Backstage's default error handler
+ *   logs the original message and stack and filters internal errors such as
+ *   `DatabaseError` from the response.
  */
-export function toHttpError(
-  error: unknown,
-  onUnexpected: (error: unknown) => void,
-): Error {
+export function toHttpError(error: unknown): unknown {
   if (error instanceof NotSessionOwner) {
     return new NotFoundError(new SessionNotFound(error.sessionId).message);
   }
@@ -181,6 +175,5 @@ export function toHttpError(
     return new ConflictError('The run changed in the meantime. Try again.');
   }
   if (error instanceof CustomErrorBase) return error;
-  onUnexpected(error);
-  return new Error(UNEXPECTED_TEXT);
+  return error;
 }

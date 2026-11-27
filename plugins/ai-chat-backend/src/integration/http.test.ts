@@ -1307,7 +1307,37 @@ describe('the HTTP routes', () => {
         ...b.useCases,
         getSession: {
           execute: async () => {
-            throw new Error(
+            throw new TypeError('cannot read properties of undefined');
+          },
+        },
+      };
+      const application = app({
+        ...b,
+        useCases: failing,
+      } as unknown as Backend);
+      const res = await as(JANE, request(application).get('/sessions/s1'));
+      expect(res.status).toBe(500);
+      expect(res.body.error.name).toBe('TypeError');
+      expect(res.body.error.message).toBe(
+        'cannot read properties of undefined',
+      );
+      expect(res.body.error.stack).toBeUndefined();
+      expect(b.logger.error).not.toHaveBeenCalled();
+    });
+
+    it('lets Backstage filter DatabaseError messages from 500 responses', async () => {
+      class DatabaseError extends Error {
+        constructor(message: string) {
+          super(message);
+          this.name = 'DatabaseError';
+        }
+      }
+      const b = backend([]);
+      const failing = {
+        ...b.useCases,
+        getSession: {
+          execute: async () => {
+            throw new DatabaseError(
               'insert into "sessions" (id) values (?) failed: SQLITE_BUSY',
             );
           },
@@ -1320,14 +1350,8 @@ describe('the HTTP routes', () => {
       const res = await as(JANE, request(application).get('/sessions/s1'));
       expect(res.status).toBe(500);
       expect(res.text).not.toContain('insert into');
-      expect(res.text).not.toContain('SQLITE');
-      expect(res.body.error.message).toBe('The request failed.');
-      expect(b.logger.error).toHaveBeenCalledWith(
-        'A request failed',
-        expect.objectContaining({
-          error: expect.stringContaining('SQLITE_BUSY'),
-        }),
-      );
+      expect(res.text).not.toContain('SQLITE_BUSY');
+      expect(res.body.error.stack).toBeUndefined();
     });
   });
 

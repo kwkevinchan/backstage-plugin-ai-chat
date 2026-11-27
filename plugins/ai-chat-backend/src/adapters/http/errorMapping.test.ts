@@ -46,8 +46,6 @@ import {
 } from '../../domain';
 import { toHttpError } from './errorMapping';
 
-const noop = () => {};
-
 describe('toHttpError', () => {
   it.each([
     [new SessionNotFound('s1'), NotFoundError],
@@ -63,7 +61,7 @@ describe('toHttpError', () => {
     [new LeaseLost('r1'), ConflictError],
     [new InvalidRunTransition('completed', 'running'), ConflictError],
   ])('maps %p to %p', (error, expected) => {
-    expect(toHttpError(error, noop)).toBeInstanceOf(expected);
+    expect(toHttpError(error)).toBeInstanceOf(expected);
   });
 
   it.each([
@@ -81,7 +79,7 @@ describe('toHttpError', () => {
   ])(
     'keeps the name of %p in the answer, with the status %p',
     (error, name, status) => {
-      const answer = toHttpError(error, noop) as Error & { statusCode: number };
+      const answer = toHttpError(error) as Error & { statusCode: number };
       // The error handler of Backstage answers with `statusCode` and `name`.
       expect(answer.name).toBe(name);
       expect(answer.statusCode).toBe(status);
@@ -90,30 +88,19 @@ describe('toHttpError', () => {
   );
 
   it('answers a session of another user like a session that does not exist', () => {
-    const notOwner = toHttpError(new NotSessionOwner('s1'), noop) as Error;
-    const missing = toHttpError(new SessionNotFound('s1'), noop) as Error;
+    const notOwner = toHttpError(new NotSessionOwner('s1')) as Error;
+    const missing = toHttpError(new SessionNotFound('s1')) as Error;
     expect(notOwner.message).toBe(missing.message);
     expect(notOwner.message).not.toContain('owner');
   });
 
   it('keeps an error of Backstage as it is', () => {
     const error = new InputError('bad body');
-    expect(toHttpError(error, noop)).toBe(error);
+    expect(toHttpError(error)).toBe(error);
   });
 
-  it('answers an unexpected error with a fixed text, and hands the error to the log', () => {
-    const seen: unknown[] = [];
-    const error = new Error('insert into "items" failed');
-    const answer = toHttpError(error, e => seen.push(e));
-    expect(answer).not.toBe(error);
-    expect(answer.message).toBe('The request failed.');
-    expect(answer.message).not.toContain('insert');
-    expect(seen).toEqual([error]);
-  });
-
-  it('does not log the errors it maps', () => {
-    const seen: unknown[] = [];
-    toHttpError(new SessionNotFound('s1'), e => seen.push(e));
-    expect(seen).toEqual([]);
+  it('returns an unexpected error unchanged for Backstage to handle', () => {
+    const error = new TypeError('cannot read properties of undefined');
+    expect(toHttpError(error)).toBe(error);
   });
 });
