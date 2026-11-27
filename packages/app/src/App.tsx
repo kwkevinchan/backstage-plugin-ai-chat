@@ -15,7 +15,12 @@
  */
 
 import { Navigate, Route } from 'react-router-dom';
-import { CatalogIndexPage } from '@backstage/plugin-catalog';
+import {
+  CatalogEntityPage,
+  CatalogIndexPage,
+  EntityAboutCard,
+  EntityLayout,
+} from '@backstage/plugin-catalog';
 import { UserSettingsPage } from '@backstage/plugin-user-settings';
 import {
   AlertDisplay,
@@ -30,6 +35,7 @@ import {
   AiChatPanel,
   aiChatPlugin,
   createAiChatToolResultsApi,
+  EntityAiChatContent,
 } from '@kwkevinchan/backstage-plugin-ai-chat';
 import { aiChatToolResultsApiRef } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import { listServicesResult } from './components/aiChat/listServicesResult';
@@ -50,10 +56,27 @@ const app = createApp({
   },
 });
 
+const entityPage = (
+  <EntityLayout>
+    <EntityLayout.Route path="/" title="Overview">
+      <EntityAboutCard />
+    </EntityLayout.Route>
+    <EntityLayout.Route path="/ai-chat" title="AI chat">
+      <EntityAiChatContent />
+    </EntityLayout.Route>
+  </EntityLayout>
+);
+
 const routes = (
   <FlatRoutes>
     <Route path="/" element={<Navigate to="ai-chat" />} />
     <Route path="/catalog" element={<CatalogIndexPage />} />
+    <Route
+      path="/catalog/:namespace/:kind/:name"
+      element={<CatalogEntityPage />}
+    >
+      {entityPage}
+    </Route>
     <Route path="/ai-chat" element={<AiChatPage />} />
     <Route path="/settings" element={<UserSettingsPage />} />
   </FlatRoutes>

@@ -39,6 +39,8 @@ export interface ThreadListAdapterOptions {
   query?: string;
   /** When true, archived sessions are included in `GET /sessions`. */
   includeArchived?: boolean;
+  /** Optional entity ref filter sent to `GET /sessions?entityRef=`. */
+  entityRef?: string;
   /** Called right before a mutating action starts (to clear stale errors). */
   onActionStart?(): void;
   /** Called after a mutating action succeeds. */
@@ -184,6 +186,7 @@ export function createThreadListAdapter(
     api,
     query,
     includeArchived = false,
+    entityRef,
     onActionStart,
     onActionSuccess,
     onActionError,
@@ -213,6 +216,7 @@ export function createThreadListAdapter(
       const sessions = await api.listSessions({
         ...(trimmedQuery && { query: trimmedQuery }),
         ...(includeArchived && { includeArchived: true }),
+        ...(entityRef && { entityRef }),
       });
       return {
         threads: sessions.map(toRemoteThreadMetadata),

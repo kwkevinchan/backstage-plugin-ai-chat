@@ -57,6 +57,7 @@ describe('threadListAdapter', () => {
       api,
       query: '  chat  ',
       includeArchived: true,
+      entityRef: 'component:default/example-payments',
     });
 
     const result = await adapter.list();
@@ -64,6 +65,7 @@ describe('threadListAdapter', () => {
     expect(api.listSessions).toHaveBeenCalledWith({
       query: 'chat',
       includeArchived: true,
+      entityRef: 'component:default/example-payments',
     });
     expect(result.threads).toEqual([
       {

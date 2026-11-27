@@ -177,6 +177,10 @@ On the legacy frontend system, render `<AiChatPanel>` once inside the router
 and outside the routes. The new frontend system mounts the same panel with
 the plugin, so the app does not render it again.
 
+The new frontend system plugin also registers an **AI chat** tab on entity
+pages (`entity-content:ai-chat/entity-ai-chat`), listing the signed-in user's
+conversations bound to that entity with a **New chat** button.
+
 ### Frontend: legacy frontend system
 
 ```tsx
@@ -185,6 +189,7 @@ import {
   AiChatPage,
   AiChatPanel,
   aiChatPlugin,
+  EntityAiChatContent,
 } from '@kwkevinchan/backstage-plugin-ai-chat';
 
 const app = createApp({ plugins: [aiChatPlugin /* … */] });
@@ -193,6 +198,15 @@ const app = createApp({ plugins: [aiChatPlugin /* … */] });
 <Route path="/ai-chat/*" element={<AiChatPage />} />;
 // once, inside the router and outside the routes:
 <AiChatPanel />;
+```
+
+To add the **AI chat** tab to entity pages, mount `EntityAiChatContent` inside
+your `EntityLayout`:
+
+```tsx
+<EntityLayout.Route path="/ai-chat" title="AI chat">
+  <EntityAiChatContent />
+</EntityLayout.Route>
 ```
 
 ### Result components of actions

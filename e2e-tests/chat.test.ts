@@ -613,3 +613,59 @@ test('session list: search, pin, rename, archive and stay archived after reload,
   await expect(nav.getByText('Beta Billing')).toHaveCount(0);
   await shot('19-session-list-deleted');
 });
+
+test('entity page AI chat tab: list entity sessions, start a new chat bound to entity, and return to see it', async ({
+  page,
+}) => {
+  watch(page);
+  await signIn(page);
+
+  await page.goto('/catalog/default/component/example-payments');
+  const aiChatTab = page
+    .getByRole('tab', { name: 'AI chat', exact: true })
+    .or(
+      page
+        .getByRole('link', { name: 'AI chat', exact: true })
+        .and(page.locator('[href*="/catalog/"]')),
+    )
+    .first();
+  await aiChatTab.click();
+  await expect(page).toHaveURL(
+    /\/catalog\/default\/component\/example-payments\/ai-chat/,
+  );
+
+  const tabNav = page.getByRole('navigation', { name: 'Conversations' });
+  await tabNav.getByRole('button', { name: 'New chat' }).click();
+  await expect(page).toHaveURL(
+    /\/ai-chat\?entityRef=component%3Adefault%2Fexample-payments/,
+  );
+
+  await say(page, 'list services');
+  await expect(
+    page.locator('details', { hasText: 'List services' }).getByText('Done'),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(0);
+  await expect(page).toHaveURL(/\/ai-chat\/[^/?]+/);
+  const createdPath = new URL(page.url()).pathname;
+
+  // Rename the currently open conversation so we can identify it reliably in the entity tab.
+  const nav = page.getByRole('navigation', { name: 'Conversations' });
+  const currentRow = nav.locator('button[aria-current="true"]').locator('..');
+  await expect(currentRow).toBeVisible();
+  await currentRow
+    .getByRole('button', { name: /^Rename conversation / })
+    .click();
+  const input = nav.getByRole('textbox', { name: 'Conversation title' });
+  await input.fill('Payments Entity Thread');
+  await nav.getByRole('button', { name: 'Save title' }).click();
+  await expect(nav.getByText('Payments Entity Thread')).toBeVisible();
+
+  // Return to the entity page AI chat tab and verify the bound session is listed.
+  await page.goto('/catalog/default/component/example-payments/ai-chat');
+  const entityNav = page.getByRole('navigation', { name: 'Conversations' });
+  await expect(entityNav.getByText('Payments Entity Thread')).toBeVisible();
+
+  // Clicking the row opens the conversation URL.
+  await entityNav.getByText('Payments Entity Thread').click();
+  await expect(page).toHaveURL(new RegExp(`${createdPath}$`));
+});

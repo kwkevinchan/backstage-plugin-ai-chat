@@ -41,6 +41,7 @@ import {
   fetchApiRef,
   PageBlueprint,
 } from '@backstage/frontend-plugin-api';
+import { EntityContentBlueprint } from '@backstage/plugin-catalog-react/alpha';
 import {
   aiChatPanelApiRef,
   aiChatToolResultsApiRef,
@@ -124,6 +125,19 @@ const aiChatPage = PageBlueprint.make({
   },
 });
 
+/** The entity page tab listing sessions bound to the current entity. */
+const entityAiChatContent = EntityContentBlueprint.make({
+  name: 'entity-ai-chat',
+  params: {
+    path: '/ai-chat',
+    title: 'AI chat',
+    loader: () =>
+      import('./ui/EntityAiChatContent').then(m =>
+        compatWrapper(<m.EntityAiChatContentView />),
+      ),
+  },
+});
+
 /**
  * The AI chat plugin for the new frontend system.
  *
@@ -137,6 +151,7 @@ export default createFrontendPlugin({
     aiChatToolResultsApi,
     aiChatPage,
     aiChatPanel,
+    entityAiChatContent,
   ],
   routes: convertLegacyRouteRefs({
     root: rootRouteRef,

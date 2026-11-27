@@ -16,6 +16,7 @@
 
 import {
   createApiFactory,
+  createComponentExtension,
   createPlugin,
   createRoutableExtension,
   discoveryApiRef,
@@ -74,5 +75,21 @@ export const AiChatPage: () => JSX.Element = aiChatPlugin.provide(
     name: 'AiChatPage',
     component: () => import('./ui/ChatPage').then(m => m.ChatPageWithHeader),
     mountPoint: rootRouteRef,
+  }),
+);
+
+/**
+ * Entity page tab listing the signed-in user's conversations bound to the
+ * current entity, with a button to start a new conversation for that entity.
+ *
+ * @public
+ */
+export const EntityAiChatContent: () => JSX.Element = aiChatPlugin.provide(
+  createComponentExtension({
+    name: 'EntityAiChatContent',
+    component: {
+      lazy: () =>
+        import('./ui/EntityAiChatContent').then(m => m.EntityAiChatContentView),
+    },
   }),
 );
