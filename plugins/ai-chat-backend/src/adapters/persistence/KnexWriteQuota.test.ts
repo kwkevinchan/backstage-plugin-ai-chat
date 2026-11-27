@@ -89,6 +89,8 @@ describe('the migration of the quota of changes', () => {
     try {
       await knex.migrate.latest(config);
       expect(await knex.schema.hasTable('write_quota_windows')).toBe(true);
+      // The migration of the references comes after this one.
+      await knex.migrate.down(config);
       await knex.migrate.down(config);
       expect(await knex.schema.hasTable('write_quota_windows')).toBe(false);
       expect(await knex.schema.hasTable('model_call_windows')).toBe(true);

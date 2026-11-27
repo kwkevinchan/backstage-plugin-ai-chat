@@ -107,10 +107,11 @@ describe('the migration of the session log', () => {
         'migrations',
       ),
     };
-    // Six later migrations come first: the write quota, the model calls, the
-    // shares, the attachments, the tables of the input phase, and the one that
+    // Seven later migrations come first: the references, the write quota, the
+    // model calls, the shares, the attachments, the tables of the input phase, and the one that
     // drops the tables of the first version (undoing it brings them back).
     // Undoing this one drops the tables of the log.
+    await knex.migrate.down(config);
     await knex.migrate.down(config);
     await knex.migrate.down(config);
     await knex.migrate.down(config);
