@@ -1348,11 +1348,11 @@ flowchart LR
 
 ### P4：擴大
 
-| 編號  | 工作項目           | 大小 | 完成的需求             | PR  | 狀態   |
-| ----- | ------------------ | ---- | ---------------------- | --- | ------ |
-| P4-01 | 子任務：`delegate` | L    | P-07、P-08、P-09       |     | 不做   |
-| P4-02 | 題組測試           | M    | O-03                   |     | 不做   |
-| P4-03 | 送出內容管理       | L    | B-04、B-01（關掉頁面） |     | 進行中 |
+| 編號  | 工作項目           | 大小 | 完成的需求             | PR                | 狀態 |
+| ----- | ------------------ | ---- | ---------------------- | ----------------- | ---- |
+| P4-01 | 子任務：`delegate` | L    | P-07、P-08、P-09       |                   | 不做 |
+| P4-02 | 題組測試           | M    | O-03                   |                   | 不做 |
+| P4-03 | 送出內容管理       | L    | B-04、B-01（關掉頁面） | PR 80、待定、待定 | 完成 |
 
 業主於 2026-11-24 決定 P4-01（子任務 `delegate`、需求 P-07 到 P-09）不做。
 
@@ -1373,7 +1373,7 @@ flowchart LR
     - 送出內容管理區：輸入框上方一排標籤，有頁面、參考、圖片。頁面標籤的開關。參考標籤可以移除。「加入參考」的選單：「目前頁面」、catalog entity 的選擇器（可搜尋，照 Scaffolder `EntityPicker` 的慣例）、別的 plugin 註冊的參考來源。
     - 擴充點：`ai-chat-react` 的參考來源型別和 API ref；新前端系統用 `/alpha` 的 blueprint，舊前端系統由 app 覆蓋 API（照 P3-10）。
     - `useAiChatPanel().open()` 和 `<AiChatLauncher>` 帶 `references`。
-  - PR 3（範例和文件）：範例 app 的 TechDocs addon「反白後問 AI」（帶文字片段和來源）和一個「問 AI」按鈕；README 中英；e2e。
+  - PR 3（範例和文件）：兩個範例 app 各有「反白後問 AI」（帶文字片段、頁面標題和路徑）、一個「問 AI」按鈕、一個參考來源；README 中英；e2e；規格狀態欄和使用說明收尾。範例 app 沒有安裝 TechDocs，所以反白的範例放在 entity 頁的「Runbook」卡片上（不為了範例加裝 TechDocs）。
   - 不做：client tool；O-03 題組測試；全站反白就跳出「問 AI」；改工具的選擇和執行；改圖片的規則。
 - **依賴**：P3-02（`EntityReader`、`readableEntityRef` 的讀法）、P3-10（前端擴充點的做法）、PU-03（排隊和插入的畫面）。
 - **驗收**：
@@ -1410,9 +1410,14 @@ flowchart LR
     - 擴充點：舊前端系統由 app 覆蓋 API、新前端系統用 blueprint 註冊的參考來源，出現在「加入參考」的選單（`ui/SendContents.test.tsx`：`lists a source that the app registered with createAiChatReferenceSourcesApi, and takes what it adds`；`lists a source of AiChatReferenceSourceBlueprint of the new frontend system`；`alpha.test.tsx`：`collects the sources of AiChatReferenceSourceBlueprint in order, the first one for an id wins`；`application/referenceSourcesApi.test.ts`；`ai-chat-react` 的 `alpha.test.ts`：`outputs the id, the title and the component`）。
     - `useAiChatPanel().open({ references })` 和 `<AiChatLauncher references>` 打開面板時，參考放進管理區，送出前能移除（`ui/AiChatPanel.test.tsx`：`puts the references of open({ references }) in the box, where they can be removed before sending`；`puts the references of <AiChatLauncher references> in the box, and keeps them while the panel is closed`；`puts the prompt of a launch with references in the input, and does not send it`；`opens a conversation from the launcher and sends the prompt with the entity`（只帶 `prompt` 照舊立刻送出）；`domain/launch.test.ts`：`keeps the prompt of a launch with references as a draft, not to send`；`domain/panel.test.ts`：`opens a new conversation for the draft of a launch with references`；`ai-chat-react` 的 `AiChatLauncher.test.tsx`：`opens the panel with references for the box`）。
     - 被分享的人的畫面顯示那則訊息的參考標籤，沒有管理區（`ui/SendContents.test.tsx`：`shows the references of a message to the user it is shared with, without the box`；`domain/itemsToMessages.test.ts`：`keeps them on the message, and a send again takes them as references of a request`）。
-  - PR 3，範例和文件（測試名稱在 PR 3 定）：
-    - 範例 app 在 TechDocs 反白後問 AI：面板打開，管理區有那段文字和來源（e2e）。
-    - README 中英寫明參考的上限、entity 用使用者的身分讀、文字片段會送到模型供應商。
+  - PR 3，範例和文件：
+    - 兩個範例 app 都有反白後問 AI：沒有選取時沒有按鈕；選取一段文字後按「Ask AI」，面板打開，管理區有那段文字（標題是頁面標題，連結是頁面路徑），什麼都沒有自動送出，送出後模型讀到這個片段（`e2e-tests/references.test.ts`：`text selected on a page: "Ask AI" opens the chat with the text as a reference, and the model reads it`）。
+    - 「問 AI」按鈕打開面板：entity 在管理區、prompt 在輸入框、沒有送出；使用者送出後請求帶這個 entity（`e2e-tests/references.test.ts`：`"Ask AI about this service" opens the chat with the entity and the prompt, and sends nothing until the user does`）。
+    - 兩個 app 各註冊一個參考來源，出現在「加入參考」；從 catalog 選擇器選 entity、從來源選片段，送出前在管理區、送出後在訊息上，請求的 `references` 照順序，模型輸入有兩個區塊（`e2e-tests/references.test.ts`：`references from the catalog and from a source: tags before sending, on the message, and in what the model reads`）。
+    - 頁面標籤關掉後送出，請求沒有 `page`，模型說不知道使用者在哪；補回來後再送，請求又帶 `page`（`e2e-tests/references.test.ts`：`the page tag left out: the next message has no page, and adding it back sends the page again`）。
+    - 假模型有 `refs ...` 的觸發字，回顯收到的參考區塊（`scripts/fake-llm.mjs`）。
+    - README 中英寫明範例、參考的上限、entity 用使用者的身分讀、文字片段會送到模型供應商。
+    - 規格狀態欄：SE-03、SE-04、SE-05、SH-01、B-02、B-05、IN-20 補上「完成」，B-04 和 B-01（關掉頁面）標成完成；使用說明的分期表 P4 一列改成現在的設計。
 - **規格沒寫、實作選定的地方**：
   - 參考在收到請求時就讀，存下的是讀到的結果：送訊息和插入在寫入 `user_message` 之前讀；排隊和改排隊的訊息在存進佇列之前讀，自動送出時不再讀。自動送出時使用者可能不在，憑證也可能快到期，所以不在那時讀。
   - entity ref 要有 kind（和 `GET /sessions?entityRef=` 同一個檢查），存成正規化的 `kind:namespace/name`。
@@ -1574,3 +1579,4 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-26 | 1.2  | PI-07 收尾完成（#70）：在 `e2e-tests/images.test.ts` 補齊圖片＋插入＋排隊綜合端對端測試；`usage.zh-TW.html` 補上三者的示意畫面與說明；`pi-coverage.zh-TW.md`、`harness-spec.zh-TW.md`、`architecture.zh-TW.md` 與本表將 PI-06、PI-07 標為完成                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | 2026-11-27 | 1.2  | SE-06 畫面完成：前端套件匯出 `EntityAiChatContent`（舊前端系統）和 `entity-content:ai-chat/entity-ai-chat`（新前端系統，預設啟用，可用 app-config 停用或設 `filter`）；列表沿用 `ThreadListSidebar` 和 `createThreadListAdapter`（加 `entityRef`），即時更新和聊天頁共用 `useThreadListLiveUpdates`；兩個示範 app 都接上，e2e 走過分頁 → 新對話 → 回到分頁                                                                                                                                                                                                                                                                                                                                           |
 | 2026-11-27 | 1.2  | P4-02（題組測試，O-03）不做。P4-03 從 client tool 改成送出內容管理（B-04、B-01 關掉頁面），分三個 PR（規格和後端協定、前端、範例和文件），逐項驗收見 P4-03                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 2026-11-27 | 1.2  | P4-03 完成（B-04、B-01 關掉頁面）：PR 80（規格和後端協定）、待定（前端）、待定（範例和文件）。範例 app 有反白後問 AI、「問 AI」按鈕和參考來源，`e2e-tests/references.test.ts` 四個測試兩個 app 都跑；假模型加 `refs` 觸發字；規格狀態欄補上 SE-03、SE-04、SE-05、SH-01、B-02、B-05、IN-20 的「完成」                                                                                                                                                                                                                                                                                                                                                                                                 |
