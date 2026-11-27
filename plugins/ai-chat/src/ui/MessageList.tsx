@@ -28,6 +28,7 @@ import type {
   ChatAttachment,
   ChatInsertedData,
   ChatNoticeData,
+  ChatPlan,
   ChatTool,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { AiChatToolResultsApi } from '@kwkevinchan/backstage-plugin-ai-chat-react';
@@ -37,7 +38,7 @@ import type { ChatUnreadData } from '../domain/types';
 import { chatAttachmentsOf } from '../adapters/assistantUi/attachmentAdapter';
 import { ChatImages, messageAttachmentComponents } from './Attachments';
 import { MarkdownText } from './MarkdownText';
-import { PlanToolCall } from './PlanCard';
+import { PlanList, PlanToolCall } from './PlanCard';
 import { cx } from './styles';
 import { ToolCall, ToolCallViewContext } from './ToolCallCard';
 
@@ -140,12 +141,26 @@ function Unread({ data }: DataMessagePartProps<ChatUnreadData>) {
   );
 }
 
+/**
+ * Renders a `data-plan` part when no `update_plan` tool call is present in the
+ * message (for example, in a copied session where tool calls are omitted).
+ */
+function PlanData({ data: plan }: DataMessagePartProps<ChatPlan>) {
+  const hasPlanToolCall = useAuiState(s =>
+    s.message.parts.some(
+      p => p.type === 'tool-call' && p.toolName === UPDATE_PLAN_TOOL,
+    ),
+  );
+  if (hasPlanToolCall) return null;
+  return <PlanList plan={plan} />;
+}
+
 // The run, the notices and the other data parts are shown outside the
-// messages or not at all. The plan is shown with its `update_plan` call.
+// messages or not at all.
 const Hidden = () => null;
 
 const data = {
-  by_name: { inserted: Inserted, unread: Unread },
+  by_name: { inserted: Inserted, unread: Unread, plan: PlanData },
   Fallback: Hidden,
 };
 

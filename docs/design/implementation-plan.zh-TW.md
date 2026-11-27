@@ -381,7 +381,7 @@ flowchart LR
 | P2-02 | 保存期限                    | S    | SE-05                                            | 定期工作刪除過期的 Session。稽核紀錄還在。多台同時跑不會重複刪。逐項驗收見下方 P2-02                                                                                                                                                                                             | #34 | 完成                   |
 | P2-03 | Permission 和分享的資料模型 | M    | SH-01、SH-05、SH-08、SH-09、SH-11                | `shares` 表。`visibleItems` 每一列規則一個測試。條件規則「是擁有者」「有分享給我或我的群組」                                                                                                                                                                                     | #36 | 完成                   |
 | P2-04 | 分享的 use case 和 API      | M    | SH-02、SH-03、SH-06、SH-10、SH-11、IN-19（讀取） | 被分享的人送訊息和核准都被拒絕。到期後變成快照。每個動作有稽核紀錄。逐項驗收見下方 P2-04                                                                                                                                                                                         | #62 | 完成                   |
-| P2-05 | 分享的畫面和複製            | M    | SH-04、SH-07、SH-10、SH-12、IN-19（複製）        | 分享對話框的說明文字。持續更新時上方的提示列。複製出來的 Session 沒有工具輸出                                                                                                                                                                                                    |
+| P2-05 | 分享的畫面和複製            | M    | SH-04、SH-07、SH-10、SH-12、IN-19（複製）        | 分享對話框的說明文字。持續更新時上方的提示列。複製出來的 Session 沒有工具輸出；範圍內的圖片複製成新的附件。逐項驗收見下方 P2-05                                                                                                                                                  | #68 | 完成                   |
 | P2-06 | 斷線接回和即時狀態          | M    | A-07、B-05                                       | 斷線後接回：從目前 Run 的第一個 Item 重送再接新的，先送 `start`，未完成的文字補送 `text-start` 加已累積的文字（Run 在別台時等它完成再整段送），Item 不重複不遺漏。逐字輸出到一半時重新整理，畫面接得上。Run 在別台時，每秒查一次新的 Item（沒有逐字片段）。沒裝 Signals 也能運作 | #44 | 後端完成，畫面在 PU-05 |
 | P2-07 | 側邊面板和入口元件          | M    | B-02                                             | 新增 `ai-chat-react`。面板在換頁時保留。別的 plugin 用 `<AiChatLauncher>` 開啟對話。逐項驗收見下方 P2-07                                                                                                                                                                         | #46 | 完成                   |
 
@@ -580,6 +580,31 @@ flowchart LR
   - 已取消的分享不能再改或再取消，回 404。取消時先寫稽核，再寫入；寫入時發現已經被取消，那一筆是 `fail`，回 404。
   - 接回時被分享的人一律走輪詢（每秒讀一次游標之後的紀錄，套一次 `visibleItems`；有一筆分享已經到期時讀完整紀錄，因為到期的分享停在哪一筆要看之前每一筆的時間），即使 Run 在同一台：這一台的事件裡有沒遮的工具輸出和逐字片段。每次讀取重新讀分享，所以取消、到期在一秒內生效。Permission policy 和群組在接回開始時檢查一次，串流中途不再問。
   - 被分享的人讀到的 Run 停在等核准時，結束的事件不帶要核准的呼叫：核准是擁有者的操作。
+
+### P2-05 分享的畫面和複製
+
+- **範圍**：
+  - 共用套件（`ai-chat-common`）：`ChatSharedView`（掛在 `ChatSessionDetail.shared`，只有被分享的人讀取時有值，用來分辨快照與持續更新，SH-12）；`chatPaths.forkSession`（`/sessions/:id/fork`）。
+  - 宿主（`ai-chat-backend`）：
+    - `GetSession`：被分享的人讀取時帶上 `shared`（`mode: 'snapshot' | 'live'`，快照附時間 `snapshotAt`，持續更新附 `expiresAt`）。擁有者不帶 `shared`。
+    - `ForkSession`（SH-04、SH-06、IN-19 複製）：`POST /sessions/:id/fork`，回 201 和新的 `ChatSession`。走 `authorizeRead` + `shareeView`（擁有者也可複製自己的 Session）；只複製可見範圍內的 `user_message`、`agent_message`、`plan_update`（重新編號 `seq` 從 1 起、不含 `runId`、`readUpToSeq`），不帶 `tool_call`、`tool_started`、`tool_result`、`approval`、`summary`、`note`、佇列與分享。
+    - 圖片複製（IN-19）：只複製可見範圍內 `user_message` 用到的附件，經 `AttachmentStore.copy` 產生新的附件 id，擁有者是複製的人，位元組與原附件相同，不受原 Session 的 `maxPending` 限制，與原 Session 的附件權限互不影響。
+    - 稽核（SH-06、IN-19）：`AuditLog` 加 `session-fork` 事件，記錄操作人、來源 Session、新 Session、複製的 Item 數與附件數。
+    - OpenAPI 同步更新 `POST /sessions/{id}/fork` 與 `ChatSessionDetail.shared`。
+  - 前端（`ai-chat`）：
+    - `AiChatApi` / `AiChatClient` 加 `forkSession(sessionId)`。
+    - 分享對話框（SH-07、SH-08、SH-09、SH-11）：擁有者的 `SessionView` 提供「Share」按鈕與對話框，顯示管理既有的分享（更新快照、停止分享）與建立新分享（對象、快照／持續更新、是否含工具輸出／之後的工具輸出、到期小時）。對話框寫明：對方會看到用你的權限查到的工具輸出；對方可以複製，複製出去的訊息、計畫和圖片收不回來；對象是 `group:` 時另外提醒之後加入群組的人也看得到。
+    - 持續更新提示列（SH-10）：Session 有未過期的持續更新分享時，擁有者的畫面上方一直顯示分享對象，旁邊有停止按鈕。
+    - 被分享的人的畫面（SH-04、SH-12）：`detail.shared` 存在時顯示唯讀橫幅，標明這是快照（附時間）還是持續更新（附到期時間），隱藏輸入框、工具組切換、佇列與分享按鈕；提供「Copy to my sessions」按鈕呼叫 `forkSession` 並跳轉至新 Session。
+- **依賴**：P2-03、P2-04（分享 API 與可見範圍）、PI-05（`AttachmentStore.copy`）、PU-02／PU-03／PU-04（前端畫面）。
+- **驗收**：
+  - 複製的內容過濾（SH-04、第 5 節安全測試）：被分享的人呼叫 `POST /sessions/:id/fork` 得到 201 與新 Session（`ownerRef` 是複製的人）；新 Session 的紀錄只含可見範圍內的 `user_message`、`agent_message`、`plan_update`，不含 `tool_call`、`tool_started`、`tool_result`、`approval`、`summary`、`note`；超過 `up_to_seq` 的訊息不在裡面；沒有複製原 Session 的佇列或分享。
+  - 圖片複製與隔離（IN-19、第 5 節安全測試）：可見範圍內的 `user_message` 附件複製成新 Session 的新附件（新的 id、擁有者是複製的人、位元組相同）；超過 `up_to_seq` 的訊息附件、未使用的附件、排隊保留的附件不複製；原 Session 的附件 id 不能用來讀新 Session 的附件，新 Session 的附件 id 也不能用來讀原 Session；原分享取消後，複製出來的新 Session 與附件仍可正常讀取。
+  - 複製權限與稽核（SH-04、SH-06）：沒有讀取權限的人（陌生人、分享已取消、離開群組、permission policy 拒絕）呼叫 `POST /sessions/:id/fork` 一律 404 且不寫稽核；成功複製寫入 `session-fork` 稽核事件（`actor`、`sourceSessionId`、`sessionId`）。
+  - 分享模式資訊（SH-12）：`GET /sessions/:id` 對擁有者不帶 `shared`；對快照或已到期持續更新的被分享者帶 `shared: { mode: 'snapshot', snapshotAt }`；對未到期持續更新的被分享者帶 `shared: { mode: 'live', expiresAt }`。
+  - 分享對話框（SH-07）：擁有者打開對話框看得到「對方會看到用你的權限查到的工具輸出」與「對方可以複製，複製出去的訊息、計畫和圖片收不回來」的說明；輸入 `group:` 對象時顯示「之後加入群組的人也看得到」提醒；可建立分享、更新快照、停止分享。
+  - 持續更新提示列（SH-10）：擁有者開啟有未過期持續更新分享的 Session 時，畫面上方顯示對象清單與停止按鈕；按下停止後呼叫 `revokeShare` 並更新提示列。
+  - 被分享的人的畫面（SH-04、SH-12）：快照模式顯示「Snapshot」與時間；持續更新模式顯示「Live」；不顯示輸入框與分享按鈕；按「Copy to my sessions」呼叫 `forkSession` 並導向新 Session。
 
 ### P2-06 斷線接回和即時狀態
 

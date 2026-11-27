@@ -41,6 +41,8 @@ export type Session = {
 
 /** What the caller gives to create a session. */
 export type NewSession = {
+  /** Pre-generated id (used when audit must record the id before writing). */
+  id?: string;
   ownerRef: string;
   agentId: string;
   title?: string;

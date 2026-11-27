@@ -1035,4 +1035,47 @@ describe('images', () => {
       expect.objectContaining({ text: 'look', attachmentIds: ['att-5'] }),
     );
   });
+
+  it('renders agent replies and plan cards for forked sessions whose items have no runId', async () => {
+    const api = mockApi();
+    const t = '2026-11-26T00:00:00.000Z';
+    const forked = detail({
+      items: [
+        {
+          sessionId: 's-1',
+          seq: 1,
+          createdAt: t,
+          kind: 'user_message',
+          text: 'list services',
+        },
+        {
+          sessionId: 's-1',
+          seq: 2,
+          createdAt: t,
+          kind: 'agent_message',
+          text: 'Here is the result of the action: payments is running.',
+        },
+        {
+          sessionId: 's-1',
+          seq: 3,
+          createdAt: t,
+          kind: 'plan_update',
+          plan: {
+            items: [{ text: 'Inspect payments service', status: 'completed' }],
+          },
+        },
+      ],
+    });
+    await open(api, forked);
+
+    expect(await screen.findByText('list services')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        'Here is the result of the action: payments is running.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText('Inspect payments service'),
+    ).toBeInTheDocument();
+  });
 });

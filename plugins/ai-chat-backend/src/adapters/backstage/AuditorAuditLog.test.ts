@@ -84,4 +84,33 @@ describe('AuditorAuditLog', () => {
       },
     });
   });
+
+  it('records session-fork meta fields', async () => {
+    const auditor = mockServices.auditor.mock({
+      createEvent: jest.fn(async () => ({
+        success: jest.fn(),
+        fail: jest.fn(),
+      })),
+    });
+    const log = new AuditorAuditLog(auditor);
+    await log.begin({
+      eventId: 'session-fork',
+      actorRef: 'user:default/bob',
+      sessionId: 's-copy',
+      sourceSessionId: 's-orig',
+      copiedItems: 4,
+      copiedAttachments: 1,
+    });
+    expect(auditor.createEvent).toHaveBeenCalledWith({
+      eventId: 'session-fork',
+      severityLevel: 'medium',
+      meta: {
+        actor: 'user:default/bob',
+        sessionId: 's-copy',
+        sourceSessionId: 's-orig',
+        copiedItems: 4,
+        copiedAttachments: 1,
+      },
+    });
+  });
 });

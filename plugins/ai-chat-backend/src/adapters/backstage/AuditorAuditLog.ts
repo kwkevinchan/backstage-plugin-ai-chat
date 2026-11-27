@@ -60,6 +60,14 @@ function metaOf(event: AuditEvent) {
         outputsUpToSeq: event.outputsUpToSeq ?? null,
         expiresAt: event.expiresAt ?? null,
       };
+    case 'session-fork':
+      return {
+        actor: event.actorRef,
+        sourceSessionId: event.sourceSessionId,
+        sessionId: event.sessionId,
+        copiedItems: event.copiedItems,
+        copiedAttachments: event.copiedAttachments,
+      };
     default:
       return {
         actor: event.actorRef,

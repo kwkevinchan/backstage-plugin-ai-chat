@@ -114,6 +114,7 @@ describe('the OpenAPI spec', () => {
       chatPaths.stream('{id}'),
       chatPaths.shares('{id}'),
       chatPaths.share('{id}', '{shareId}'),
+      chatPaths.forkSession('{id}'),
       chatPaths.tools('{id}'),
       chatPaths.toolsets(),
     ].map(path => decodeURIComponent(path));

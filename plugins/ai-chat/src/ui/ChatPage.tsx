@@ -90,7 +90,13 @@ type Basics = {
 };
 
 /** A session opens on its own URL: `<page>/<session id>` (SE-01). */
-function OpenSession({ api, toolsets, liveActivity, onChanged }: Basics) {
+function OpenSession({
+  api,
+  basePath,
+  toolsets,
+  liveActivity,
+  onChanged,
+}: Basics) {
   const { sessionId = '' } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -164,6 +170,10 @@ function OpenSession({ api, toolsets, liveActivity, onChanged }: Basics) {
       firstAttachments={firstAttachments}
       liveActivity={liveActivity}
       onChanged={onChanged}
+      onForked={forked => {
+        onChanged();
+        navigate(`${basePath}/${encodeURIComponent(forked.id)}`);
+      }}
     />
   );
 }
@@ -560,14 +570,16 @@ export function ChatPageContent() {
     setActionError(describeError(error));
   }, []);
 
-  const handleDeleted = useCallback(
-    (remoteId: string) => {
-      if (remoteId === openIdRef.current) {
-        navigate(basePathRef.current || '/');
-      }
-    },
-    [navigate],
-  );
+  const handleDeletedRef = useRef((remoteId: string) => {
+    if (remoteId === openIdRef.current) {
+      navigate(basePathRef.current || '/');
+    }
+  });
+  handleDeletedRef.current = (remoteId: string) => {
+    if (remoteId === openIdRef.current) {
+      navigate(basePathRef.current || '/');
+    }
+  };
 
   const adapter = useMemo(
     () =>
@@ -579,16 +591,9 @@ export function ChatPageContent() {
         onActionSuccess: clearActionError,
         onActionError: reportActionError,
         onCustomUpdated: () => reloadRef.current?.(),
-        onDeleted: handleDeleted,
+        onDeleted: id => handleDeletedRef.current(id),
       }),
-    [
-      api,
-      debouncedSearch,
-      showArchived,
-      clearActionError,
-      reportActionError,
-      handleDeleted,
-    ],
+    [api, debouncedSearch, showArchived, clearActionError, reportActionError],
   );
 
   const onThreadIdChange = useCallback(

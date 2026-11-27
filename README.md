@@ -323,21 +323,24 @@ must be positive integers, and `defaultHours` must not be greater than
 `maxHours`; otherwise the backend does not start.
 
 **Sharing.** The owner of a session shares it, read-only, with a user or a
-group through the routes `/sessions/{id}/shares` (the screen for it is not in
-this version). A **snapshot** (the default) shows the session up to the moment
-of the share; the owner refreshes it to move it on. A **live** share shows what
-comes next too, until it expires, and then stays as it was at that moment. The
-sharee sees the messages, the plan, the tools that were called with their
-input, the images of the messages they see, and the tool output, unless the
-owner leaves it out; in a live share the tool output written after the share is
-left out until the owner shows it. A tool result that is left out keeps its
-status with the text "not shared". **The sharee sees tool output that was read
-with the owner's permissions**, and a group share is seen by whoever is in the
-group when they open it. The sharee cannot send a message, decide an approval
-or change anything: every such request answers like a session that does not
-exist. Making, changing and cancelling a share are written to the auditor
-(`session-share`, `session-share-update`, `session-share-revoke`). A cancel
-stops every read at once.
+group from the Share dialog or through the routes `/sessions/{id}/shares`. A
+**snapshot** (the default) shows the session up to the moment of the share; the
+owner refreshes it to move it on. A **live** share shows what comes next too,
+until it expires, and then stays as it was at that moment. The sharee sees the
+messages, the plan, the tools that were called with their input, the images of
+the messages they see, and the tool output, unless the owner leaves it out; in a
+live share the tool output written after the share is left out until the owner
+shows it. A tool result that is left out keeps its status with the text "not
+shared". **The sharee sees tool output that was read with the owner's
+permissions**, and a group share is seen by whoever is in the group when they
+open it. The sharee cannot send a message, decide an approval or change
+anything: every such request answers like a session that does not exist. Anyone
+who can read a session can copy it into their own session (`POST /sessions/{id}/fork`,
+or "Copy to my sessions" in the read-only banner); copying brings the visible
+messages, plans, and images in scope as new attachments, without tool calls or
+tool outputs. Making, changing, cancelling and copying a share are written to
+the auditor (`session-share`, `session-share-update`, `session-share-revoke`,
+`session-fork`). A cancel stops every read at once.
 
 **Images.** With `aiChat.llm.images: true`, a user can attach PNG, JPEG, WebP
 or GIF images to a message. **The images are sent to the model server** as part
@@ -853,11 +856,11 @@ Backstage upgrade can break this plugin until it is updated.
 
 An entity tab or sidebar widget (the backend lists the sessions of an entity),
 sessions shared with the user in the list of an entity, file uploads,
-several model providers at once, MCP servers outside Backstage, a screen to
-share a conversation or copy a shared one, or an agent's model and limits (those
-fields can be set, and a module can register them; the loop does not use them
-yet), and a session list that can search, pin or archive (the page still lists
-recent sessions; a title is stored after the first round ends normally).
+several model providers at once, MCP servers outside Backstage, an agent's model
+and limits (those fields can be set, and a module can register them; the loop
+does not use them yet), and a session list that can search, pin or archive (the
+page still lists recent sessions; a title is stored after the first round ends
+normally).
 
 Limits of this version:
 

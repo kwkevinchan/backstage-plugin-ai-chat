@@ -14,15 +14,17 @@
  * limitations under the License.
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AssistantRuntimeProvider, ThreadPrimitive } from '@assistant-ui/react';
 import { useApiHolder } from '@backstage/core-plugin-api';
+import { Button } from '@backstage/ui';
 import { aiChatToolResultsApiRef } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import type {
   ChatAttachment,
   ChatPageContext,
   ChatSession,
   ChatSessionDetail,
+  ChatShare,
   ChatToolset,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { AiChatApi } from '../api';
@@ -38,11 +40,17 @@ import { AttachmentLoaderContext, RejectionNotes } from './Attachments';
 import { Composer } from './Composer';
 import { ComposerQueue } from './ComposerQueue';
 import { MessageList } from './MessageList';
+import { ShareDialog } from './ShareDialog';
 import { cx } from './styles';
 import { ToolsetPanel } from './ToolsetPanel';
 
 /** The limit of the queue until the input config has answered (the default of the backend). */
 const DEFAULT_QUEUE_MAX = 5;
+
+function formatShareTime(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+}
 
 export interface SessionViewProps {
   api: AiChatApi;
@@ -60,6 +68,8 @@ export interface SessionViewProps {
   /** Live run activity from the session list (Signals or fallback polling). */
   liveActivity?: ChatSession['activity'];
   onChanged?(): void;
+  /** Called after a sharee copies this session into their own new session (SH-04). */
+  onForked?(session: ChatSession): void;
 }
 
 /** One session: its messages, the toolsets, the input box. Keyed by the session. */
@@ -161,57 +171,177 @@ export function SessionView(props: SessionViewProps) {
     hint = 'After you send, the queue continues when this run ends.';
   }
 
+  const shared = detail.shared;
+  const [shares, setShares] = useState<ChatShare[]>([]);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareError, setShareError] = useState<string>();
+  const [forking, setForking] = useState(false);
+
+  useEffect(() => {
+    if (shared) return () => undefined;
+    let cancelled = false;
+    api
+      .listShares(sessionId)
+      .then(list => {
+        if (!cancelled) setShares(list);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [api, sessionId, shared]);
+
+  const activeLiveShares = shares.filter(s => s.mode === 'live' && !s.expired);
+
+  const stopLiveShare = async (shareId: string) => {
+    setShareError(undefined);
+    try {
+      await api.revokeShare(sessionId, shareId);
+      setShares(prev => prev.filter(s => s.id !== shareId));
+    } catch (cause) {
+      setShareError(describeError(cause));
+    }
+  };
+
+  const fork = async () => {
+    setForking(true);
+    setShareError(undefined);
+    try {
+      const created = await api.forkSession(sessionId);
+      props.onForked?.(created);
+    } catch (cause) {
+      setShareError(describeError(cause));
+    } finally {
+      setForking(false);
+    }
+  };
+
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <AttachmentLoaderContext.Provider value={loadAttachment}>
         <ThreadPrimitive.Root className={cx('chat-main')}>
-          <ToolsetPanel
-            toolsets={toolsets}
-            enabled={enabled}
-            disabled={running}
-            onChange={changeToolsets}
-          />
-          {toolsetError && (
+          {!shared && activeLiveShares.length > 0 && (
+            <div
+              className={cx('share-live-banner')}
+              role="status"
+              aria-label="Live sharing"
+            >
+              <span>Live sharing with:</span>
+              {activeLiveShares.map(share => (
+                <span key={share.id} className={cx('share-live-recipient')}>
+                  <span>{share.subjectRef}</span>
+                  <Button
+                    variant="tertiary"
+                    size="small"
+                    onPress={() => stopLiveShare(share.id)}
+                    aria-label={`Stop live sharing with ${share.subjectRef}`}
+                  >
+                    Stop
+                  </Button>
+                </span>
+              ))}
+            </div>
+          )}
+          {shared && (
+            <div
+              className={cx('share-readonly-banner')}
+              role="status"
+              aria-label="Shared conversation"
+            >
+              <span>
+                {shared.mode === 'snapshot'
+                  ? `Shared snapshot${
+                      shared.snapshotAt
+                        ? ` (${formatShareTime(shared.snapshotAt)})`
+                        : ''
+                    } — read-only`
+                  : `Shared live conversation${
+                      shared.expiresAt
+                        ? ` (expires ${formatShareTime(shared.expiresAt)})`
+                        : ''
+                    } — read-only`}
+              </span>
+              <Button
+                variant="secondary"
+                size="small"
+                isDisabled={forking}
+                onPress={fork}
+              >
+                {forking ? 'Copying…' : 'Copy to my sessions'}
+              </Button>
+            </div>
+          )}
+          {!shared && (
+            <div className={cx('session-toolbar')}>
+              <ToolsetPanel
+                toolsets={toolsets}
+                enabled={enabled}
+                disabled={running}
+                onChange={changeToolsets}
+              />
+              <Button
+                variant="secondary"
+                size="small"
+                onPress={() => setShareOpen(open => !open)}
+              >
+                Share
+              </Button>
+            </div>
+          )}
+          {!shared && shareOpen && (
+            <ShareDialog
+              api={api}
+              sessionId={sessionId}
+              shares={shares}
+              onSharesChange={setShares}
+              onClose={() => setShareOpen(false)}
+            />
+          )}
+          {(toolsetError || shareError) && (
             <div className={cx('chat-error')} role="alert">
-              {toolsetError}
+              {toolsetError ?? shareError}
             </div>
           )}
           <MessageList
             busy={chat.busy}
-            disabled={chat.deciding}
+            disabled={chat.deciding || Boolean(shared)}
             notice={chat.notice}
             tools={tools}
             decisions={chat.decisions}
             toolResults={toolResults}
             error={chat.error}
-            interrupted={chat.interrupted && chat.canResend}
-            onSendAgain={chat.sendAgain}
+            interrupted={!shared && chat.interrupted && chat.canResend}
+            onSendAgain={shared ? undefined : chat.sendAgain}
             onSendTextAgain={
-              running || chat.busy ? undefined : chat.sendTextAgain
+              shared || running || chat.busy ? undefined : chat.sendTextAgain
             }
           />
-          <ComposerQueue
-            queue={queue}
-            paused={chat.queuePaused}
-            pausedReason={chat.queuePausedReason}
-            notice={chat.queueNotice}
-            onContinue={chat.continueQueue}
-            moving={chat.queueMoving}
-            canSendNow={
-              chat.activeRun?.status === 'running' &&
-              !chat.followingNext &&
-              !chat.sendingNow
-            }
-            maxMessages={queueMax}
-          />
-          <Composer
-            hint={hint}
-            placeholder={placeholder}
-            sendLabel={waiting ? 'Queue' : undefined}
-            canQueue={running && !waiting}
-            canStop={running}
-            rejections={rejections}
-          />
+          {!shared && (
+            <>
+              <ComposerQueue
+                queue={queue}
+                paused={chat.queuePaused}
+                pausedReason={chat.queuePausedReason}
+                notice={chat.queueNotice}
+                onContinue={chat.continueQueue}
+                moving={chat.queueMoving}
+                canSendNow={
+                  chat.activeRun?.status === 'running' &&
+                  !chat.followingNext &&
+                  !chat.sendingNow
+                }
+                maxMessages={queueMax}
+              />
+              <Composer
+                hint={hint}
+                placeholder={placeholder}
+                sendLabel={waiting ? 'Queue' : undefined}
+                canQueue={running && !waiting}
+                canStop={running}
+                rejections={rejections}
+              />
+            </>
+          )}
         </ThreadPrimitive.Root>
       </AttachmentLoaderContext.Provider>
     </AssistantRuntimeProvider>

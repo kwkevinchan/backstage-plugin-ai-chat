@@ -55,6 +55,7 @@ export { DeleteSession } from './usecases/DeleteSession';
 export { ExpireStaleRuns } from './usecases/ExpireStaleRuns';
 export { FollowSession } from './usecases/FollowSession';
 export type { FollowHandle } from './usecases/FollowSession';
+export { ForkSession } from './usecases/ForkSession';
 export { GetSession } from './usecases/GetSession';
 export type { SessionView } from './usecases/GetSession';
 export { InsertMessage } from './usecases/InsertMessage';
