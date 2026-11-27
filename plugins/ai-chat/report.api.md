@@ -48,6 +48,7 @@ export interface AiChatApi {
   // (undocumented)
   deleteSession(id: string): Promise<void>;
   follow(id: string, signal?: AbortSignal): Promise<Response | undefined>;
+  forkSession(id: string): Promise<ChatSession>;
   getInputConfig(): Promise<ChatInputConfig>;
   getQueue(id: string): Promise<ChatQueue>;
   // (undocumented)

@@ -231,6 +231,21 @@ export interface ChatSessionList {
 }
 
 /**
+ * Present on `GET /sessions/:id` when the caller reads someone else's session
+ * through a share (SH-12). Absent for the owner.
+ *
+ * @public
+ */
+export interface ChatSharedView {
+  /** `snapshot` when frozen at a point in time (including an expired live share), `live` when following new items. */
+  mode: ChatShareMode;
+  /** When `mode` is `snapshot`: the timestamp of the snapshot or expiry, ISO 8601. */
+  snapshotAt?: string;
+  /** When `mode` is `live`: when the live share expires, ISO 8601. */
+  expiresAt?: string;
+}
+
+/**
  * The answer of `GET /sessions/:id`.
  *
  * @public
@@ -253,6 +268,8 @@ export interface ChatSessionDetail {
   resumable: boolean;
   /** The messages that wait for the run to end, and whether the queue waits for the user. */
   queue: ChatQueue;
+  /** Present when the caller is a sharee rather than the owner (SH-12). */
+  shared?: ChatSharedView;
 }
 
 /** A message that waits for the run of the session to end. @public */

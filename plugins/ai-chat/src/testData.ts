@@ -137,6 +137,7 @@ export function mockApi(
     createShare: jest.fn(),
     updateShare: jest.fn(),
     revokeShare: jest.fn().mockResolvedValue(undefined),
+    forkSession: jest.fn().mockResolvedValue(session),
     listToolsets: jest.fn().mockResolvedValue([]),
     listSessionTools: jest.fn().mockResolvedValue([]),
     sendMessage: jest.fn(),

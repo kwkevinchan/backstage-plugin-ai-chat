@@ -54,7 +54,7 @@ type Basics = {
 };
 
 /** A session opens on its own URL: `<page>/<session id>` (SE-01). */
-function OpenSession({ api, toolsets, onChanged }: Basics) {
+function OpenSession({ api, basePath, toolsets, onChanged }: Basics) {
   const { sessionId = '' } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -127,6 +127,10 @@ function OpenSession({ api, toolsets, onChanged }: Basics) {
       firstMessage={firstMessage}
       firstAttachments={firstAttachments}
       onChanged={onChanged}
+      onForked={forked => {
+        onChanged();
+        navigate(`${basePath}/${encodeURIComponent(forked.id)}`);
+      }}
     />
   );
 }

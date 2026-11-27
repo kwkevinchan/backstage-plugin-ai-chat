@@ -14,12 +14,20 @@
  * limitations under the License.
  */
 
+import type { Item, ItemDraft } from '@kwkevinchan/ai-chat-harness';
 import type { NewSession, Session, SessionPatch } from '../../domain';
 
 /** Where the sessions are kept. */
 export interface SessionRepository {
   /** Makes a session with a new id and an empty log. */
   create(input: NewSession): Promise<Session>;
+
+  /**
+   * Writes initial copied items into a newly forked session (no run fence),
+   * assigning consecutive sequence numbers starting at 1 and marking any
+   * referenced attachments as used.
+   */
+  seedItems(sessionId: string, drafts: ItemDraft[]): Promise<Item[]>;
 
   /** Throws `SessionNotFound` when there is none. */
   get(sessionId: string): Promise<Session>;

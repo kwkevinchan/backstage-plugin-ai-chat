@@ -62,7 +62,24 @@ export type ShareAuditEvent = {
   expiresAt?: string;
 };
 
-export type AuditEvent = ToolAuditEvent | QueueAuditEvent | ShareAuditEvent;
+/** A fork (copy) of a session into a new session owned by the caller (SH-06, IN-19). */
+export type ForkAuditEvent = {
+  eventId: 'session-fork';
+  /** The entity ref of the user who copied the session. */
+  actorRef: string;
+  /** The source session that was copied. */
+  sourceSessionId: string;
+  /** The new session created for the caller. */
+  sessionId: string;
+  copiedItems: number;
+  copiedAttachments: number;
+};
+
+export type AuditEvent =
+  | ToolAuditEvent
+  | QueueAuditEvent
+  | ShareAuditEvent
+  | ForkAuditEvent;
 
 /** An event that has begun; end it with `success` or `fail`. */
 export interface AuditSpan {

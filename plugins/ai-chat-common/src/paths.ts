@@ -57,6 +57,7 @@ export const chatPaths = {
   shares: (id: string) => `/sessions/${encodeURIComponent(id)}/shares`,
   share: (id: string, shareId: string) =>
     `/sessions/${encodeURIComponent(id)}/shares/${encodeURIComponent(shareId)}`,
+  forkSession: (id: string) => `/sessions/${encodeURIComponent(id)}/fork`,
   tools: (id: string) => `/sessions/${encodeURIComponent(id)}/tools`,
   toolsets: () => '/toolsets',
 };

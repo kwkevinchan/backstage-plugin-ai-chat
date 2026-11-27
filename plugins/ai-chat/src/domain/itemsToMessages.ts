@@ -150,9 +150,10 @@ export function itemsToMessages(
 
   const messages: ChatUiMessage[] = [];
   const assistant = new Map<string, ChatUiMessage>();
-  /** Whether the next text or call begins a new step of its run. */
+  /** Whether the next text or call begins a new step of its run or turn. */
   const newStep = new Set<string>();
   const plans = new Map<string, ChatPlan>();
+  let turn = 0;
 
   for (const item of items) {
     if (item.kind === 'user_message') {
@@ -170,7 +171,10 @@ export function itemsToMessages(
                 id: `unread-${item.seq}`,
                 data: {
                   seq: item.seq,
-                  sendAgain: !interrupted && item.runId === lastRunId,
+                  sendAgain:
+                    !interrupted &&
+                    item.runId !== undefined &&
+                    item.runId === lastRunId,
                 },
               },
             ],
@@ -178,6 +182,7 @@ export function itemsToMessages(
         }
         continue;
       }
+      turn = item.seq;
       messages.push({
         id: userMessageId(item.seq),
         role: 'user',
@@ -186,17 +191,18 @@ export function itemsToMessages(
       });
       continue;
     }
-    if (!item.runId) continue;
-    let message = assistant.get(item.runId);
+    if (item.kind === 'summary' || item.kind === 'note') continue;
+    const key = item.runId ?? `turn-${turn}`;
+    let message = assistant.get(key);
     if (!message) {
       message = {
-        id: messageIdOfRun(item.runId),
+        id: item.runId ? messageIdOfRun(item.runId) : `turn_${turn}`,
         role: 'assistant',
         parts: [],
       };
-      assistant.set(item.runId, message);
+      assistant.set(key, message);
       messages.push(message);
-      newStep.add(item.runId);
+      newStep.add(key);
     }
     if (
       (item.kind === 'agent_message' || item.kind === 'tool_call') &&
@@ -221,11 +227,11 @@ export function itemsToMessages(
               }),
           },
         });
-        newStep.add(item.runId);
+        newStep.add(key);
       }
     }
     const beginStep = () => {
-      if (newStep.delete(item.runId!)) {
+      if (newStep.delete(key)) {
         message!.parts.push({ type: 'step-start' });
       }
     };
@@ -241,18 +247,18 @@ export function itemsToMessages(
       case 'approval':
       case 'tool_started':
       case 'tool_result':
-        newStep.add(item.runId);
+        newStep.add(key);
         break;
       case 'plan_update':
-        plans.set(item.runId, item.plan);
+        plans.set(key, item.plan);
         break;
       default:
         break;
     }
   }
-  for (const [runId, plan] of plans) {
+  for (const [key, plan] of plans) {
     assistant
-      .get(runId)
+      .get(key)
       ?.parts.push({ type: 'data-plan', id: 'plan', data: plan });
   }
   return messages;

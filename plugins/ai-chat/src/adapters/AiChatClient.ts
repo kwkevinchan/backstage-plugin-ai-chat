@@ -140,6 +140,11 @@ export class AiChatClient implements AiChatApi {
     await this.request(chatPaths.share(id, shareId), { method: 'DELETE' });
   }
 
+  async forkSession(id: string): Promise<ChatSession> {
+    const response = await this.post(chatPaths.forkSession(id), {});
+    return (await response.json()) as ChatSession;
+  }
+
   async listToolsets(): Promise<ChatToolset[]> {
     const response = await this.request(chatPaths.toolsets());
     return (await response.json()).items;

@@ -73,6 +73,8 @@ export interface AiChatApi {
   ): Promise<ChatShare>;
   /** Cancels a share; 404 when it is cancelled already. */
   revokeShare(id: string, shareId: string): Promise<void>;
+  /** Copies a readable session into a new session owned by the caller (SH-04). */
+  forkSession(id: string): Promise<ChatSession>;
   listToolsets(): Promise<ChatToolset[]>;
   /** The tools the session offers now, to show a call with its title and what it does. */
   listSessionTools(id: string): Promise<ChatTool[]>;
