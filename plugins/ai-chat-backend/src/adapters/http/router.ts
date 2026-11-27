@@ -78,16 +78,7 @@ export function createRouter(options: RouterOptions): express.Router {
       } catch (error) {
         // After the first byte the response is a stream and cannot change.
         if (res.headersSent) throw error;
-        throw toHttpError(error, unexpected =>
-          logger.error('A request failed', {
-            method: req.method,
-            path: req.path,
-            error:
-              unexpected instanceof Error
-                ? unexpected.message
-                : String(unexpected),
-          }),
-        );
+        throw toHttpError(error);
       }
     };
 

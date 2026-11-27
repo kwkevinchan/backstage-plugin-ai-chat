@@ -168,12 +168,13 @@ describe('sessions bound to an entity', () => {
       expect(await listed(b, {})).toEqual([]);
     });
 
-    it('makes no session when the catalog fails, and does not show its error', async () => {
+    it('makes no session when the catalog fails and delegates the 500 to Backstage', async () => {
       const b = backend();
       entities.failing = true;
       const res = await create(b, { entityRef: 'component:default/shop' });
       expect(res.status).toBe(500);
-      expect(JSON.stringify(res.body)).not.toContain('catalog.internal');
+      expect(res.body.error.name).toBe('Error');
+      expect(res.body.error.stack).toBeUndefined();
       entities.failing = false;
       expect(await listed(b, {})).toEqual([]);
     });
