@@ -32,8 +32,8 @@ import { signIn, watch } from './support';
 async function say(page: Page, text: string) {
   // A message cannot start while the run of the last one goes on.
   await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(0);
-  await page.getByLabel('Message').fill(text);
-  await page.getByLabel('Message').press('Enter');
+  await page.getByLabel('Message', { exact: true }).fill(text);
+  await page.getByLabel('Message', { exact: true }).press('Enter');
 }
 
 test('read-only call, approval, rejection', async ({ page }) => {
