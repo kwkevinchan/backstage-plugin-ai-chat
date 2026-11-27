@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { useMemo, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, type KeyboardEvent } from 'react';
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
@@ -151,6 +151,12 @@ export interface DraftComposerProps {
   attachments?: AttachmentSource;
   /** The page and the references of the first message. */
   contents?: SendContents;
+  /**
+   * Text to put in the box, not sent. It is put in again when `textKey`
+   * changes, replacing what the box holds.
+   */
+  text?: string;
+  textKey?: number;
 }
 
 const NO_MESSAGES: never[] = [];
@@ -170,6 +176,12 @@ export function DraftComposer(props: DraftComposerProps) {
     onSend: props.onSend,
     attachments: withNotes,
   });
+  const { text, textKey } = props;
+  useEffect(() => {
+    if (text) runtime.thread.composer.setText(text);
+    // Only a new key puts the text in again: the user may have edited it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runtime, textKey]);
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <Composer

@@ -243,7 +243,8 @@ to a user it is shared with.
 Another plugin puts references in the box of the side panel with
 `useAiChatPanel().open({ references })` or `<AiChatLauncher references={…}>`
 (`@kwkevinchan/backstage-plugin-ai-chat-react`). The user sees them and can
-remove them before sending; with a `prompt`, they are sent with the prompt.
+remove them before sending. With `references`, a `prompt` is not sent: it goes
+into the input of a new conversation, and the user sends it.
 
 ```tsx
 import { useAiChatPanel } from '@kwkevinchan/backstage-plugin-ai-chat-react';

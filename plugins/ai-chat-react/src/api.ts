@@ -25,14 +25,18 @@ import type { AiChatReference } from './references';
  * @public
  */
 export interface AiChatLaunchRequest {
-  /** The first message of a new conversation. */
+  /**
+   * The first message of a new conversation. It is sent at once, unless the
+   * request carries references.
+   */
   prompt?: string;
   /** The entity this conversation is about, `kind:namespace/name`. */
   entityRef?: string;
   /**
    * References for the next message. They go into the box of the panel,
-   * where the user sees them and can remove them before sending. With a
-   * prompt, they are sent with the prompt.
+   * where the user sees them and can remove them before sending. With
+   * references, a prompt is not sent: it goes into the input of a new
+   * conversation, and the user sends it.
    */
   references?: AiChatReference[];
 }
@@ -53,7 +57,8 @@ export interface AiChatPanelApi {
    * Opens the panel. A request that sets `prompt` or `entityRef` is a launch:
    * a prompt starts a new conversation, and an entity reference stays with the
    * messages. With neither field, the panel opens and the conversation and the
-   * previous launch stay. `references` are added to the box in either case.
+   * previous launch stay. `references` are added to the box in either case,
+   * and with them a prompt waits in the input instead of being sent.
    */
   open(request?: AiChatLaunchRequest): void;
   /** Closes the panel. The conversation and the launch stay. */

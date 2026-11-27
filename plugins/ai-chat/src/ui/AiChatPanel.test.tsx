@@ -775,7 +775,7 @@ describe('the box of the panel (B-04)', () => {
     expect(within(box()).getByText('billing')).toBeInTheDocument();
   });
 
-  it('sends the references of a launch with its prompt', async () => {
+  it('puts the prompt of a launch with references in the input, and does not send it', async () => {
     const api = mockApi();
     api.sendMessage.mockResolvedValue(answer('About billing'));
     await renderPanel(api, {
@@ -790,14 +790,20 @@ describe('the box of the panel (B-04)', () => {
     });
 
     await userEvent.click(screen.getByRole('button', { name: 'Ask now' }));
+    const aside = screen.getByRole('complementary', { name: 'AI chat' });
+    const input = within(aside).getByLabelText('Message');
+    await waitFor(() => expect(input).toHaveValue('what is this'));
+    expect(input).toHaveFocus();
+    expect(within(box()).getByText('billing')).toBeInTheDocument();
+    expect(api.createSession).not.toHaveBeenCalled();
+    expect(api.sendMessage).not.toHaveBeenCalled();
+
+    await userEvent.type(input, '{Enter}');
     await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
     expect(api.sendMessage.mock.calls[0][1]).toStrictEqual({
       text: 'what is this',
       page: { path: '/catalog' },
       references: [{ kind: 'entity', entityRef: 'system:default/billing' }],
     });
-    await waitFor(() =>
-      expect(within(box()).getAllByRole('listitem')).toHaveLength(2),
-    );
   });
 });

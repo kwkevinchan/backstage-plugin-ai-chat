@@ -33,6 +33,18 @@ describe('launchContextOf', () => {
     expect(launchContextOf({ prompt: '   ', entityRef: 'a b' })).toEqual({});
     expect(launchContextOf()).toEqual({});
   });
+
+  it('keeps the prompt of a launch with references as a draft, not to send', () => {
+    expect(
+      launchContextOf({
+        prompt: ' what is this ',
+        references: [{ kind: 'entity', entityRef: 'system:default/billing' }],
+      }),
+    ).toEqual({ draft: 'what is this' });
+    expect(launchContextOf({ prompt: 'hi', references: [] })).toEqual({
+      prompt: 'hi',
+    });
+  });
 });
 
 describe('panelMessagePage', () => {

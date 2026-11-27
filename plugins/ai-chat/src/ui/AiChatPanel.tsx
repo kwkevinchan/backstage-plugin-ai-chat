@@ -248,11 +248,18 @@ function PanelConversation(props: {
   }, [activeSessionId, asideRef, state.open]);
 
   const prompt = state.launch?.prompt;
+  const draft = state.launch?.draft;
   const launchId = state.launchId;
   const sessionId = state.sessionId;
   const { setSession, start } = store;
   const launchIdRef = useRef(launchId);
   launchIdRef.current = launchId;
+
+  // A launch with references puts its prompt in the input, not sent.
+  useEffect(() => {
+    if (!state.open || !draft) return;
+    asideRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus();
+  }, [asideRef, draft, launchId, state.open]);
 
   const defaultToolsets = () =>
     toolsets.length > 0
@@ -407,6 +414,8 @@ function PanelConversation(props: {
         disabled={opening}
         attachments={attachments}
         contents={contents}
+        text={draft}
+        textKey={launchId}
       />
     </div>
   );

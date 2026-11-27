@@ -25,13 +25,20 @@ import type { AiChatLaunchRequest } from '@kwkevinchan/backstage-plugin-ai-chat-
  * An entity that fails `isEntityRef` from the common package is absent.
  */
 export interface LaunchContext {
+  /** Sent at once as the first message of a new conversation. */
   prompt?: string;
+  /**
+   * The prompt of a launch that carries references. It waits in the input of
+   * a new conversation, so the user sees the references before sending.
+   */
+  draft?: string;
   entityRef?: string;
 }
 
 /**
  * The prompt and the entity to keep from a launch. A prompt that is empty
  * after trimming is not a prompt. The text that is sent is the trimmed one.
+ * With references, the prompt is a draft and is not sent.
  * An entity reference that fails the catalog check is dropped.
  */
 export function launchContextOf(
@@ -39,8 +46,10 @@ export function launchContextOf(
 ): LaunchContext {
   const prompt = request.prompt?.trim();
   const entityRef = request.entityRef;
+  const waits =
+    Array.isArray(request.references) && request.references.length > 0;
   return {
-    ...(prompt ? { prompt } : {}),
+    ...(prompt ? (waits ? { draft: prompt } : { prompt }) : {}),
     ...(entityRef && isEntityRef(entityRef) ? { entityRef } : {}),
   };
 }

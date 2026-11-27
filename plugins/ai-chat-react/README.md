@@ -26,7 +26,8 @@ registered by `@kwkevinchan/backstage-plugin-ai-chat`. When that plugin is not
 installed in the app, `AiChatLauncher` renders nothing (`null`). Pass `className`
 to style the button.
 
-A `prompt` starts a new conversation and is sent at once as the signed-in user;
+A `prompt` starts a new conversation and is sent at once as the signed-in user
+(with `references`, it waits in the input instead; see below);
 pass fixed text or values your plugin controls, not URL query parameters or
 other untrusted input. An `entityRef` is sent with the messages of that
 conversation. A value that is not an entity reference is left out, and the chat
@@ -34,7 +35,8 @@ still opens. With neither prop, the button only opens the panel.
 
 `references` (entities of the catalog and text snippets) go into the box of
 the panel for the next message: the user sees them above the input and can
-remove them before sending. With a `prompt`, they are sent with the prompt.
+remove them before sending. With `references`, a `prompt` is not sent: it goes
+into the input of a new conversation, which has the focus, and the user sends it.
 See [References](#references).
 
 `useAiChatPanel()` reads `{ isOpen, open, close }` from `aiChatPanelApiRef`

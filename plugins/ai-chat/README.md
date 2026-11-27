@@ -25,8 +25,9 @@ opens the chat for an entity: every message carries the entity to the backend.
 
 Another plugin opens that panel with `AiChatLauncher`, `useAiChatPanel`, or
 `aiChatPanelApiRef` from `@kwkevinchan/backstage-plugin-ai-chat-react`. A
-prompt starts a new conversation and is sent at once. An entity reference is
-sent with the messages.
+prompt starts a new conversation and is sent at once; with references, it
+waits in the input for the user to send. An entity reference is sent with the
+messages.
 
 A plugin shows the result of an action with its own component through
 `aiChatToolResultsApiRef`: on the new frontend system with

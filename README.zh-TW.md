@@ -88,7 +88,7 @@ plugin 不能放機密。訊息在文字上方顯示它帶的參考，被分享�
 
 別的 plugin 用 `@kwkevinchan/backstage-plugin-ai-chat-react` 的 `useAiChatPanel().open({ references })`
 或 `<AiChatLauncher references={…}>` 把參考放進側邊面板的管理區，使用者送出前看得到、能移除；
-有 `prompt` 時，參考和 prompt 一起送出。要在「Add reference」加一項，plugin 註冊參考來源（標題和一個讓使用者挑選、
+同時帶 `prompt` 時，prompt 不會送出，而是放進新對話的輸入框，由使用者送出。要在「Add reference」加一項，plugin 註冊參考來源（標題和一個讓使用者挑選、
 回傳參考的元件）：新前端系統用 `@kwkevinchan/backstage-plugin-ai-chat-react/alpha` 的
 `AiChatReferenceSourceBlueprint`；舊前端系統由 app 用 `createAiChatReferenceSourcesApi([...])` 覆蓋
 `aiChatReferenceSourcesApiRef`。細節見

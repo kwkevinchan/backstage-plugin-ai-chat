@@ -49,15 +49,15 @@ export function applyOpen(state: PanelState): PanelState {
 }
 
 /**
- * Opens the panel for a launch. A prompt replaces the conversation. Without
- * one, the conversation stays. The launch replaces the previous one.
+ * Opens the panel for a launch. A prompt, sent or waiting as a draft,
+ * replaces the conversation. Without one, the conversation stays. The launch replaces the previous one.
  */
 export function applyLaunch(
   state: PanelState,
   request: AiChatLaunchRequest,
 ): PanelState {
   const launch = launchContextOf(request);
-  const sessionId = launch.prompt ? undefined : state.sessionId;
+  const sessionId = launch.prompt || launch.draft ? undefined : state.sessionId;
   return {
     open: true,
     launch,

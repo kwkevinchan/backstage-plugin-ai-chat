@@ -23,12 +23,13 @@ import { useAiChatPanel } from '../application/useAiChatPanel';
 /**
  * Props of {@link AiChatLauncher}. All fields are optional. A prompt starts
  * a new conversation. An entity reference is sent with that conversation.
- * References go into the box of the panel for the next message.
+ * References go into the box of the panel for the next message; with them,
+ * the prompt waits in the input and the user sends it.
  *
  * @public
  */
 export interface AiChatLauncherProps {
-  /** The first message of a new conversation. */
+  /** The first message of a new conversation. Not sent at once with `references`. */
   prompt?: string;
   /** The entity this conversation is about, `kind:namespace/name`. */
   entityRef?: string;
