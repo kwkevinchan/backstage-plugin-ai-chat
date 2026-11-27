@@ -296,4 +296,13 @@ export class AiChatClient implements AiChatApi {
     );
     return response.blob();
   }
+
+  async deleteAttachment(
+    sessionId: string,
+    attachmentId: string,
+  ): Promise<void> {
+    await this.request(chatPaths.attachment(sessionId, attachmentId), {
+      method: 'DELETE',
+    });
+  }
 }

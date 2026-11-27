@@ -75,11 +75,21 @@ export type ForkAuditEvent = {
   copiedAttachments: number;
 };
 
+/** Deletion of a pending attachment by its owner. */
+export type AttachmentAuditEvent = {
+  eventId: 'attachment-delete';
+  /** The entity ref of the user who deleted the attachment. */
+  actorRef: string;
+  sessionId: string;
+  attachmentId: string;
+};
+
 export type AuditEvent =
   | ToolAuditEvent
   | QueueAuditEvent
   | ShareAuditEvent
-  | ForkAuditEvent;
+  | ForkAuditEvent
+  | AttachmentAuditEvent;
 
 /** An event that has begun; end it with `success` or `fail`. */
 export interface AuditSpan {

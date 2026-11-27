@@ -17,6 +17,7 @@
 import { createHash } from 'node:crypto';
 import { IMAGES } from '../../__testUtils__/images';
 import {
+  AttachmentInUse,
   AttachmentNotFound,
   TooManyPendingAttachments,
   type AttachmentMeta,
@@ -259,6 +260,94 @@ describe('KnexAttachmentStore', () => {
       expect(await p.attachments.purgeUnused(p.clock.now())).toBe(0);
       await p.queue.remove(sessionId, queued.id);
       expect(await p.attachments.purgeUnused(p.clock.now())).toBe(1);
+    });
+  });
+
+  describe('deletePending', () => {
+    it('deletes an unused attachment and frees a pending slot', async () => {
+      const a = await put({ maxPending: 1 });
+      await expect(put({ maxPending: 1 })).rejects.toBeInstanceOf(
+        TooManyPendingAttachments,
+      );
+      await p.attachments.deletePending({
+        sessionId,
+        id: a.id,
+        ownerRef: 'user:default/jane',
+      });
+      await expect(p.attachments.get(sessionId, a.id)).rejects.toBeInstanceOf(
+        AttachmentNotFound,
+      );
+      await expect(put({ maxPending: 1 })).resolves.toBeDefined();
+    });
+
+    it('throws AttachmentNotFound for missing, another session, or another owner', async () => {
+      const other = (await p.sessions.create(NEW_SESSION)).id;
+      const a = await put();
+      await expect(
+        p.attachments.deletePending({
+          sessionId,
+          id: 'missing',
+          ownerRef: 'user:default/jane',
+        }),
+      ).rejects.toBeInstanceOf(AttachmentNotFound);
+      await expect(
+        p.attachments.deletePending({
+          sessionId: other,
+          id: a.id,
+          ownerRef: 'user:default/jane',
+        }),
+      ).rejects.toBeInstanceOf(AttachmentNotFound);
+      await expect(
+        p.attachments.deletePending({
+          sessionId,
+          id: a.id,
+          ownerRef: 'user:default/mallory',
+        }),
+      ).rejects.toBeInstanceOf(AttachmentNotFound);
+    });
+
+    it('throws AttachmentInUse when already used by a message or held by a queued message', async () => {
+      const used = await put();
+      const held = await put();
+      const run = await p.runs.start(sessionId);
+      await p.items.append(
+        sessionId,
+        [
+          {
+            kind: 'user_message',
+            text: 'x',
+            attachments: [
+              {
+                id: used.id,
+                mediaType: used.mediaType,
+                name: used.name,
+                size: used.size,
+              },
+            ],
+          },
+        ],
+        run.fence,
+      );
+      await p.queue.add(
+        sessionId,
+        { text: 'later', attachmentIds: [held.id] },
+        { max: 5 },
+      );
+
+      await expect(
+        p.attachments.deletePending({
+          sessionId,
+          id: used.id,
+          ownerRef: 'user:default/jane',
+        }),
+      ).rejects.toBeInstanceOf(AttachmentInUse);
+      await expect(
+        p.attachments.deletePending({
+          sessionId,
+          id: held.id,
+          ownerRef: 'user:default/jane',
+        }),
+      ).rejects.toBeInstanceOf(AttachmentInUse);
     });
   });
 

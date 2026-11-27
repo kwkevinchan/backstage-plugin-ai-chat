@@ -242,6 +242,16 @@ export class AttachmentNotFound extends ChatDomainError {
   }
 }
 
+/** The attachment is already used by a message or held by a queued message and cannot be deleted. */
+export class AttachmentInUse extends ChatDomainError {
+  constructor(attachmentId: string) {
+    super(
+      'ATTACHMENT_IN_USE',
+      `Attachment ${attachmentId} is already in use and cannot be deleted`,
+    );
+  }
+}
+
 /**
  * A message names an attachment that is not in its session. The answer is a
  * 400 named `AttachmentNotFound`: the request is wrong, not the path.

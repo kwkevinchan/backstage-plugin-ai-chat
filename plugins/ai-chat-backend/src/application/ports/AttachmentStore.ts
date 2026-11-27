@@ -59,6 +59,18 @@ export interface AttachmentStore {
   }): Promise<Map<string, AttachmentMeta>>;
 
   /**
+   * Deletes an unused, unreserved image belonging to `ownerRef` in `sessionId`.
+   * Throws `AttachmentNotFound` when the image does not exist, belongs to
+   * another session, or is owned by someone else; throws `AttachmentInUse`
+   * when it is already referenced by a message or held by a queued message.
+   */
+  deletePending(input: {
+    sessionId: string;
+    id: string;
+    ownerRef: string;
+  }): Promise<void>;
+
+  /**
    * Deletes the images that are in no message, are not held by a queued
    * message, and were stored before `olderThan`. Returns how many.
    */

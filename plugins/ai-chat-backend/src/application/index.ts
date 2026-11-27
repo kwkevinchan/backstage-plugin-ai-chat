@@ -50,6 +50,7 @@ export { CancelRun } from './usecases/CancelRun';
 export { CreateSession } from './usecases/CreateSession';
 export { DecideApproval } from './usecases/DecideApproval';
 export type { DecisionResult } from './usecases/DecideApproval';
+export { DeleteAttachment } from './usecases/DeleteAttachment';
 export { DeleteQueuedMessage } from './usecases/DeleteQueuedMessage';
 export { DeleteSession } from './usecases/DeleteSession';
 export { ExpireStaleRuns } from './usecases/ExpireStaleRuns';

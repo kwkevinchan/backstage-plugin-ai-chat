@@ -68,6 +68,12 @@ function metaOf(event: AuditEvent) {
         copiedItems: event.copiedItems,
         copiedAttachments: event.copiedAttachments,
       };
+    case 'attachment-delete':
+      return {
+        actor: event.actorRef,
+        sessionId: event.sessionId,
+        attachmentId: event.attachmentId,
+      };
     default:
       return {
         actor: event.actorRef,

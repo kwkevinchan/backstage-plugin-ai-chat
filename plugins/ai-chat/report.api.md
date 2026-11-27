@@ -43,6 +43,7 @@ export interface AiChatApi {
     request: DecideToolCallRequest,
     signal?: AbortSignal,
   ): Promise<Response>;
+  deleteAttachment(sessionId: string, attachmentId: string): Promise<void>;
   // (undocumented)
   deleteQueuedMessage(id: string, queuedId: string): Promise<void>;
   // (undocumented)

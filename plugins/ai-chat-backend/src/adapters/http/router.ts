@@ -194,6 +194,13 @@ export function createRouter(options: RouterOptions): express.Router {
       );
     }),
   );
+  router.delete(
+    '/sessions/:id/attachments/:attachmentId',
+    route(async (user, req, res) => {
+      await attachments.delete(user, req.params.id, req.params.attachmentId);
+      res.status(204).end();
+    }),
+  );
   router.post(
     '/sessions/:id/runs',
     route(async (user, req, res) => {

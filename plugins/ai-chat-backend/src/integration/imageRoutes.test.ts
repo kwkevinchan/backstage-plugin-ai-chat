@@ -911,6 +911,122 @@ describe('the routes of the images', () => {
     });
   });
 
+  describe('DELETE /sessions/:id/attachments/:attachmentId', () => {
+    it('deletes an unused attachment, frees a pending slot, and records an audit event', async () => {
+      await start({
+        images: {
+          enabled: true,
+          maxPendingPerSession: 1,
+          maxBytes: 1024 * 1024,
+          maxPerMessage: 4,
+          maxBytesPerInput: 5 * 1024 * 1024,
+        },
+      });
+      const b = backend([]);
+      const id = await newSession(b);
+      const first = await upload(b, id).expect(201);
+      await upload(b, id).expect(409);
+
+      await as(
+        JANE,
+        request(b.app).delete(`/sessions/${id}/attachments/${first.body.id}`),
+      ).expect(204);
+
+      await as(
+        JANE,
+        request(b.app).get(`/sessions/${id}/attachments/${first.body.id}`),
+      ).expect(404);
+      // Pending slot is freed immediately.
+      await upload(b, id).expect(201);
+      expect(world.audit.events).toContainEqual({
+        eventId: 'attachment-delete',
+        actorRef: 'user:default/jane',
+        sessionId: id,
+        attachmentId: first.body.id,
+        outcome: 'success',
+      });
+    });
+
+    it('returns 404 for missing attachment, another session, or another user, and 401 when unauthenticated', async () => {
+      await start();
+      const b = backend([]);
+      const id = await newSession(b);
+      const otherId = await newSession(b);
+      const uploaded = await upload(b, id).expect(201);
+
+      await as(
+        undefined,
+        request(b.app).delete(
+          `/sessions/${id}/attachments/${uploaded.body.id}`,
+        ),
+      ).expect(401);
+      await as(
+        MALLORY,
+        request(b.app).delete(
+          `/sessions/${id}/attachments/${uploaded.body.id}`,
+        ),
+      ).expect(404);
+      await as(
+        JANE,
+        request(b.app).delete(
+          `/sessions/${otherId}/attachments/${uploaded.body.id}`,
+        ),
+      ).expect(404);
+      await as(
+        JANE,
+        request(b.app).delete(`/sessions/${id}/attachments/does-not-exist`),
+      ).expect(404);
+      // Still exists for the owner.
+      await as(
+        JANE,
+        request(b.app).get(`/sessions/${id}/attachments/${uploaded.body.id}`),
+      ).expect(200);
+    });
+
+    it('returns 409 AttachmentInUse for an attachment already used by a message or held by a queued message', async () => {
+      await start();
+      const b = backend([[say('ok')], waitForAbort]);
+      const id = await newSession(b);
+      const used = await upload(b, id).expect(201);
+      await as(JANE, request(b.app).post(`/sessions/${id}/runs`))
+        .send({ text: 'with image', attachmentIds: [used.body.id] })
+        .expect(200);
+
+      const usedRes = await as(
+        JANE,
+        request(b.app).delete(`/sessions/${id}/attachments/${used.body.id}`),
+      ).expect(409);
+      expect(usedRes.body.error.name).toBe('AttachmentInUse');
+
+      const held = await upload(b, id).expect(201);
+      const pending = as(JANE, request(b.app).post(`/sessions/${id}/runs`))
+        .send({ text: 'hold' })
+        .then(res => res);
+      await until(() => b.model.inputs.length === 2);
+      const runId = (
+        await world
+          .knex('runs')
+          .where({ session_id: id, status: 'running' })
+          .first()
+      ).id;
+      await as(JANE, request(b.app).post(`/sessions/${id}/queue`))
+        .send({ text: 'queued', attachmentIds: [held.body.id] })
+        .expect(201);
+
+      const heldRes = await as(
+        JANE,
+        request(b.app).delete(`/sessions/${id}/attachments/${held.body.id}`),
+      ).expect(409);
+      expect(heldRes.body.error.name).toBe('AttachmentInUse');
+
+      await as(
+        JANE,
+        request(b.app).post(`/sessions/${id}/runs/${runId}/cancel`),
+      ).expect(202);
+      await pending;
+    });
+  });
+
   describe('GET /input-config', () => {
     it('answers with the settings, and 401 with no user', async () => {
       await start();

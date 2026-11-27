@@ -318,6 +318,12 @@ function PanelConversation(props: {
               const created = await ensureDraftSession();
               return api.uploadAttachment(created.id, file, file.name);
             },
+            remove: async attachmentId => {
+              const created = creating.current
+                ? await creating.current
+                : undefined;
+              if (created) await api.deleteAttachment(created.id, attachmentId);
+            },
           }
         : undefined,
     // eslint-disable-next-line react-hooks/exhaustive-deps

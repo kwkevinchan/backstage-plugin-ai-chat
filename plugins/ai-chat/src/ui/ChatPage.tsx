@@ -254,6 +254,12 @@ function NewSession({ api, basePath, toolsets, onChanged }: Basics) {
               const session = await ensureSession();
               return api.uploadAttachment(session.id, file, file.name);
             },
+            remove: async attachmentId => {
+              const session = creating.current
+                ? await creating.current
+                : undefined;
+              if (session) await api.deleteAttachment(session.id, attachmentId);
+            },
           }
         : undefined,
     // eslint-disable-next-line react-hooks/exhaustive-deps

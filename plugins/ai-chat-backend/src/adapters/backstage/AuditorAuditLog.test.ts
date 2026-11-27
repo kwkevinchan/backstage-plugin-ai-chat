@@ -113,4 +113,29 @@ describe('AuditorAuditLog', () => {
       },
     });
   });
+
+  it('records attachment-delete meta fields', async () => {
+    const auditor = mockServices.auditor.mock({
+      createEvent: jest.fn(async () => ({
+        success: jest.fn(),
+        fail: jest.fn(),
+      })),
+    });
+    const log = new AuditorAuditLog(auditor);
+    await log.begin({
+      eventId: 'attachment-delete',
+      actorRef: 'user:default/jane',
+      sessionId: 's1',
+      attachmentId: 'att-1',
+    });
+    expect(auditor.createEvent).toHaveBeenCalledWith({
+      eventId: 'attachment-delete',
+      severityLevel: 'medium',
+      meta: {
+        actor: 'user:default/jane',
+        sessionId: 's1',
+        attachmentId: 'att-1',
+      },
+    });
+  });
 });

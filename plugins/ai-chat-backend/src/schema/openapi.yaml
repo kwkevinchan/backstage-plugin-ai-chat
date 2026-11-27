@@ -856,6 +856,20 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+    delete:
+      operationId: deleteAttachment
+      tags: [Attachments]
+      summary: Delete a pending image of a session.
+      description: Deletes an uploaded image that has not yet been used by a message or reserved by a queued message, immediately freeing a pending-attachment slot. Only the session owner who uploaded the image may delete it. Returns 404 when the session or attachment does not exist or belongs to someone else, and 409 `AttachmentInUse` when the image is already referenced by a message or queued message.
+      responses:
+        '204':
+          description: The pending image was deleted.
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
   /sessions/{id}/runs:
     parameters:
       - $ref: '#/components/parameters/sessionId'

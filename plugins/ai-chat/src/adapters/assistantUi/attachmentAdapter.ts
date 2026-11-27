@@ -37,6 +37,8 @@ export interface AttachmentSource {
   limits: ImageLimits;
   /** Uploads one image to the session. */
   upload(file: File): Promise<ChatAttachment>;
+  /** Deletes a pending uploaded image when removed from the draft. */
+  remove?(attachmentId: string): Promise<void>;
   /** Called when `add` starts, before its checks. */
   onAdd?(): void;
 }
@@ -124,8 +126,12 @@ let nextId = 0;
  * - `send` is called only for an image whose upload failed. It throws the
  *   reason, and assistant-ui keeps the message in the box; the user removes
  *   the image or attaches it again.
- * - `remove`: there is no API to delete an upload. An image removed while it
- *   uploads is not taken; the backend deletes unused uploads after a day.
+ * - `remove`: called by `@assistant-ui/core` for incomplete (in-flight)
+ *   attachments; records the id so `source.remove` runs once the upload
+ *   finishes. Completed draft images invoke `source.remove` directly from
+ *   `DraftImage`'s Remove button. Errors are ignored so removing from the
+ *   draft never blocks; unused uploads are also purged by the backend after
+ *   a day.
  *
  * The last state of a good image is `complete`, which the type of `add` does
  * not list. assistant-ui 0.15 takes it. A message with an image that is not
@@ -184,7 +190,12 @@ export function createAttachmentAdapter(
       shown();
       try {
         const attachment = await source.upload(file);
-        if (removed.has(base.id)) return;
+        if (removed.has(base.id)) {
+          if (source.remove) {
+            void source.remove(attachment.id).catch(() => {});
+          }
+          return;
+        }
         yield {
           ...toCompleteAttachment(attachment),
           id: base.id,
@@ -215,6 +226,14 @@ export function createAttachmentAdapter(
     async remove(attachment) {
       removed.add(attachment.id);
       failures.delete(attachment.id);
+      const uploaded = chatAttachmentOf(attachment);
+      if (uploaded && source.remove) {
+        try {
+          await source.remove(uploaded.id);
+        } catch {
+          // Removing from the draft never blocks on backend cleanup.
+        }
+      }
     },
   };
 }

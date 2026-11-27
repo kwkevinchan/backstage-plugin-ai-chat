@@ -49,6 +49,8 @@ export interface ComposerProps {
   canStop?: boolean;
   /** Why images were not taken; give the same notes to the attachments of the runtime. */
   rejections?: RejectionNotes;
+  /** Called when a completed draft image is removed from the composer. */
+  onRemoveAttachment?: (attachmentId: string) => Promise<void> | void;
 }
 
 const DEFAULT_PLACEHOLDER =
@@ -99,7 +101,7 @@ export function Composer(props: ComposerProps) {
       )}
       <ComposerPrimitive.AttachmentDropzone className={cx('chat-composer-box')}>
         {props.rejections && <AttachmentRejections notes={props.rejections} />}
-        <DraftImages />
+        <DraftImages onRemove={props.onRemoveAttachment} />
         <ComposerPrimitive.Root className={cx('chat-composer')}>
           <AttachButton />
           <ComposerPrimitive.Input
@@ -163,7 +165,10 @@ export function DraftComposer(props: DraftComposerProps) {
   });
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <Composer rejections={rejections} />
+      <Composer
+        rejections={rejections}
+        onRemoveAttachment={attachments?.remove}
+      />
     </AssistantRuntimeProvider>
   );
 }

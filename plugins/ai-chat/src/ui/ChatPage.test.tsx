@@ -460,6 +460,18 @@ describe('the new conversation with images', () => {
     );
   });
 
+  it('deletes a pending attachment from the draft session when removed before sending', async () => {
+    const api = imagesApi();
+    await renderPage(api);
+    await screen.findByRole('button', { name: 'Attach' });
+    paste([png('a.png')]);
+    await waitFor(() => expect(api.uploadAttachment).toHaveBeenCalledTimes(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove a.png' }));
+    await waitFor(() =>
+      expect(api.deleteAttachment).toHaveBeenCalledWith('s-1', 'att-a.png'),
+    );
+  });
+
   it('writes a change of the toolsets after the first image before the first run', async () => {
     const api = imagesApi();
     let written: (value: unknown) => void = () => {};
