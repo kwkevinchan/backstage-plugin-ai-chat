@@ -554,14 +554,19 @@ describe('useSessionChat', () => {
 
   it('does not follow again a run that was already running when the page opened', async () => {
     const api = mockApi();
-    api.follow.mockResolvedValue(
-      streamResponse([
+    let releaseInitial!: () => void;
+    const initialGate = new Promise<void>(resolve => {
+      releaseInitial = resolve;
+    });
+    api.follow.mockImplementation(async () => {
+      await initialGate;
+      return streamResponse([
         { type: 'start', messageId: 'run_r-1' },
         runChunks('running'),
         runChunks('completed'),
         { type: 'finish', finishReason: 'stop' },
-      ]),
-    );
+      ]);
+    });
     const running = detail({
       run: run('running'),
       items: items(user('hi')),
@@ -578,6 +583,40 @@ describe('useSessionChat', () => {
       await Promise.resolve();
     });
     expect(api.follow).toHaveBeenCalledTimes(1);
+
+    releaseInitial();
+    await act(async () => {
+      await Promise.resolve();
+    });
+  });
+
+  it('follows a later run started elsewhere when the initial running stream ends before liveActivity ever reports running', async () => {
+    const api = mockApi();
+    api.follow
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(
+        streamResponse([
+          { type: 'start', messageId: 'run_r-2' },
+          runChunks('running'),
+          runChunks('completed'),
+          { type: 'finish', finishReason: 'stop' },
+        ]),
+      );
+    const running = detail({
+      run: run('running'),
+      items: items(user('hi')),
+    });
+    const { result, rerender } = renderHook(
+      ({ liveActivity }: { liveActivity?: 'running' }) =>
+        useSessionChat({ api, detail: running, page, liveActivity }),
+      { initialProps: { liveActivity: undefined as 'running' | undefined } },
+    );
+    await waitFor(() => expect(api.follow).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(result.current.busy).toBe(false));
+
+    // A new run starts elsewhere; liveActivity transitions undefined -> running.
+    rerender({ liveActivity: 'running' });
+    await waitFor(() => expect(api.follow).toHaveBeenCalledTimes(2));
   });
 
   it('follows when a run resumes after waiting_approval even if opened with liveActivity running', async () => {

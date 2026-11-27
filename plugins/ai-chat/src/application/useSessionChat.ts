@@ -240,6 +240,8 @@ export function useSessionChat(options: UseSessionChatOptions) {
     return () => window.removeEventListener('focus', onFocus);
   }, []);
 
+  const openedRunning = useRef(initial.detail.run?.status === 'running');
+
   const transport = useMemo(
     () =>
       new AiChatTransport({
@@ -254,6 +256,9 @@ export function useSessionChat(options: UseSessionChatOptions) {
         },
         onNothingToResume: () => {
           followAfter.current = true;
+        },
+        onNoStreamToFollow: () => {
+          openedRunning.current = false;
         },
       }),
     [api, sessionId],
@@ -319,7 +324,11 @@ export function useSessionChat(options: UseSessionChatOptions) {
         }
       }
     },
+    onFinish: () => {
+      openedRunning.current = false;
+    },
     onError: error => {
+      openedRunning.current = false;
       pendingDecision.current = undefined;
       setFailure(describeError(error));
     },
@@ -439,7 +448,6 @@ export function useSessionChat(options: UseSessionChatOptions) {
   const liveActivity = options.liveActivity;
   const sawActivity = useRef(false);
   const activityBefore = useRef(liveActivity);
-  const openedRunning = useRef(initial.detail.run?.status === 'running');
   useEffect(() => {
     const before = activityBefore.current;
     activityBefore.current = liveActivity;

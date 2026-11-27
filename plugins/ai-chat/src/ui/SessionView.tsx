@@ -65,6 +65,8 @@ export interface SessionViewProps {
    * send time. Omitted, the route is used.
    */
   page?: ChatPageContext;
+  /** Live run activity from the session list (Signals or fallback polling). */
+  liveActivity?: ChatSession['activity'];
   onChanged?(): void;
   /** Called after a sharee copies this session into their own new session (SH-04). */
   onForked?(session: ChatSession): void;
@@ -81,6 +83,7 @@ export function SessionView(props: SessionViewProps) {
     page,
     firstMessage: props.firstMessage,
     firstAttachments: props.firstAttachments,
+    liveActivity: props.liveActivity,
     onChanged: props.onChanged,
   });
   const sessionId = detail.session.id;

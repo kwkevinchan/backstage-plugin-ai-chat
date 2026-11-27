@@ -502,3 +502,114 @@ test('a plugin shows the result of an action with its own component', async ({
   ).toHaveAttribute('href', /\/catalog\/default\/component\/example-payments$/);
   await shot('16-result-component');
 });
+
+test('session list: search, pin, rename, archive and stay archived after reload, unarchive, and delete', async ({
+  page,
+}) => {
+  const shot = watch(page);
+  await signIn(page);
+
+  // Create two conversations.
+  await say(page, 'list services');
+  await expect(
+    page.locator('details', { hasText: 'List services' }).getByText('Done'),
+  ).toBeVisible();
+  const firstUrl = page.url();
+
+  await page.getByRole('button', { name: 'New chat' }).click();
+  await say(page, 'list services');
+  await expect(
+    page.locator('details', { hasText: 'List services' }).getByText('Done'),
+  ).toBeVisible();
+
+  const nav = page.getByRole('navigation', { name: 'Conversations' });
+
+  // Rename the currently open conversation inline.
+  await nav
+    .getByRole('button', { name: /^Rename conversation / })
+    .first()
+    .click();
+  const titleInput = nav.getByRole('textbox', { name: 'Conversation title' });
+  await titleInput.fill('Alpha Ops');
+  await titleInput.press('Enter');
+  await expect(nav.getByText('Alpha Ops')).toBeVisible();
+
+  // Rename the earlier conversation so we can search and test pin ordering.
+  await page.goto(firstUrl);
+  await nav
+    .getByRole('button', { name: /^Rename conversation / })
+    .nth(1)
+    .click();
+  const secondInput = nav.getByRole('textbox', { name: 'Conversation title' });
+  await secondInput.fill('Beta Billing');
+  await secondInput.press('Enter');
+  await expect(nav.getByText('Beta Billing')).toBeVisible();
+
+  // Pin Beta Billing and verify it stays pinned.
+  await nav
+    .getByRole('button', { name: 'Pin conversation Beta Billing' })
+    .click();
+  await expect(
+    nav.getByRole('button', { name: 'Unpin conversation Beta Billing' }),
+  ).toHaveAttribute('aria-pressed', 'true');
+
+  // Search filters the list; clearing restores both.
+  const search = nav.getByRole('searchbox', { name: 'Search conversations' });
+  await search.fill('Alpha');
+  await expect(nav.getByText('Alpha Ops')).toBeVisible();
+  await expect(nav.getByText('Beta Billing')).toHaveCount(0);
+  await search.fill('');
+  await expect(nav.getByText('Beta Billing')).toBeVisible();
+  await shot('17-session-list-search-pin-rename');
+
+  // Archive the currently open conversation (Beta Billing): stays on the same URL.
+  await nav
+    .getByRole('button', { name: 'Archive conversation Beta Billing' })
+    .click();
+  await expect(nav.getByText('Beta Billing')).toHaveCount(0);
+  expect(page.url()).toBe(firstUrl);
+
+  // Reloading the archived conversation URL keeps it archived (must not auto-unarchive).
+  let unarchivePatches = 0;
+  const countUnarchivePatch = (request: {
+    method(): string;
+    postData(): string | null;
+  }) => {
+    if (request.method() === 'PATCH') {
+      const body = request.postData();
+      if (body && body.includes('"archived":false')) {
+        unarchivePatches += 1;
+      }
+    }
+  };
+  page.on('request', countUnarchivePatch);
+  await page.reload();
+  expect(page.url()).toBe(firstUrl);
+  await expect(nav.getByText('Alpha Ops')).toBeVisible();
+  await expect(nav.getByText('Beta Billing')).toHaveCount(0);
+  page.off('request', countUnarchivePatch);
+  expect(unarchivePatches).toBe(0);
+
+  // Show archived reveals Beta Billing; Unarchive restores it to the regular list.
+  await nav.getByLabel('Show archived').check();
+  await expect(nav.getByText('Archived', { exact: true })).toBeVisible();
+  await expect(nav.getByText('Beta Billing')).toBeVisible();
+  await shot('18-session-list-archived');
+
+  await nav
+    .getByRole('button', { name: 'Unarchive conversation Beta Billing' })
+    .click();
+  await expect(
+    nav.getByRole('button', { name: 'Archive conversation Beta Billing' }),
+  ).toBeVisible();
+  await nav.getByLabel('Show archived').uncheck();
+  await expect(nav.getByText('Beta Billing')).toBeVisible();
+
+  // Deleting the currently open conversation returns to /ai-chat.
+  await nav
+    .getByRole('button', { name: 'Delete conversation Beta Billing' })
+    .click();
+  await expect(page).toHaveURL(/\/ai-chat$/);
+  await expect(nav.getByText('Beta Billing')).toHaveCount(0);
+  await shot('19-session-list-deleted');
+});

@@ -1221,6 +1221,7 @@ plugins/ai-chat/src/
     AiChatClient.ts         實作 AiChatApi；串流的路由直接回傳 Response
     AiChatTransport.ts      實作 ai 的 ChatTransport：送訊息、決定、接續、接回串流
     describeError.ts
+    signals.ts              可選的 Backstage Signals（plugin.signal.service，頻道 ai-chat）與活動訊息解析
     assistantUi/            全專案只有這個目錄和 ui/ 可以 import @assistant-ui/*
       sessionRuntime.ts     useExternalStoreRuntime，把下面幾個組起來
       toThreadMessage.ts    我們的訊息 → ThreadMessageLike
@@ -1231,14 +1232,14 @@ plugins/ai-chat/src/
     panelStore.ts           實作 aiChatPanelApiRef 的面板狀態與 launch 協調
     toolResultsApi.ts       createAiChatToolResultsApi：實作 aiChatToolResultsApiRef（先註冊的有效）
     useSessionChat.ts       一個 Session 的 useChat：還原、決定、接續、停止、重新讀取、插入和排隊
-    useSessionList.ts       Session 列表（PU-05 之後刪掉，改由 threadListAdapter 負責）
     useToolsets.ts          GET /toolsets
     useSessionTools.ts      GET /sessions/:id/tools
     usePageContext.ts       B-01：路徑和 entityRef
     useAttachmentUrl.ts     一張圖片：帶身分的請求 → object URL，換圖或卸載時釋放
   ui/                       assistant-ui 的 primitives，套 @backstage/ui 的樣式
-    ChatPage.tsx            路由（SE-01）、Session 列表、新對話
-    SessionView.tsx         一個 Session：Toolset、訊息、輸入框。可傳 page
+    ChatPage.tsx            路由（SE-01）、useRemoteThreadListRuntime、Signals 與後備輪詢、新對話
+    ThreadListSidebar.tsx   ThreadListPrimitive / ThreadListItemPrimitive 列表、搜尋、釘選、改名、封存／恢復、即時狀態標籤
+    SessionView.tsx         一個 Session：Toolset、訊息、輸入框。可傳 page 與 liveActivity
     Composer.tsx            ComposerPrimitive：Enter 是 steer，Ctrl 或 Cmd 加 Enter 和「排隊」按鈕是 enqueue
     ComposerQueue.tsx       ComposerPrimitive.Queue、QueueItemPrimitive；自己畫暫停和「繼續」、上限、錯誤
     Attachments.tsx         ComposerPrimitive.Attachments、AttachmentPrimitive：草稿縮圖；訊息和排隊裡的圖片；拒絕的原因
@@ -1254,7 +1255,7 @@ plugins/ai-chat/src/
 
 `application/`、`domain/`、其餘 `adapters/`（`AiChatClient`、`AiChatTransport`）的分層不變。狀態仍用 `@ai-sdk/react` 的 `useChat`，加我們的 `ChatTransport`。畫面不直接用 `useChat`：`sessionRuntime` 以 `useExternalStoreRuntime` 把它接到 assistant-ui。型別、路徑、`messageIdOfRun` 來自 `ai-chat-common`，前端沒有自己的一份。
 
-整頁的樹是 `useRemoteThreadListRuntime({ adapter: threadListAdapter, threadId: 網址上的 id, onThreadIdChange: navigate, runtimeHook: () => sessionRuntime })`。側邊面板只有一段對話、沒有列表，所以不用 `useRemoteThreadListRuntime`。
+整頁的樹由 `ChatPage` 掛 `useRemoteThreadListRuntime({ adapter: threadListAdapter, threadId: 網址上的 id, onThreadIdChange: navigate, runtimeHook: usePlaceholderThreadRuntime })` 負責列表與網址同步（`usePlaceholderThreadRuntime` 為最小佔位 runtime，打開的對話本體仍由 `SessionView` 各自掛自己的 `sessionRuntime`）。側邊面板只有一段對話、沒有列表，所以不用 `useRemoteThreadListRuntime`。
 
 **版本。** `@assistant-ui/react` 鎖在 0.15.38，`@assistant-ui/react-markdown` 鎖在 0.14.26，不用 `^`。升級要另開單。不裝 `@assistant-ui/react-ai-sdk`、帶樣式的 `@assistant-ui/react-ui` / `@assistant-ui/styles`，也不用 Tailwind 或 shadcn。樣式用 `@backstage/ui` 的 token 和現有的 CSS module。Markdown 用 `MarkdownTextPrimitive` 加 `remark-gfm`：禁用圖片、不加 `rehype-raw`（不渲染原始 HTML）、連結只允許 `http`、`https`、`mailto`（S-02，由測試鎖住）。
 
@@ -1347,7 +1348,7 @@ Session 列表（`threadListAdapter`，實作 `RemoteThreadListAdapter`）。
 
 **接回**。`useChat({ resume })` 在載入時 Run 是 `running` 才為真，`reconnectToStream` 打 `GET /sessions/:id/stream`（204 回 `null`），不帶 `afterSeq`（帶了 SDK 找不到前面的 tool part）；`resumeStreamIsReplay` 為真，SDK 在第一個 `start` 把訊息重置，所以重送不會讓文字重複。逐字到一半時，這一台先送已累積的文字，後面的字接在同一則訊息上。
 
-**即時狀態（B-05）**。`GET /sessions` 在有進行中的 Run 時帶 `activity`（`running` 或 `waiting_approval`）。裝了 `aiChatSignalsModule` 時，backend 把 `{ sessionId, activity }` 發給擁有者（頻道 `ai-chat`）；成功完成通知 `replied`，進入等待核准通知 `waiting_approval`，開始或接續通知 `running`，失敗、取消、過期（包含取消等核准的 Run、租約過期、以及啟動失敗）通知 `idle`。`useSessionChat` 接收 `liveActivity` 參數：開著的對話若不在串流中，活動變成 `running` 就接回（剛載入時已是 `running` 的處理會在首次取得狀態或轉態時清掉，不會吃掉之後等核准再恢復的接回）；從進行中變成沒有活動就重新讀取一次。列表 UI 訂閱與標記留到新版前端實作。
+**即時狀態（B-05）**。`GET /sessions` 在有進行中的 Run 時帶 `activity`（`running` 或 `waiting_approval`）。裝了 `aiChatSignalsModule` 時，backend 把 `{ sessionId, activity }` 發給擁有者（頻道 `ai-chat`）；成功完成通知 `replied`，進入等待核准通知 `waiting_approval`，開始或接續通知 `running`，失敗、取消、過期（包含取消等核准的 Run、租約過期、以及啟動失敗）通知 `idle`。`useSessionChat` 接收 `liveActivity` 參數：開著的對話若不在串流中，活動變成 `running` 就接回（剛載入時已是 `running` 的處理會在首次取得狀態、轉態或自身串流結束時清掉，不會吃掉之後等核准再恢復或別處新開的接回）；從進行中變成沒有活動就重新讀取一次。列表（`ChatPage` / `ThreadListSidebar`）透過可選的 `signalApiRef` 訂閱 `ai-chat` 頻道，不論有沒有安裝 Signals 都保留 15 秒低頻後備輪詢（分頁隱藏時暫停、切回前景時立即重讀），顯示 `Processing`、`Waiting for approval`、`New reply` 標籤並把目前開著的 Session 活動傳給 `SessionView`。
 
 **停止**。畫面有進行中的 Run（載入時的 `run`，之後由 `data-run` 更新）就顯示 Stop，也包含停在等核准的 Run（新訊息要等 Run 結束）。Stop 呼叫 `POST …/runs/:runId/cancel`（409 忽略），不呼叫 `useChat.stop()`：後端結束 Run 時串流自己以 `abort` 結束。沒有串流開著（Run 在等核准）時，畫面自己重新讀取。`data-run` 是 `failed`、`cancelled`、`expired`，或串流出錯時，結束後重新讀取 `GET /sessions/:id`，畫面以紀錄為準。
 
