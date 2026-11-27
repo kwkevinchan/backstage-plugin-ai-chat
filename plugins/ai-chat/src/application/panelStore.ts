@@ -54,19 +54,31 @@ const stores = new WeakMap<AiChatPanelApi, AiChatPanelStore>();
  */
 export function createAiChatPanelStore(): AiChatPanelApi {
   let state = initialPanelState();
-  const listeners = new Set<() => void>();
+  const storeListeners = new Set<() => void>();
+  const openListeners = new Set<() => void>();
   const started = new Map<number, Promise<unknown>>();
 
   const commit = (next: PanelState) => {
     if (next === state) return;
+    const openChanged = next.open !== state.open;
     state = next;
-    for (const listener of listeners) listener();
+    for (const listener of storeListeners) listener();
+    if (openChanged) {
+      for (const listener of openListeners) listener();
+    }
   };
 
-  const subscribe = (listener: () => void) => {
-    listeners.add(listener);
+  const subscribeStore = (listener: () => void) => {
+    storeListeners.add(listener);
     return () => {
-      listeners.delete(listener);
+      storeListeners.delete(listener);
+    };
+  };
+
+  const subscribeOpen = (listener: () => void) => {
+    openListeners.add(listener);
+    return () => {
+      openListeners.delete(listener);
     };
   };
 
@@ -85,12 +97,12 @@ export function createAiChatPanelStore(): AiChatPanelApi {
     close() {
       commit(applyClose(state));
     },
-    subscribe,
+    subscribe: subscribeOpen,
   };
 
   const store: AiChatPanelStore = {
     getSnapshot: () => state,
-    subscribe,
+    subscribe: subscribeStore,
     setSession(sessionId) {
       commit(applySession(state, sessionId));
     },

@@ -52,8 +52,7 @@ export interface AiChatPanelApi {
   /** Closes the panel. The conversation and the launch stay. */
   close(): void;
   /**
-   * Calls `listener` when the state of the panel changes; read `isOpen()` for
-   * the current value. Returns an unsubscribe function.
+   * Calls `listener` when `isOpen()` changes. Returns an unsubscribe function.
    */
   subscribe(listener: () => void): () => void;
 }

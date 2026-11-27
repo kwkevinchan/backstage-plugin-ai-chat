@@ -17,16 +17,19 @@
 import { createAiChatPanelStore, getAiChatPanelStore } from './panelStore';
 
 describe('createAiChatPanelStore', () => {
-  it('open, close, and setSession notify and keep the snapshot stable', () => {
+  it('open, close, and setSession notify the store, while api.subscribe only fires when isOpen changes', () => {
     const api = createAiChatPanelStore();
     const store = getAiChatPanelStore(api);
     const first = store.getSnapshot();
-    const seen: unknown[] = [];
-    api.subscribe(() => seen.push(store.getSnapshot()));
+    const storeSeen: unknown[] = [];
+    const openSeen: boolean[] = [];
+    store.subscribe(() => storeSeen.push(store.getSnapshot()));
+    api.subscribe(() => openSeen.push(api.isOpen()));
 
     api.open();
     api.open();
-    expect(seen).toHaveLength(1);
+    expect(storeSeen).toHaveLength(1);
+    expect(openSeen).toEqual([true]);
     expect(api.isOpen()).toBe(true);
     expect(store.getSnapshot()).toEqual({ open: true, launchId: 0 });
     expect(store.getSnapshot()).not.toBe(first);
@@ -34,18 +37,25 @@ describe('createAiChatPanelStore', () => {
 
     store.setSession('s-1');
     store.setSession('s-1');
-    expect(seen).toHaveLength(2);
+    expect(storeSeen).toHaveLength(2);
+    expect(openSeen).toEqual([true]);
     expect(store.getSnapshot().sessionId).toBe('s-1');
+
+    // A launch while already open updates store state without re-notifying isOpen subscribers.
+    api.open({ prompt: 'hello' });
+    expect(storeSeen).toHaveLength(3);
+    expect(openSeen).toEqual([true]);
 
     const open = store.getSnapshot();
     api.close();
     api.close();
-    expect(seen).toHaveLength(3);
+    expect(storeSeen).toHaveLength(4);
+    expect(openSeen).toEqual([true, false]);
     expect(api.isOpen()).toBe(false);
     expect(store.getSnapshot()).toEqual({
       open: false,
-      launchId: 0,
-      sessionId: 's-1',
+      launchId: 1,
+      launch: { prompt: 'hello' },
     });
     expect(store.getSnapshot()).not.toBe(open);
   });

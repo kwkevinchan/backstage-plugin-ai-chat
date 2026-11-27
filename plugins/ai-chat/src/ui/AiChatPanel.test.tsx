@@ -26,12 +26,27 @@ import {
   AiChatLauncher,
   aiChatPanelApiRef,
 } from '@kwkevinchan/backstage-plugin-ai-chat-react';
-import { act, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { aiChatApiRef } from '../api';
 import { createAiChatPanelStore } from '../application/panelStore';
-import { detail, mockApi, session, streamResponse } from '../testData';
+import {
+  answer as agentAnswer,
+  detail,
+  items,
+  mockApi,
+  session,
+  streamResponse,
+  user,
+} from '../testData';
 import { AiChatPanel } from './AiChatPanel';
+import { ChatPageContent } from './ChatPage';
 
 function Navigation() {
   const navigate = useNavigate();
@@ -398,5 +413,223 @@ describe('AiChatPanel', () => {
       screen.queryByRole('button', { name: 'Open AI chat' }),
     ).not.toBeInTheDocument();
     expect(document.querySelector('aside')).not.toBeInTheDocument();
+  });
+
+  it('moves focus to the input on open, closes on Escape, restores focus and updates aria-expanded', async () => {
+    const api = mockApi();
+    await renderPanel(api, {
+      launcher: <AiChatLauncher>Ask from page</AiChatLauncher>,
+    });
+
+    const openTab = screen.getByRole('button', { name: 'Open AI chat' });
+    const launcher = screen.getByRole('button', { name: 'Ask from page' });
+    expect(openTab).toHaveAttribute('aria-expanded', 'false');
+    expect(launcher).toHaveAttribute('aria-expanded', 'false');
+
+    // Open via the edge tab: focus moves into the composer textarea.
+    await userEvent.click(openTab);
+    expect(launcher).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByLabelText('Message')).toHaveFocus();
+
+    // Pressing Escape closes the panel and restores focus to the edge tab.
+    await userEvent.keyboard('{Escape}');
+    expect(launcher).toHaveAttribute('aria-expanded', 'false');
+    const restoredTab = screen.getByRole('button', { name: 'Open AI chat' });
+    expect(restoredTab).toHaveAttribute('aria-expanded', 'false');
+    expect(restoredTab).toHaveFocus();
+
+    // Open via AiChatLauncher: closing via Escape returns focus to the launcher.
+    await userEvent.click(launcher);
+    expect(launcher).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByLabelText('Message')).toHaveFocus();
+
+    await userEvent.keyboard('{Escape}');
+    expect(launcher).toHaveAttribute('aria-expanded', 'false');
+    expect(launcher).toHaveFocus();
+  });
+
+  it('keeps panel and full page on the same session working independently', async () => {
+    const shared = { ...session, id: 's-shared' };
+    const sharedDetail = detail({
+      session: shared,
+      items: items(user('hello from history'), agentAnswer('existing answer')),
+    });
+    const api = mockApi({
+      listSessions: jest.fn().mockResolvedValue([shared]),
+      getSession: jest.fn().mockResolvedValue(sharedDetail),
+      createSession: jest.fn().mockResolvedValue(shared),
+    });
+    api.sendMessage
+      .mockResolvedValueOnce(answer('panel reply'))
+      .mockResolvedValueOnce(answer('page reply'));
+
+    const panelApi = createAiChatPanelStore();
+    await renderInTestApp(
+      <TestApiProvider
+        apis={[
+          [aiChatApiRef, api],
+          [aiChatPanelApiRef, panelApi],
+        ]}
+      >
+        <Routes>
+          <Route path="/ai-chat/*" element={<ChatPageContent />} />
+        </Routes>
+        <AiChatPanel />
+      </TestApiProvider>,
+      { routeEntries: ['/ai-chat/s-shared'] },
+    );
+
+    // Full page loads the shared session.
+    expect(await screen.findByText('hello from history')).toBeInTheDocument();
+    expect(screen.getByText('existing answer')).toBeInTheDocument();
+
+    // Open the side panel and send a message on the same session.
+    await userEvent.click(screen.getByRole('button', { name: 'Open AI chat' }));
+    const aside = screen.getByRole('complementary', { name: 'AI chat' });
+    await userEvent.type(
+      within(aside).getByLabelText('Message'),
+      'from panel{Enter}',
+    );
+    expect(await within(aside).findByText('panel reply')).toBeInTheDocument();
+
+    // Send a message from the full page's own runtime as well.
+    const allInputs = screen.getAllByLabelText('Message');
+    const pageInput = allInputs.find(el => !aside.contains(el))!;
+    expect(pageInput).toBeDefined();
+    await userEvent.type(pageInput, 'from page{Enter}');
+    expect(await screen.findByText('page reply')).toBeInTheDocument();
+    expect(api.sendMessage).toHaveBeenCalledTimes(2);
+    expect(api.sendMessage.mock.calls[0][0]).toBe('s-shared');
+    expect(api.sendMessage.mock.calls[1][0]).toBe('s-shared');
+    expect(aside).not.toHaveTextContent('page reply');
+    expect(within(aside).getByText('panel reply')).toBeInTheDocument();
+  });
+
+  it('ignores Escape outside the panel and during IME composition', async () => {
+    const api = mockApi();
+    await renderPanel(api, {
+      launcher: <input aria-label="Catalog search" />,
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Open AI chat' }));
+    const aside = screen.getByRole('complementary', { name: 'AI chat' });
+    const composer = within(aside).getByLabelText('Message');
+    expect(composer).toHaveFocus();
+
+    // IME composition Escape inside the panel does not close it.
+    fireEvent.keyDown(composer, { key: 'Escape', isComposing: true });
+    fireEvent.keyDown(composer, { key: 'Escape', keyCode: 229 });
+    expect(aside).not.toHaveAttribute('hidden');
+
+    // Escape pressed while focus is outside the panel does not close it or steal focus.
+    const externalInput = screen.getByLabelText('Catalog search');
+    externalInput.focus();
+    expect(externalInput).toHaveFocus();
+    await userEvent.keyboard('{Escape}');
+    expect(aside).not.toHaveAttribute('hidden');
+    expect(externalInput).toHaveFocus();
+  });
+
+  it('keeps focus in the panel input when opened via AiChatLauncher with a prompt', async () => {
+    const api = mockApi();
+    api.sendMessage.mockResolvedValue(answer('Prompt reply'));
+    await renderPanel(api, {
+      launcher: <AiChatLauncher prompt="hello">Launch prompt</AiChatLauncher>,
+    });
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Launch prompt' }),
+    );
+    expect(await screen.findByText('Prompt reply')).toBeInTheDocument();
+    const aside = screen.getByRole('complementary', { name: 'AI chat' });
+    expect(within(aside).getByLabelText('Message')).toHaveFocus();
+  });
+
+  it('attaches two images in a new panel conversation using one session and sends their attachmentIds', async () => {
+    const png = (name: string) =>
+      new File([new Uint8Array(4)], name, { type: 'image/png' });
+    const api = mockApi({
+      listToolsets: jest.fn().mockResolvedValue([
+        { id: 'read', title: 'Read', default: true, egress: false },
+        { id: 'write', title: 'Write', default: false, egress: true },
+      ]),
+    });
+    api.getInputConfig.mockResolvedValue({
+      images: {
+        enabled: true,
+        mediaTypes: ['image/png'],
+        maxPerMessage: 4,
+        maxBytes: 1024,
+        maxBytesPerInput: 20 * 1024 * 1024,
+        maxPendingPerSession: 12,
+      },
+      insertMaxPerRun: 5,
+      queueMaxMessages: 5,
+    });
+    api.uploadAttachment.mockImplementation(async (_s, file, name) => ({
+      id: `att-${name}`,
+      mediaType: file.type,
+      name,
+      size: file.size,
+    }));
+    api.sendMessage.mockResolvedValue(answer('Saw both images'));
+    Object.assign(URL, {
+      createObjectURL: jest.fn(() => 'blob:1'),
+      revokeObjectURL: jest.fn(),
+    });
+
+    await renderPanel(api);
+    await userEvent.click(screen.getByRole('button', { name: 'Open AI chat' }));
+    const aside = screen.getByRole('complementary', { name: 'AI chat' });
+    await within(aside).findByRole('button', { name: 'Attach' });
+    await waitFor(() => expect(api.listToolsets).toHaveBeenCalled());
+
+    const input = within(aside).getByLabelText('Message');
+    fireEvent.paste(input, {
+      clipboardData: {
+        files: [png('a.png'), png('b.png')],
+        getData: () => '',
+      },
+    });
+    await waitFor(() => expect(api.uploadAttachment).toHaveBeenCalledTimes(2));
+    expect(api.createSession).toHaveBeenCalledTimes(1);
+    expect(api.createSession).toHaveBeenCalledWith({
+      enabledToolsets: ['read'],
+    });
+    expect(api.uploadAttachment.mock.calls.map(c => c[0])).toEqual([
+      's-1',
+      's-1',
+    ]);
+
+    await userEvent.type(input, 'check images{Enter}');
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(api.createSession).toHaveBeenCalledTimes(1);
+    expect(api.sendMessage.mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        text: 'check images',
+        attachmentIds: ['att-a.png', 'att-b.png'],
+      }),
+    );
+  });
+
+  it('omits Attach in the panel when the model cannot read images', async () => {
+    const api = mockApi();
+    api.getInputConfig.mockResolvedValue({
+      images: {
+        enabled: false,
+        mediaTypes: ['image/png'],
+        maxPerMessage: 4,
+        maxBytes: 1024,
+        maxBytesPerInput: 20 * 1024 * 1024,
+        maxPendingPerSession: 12,
+      },
+      insertMaxPerRun: 5,
+      queueMaxMessages: 5,
+    });
+    await renderPanel(api);
+    await userEvent.click(screen.getByRole('button', { name: 'Open AI chat' }));
+    await waitFor(() => expect(api.getInputConfig).toHaveBeenCalled());
+    const aside = screen.getByRole('complementary', { name: 'AI chat' });
+    expect(within(aside).queryByRole('button', { name: 'Attach' })).toBeNull();
   });
 });

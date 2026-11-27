@@ -230,15 +230,15 @@ flowchart LR
   PI06 --> PI07["PI-07 收尾"]
 ```
 
-| 編號  | 工作項目         | 大小 | 完成的需求                          | PR       | 狀態                                   |
-| ----- | ---------------- | ---- | ----------------------------------- | -------- | -------------------------------------- |
-| PI-01 | 規格和設計文件   | S    | D-27 到 D-30；IN-01 到 IN-19 的定義 | #18      | 完成                                   |
-| PI-02 | 核心：插入       | M    | IN-10、IN-11、IN-17（核心的部分）   | #25      | 完成                                   |
-| PI-03 | 宿主：插入和排隊 | L    | IN-10 到 IN-17                      | #26、#29 | 完成                                   |
-| PI-04 | 前端：插入和排隊 | M    | IN-12、IN-13、IN-15、IN-18          | #28      | 完成（畫面在 PU-03 重做）              |
-| PI-05 | 核心和宿主：圖片 | L    | IN-01 到 IN-07                      | #30、#32 | 完成                                   |
-| PI-06 | 前端：圖片       | M    | IN-08、IN-09                        | #41      | 後端完成，畫面在 PU-04                 |
-| PI-07 | 收尾             | S    | 整體驗收                            | #49      | 文件完成，端對端和用途說明頁在 PU 之後 |
+| 編號  | 工作項目         | 大小 | 完成的需求                          | PR       | 狀態                      |
+| ----- | ---------------- | ---- | ----------------------------------- | -------- | ------------------------- |
+| PI-01 | 規格和設計文件   | S    | D-27 到 D-30；IN-01 到 IN-19 的定義 | #18      | 完成                      |
+| PI-02 | 核心：插入       | M    | IN-10、IN-11、IN-17（核心的部分）   | #25      | 完成                      |
+| PI-03 | 宿主：插入和排隊 | L    | IN-10 到 IN-17                      | #26、#29 | 完成                      |
+| PI-04 | 前端：插入和排隊 | M    | IN-12、IN-13、IN-15、IN-18          | #28      | 完成（畫面在 PU-03 重做） |
+| PI-05 | 核心和宿主：圖片 | L    | IN-01 到 IN-07                      | #30、#32 | 完成                      |
+| PI-06 | 前端：圖片       | M    | IN-08、IN-09                        | #41、#64 | 完成（畫面在 PU-04）      |
+| PI-07 | 收尾             | S    | 整體驗收                            | #49、#70 | 完成                      |
 
 順序：PI-02 到 PI-05 依序做，PI-04 和 PI-05 互相獨立（PI-03 之後都可以開始）。PI-03 的排隊先不帶附件（`attachment_ids` 一律是空陣列），PI-05 加上保留和標記。IN-19 屬於 P2，在 P2-04、P2-05 做。
 
@@ -367,7 +367,7 @@ flowchart LR
 
 ### PI-07 收尾
 
-- **範圍**：對照表 [pi-coverage.zh-TW.md](pi-coverage.zh-TW.md)（IN-01 到 IN-18 對到測試；屬於畫面的需求先標「畫面在 PU-03、PU-04」）、README 的設定範例（`input`、`images`）和「圖片會送到模型供應商」的說明、`config.d.ts` 說明，以及三份設計文件標註 PI 的需求／PR 狀態和 P4-01（`delegate`）不做。**延後**：綜合端對端（圖片加插入加排隊一起）和 `usage.zh-TW.html` 的畫面說明，等 PU-03、PU-04 合併後另外補上。
+- **範圍**：對照表 [pi-coverage.zh-TW.md](pi-coverage.zh-TW.md)（IN-01 到 IN-18 對到測試）、README 的設定範例（`input`、`images`）和「圖片會送到模型供應商」的說明、`config.d.ts` 說明、三份設計文件標註 PI 的需求／PR 狀態與 P4-01（`delegate`）不做，以及綜合端對端（`e2e-tests/images.test.ts`：圖片＋插入＋排隊）和用途說明頁（`docs/design/usage.zh-TW.html`）的畫面與說明（#49、#70）。
 - **依賴**：PI-06（後端和 client）。
 - **驗收**：核心與後端的 PI 需求都對得到測試（[pi-coverage.zh-TW.md](pi-coverage.zh-TW.md)）；README 的 `input` 和 `images` 設定範例由 `config.test.ts` 檢查；用途說明頁（`usage.zh-TW.html`）由 `config.test.ts` 檢查不載入外部資源。
 
@@ -612,7 +612,7 @@ flowchart LR
 | PU-03 | 排隊和插入                            | M    | PU-02、PU-07                 | `queueAdapter`、佇列區塊、暫停和未讀的小元件、契約測試                    | #63 | 完成 |
 | PU-04 | 圖片附件                              | M    | PU-02、PI-06 的後端          | `attachmentAdapter`、草稿和訊息裡的縮圖                                   | #64 | 完成 |
 | PU-05 | Session 列表                          | M    | PU-02、P2-01 和 P2-06 的後端 | `threadListAdapter`、搜尋、釘選、封存、即時狀態                           | #69 | 完成 |
-| PU-06 | 側邊面板的內容                        | S    | PU-02、P2-07                 | 面板接上新的訊息串；和整頁同時開著同一段對話時兩邊都正確                  |     |      |
+| PU-06 | 側邊面板的內容                        | S    | PU-02、P2-07                 | 面板接上新的訊息串；和整頁同時開著同一段對話時兩邊都正確                  | #67 | 完成 |
 | PU-07 | 後端：把排隊的訊息改成插入            | M    | 無                           | 「現在就送」的 API 一次做完；和 `startNext` 並行時只有一邊成功            | #47 | 完成 |
 
 順序：PU-07 和 PU-01 沒有互相依賴，都可以先做。PU-02 做完之前，PU-03 到 PU-06 不能開始。PU-03、PU-04、PU-05 彼此獨立。PU-03 還要等 PU-07。PU-04 要等 PI-06 的後端；PU-05 要等 P2-01 和 P2-06 的後端；PU-06 要等 P2-07。
@@ -1058,8 +1058,7 @@ flowchart LR
 - **規格沒寫、實作選定的地方**：
   - 官方已經有 action，所以不重做（V-05）。X-08 的「搜尋」是 `search:query`，「讀取」是搜尋結果的 `document.text`。TechDocs backend 的 `techdocs:get-techdocs-metadata` 只回傳網站的目錄和中繼資料，不回傳內容；要用的話可以放進同一個工具組。
   - 使用者的權限由 search backend 套用。它只在 `permission.enabled: true` 時才用 `AuthorizedSearchEngine` 過濾結果；沒有開 permission 時，每個人都看得到全部的結果。README 寫明這一條。TechDocs 文件的權限是 `catalog.entity.read`，對象是文件所屬的 entity。
-  - 連結：TechDocs 的 collator 的 `location` 是相對路徑（預設 `/docs/:namespace/:kind/:name/:path`）。對話的 Markdown 只把 `http`、`https`、`mailto` 做成連結（S-02），所以相對路徑只顯示成文字。選定的做法：保留預設的 `search.collators.techdocs.locationTemplate`，在 Agent 的系統提示寫明「location 是 `https://backstage.example.com` 底下的路徑，引用時寫成完整連結」。README 有這段系統提示的範例。理由：`locationTemplate` 套用在整個 Backstage 的 TechDocs 搜尋索引；TechDocs 閱讀頁的搜尋用 `navigate(location)` 換頁（`@backstage/plugin-techdocs` 1.19.0 的 `TechDocsSearch`），完整網址會跳到錯的頁面。
-  - 之後的版本：前端把 `/` 開頭的連結套上 app 的網址，做成站內連結。這一項不做。
+  - 連結：TechDocs 的 collator 的 `location` 是相對路徑（預設 `/docs/:namespace/:kind/:name/:path`）。前端的 `MarkdownText` 會把單一 `/` 開頭（非 `//`、非 `/\`）的連結用 `app.baseUrl` 補成同源的完整網址，再交由 `safeUrl` 檢查（S-02），所以模型直接引用 `document.location` 就會變成可點擊的站內連結。仍保留預設的 `search.collators.techdocs.locationTemplate`，因為它套用在整個 Backstage 的 TechDocs 搜尋索引，而 TechDocs 閱讀頁的搜尋用 `navigate(location)` 換頁（`@backstage/plugin-techdocs` 1.19.0 的 `TechDocsSearch`），完整網址會跳到錯的頁面。
   - 工具名稱：模型看到的是 `search_query`（模型轉接把 `:` 換成 `_`）。系統提示的範例不寫 action 的 id。
   - `search:query` 的 input schema 在 `filters` 有遞迴的 `$ref`（`#/properties/filters`）。這是在測試 backend 裡由 actions registry 轉出、送給模型伺服器的 schema 確認的。不接受 `$ref` 的模型伺服器會拒絕請求；README 寫明這一條。
   - `permission.enabled: true` 會讓整個 Backstage 進入權限模式：`PermissionClient` 只在這個設定開著時向 permission backend 要決定，關著時一律允許。所以要裝 permission backend，政策要判斷 `catalog.entity.read`。README 寫明這一條。
@@ -1475,3 +1474,4 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-26 | 1.2  | P3-10 完成（B-03，#61）：`ai-chat-react` 公開結果顯示元件的型別、`aiChatToolResultsApiRef`、`AiChatSafeLink`，`/alpha` 有 `AiChatToolResultBlueprint`；舊前端系統由 app 用 `createAiChatToolResultsApi` 覆蓋這個 API。元件畫在內建的列或核准卡片下面，先註冊的有效，內建工具不能被覆蓋，元件出錯時退回預設。逐項驗收見 P3-10                                                                                                                                                                                                                                                                                                                                                                         |
 | 2026-11-26 | 1.2  | P2-04 驗收清單（SH-02、SH-03、SH-06、SH-10、SH-11、IN-19 的讀取）：分享的 API 和兩個序號的對應；被分享的人的寫入一律 404；讀取（`GetSession`、附件、接回）都經過 `AccessControl` 和同一份可見範圍；接回時被分享的人一律輪詢；快照沒有到期時間；稽核先記再寫                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 2026-11-26 | 1.2  | P2-04 完成（SH-02、SH-03、SH-11，SH-06 和 SH-10 的後端，IN-19 的讀取，#62）：`/sessions/{id}/shares` 建立、修改、取消、列出唯讀的分享，先寫稽核再寫入；被分享的人的寫入一律 404；`GetSession`、附件、接回都經過 `AccessControl` 和同一份可見範圍；接回時被分享的人只輪詢游標之後的紀錄；分享對象整串小寫。逐項驗收見 P2-04                                                                                                                                                                                                                                                                                                                                                                           |
+| 2026-11-26 | 1.2  | PI-07 收尾完成（#70）：在 `e2e-tests/images.test.ts` 補齊圖片＋插入＋排隊綜合端對端測試；`usage.zh-TW.html` 補上三者的示意畫面與說明；`pi-coverage.zh-TW.md`、`harness-spec.zh-TW.md`、`architecture.zh-TW.md` 與本表將 PI-06、PI-07 標為完成                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
