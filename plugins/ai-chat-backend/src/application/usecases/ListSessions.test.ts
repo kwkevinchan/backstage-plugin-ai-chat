@@ -50,6 +50,7 @@ describe('ListSessions', () => {
         listByOwner: async () => sessions,
       } as any,
       runs: { findActiveForSessions } as any,
+      items: { firstUserMessageTexts: async () => new Map() },
     });
 
     const listed = await useCase.execute({ principal: jane });
@@ -70,42 +71,23 @@ describe('ListSessions', () => {
       session('s-long'),
       session('s-empty'),
     ];
-    const read = jest.fn(async (id: string) => {
-      const t = '2026-01-01T00:00:00.000Z';
-      if (id === 's-short') {
-        return [
-          {
-            sessionId: id,
-            seq: 1,
-            createdAt: t,
-            kind: 'user_message' as const,
-            text: '  list\nservices  ',
-          },
-        ];
-      }
-      if (id === 's-long') {
-        return [
-          {
-            sessionId: id,
-            seq: 1,
-            createdAt: t,
-            kind: 'user_message' as const,
-            text: longText,
-          },
-        ];
-      }
-      return [];
+    const firstUserMessageTexts = jest.fn(async (ids: readonly string[]) => {
+      expect(ids).toEqual(['s-short', 's-long', 's-empty']);
+      return new Map<string, string>([
+        ['s-short', '  list\nservices  '],
+        ['s-long', longText],
+      ]);
     });
 
     const useCase = new ListSessions({
       sessions: { listByOwner: async () => sessions } as any,
       runs: { findActiveForSessions: async () => [] } as any,
-      items: { read },
+      items: { firstUserMessageTexts },
     });
 
     const listed = await useCase.execute({ principal: jane });
 
-    expect(read).not.toHaveBeenCalledWith('s-titled');
+    expect(firstUserMessageTexts).toHaveBeenCalledTimes(1);
     expect(
       listed.map(item => [item.id, item.title, item.previewTitle]),
     ).toEqual([

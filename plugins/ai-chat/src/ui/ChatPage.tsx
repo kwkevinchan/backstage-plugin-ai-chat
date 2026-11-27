@@ -367,10 +367,12 @@ function ChatPageBody(props: ChatPageBodyProps) {
     [threadItems],
   );
 
-  // When a non-open session transitions from active (running / waiting) to
-  // idle across a list refresh, mark it "replied" so "New reply" still appears
-  // even when Backstage Signals is not installed.
+  // When Backstage Signals is not installed and a non-open session transitions
+  // from active (running / waiting) to idle across a list refresh, mark it
+  // "replied" so "New reply" still appears. Known limitation without Signals:
+  // failed, cancelled, and expired runs also transition from active to idle.
   useEffect(() => {
+    if (signals) return;
     const prev = prevActivitiesRef.current;
     const next = new Map<string, SessionListActivity>();
     const newlyCompleted: string[] = [];
@@ -397,7 +399,7 @@ function ChatPageBody(props: ChatPageBodyProps) {
         return changed ? updated : current;
       });
     }
-  }, [threadItems]);
+  }, [signals, threadItems]);
 
   const reloadList = useCallback(() => {
     const seqAtStart = signalSeqRef.current;

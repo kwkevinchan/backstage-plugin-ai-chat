@@ -14,9 +14,12 @@
  * limitations under the License.
  */
 
-import type { ItemLog } from '@kwkevinchan/ai-chat-harness';
 import type { Principal, Session } from '../../domain';
-import type { RunRepository, SessionRepository } from '../ports';
+import type {
+  RunRepository,
+  SessionPreviewReader,
+  SessionRepository,
+} from '../ports';
 
 const MAX_PREVIEW_TITLE_CHARS = 60;
 
@@ -48,7 +51,7 @@ export class ListSessions {
     private readonly deps: {
       sessions: SessionRepository;
       runs: RunRepository;
-      items?: Pick<ItemLog, 'read'>;
+      items: SessionPreviewReader;
     },
   ) {}
 
@@ -74,20 +77,15 @@ export class ListSessions {
     const bySession = new Map(active.map(run => [run.sessionId, run]));
 
     const previews = new Map<string, string>();
-    if (this.deps.items) {
-      const untitled = sessions.filter(s => !s.title?.trim());
-      await Promise.all(
-        untitled.map(async session => {
-          const list = await this.deps.items!.read(session.id);
-          const first = list.find(
-            item => item.kind === 'user_message' && item.text.trim().length > 0,
-          );
-          if (first?.kind === 'user_message') {
-            const preview = previewOf(first.text);
-            if (preview) previews.set(session.id, preview);
-          }
-        }),
-      );
+    const untitledIds = sessions
+      .filter(s => !s.title?.trim())
+      .map(s => s.id);
+    if (untitledIds.length > 0) {
+      const texts = await this.deps.items.firstUserMessageTexts(untitledIds);
+      for (const [sessionId, text] of texts) {
+        const preview = previewOf(text);
+        if (preview) previews.set(sessionId, preview);
+      }
     }
 
     return sessions.map(session => {

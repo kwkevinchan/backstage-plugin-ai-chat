@@ -74,10 +74,11 @@ backend.add(import('@kwkevinchan/backstage-plugin-ai-chat-backend'));
 ```
 
 `GET /sessions` includes `activity` (`running` or `waiting_approval`) while a
-run has not ended. To push activity changes (`running`, `waiting_approval`,
-`replied`, `idle`) to the session owner on the `ai-chat` Signals channel,
-install `@backstage/plugin-signals-backend` the way this Backstage version
-documents and add the module:
+run has not ended, and `previewTitle` (the truncated opening of the first user
+message) while `title` is still unset. To push activity changes (`running`,
+`waiting_approval`, `replied`, `idle`) to the session owner on the `ai-chat`
+Signals channel, install `@backstage/plugin-signals-backend` the way this
+Backstage version documents and add the module:
 
 ```ts
 import { aiChatSignalsModule } from '@kwkevinchan/backstage-plugin-ai-chat-backend';

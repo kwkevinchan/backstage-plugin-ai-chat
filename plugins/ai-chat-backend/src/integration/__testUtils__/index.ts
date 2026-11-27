@@ -383,7 +383,12 @@ export async function createWorld(
         }) as KnexRunRepository)
       : runs;
     const host = createHost({
-      items: extra.items ? extra.items(items) : items,
+      items: extra.items
+        ? Object.assign(extra.items(items), {
+            firstUserMessageTexts: (sessionIds: readonly string[]) =>
+              items.firstUserMessageTexts(sessionIds),
+          })
+        : items,
       sessions,
       runs: hooked,
       queue,
