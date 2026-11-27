@@ -216,9 +216,9 @@ describe('RunSupervisor', () => {
       'Could not name the session',
       expect.objectContaining({ runId: 'r1', errorName: 'Error' }),
     );
-    expect(JSON.stringify(logger.error.mock.calls)).not.toContain(
-      'title model down',
-    );
+    expect(
+      JSON.stringify((logger.error as jest.Mock).mock.calls),
+    ).not.toContain('title model down');
   });
 
   it.each([
@@ -328,7 +328,7 @@ describe('RunSupervisor', () => {
       'Could not renew the lease of a run',
       expect.objectContaining({ errorName: 'Error' }),
     );
-    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(
+    expect(JSON.stringify((logger.warn as jest.Mock).mock.calls)).not.toContain(
       'connection timeout',
     );
     expect(runs.transition).toHaveBeenCalledWith(
@@ -749,9 +749,9 @@ describe('RunSupervisor with inserted messages and the queue (PI-03)', () => {
       'Could not tell the state of the queue',
       expect.objectContaining({ errorName: 'Error' }),
     );
-    expect(JSON.stringify(logger.error.mock.calls)).not.toContain(
-      'queue table gone',
-    );
+    expect(
+      JSON.stringify((logger.error as jest.Mock).mock.calls),
+    ).not.toContain('queue table gone');
   });
 });
 
