@@ -167,6 +167,7 @@ export function mockApi(
     }),
     uploadAttachment: jest.fn(),
     readAttachment: jest.fn(),
+    deleteAttachment: jest.fn().mockResolvedValue(undefined),
     ...overrides,
   } as jest.Mocked<AiChatApi>;
 }

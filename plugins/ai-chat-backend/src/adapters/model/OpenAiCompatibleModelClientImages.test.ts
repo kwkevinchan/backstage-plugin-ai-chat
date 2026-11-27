@@ -67,6 +67,7 @@ class MemoryStore implements AttachmentStore {
   put = jest.fn();
   describe = jest.fn();
   copy = jest.fn();
+  deletePending = jest.fn();
   purgeUnused = jest.fn();
 }
 

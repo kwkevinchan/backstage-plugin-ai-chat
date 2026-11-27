@@ -20,6 +20,7 @@ import type { Knex } from 'knex';
 import { isPostgres } from './postgres';
 import type { AttachmentStore } from '../../application/ports';
 import {
+  AttachmentInUse,
   AttachmentNotFound,
   SessionNotFound,
   TooManyPendingAttachments,
@@ -135,6 +136,32 @@ export class KnexAttachmentStore implements AttachmentStore {
       }
     });
     return copies;
+  }
+
+  async deletePending(
+    input: Parameters<AttachmentStore['deletePending']>[0],
+  ): Promise<void> {
+    await this.knex.transaction(async trx => {
+      const query = trx<AttachmentRow>('attachments').where({
+        id: input.id,
+        session_id: input.sessionId,
+        owner_ref: input.ownerRef,
+      });
+      const row = await (isPostgres(trx) ? query.forUpdate() : query).first(
+        'id',
+        'used_seq',
+        'reserved_by',
+      );
+      if (!row) throw new AttachmentNotFound(input.id);
+      if (row.used_seq !== null || row.reserved_by !== null) {
+        throw new AttachmentInUse(input.id);
+      }
+      await trx('attachments')
+        .where({ id: row.id })
+        .whereNull('used_seq')
+        .whereNull('reserved_by')
+        .delete();
+    });
   }
 
   async purgeUnused(olderThan: Date): Promise<number> {

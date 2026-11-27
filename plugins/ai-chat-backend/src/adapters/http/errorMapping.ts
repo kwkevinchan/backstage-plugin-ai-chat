@@ -24,6 +24,7 @@ import {
 import { InvalidRunTransition, LeaseLost } from '@kwkevinchan/ai-chat-harness';
 import {
   AgentNotFound,
+  AttachmentInUse,
   AttachmentNotFound,
   AttachmentTooLarge,
   EmptyMessage,
@@ -164,7 +165,10 @@ export function toHttpError(
   if (error instanceof AttachmentNotFound) {
     return new NamedHttpError(error.name, 404, error.message);
   }
-  if (error instanceof TooManyPendingAttachments) {
+  if (
+    error instanceof TooManyPendingAttachments ||
+    error instanceof AttachmentInUse
+  ) {
     return new NamedHttpError(error.name, 409, error.message);
   }
   if (

@@ -355,5 +355,14 @@ describe('AiChatClient', () => {
     expect(urls(read.fetch)).toEqual([
       ['GET', 'http://backend/api/ai-chat/sessions/s%2F1/attachments/att%2F1'],
     ]);
+
+    const del = setup(new Response(null, { status: 204 }));
+    await del.client.deleteAttachment('s/1', 'att/1');
+    expect(urls(del.fetch)).toEqual([
+      [
+        'DELETE',
+        'http://backend/api/ai-chat/sessions/s%2F1/attachments/att%2F1',
+      ],
+    ]);
   });
 });

@@ -28,6 +28,7 @@ export {
 export { callsAwaitingDecision, findToolCall, hasResult } from './approval';
 export {
   AgentNotFound,
+  AttachmentInUse,
   AttachmentNotFound,
   AttachmentTooLarge,
   ChatDomainError,

@@ -157,6 +157,8 @@ export interface AiChatApi {
   ): Promise<ChatUploadedAttachment>;
   /** The bytes of one image of the session. */
   readAttachment(sessionId: string, attachmentId: string): Promise<Blob>;
+  /** Deletes a pending (unused, unreserved) image of the session. */
+  deleteAttachment(sessionId: string, attachmentId: string): Promise<void>;
 }
 
 /**

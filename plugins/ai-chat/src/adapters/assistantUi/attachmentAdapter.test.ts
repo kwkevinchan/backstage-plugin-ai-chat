@@ -177,7 +177,7 @@ describe('attachment adapter: the upload', () => {
     expect(upload).toHaveBeenCalledTimes(1);
   });
 
-  it('remove: an image removed while it uploads is not taken', async () => {
+  it('remove: an image removed while it uploads is not taken and is cleaned up when upload resolves', async () => {
     let finish: () => void = () => {};
     const upload = jest.fn(
       (file: File) =>
@@ -185,7 +185,8 @@ describe('attachment adapter: the upload', () => {
           finish = () => resolve(uploadedOf(file));
         }),
     );
-    const { adapter } = setup({ upload });
+    const remove = jest.fn().mockResolvedValue(undefined);
+    const { adapter } = setup({ upload, remove });
     const added = adapter.add({ file: png() }) as AsyncGenerator<
       PendingAttachment,
       void
@@ -195,9 +196,20 @@ describe('attachment adapter: the upload', () => {
     const draft = first.value as PendingAttachment;
     const rest = added.next();
     await adapter.remove(draft);
+    expect(remove).not.toHaveBeenCalled();
     finish();
     expect(await rest).toEqual({ done: true, value: undefined });
     expect(upload).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledWith('att-dot.png');
+  });
+
+  it('remove: calls source.remove with backend id and swallows errors', async () => {
+    const remove = jest.fn().mockRejectedValue(new Error('network error'));
+    const { adapter } = setup({ remove });
+    const states = await statesOf(adapter.add({ file: png() }));
+    const complete = states[states.length - 1];
+    await expect(adapter.remove(complete)).resolves.toBeUndefined();
+    expect(remove).toHaveBeenCalledWith('att-dot.png');
   });
 });
 

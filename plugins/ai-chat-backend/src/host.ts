@@ -29,6 +29,7 @@ import {
   CancelRun,
   CreateSession,
   DecideApproval,
+  DeleteAttachment,
   DeleteQueuedMessage,
   DeleteSession,
   ExpireStaleRuns,
@@ -454,6 +455,7 @@ export function createHost(ports: HostPorts) {
         items,
         clock,
       }),
+      deleteAttachment: new DeleteAttachment({ sessions, attachments, audit }),
       purgeUnusedAttachments: new PurgeUnusedAttachments({
         attachments,
         clock,

@@ -19,7 +19,11 @@ import type {
   ChatUploadedAttachment,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { Request, Response } from 'express';
-import type { ReadAttachment, UploadAttachment } from '../../../application';
+import type {
+  DeleteAttachment,
+  ReadAttachment,
+  UploadAttachment,
+} from '../../../application';
 import { etagOf } from '../../../application';
 import { IMAGE_MEDIA_TYPES, type Principal } from '../../../domain';
 import { mediaTypeOf, readLimited } from '../rawBody';
@@ -28,6 +32,7 @@ import { parse, uploadAttachmentQuery } from '../requestSchemas';
 export type AttachmentUseCases = {
   uploadAttachment: Pick<UploadAttachment, 'authorize' | 'execute'>;
   readAttachment: Pick<ReadAttachment, 'execute'>;
+  deleteAttachment: Pick<DeleteAttachment, 'execute'>;
 };
 
 /**
@@ -110,6 +115,19 @@ export class AttachmentsController {
       return;
     }
     res.status(200).type(result.meta.mediaType).end(Buffer.from(result.bytes));
+  }
+
+  /** `DELETE /sessions/:id/attachments/:attachmentId` */
+  async delete(
+    principal: Principal,
+    sessionId: string,
+    attachmentId: string,
+  ): Promise<void> {
+    await this.useCases.deleteAttachment.execute({
+      principal,
+      sessionId,
+      attachmentId,
+    });
   }
 }
 

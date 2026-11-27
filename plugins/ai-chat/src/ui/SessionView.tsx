@@ -124,6 +124,8 @@ export function SessionView(props: SessionViewProps) {
         ? {
             limits: images,
             upload: file => api.uploadAttachment(sessionId, file, file.name),
+            remove: attachmentId =>
+              api.deleteAttachment(sessionId, attachmentId),
             onAdd: rejections.begin,
           }
         : undefined,
