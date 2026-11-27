@@ -1359,7 +1359,9 @@ describe('the box of the chat page (B-04)', () => {
     await userEvent.click(
       screen.getByRole('button', { name: 'Leave out the current page' }),
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Add reference' }));
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Add reference' }),
+    );
     await userEvent.click(
       await screen.findByRole('menuitem', { name: 'Catalog entity' }),
     );

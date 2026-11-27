@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 import { createAiChatReferenceSourcesApi } from './referenceSourcesApi';
 
 const First = () => null;
@@ -54,7 +53,11 @@ describe('createAiChatReferenceSourcesApi', () => {
     const api = createAiChatReferenceSourcesApi([
       { id: '', title: 'No id', component: First },
       { id: 'no-title', title: '', component: First },
-      { id: 'no-component', title: 'No component', component: undefined as never },
+      {
+        id: 'no-component',
+        title: 'No component',
+        component: undefined as never,
+      },
     ]);
     expect(api.getSources()).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(3);

@@ -126,7 +126,9 @@ const aiChatReferenceSourcesApi = ApiBlueprint.makeWithOverrides({
         factory: () =>
           createAiChatReferenceSourcesApi(
             inputs.referenceSources.map(input =>
-              input.get(AiChatReferenceSourceBlueprint.dataRefs.referenceSource),
+              input.get(
+                AiChatReferenceSourceBlueprint.dataRefs.referenceSource,
+              ),
             ),
           ),
       }),

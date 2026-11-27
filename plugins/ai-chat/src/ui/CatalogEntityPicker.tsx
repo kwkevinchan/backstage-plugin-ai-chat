@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 import { useEffect, useState } from 'react';
 import { stringifyEntityRef, type Entity } from '@backstage/catalog-model';
 import { useApi } from '@backstage/core-plugin-api';

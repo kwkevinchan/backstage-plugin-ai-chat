@@ -16,12 +16,14 @@ export interface AiChatLauncherProps {
   className?: string;
   entityRef?: string;
   prompt?: string;
+  references?: AiChatReference[];
 }
 
 // @public
 export interface AiChatLaunchRequest {
   entityRef?: string;
   prompt?: string;
+  references?: AiChatReference[];
 }
 
 // @public
@@ -34,6 +36,40 @@ export interface AiChatPanelApi {
 
 // @public
 export const aiChatPanelApiRef: ApiRef<AiChatPanelApi>;
+
+// @public
+export type AiChatReference =
+  | {
+      kind: 'entity';
+      entityRef: string;
+    }
+  | {
+      kind: 'text';
+      text: string;
+      title?: string;
+      url?: string;
+    };
+
+// @public
+export interface AiChatReferenceSource {
+  component: ComponentType<AiChatReferenceSourceProps>;
+  id: string;
+  title: string;
+}
+
+// @public
+export interface AiChatReferenceSourceProps {
+  onAdd(references: AiChatReference[]): void;
+  onClose(): void;
+}
+
+// @public
+export interface AiChatReferenceSourcesApi {
+  getSources(): AiChatReferenceSource[];
+}
+
+// @public
+export const aiChatReferenceSourcesApiRef: ApiRef<AiChatReferenceSourcesApi>;
 
 // @public
 export function AiChatSafeLink(props: AiChatSafeLinkProps): JSX.Element;

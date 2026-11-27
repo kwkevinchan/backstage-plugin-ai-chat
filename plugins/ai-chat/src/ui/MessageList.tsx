@@ -175,8 +175,9 @@ const NO_REFERENCES: ShownReference[] = [];
 function UserReferences() {
   const references = useAuiState(
     s =>
-      (s.message.metadata?.custom?.references as ShownReference[] | undefined) ??
-      NO_REFERENCES,
+      (s.message.metadata?.custom?.references as
+        | ShownReference[]
+        | undefined) ?? NO_REFERENCES,
   );
   return <MessageReferences references={references} />;
 }

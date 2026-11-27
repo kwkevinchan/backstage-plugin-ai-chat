@@ -42,11 +42,19 @@ describe('AiChatReferenceSourceBlueprint', () => {
   it('outputs the id, the title and the component', () => {
     const extension = AiChatReferenceSourceBlueprint.make({
       name: 'docs-page',
-      params: { id: 'docs-page', title: 'Documentation page', component: Result },
+      params: {
+        id: 'docs-page',
+        title: 'Documentation page',
+        component: Result,
+      },
     });
     const tester = createExtensionTester(extension);
     expect(
       tester.get(AiChatReferenceSourceBlueprint.dataRefs.referenceSource),
-    ).toEqual({ id: 'docs-page', title: 'Documentation page', component: Result });
+    ).toEqual({
+      id: 'docs-page',
+      title: 'Documentation page',
+      component: Result,
+    });
   });
 });

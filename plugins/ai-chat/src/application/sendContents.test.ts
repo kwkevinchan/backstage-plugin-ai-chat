@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 import { act, renderHook } from '@testing-library/react';
 import type { ChatPageContext } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import { createSendContentsStore, useSendContents } from './sendContents';
@@ -31,7 +30,12 @@ describe('createSendContentsStore', () => {
     store.add([
       { kind: 'entity', entityRef: 'Component:Default/Payments' },
       { kind: 'entity', entityRef: 'component:payments' },
-      { kind: 'text', text: 'a\0b', title: '  Notes  ', url: 'javascript:x' },
+      {
+        kind: 'text',
+        text: 'a\0b',
+        title: '  Notes  ',
+        url: 'ftp://example.com/notes',
+      },
     ]);
     expect(store.getSnapshot().references.map(r => r.reference)).toEqual([
       { kind: 'entity', entityRef: 'component:default/payments' },
@@ -120,11 +124,15 @@ describe('useSendContents', () => {
       useSendContents({ store, page: catalog }),
     );
     act(() =>
-      result.current.add([{ kind: 'entity', entityRef: 'component:default/a' }]),
+      result.current.add([
+        { kind: 'entity', entityRef: 'component:default/a' },
+      ]),
     );
     const box = result.current.take();
     act(() =>
-      result.current.add([{ kind: 'entity', entityRef: 'component:default/b' }]),
+      result.current.add([
+        { kind: 'entity', entityRef: 'component:default/b' },
+      ]),
     );
     act(() => box.sent());
     expect(box.references).toEqual([

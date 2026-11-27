@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 import type { ComponentType } from 'react';
 import { createApiRef } from '@backstage/core-plugin-api';
 

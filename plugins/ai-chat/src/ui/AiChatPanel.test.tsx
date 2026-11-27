@@ -736,14 +736,18 @@ describe('the box of the panel (B-04)', () => {
     expect(within(box()).getByText('Runbook')).toBeInTheDocument();
     expect(api.createSession).not.toHaveBeenCalled();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Remove payments' }));
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Remove payments' }),
+    );
     await userEvent.type(screen.getByLabelText('Message'), 'what now{Enter}');
 
     await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
     expect(api.sendMessage.mock.calls[0][1]).toStrictEqual({
       text: 'what now',
       page: { path: '/catalog' },
-      references: [{ kind: 'text', text: 'Step 1: restart.', title: 'Runbook' }],
+      references: [
+        { kind: 'text', text: 'Step 1: restart.', title: 'Runbook' },
+      ],
     });
   });
 
@@ -764,7 +768,9 @@ describe('the box of the panel (B-04)', () => {
     );
     expect(within(box()).getByText('billing')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Close AI chat' }));
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Close AI chat' }),
+    );
     await userEvent.click(screen.getByRole('button', { name: 'Open AI chat' }));
     expect(within(box()).getByText('billing')).toBeInTheDocument();
   });

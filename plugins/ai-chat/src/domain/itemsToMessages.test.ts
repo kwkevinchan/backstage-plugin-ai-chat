@@ -597,7 +597,12 @@ describe('the references of a user message', () => {
   ];
 
   it('keeps them on the message, and a send again takes them as references of a request', () => {
-    const log = items({ ...user('what is this'), references });
+    const log = items({
+      kind: 'user_message',
+      text: 'what is this',
+      runId: 'r-1',
+      references,
+    });
     const [message] = itemsToMessages(detail({ items: log }));
     expect(message.metadata).toEqual({ references });
     expect(lastUserDraft(log)).toEqual({

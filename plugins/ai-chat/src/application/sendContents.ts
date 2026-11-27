@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import {
   MAX_REFERENCE_TEXT_LENGTH,

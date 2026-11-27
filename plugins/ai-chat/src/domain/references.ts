@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 import {
   isEntityRef,
   isReferenceUrl,
@@ -141,7 +140,9 @@ export function sameReference(
 }
 
 /** A reference of a stored message, as a request takes it again. */
-export function referenceInputOf(reference: ShownReference): ChatReferenceInput {
+export function referenceInputOf(
+  reference: ShownReference,
+): ChatReferenceInput {
   if (reference.kind === 'entity') {
     return { kind: 'entity', entityRef: reference.entityRef };
   }

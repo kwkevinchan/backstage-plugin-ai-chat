@@ -64,7 +64,11 @@ describe('ai-chat (new frontend system)', () => {
       .add(
         AiChatReferenceSourceBlueprint.make({
           name: 'docs',
-          params: { id: 'docs-page', title: 'Documentation page', component: Docs },
+          params: {
+            id: 'docs-page',
+            title: 'Documentation page',
+            component: Docs,
+          },
         }),
       )
       .add(

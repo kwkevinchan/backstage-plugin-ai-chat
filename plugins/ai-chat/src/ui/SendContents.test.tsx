@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 import type { ComponentType } from 'react';
 import type { Entity } from '@backstage/catalog-model';
 import { catalogApiRef } from '@backstage/plugin-catalog-react';
@@ -89,13 +88,13 @@ async function open(
   }
   const apis: Array<readonly [never, never]> = [];
   if (options.catalog) {
-    apis.push([
-      catalogApiRef as never,
-      catalogApiMock({ entities }) as never,
-    ]);
+    apis.push([catalogApiRef as never, catalogApiMock({ entities }) as never]);
   }
   if (options.sources) {
-    apis.push([aiChatReferenceSourcesApiRef as never, options.sources as never]);
+    apis.push([
+      aiChatReferenceSourcesApiRef as never,
+      options.sources as never,
+    ]);
   }
   await renderInTestApp(
     <TestApiProvider apis={apis}>
@@ -147,7 +146,9 @@ describe('the box of the page and the references (B-04)', () => {
     const api = mockApi();
     await open(api, detail(), { store: closedStore() });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add reference' }));
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Add reference' }),
+    );
     await userEvent.click(
       await screen.findByRole('menuitem', { name: 'Current page' }),
     );
@@ -245,7 +246,9 @@ describe('the box of the page and the references (B-04)', () => {
     expect(tags[2]).toHaveTextContent('Restart the payments service fro…');
     expect(tags[3]).toHaveTextContent('billing');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Remove billing' }));
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Remove billing' }),
+    );
     await userEvent.type(input(), 'what is this{Enter}');
 
     await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
@@ -266,7 +269,9 @@ describe('the box of the page and the references (B-04)', () => {
     await waitFor(() =>
       expect(within(box()).getAllByRole('listitem')).toHaveLength(2),
     );
-    const sent = screen.getByRole('list', { name: 'References of the message' });
+    const sent = screen.getByRole('list', {
+      name: 'References of the message',
+    });
     expect(sent).toHaveTextContent('payments');
     expect(sent).toHaveTextContent('Runbook');
     expect(sent).not.toHaveTextContent('billing');
@@ -314,7 +319,9 @@ describe('the box of the page and the references (B-04)', () => {
       screen.getByText('A message carries at most 2 references.'),
     ).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add reference' }));
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Add reference' }),
+    );
     expect(
       await screen.findByRole('menuitem', { name: 'Catalog entity' }),
     ).toHaveAttribute('aria-disabled', 'true');
@@ -324,7 +331,9 @@ describe('the box of the page and the references (B-04)', () => {
     const api = mockApi();
     await open(api, detail(), { catalog: true });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add reference' }));
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Add reference' }),
+    );
     await userEvent.click(
       await screen.findByRole('menuitem', { name: 'Catalog entity' }),
     );
@@ -337,12 +346,16 @@ describe('the box of the page and the references (B-04)', () => {
     await waitFor(() =>
       expect(within(list).getAllByRole('button')).toHaveLength(1),
     );
-    await userEvent.click(within(list).getByRole('button', { name: /Payments/ }));
+    await userEvent.click(
+      within(list).getByRole('button', { name: /Payments/ }),
+    );
 
     expect(
       screen.queryByRole('dialog', { name: 'Catalog entity' }),
     ).not.toBeInTheDocument();
-    expect(within(box()).getByTitle('component:default/payments')).toBeInTheDocument();
+    expect(
+      within(box()).getByTitle('component:default/payments'),
+    ).toBeInTheDocument();
   });
 
   it('lists a source that the app registered with createAiChatReferenceSourcesApi, and takes what it adds', async () => {
@@ -367,11 +380,15 @@ describe('the box of the page and the references (B-04)', () => {
       ]),
     });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add reference' }));
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Add reference' }),
+    );
     await userEvent.click(
       await screen.findByRole('menuitem', { name: 'Documentation page' }),
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Use this page' }));
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Use this page' }),
+    );
 
     expect(within(box()).getByText('Setup')).toBeInTheDocument();
     expect(within(box()).getByText('Install with yarn.')).toBeInTheDocument();
@@ -393,8 +410,12 @@ describe('the box of the page and the references (B-04)', () => {
     const api = mockApi();
     await open(api, detail(), { sources });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add reference' }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Template' }));
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Add reference' }),
+    );
+    await userEvent.click(
+      await screen.findByRole('menuitem', { name: 'Template' }),
+    );
     expect(screen.getByText('Pick a template')).toBeInTheDocument();
   });
 
@@ -404,7 +425,9 @@ describe('the box of the page and the references (B-04)', () => {
       api,
       detail({
         items: items({
-          ...user('what is this'),
+          kind: 'user_message',
+          text: 'what is this',
+          runId: 'r-1',
           references: [
             {
               kind: 'entity',
@@ -417,7 +440,11 @@ describe('the box of the page and the references (B-04)', () => {
                 title: 'Payments',
               },
             },
-            { kind: 'entity', entityRef: 'component:default/secret', readable: false },
+            {
+              kind: 'entity',
+              entityRef: 'component:default/secret',
+              readable: false,
+            },
             { kind: 'text', text: 'Some notes', title: 'Notes' },
           ],
         }),
@@ -425,7 +452,9 @@ describe('the box of the page and the references (B-04)', () => {
       }),
     );
 
-    const sent = screen.getByRole('list', { name: 'References of the message' });
+    const sent = screen.getByRole('list', {
+      name: 'References of the message',
+    });
     expect(sent).toHaveTextContent('Payments');
     expect(sent).toHaveTextContent('Component');
     expect(sent).toHaveTextContent('secret');
