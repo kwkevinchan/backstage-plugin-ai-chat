@@ -634,20 +634,22 @@ test('entity page AI chat tab: list entity sessions, start a new chat bound to e
 
   await say(page, 'list services');
   await expect(
-    page.getByText('Here is the result of the action'),
+    page.locator('details', { hasText: 'List services' }).getByText('Done'),
   ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(0);
   await expect(page).toHaveURL(/\/ai-chat\/[^/?]+/);
   const createdPath = new URL(page.url()).pathname;
 
-  // Rename the session so we can identify it reliably in the entity tab.
+  // Rename the currently open conversation so we can identify it reliably in the entity tab.
   const nav = page.getByRole('navigation', { name: 'Conversations' });
-  await nav
+  const currentRow = nav.locator('[aria-current="true"]').locator('..');
+  await expect(currentRow).toBeVisible();
+  await currentRow
     .getByRole('button', { name: /^Rename conversation / })
-    .first()
     .click();
   const input = nav.getByRole('textbox', { name: 'Conversation title' });
   await input.fill('Payments Entity Thread');
-  await input.press('Enter');
+  await nav.getByRole('button', { name: 'Save title' }).click();
   await expect(nav.getByText('Payments Entity Thread')).toBeVisible();
 
   // Return to the entity page AI chat tab and verify the bound session is listed.
