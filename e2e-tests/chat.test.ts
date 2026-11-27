@@ -642,7 +642,7 @@ test('entity page AI chat tab: list entity sessions, start a new chat bound to e
 
   // Rename the currently open conversation so we can identify it reliably in the entity tab.
   const nav = page.getByRole('navigation', { name: 'Conversations' });
-  const currentRow = nav.locator('[aria-current="true"]').locator('..');
+  const currentRow = nav.locator('button[aria-current="true"]').locator('..');
   await expect(currentRow).toBeVisible();
   await currentRow
     .getByRole('button', { name: /^Rename conversation / })
