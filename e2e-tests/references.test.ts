@@ -76,7 +76,9 @@ test('references from the catalog and from a source: tags before sending, on the
   await picker
     .getByRole('searchbox', { name: 'Search the catalog' })
     .fill('payments');
-  await picker.getByRole('button', { name: /example-payments/ }).click();
+  await picker
+    .getByRole('button', { name: /Example payments service/ })
+    .click();
   await expect(box.getByText('example-payments')).toBeVisible();
 
   // A snippet from the source that the app registers.
@@ -207,7 +209,9 @@ test('"Ask AI about this service" opens the chat with the entity and the prompt,
 
   const panel = panelOf(page);
   await expect(panel).toBeVisible();
-  await expect(boxOf(panel).getByText('example-payments')).toBeVisible();
+  await expect(
+    boxOf(panel).getByText('example-payments', { exact: true }),
+  ).toBeVisible();
   const input = panel.getByLabel('Message', { exact: true });
   await expect(input).toHaveValue('Is this service ready for a restart?');
   // Wait a moment: a send by itself would show here.
