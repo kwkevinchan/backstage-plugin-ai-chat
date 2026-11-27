@@ -680,3 +680,118 @@ describe('AiChatPanel', () => {
     expect(within(aside).queryByRole('button', { name: 'Attach' })).toBeNull();
   });
 });
+
+describe('the box of the panel (B-04)', () => {
+  const box = () => screen.getByRole('list', { name: 'Sent with the message' });
+
+  it('keeps the page out on the same page, and sends it again on another page', async () => {
+    const api = mockApi();
+    api.sendMessage.mockResolvedValue(answer('Hello'));
+    await renderPanel(api);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Open AI chat' }));
+    expect(within(box()).getByTitle('/catalog')).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Leave out the current page' }),
+    );
+    await userEvent.type(screen.getByLabelText('Message'), 'first{Enter}');
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(api.sendMessage.mock.calls[0][1]).toStrictEqual({ text: 'first' });
+    expect(await screen.findByText('Hello')).toBeInTheDocument();
+
+    // Still on the same page: the page stays out.
+    expect(
+      await screen.findByRole('button', { name: 'Add the current page' }),
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(within(box()).getByTitle('/settings')).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('Message'), 'second{Enter}');
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(2));
+    expect(api.sendMessage.mock.calls[1][1]).toStrictEqual({
+      text: 'second',
+      page: { path: '/settings' },
+    });
+
+    // Back on the first page, it is sent again too.
+    await userEvent.click(screen.getByRole('button', { name: 'Catalog' }));
+    expect(within(box()).getByTitle('/catalog')).toBeInTheDocument();
+  });
+
+  it('puts the references of open({ references }) in the box, where they can be removed before sending', async () => {
+    const api = mockApi();
+    api.sendMessage.mockResolvedValue(answer('Read them'));
+    const { panelApi } = await renderPanel(api);
+
+    act(() => {
+      panelApi.open({
+        references: [
+          { kind: 'entity', entityRef: 'component:default/payments' },
+          { kind: 'text', text: 'Step 1: restart.', title: 'Runbook' },
+        ],
+      });
+    });
+
+    expect(within(box()).getByText('payments')).toBeInTheDocument();
+    expect(within(box()).getByText('Runbook')).toBeInTheDocument();
+    expect(api.createSession).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove payments' }));
+    await userEvent.type(screen.getByLabelText('Message'), 'what now{Enter}');
+
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(api.sendMessage.mock.calls[0][1]).toStrictEqual({
+      text: 'what now',
+      page: { path: '/catalog' },
+      references: [{ kind: 'text', text: 'Step 1: restart.', title: 'Runbook' }],
+    });
+  });
+
+  it('puts the references of <AiChatLauncher references> in the box, and keeps them while the panel is closed', async () => {
+    const api = mockApi();
+    await renderPanel(api, {
+      launcher: (
+        <AiChatLauncher
+          references={[{ kind: 'entity', entityRef: 'system:default/billing' }]}
+        >
+          Ask about billing
+        </AiChatLauncher>
+      ),
+    });
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Ask about billing' }),
+    );
+    expect(within(box()).getByText('billing')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Close AI chat' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Open AI chat' }));
+    expect(within(box()).getByText('billing')).toBeInTheDocument();
+  });
+
+  it('sends the references of a launch with its prompt', async () => {
+    const api = mockApi();
+    api.sendMessage.mockResolvedValue(answer('About billing'));
+    await renderPanel(api, {
+      launcher: (
+        <AiChatLauncher
+          prompt="what is this"
+          references={[{ kind: 'entity', entityRef: 'system:default/billing' }]}
+        >
+          Ask now
+        </AiChatLauncher>
+      ),
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Ask now' }));
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(api.sendMessage.mock.calls[0][1]).toStrictEqual({
+      text: 'what is this',
+      page: { path: '/catalog' },
+      references: [{ kind: 'entity', entityRef: 'system:default/billing' }],
+    });
+    await waitFor(() =>
+      expect(within(box()).getAllByRole('listitem')).toHaveLength(2),
+    );
+  });
+});

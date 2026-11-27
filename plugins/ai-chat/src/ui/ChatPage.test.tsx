@@ -46,6 +46,8 @@ import {
   streamResponse,
   user,
 } from '../testData';
+import { catalogApiRef } from '@backstage/plugin-catalog-react';
+import { catalogApiMock } from '@backstage/plugin-catalog-react/testUtils';
 import { ChatPageContent } from './ChatPage';
 
 function Where() {
@@ -1327,5 +1329,54 @@ describe('session list controls and live status', () => {
     expect(await within(nav).findByText('hold 600')).toBeInTheDocument();
     expect(await within(nav).findByText('Processing')).toBeInTheDocument();
     closeStream?.();
+  });
+});
+
+describe('the box of the chat page (B-04)', () => {
+  it('sends the first message of a new session without the page the user left out, with the references of the box', async () => {
+    const api = mockApi();
+    api.getSession.mockResolvedValue(detail());
+    api.sendMessage.mockResolvedValue(
+      streamResponse([
+        { type: 'start', messageId: 'run_r-1' },
+        { type: 'finish', finishReason: 'stop' },
+      ]),
+    );
+    const catalogApi = catalogApiMock({
+      entities: [
+        {
+          apiVersion: 'backstage.io/v1alpha1',
+          kind: 'Component',
+          metadata: { name: 'payments', namespace: 'default' },
+          spec: {},
+        },
+      ],
+    });
+    await renderPage(api, '/ai-chat', [
+      [catalogApiRef as never, catalogApi as never],
+    ]);
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Leave out the current page' }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Add reference' }));
+    await userEvent.click(
+      await screen.findByRole('menuitem', { name: 'Catalog entity' }),
+    );
+    await userEvent.click(
+      await screen.findByRole('button', { name: /payments/ }),
+    );
+    await userEvent.type(screen.getByLabelText('Message'), 'hi{Enter}');
+
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    expect(where()).toBe('/ai-chat/s-1');
+    expect(api.sendMessage.mock.calls[0][1]).toStrictEqual({
+      text: 'hi',
+      references: [{ kind: 'entity', entityRef: 'component:default/payments' }],
+    });
+    // The open conversation is the same page: the page stays out.
+    expect(
+      screen.getByRole('button', { name: 'Add the current page' }),
+    ).toBeInTheDocument();
   });
 });
