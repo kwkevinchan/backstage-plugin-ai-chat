@@ -601,6 +601,7 @@ describe('AdvanceRun: tools that need approval', () => {
       expect(log.find(i => i.kind === 'tool_result')).toMatchObject({
         callId: 'call-2',
         status: 'denied',
+        deniedReason: 'user',
       });
       const [message] = toolMessages(t.model.inputs[1]);
       expect(JSON.parse(message.content)).toMatchObject({ status: 'denied' });
@@ -716,7 +717,10 @@ describe('AdvanceRun: a call that is refused when it is written', () => {
       UPDATE_PLAN_TOOL_ID,
     ]);
     expect(t.tools.executed).toHaveLength(0);
-    expect((await t.read())[2]).toMatchObject({ status: 'denied' });
+    expect((await t.read())[2]).toMatchObject({
+      status: 'denied',
+      deniedReason: 'policy',
+    });
   });
 
   it('offers the other tools to the model', async () => {
@@ -833,7 +837,11 @@ describe('AdvanceRun: limits (H-05)', () => {
       (await t.read()).find(
         i => i.kind === 'tool_result' && i.callId === 'call-3',
       ),
-    ).toMatchObject({ status: 'denied', message: 'tool call limit' });
+    ).toMatchObject({
+      status: 'denied',
+      deniedReason: 'run_limit',
+      message: 'tool call limit',
+    });
   });
 
   it('stops when the working time is used up', async () => {

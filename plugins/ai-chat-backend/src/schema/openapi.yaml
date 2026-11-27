@@ -394,6 +394,18 @@ components:
             status:
               type: string
               enum: [ok, error, timeout, denied, invalid, unknown]
+            deniedReason:
+              type: string
+              enum:
+                [
+                  policy,
+                  run_limit,
+                  step_limit,
+                  hook,
+                  user,
+                  earlier_write_timed_out,
+                ]
+              description: Fixed reason code when `status` is `denied`.
             output:
               description: The output of the action. When it was cut, `truncated` is true.
             truncated:

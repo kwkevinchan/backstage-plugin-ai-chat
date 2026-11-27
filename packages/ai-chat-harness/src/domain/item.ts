@@ -163,11 +163,28 @@ export type ApprovalBody = {
  */
 export type ToolStartedBody = { kind: 'tool_started'; callId: string };
 
+/**
+ * Why a call got a `denied` result: the policy, the calls the run may make,
+ * the calls of one step, a `beforeToolCall` hook, the user, or a change
+ * before it in the step that went over its time.
+ *
+ * @public
+ */
+export type ToolDeniedReason =
+  | 'policy'
+  | 'run_limit'
+  | 'step_limit'
+  | 'hook'
+  | 'user'
+  | 'earlier_write_timed_out';
+
 /** @public */
 export type ToolResultBody = {
   kind: 'tool_result';
   callId: string;
   status: ToolResultStatus;
+  /** Fixed reason code when `status` is `denied`. Never carries user text. */
+  deniedReason?: ToolDeniedReason;
   output?: JsonValue;
   truncated?: boolean;
   message?: string;

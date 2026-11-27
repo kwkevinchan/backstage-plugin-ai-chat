@@ -115,6 +115,25 @@ describe('visibleItems', () => {
     expect(NOT_SHARED_OUTPUT).toBe('not shared');
   });
 
+  it('a redacted denied tool result keeps its fixed deniedReason code', () => {
+    const hidden = item(2, {
+      kind: 'tool_result',
+      callId: 'c2',
+      status: 'denied',
+      deniedReason: 'hook',
+      message: 'Denied by hook: secret detail',
+    });
+    const [seen] = see([hidden], share({ upToSeq: 2, outputsUpToSeq: 1 }));
+    expect(seen).toMatchObject({
+      kind: 'tool_result',
+      callId: 'c2',
+      status: 'denied',
+      deniedReason: 'hook',
+      output: NOT_SHARED_OUTPUT,
+    });
+    expect(seen).not.toHaveProperty('message');
+  });
+
   it('a tool call keeps its id and input when the output bound is behind it', () => {
     const call = item(2, {
       kind: 'tool_call',

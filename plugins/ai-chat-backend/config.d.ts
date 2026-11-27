@@ -39,10 +39,13 @@ export interface Config {
       /** Seconds to wait for the model to finish one answer. Defaults to 120. */
       timeoutSeconds?: number;
       /**
-       * Whether the model reads images (JPEG, PNG, WebP, GIF). When it does,
-       * the images a user attaches are sent to the model server as part of the
-       * message, so they leave your organization if the server is outside it.
-       * Defaults to false: the chat then takes no image.
+       * Global switch for image attachments (JPEG, PNG, WebP, GIF) and whether
+       * the default model reads them. Controls `GET /input-config` (whether
+       * the UI shows the attach button) and whether the backend accepts image
+       * uploads and messages with images (400 when false). When true, attached
+       * images are sent to the default model server as part of the message, so
+       * they leave your organization if the server is outside it. Defaults to
+       * false.
        */
       images?: boolean;
       /**
@@ -86,7 +89,13 @@ export interface Config {
         model: string;
         /** Seconds to wait for one answer. Defaults to 120. */
         timeoutSeconds?: number;
-        /** Whether the model reads images. Defaults to false. */
+        /**
+         * Whether this model reads images. Only controls whether attached
+         * images are sent to this model or replaced with a one-line
+         * placeholder; it does not hide the attach button or reject image
+         * uploads/messages (which are controlled globally by
+         * `aiChat.llm.images`). Defaults to false.
+         */
         images?: boolean;
         /** As `llm.parallelToolCalls`. Defaults to false. */
         parallelToolCalls?: boolean;

@@ -48,6 +48,7 @@ export function resultStatusOf(
     case 'failed':
       return 'failed';
     case 'rejected':
+    case 'blocked':
       return 'denied';
     case 'unknown':
       return 'unknown';

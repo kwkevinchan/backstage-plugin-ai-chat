@@ -966,4 +966,83 @@ describe('UiMessageStreamPresenter', () => {
       ).toContain('text-end');
     });
   });
+
+  describe('system-denied tool results', () => {
+    it('emits tool-approval-request and approved:false with reason for pre-approval denials', () => {
+      const chunks = present([
+        { type: 'run.started', runId: RUN },
+        { type: 'step.started', step: 1 },
+        completed(toolCall(2, 'c1')),
+        completed({
+          ...base(3),
+          kind: 'tool_result',
+          callId: 'c1',
+          status: 'denied',
+          deniedReason: 'policy',
+        } as Item),
+        { type: 'step.ended', step: 1 },
+        { type: 'run.ended', outcome: { status: 'completed' } },
+      ]);
+      expect(chunks).toContainEqual(
+        expect.objectContaining({
+          type: 'tool-approval-request',
+          approvalId: 'c1',
+          toolCallId: 'c1',
+        }),
+      );
+      expect(chunks).toContainEqual({
+        type: 'tool-approval-response',
+        approvalId: 'c1',
+        approved: false,
+        reason: 'policy',
+      });
+      expect(chunks).toContainEqual({
+        type: 'tool-output-denied',
+        toolCallId: 'c1',
+      });
+    });
+
+    it('emits approved:true with reason and no request for earlier_write_timed_out on a resumed presenter', () => {
+      const presenter = new UiMessageStreamPresenter({
+        runId: RUN,
+        typing: false,
+        afterStart: [
+          {
+            type: 'tool-approval-response',
+            approvalId: 'c2',
+            approved: true,
+          },
+        ],
+      });
+      const chunks = [
+        ...presenter.present({ type: 'run.started', runId: RUN }),
+        ...presenter.present(
+          completed({
+            ...base(5),
+            kind: 'tool_result',
+            callId: 'c2',
+            status: 'denied',
+            deniedReason: 'earlier_write_timed_out',
+          } as Item),
+        ),
+        ...presenter.present({
+          type: 'run.ended',
+          outcome: { status: 'completed' },
+        }),
+      ];
+      expect(chunks.filter(c => c.type === 'tool-approval-request')).toEqual(
+        [],
+      );
+      expect(chunks).toContainEqual({
+        type: 'tool-approval-response',
+        approvalId: 'c2',
+        approved: true,
+        reason: 'earlier_write_timed_out',
+      });
+      expect(chunks).toContainEqual({
+        type: 'tool-output-denied',
+        toolCallId: 'c2',
+      });
+    });
+  });
 });
