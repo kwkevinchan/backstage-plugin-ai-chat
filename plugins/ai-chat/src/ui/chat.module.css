@@ -35,6 +35,10 @@
   }
 }
 
+.chat-entity-tab {
+  max-width: 42rem;
+}
+
 .chat-sidebar {
   display: flex;
   flex-direction: column;

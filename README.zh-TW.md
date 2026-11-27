@@ -58,8 +58,9 @@ backend.add(import('@backstage/plugin-signals-backend'));
 沒裝 chat 外掛時按鈕不顯示）。`prompt` 會以登入者的身分立刻送出，請使用固定字串
 或程式可控的內容，不要從網址參數或不受信任的輸入組合；只有 entity 時，下一則從面板
 送出的訊息帶著它。面板等登入完成後才出現，掛在路由外面，換頁不會卸下進行中的對話。
-舊前端系統要在 router 裡、路由外面掛一次 `<AiChatPanel>`；新前端系統註冊 plugin 就有這塊面板。
-舊前端系統的接法見[英文 README](README.md#frontend-legacy-frontend-system)。
+舊前端系統要在 router 裡、路由外面掛一次 `<AiChatPanel>`；新前端系統註冊 plugin 就有這塊面板，
+也會自動在 entity 頁面加上「AI chat」分頁，列出自己綁定該 entity 的對話與「New chat」按鈕。
+舊前端系統可在 `EntityLayout` 加上 `<EntityLayout.Route path="/ai-chat" title="AI chat"><EntityAiChatContent /></EntityLayout.Route>`，詳見[英文 README](README.md#frontend-legacy-frontend-system)。
 別的 frontend plugin 可以為某個 action 註冊結果顯示元件（例如把輸出畫成表格），畫在那個呼叫的列下面；
 內建的列和核准卡片照舊。新前端系統用 `@kwkevinchan/backstage-plugin-ai-chat-react/alpha` 的
 `AiChatToolResultBlueprint`；舊前端系統由 app 用 `createAiChatToolResultsApi([...])` 覆蓋

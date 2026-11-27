@@ -21,7 +21,7 @@
  * @packageDocumentation
  */
 
-export { aiChatPlugin, AiChatPage } from './plugin';
+export { aiChatPlugin, AiChatPage, EntityAiChatContent } from './plugin';
 export { AiChatPanel } from './ui/AiChatPanel';
 export { aiChatApiRef } from './api';
 export { createAiChatToolResultsApi } from './application/toolResultsApi';

@@ -869,7 +869,7 @@ flowchart LR
   - 共用型別（`@kwkevinchan/backstage-plugin-ai-chat-common`）：`ChatSession.entityRef` 的說明。
   - 前端的 client（`@kwkevinchan/backstage-plugin-ai-chat`）：`AiChatClient.listSessions({ entityRef })`。不改畫面。
   - 範例 module：示範 `addContextProvider`。
-  - 不做：entity 頁面的 Session 分頁（SE-06 的畫面，另一項）；分享給自己的 Session 出現在 entity 的列表（P2-04 之後）；每個 Agent 選用哪些 provider；改變 Session 的綁定；provider 上限的設定。
+  - 不做：分享給自己的 Session 出現在 entity 的列表（P2-04 之後）；每個 Agent 選用哪些 provider；改變 Session 的綁定；provider 上限的設定。（entity 頁面的 Session 分頁 `EntityAiChatContent` 已完成。）
 - **依賴**：P3-03（`readCurrentPlan`）、P3-05（`StepContext`、`copyStepContext`、`settle`）。
 - **送給模型的位置和順序**：系統提示，依序是 Agent 的系統提示、工具輸出不可信的說明、Skill 清單、「這一步先寫計畫」（`planning: required` 的第一步）、provider 的說明（`CONTEXT_NOTICE`），然後每個 provider 一段：`user`、`entity`、`plan`，再來是 module 的 provider，照註冊順序。每一段第一行是 `Context from "<id>":`，provider 的每一行前面加 `> `。
 - **驗收**：

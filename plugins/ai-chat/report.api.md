@@ -136,4 +136,7 @@ export const aiChatPlugin: BackstagePlugin<
 export function createAiChatToolResultsApi(
   results: Iterable<AiChatToolResult>,
 ): AiChatToolResultsApi;
+
+// @public
+export const EntityAiChatContent: () => JSX.Element;
 ```

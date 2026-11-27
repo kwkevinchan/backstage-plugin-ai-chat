@@ -613,3 +613,50 @@ test('session list: search, pin, rename, archive and stay archived after reload,
   await expect(nav.getByText('Beta Billing')).toHaveCount(0);
   await shot('19-session-list-deleted');
 });
+
+test('entity page AI chat tab: list entity sessions, start a new chat bound to entity, and return to see it', async ({
+  page,
+}) => {
+  const shot = watch(page);
+  await signIn(page);
+
+  await page.goto('/catalog/default/component/example-payments');
+  await page.getByRole('tab', { name: /AI chat/i }).click();
+  await expect(page).toHaveURL(
+    /\/catalog\/default\/component\/example-payments\/ai-chat/,
+  );
+
+  const tabNav = page.getByRole('navigation', { name: 'Conversations' });
+  await tabNav.getByRole('button', { name: 'New chat' }).click();
+  await expect(page).toHaveURL(
+    /\/ai-chat\?entityRef=component%3Adefault%2Fexample-payments/,
+  );
+
+  await say(page, 'list services');
+  await expect(
+    page.getByText('Here is the result of the action'),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/ai-chat\/[^/?]+/);
+  const createdPath = new URL(page.url()).pathname;
+
+  // Rename the session so we can identify it reliably in the entity tab.
+  const nav = page.getByRole('navigation', { name: 'Conversations' });
+  await nav
+    .getByRole('button', { name: /^Rename conversation / })
+    .first()
+    .click();
+  const input = nav.getByRole('textbox', { name: 'Conversation title' });
+  await input.fill('Payments Entity Thread');
+  await input.press('Enter');
+  await expect(nav.getByText('Payments Entity Thread')).toBeVisible();
+
+  // Return to the entity page AI chat tab and verify the bound session is listed.
+  await page.goto('/catalog/default/component/example-payments/ai-chat');
+  const entityNav = page.getByRole('navigation', { name: 'Conversations' });
+  await expect(entityNav.getByText('Payments Entity Thread')).toBeVisible();
+  await shot('20-entity-ai-chat-tab');
+
+  // Clicking the row opens the conversation URL.
+  await entityNav.getByText('Payments Entity Thread').click();
+  await expect(page).toHaveURL(new RegExp(`${createdPath}$`));
+});
