@@ -48,8 +48,9 @@ export function launchContextOf(
   const entityRef = request.entityRef;
   const waits =
     Array.isArray(request.references) && request.references.length > 0;
+  const text = waits ? { draft: prompt } : { prompt };
   return {
-    ...(prompt ? (waits ? { draft: prompt } : { prompt }) : {}),
+    ...(prompt ? text : {}),
     ...(entityRef && isEntityRef(entityRef) ? { entityRef } : {}),
   };
 }
