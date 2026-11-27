@@ -172,7 +172,13 @@ export type ItemBody =
       kind: 'tool_result';
       callId: string;
       status: 'ok' | 'error' | 'timeout' | 'denied' | 'invalid' | 'unknown';
-      deniedReason?: 'user' | 'policy' | 'run_limit' | 'step_limit' | 'earlier_write_timed_out' | 'hook';
+      deniedReason?:
+        | 'user'
+        | 'policy'
+        | 'run_limit'
+        | 'step_limit'
+        | 'earlier_write_timed_out'
+        | 'hook';
       output?: JsonValue;
       truncated?: boolean;
       message?: string;
@@ -1149,31 +1155,31 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 
 **SSE 的格式**是 AI SDK 的 UI message stream（鎖定 `ai@7.0.166`）。`uiMessageStream.ts` 把 `HarnessEvent` 轉過去。回應的 header：`content-type: text/event-stream`、`cache-control: no-cache, no-transform`、`x-vercel-ai-ui-message-stream: v1`、`x-accel-buffering: no`。每個事件一行 `data: <JSON>`，結尾 `data: [DONE]`。`no-transform` 讓 Backstage root router 的 `compression()` 不壓縮這個回應（壓縮會把串流累積到結尾才送）；每次寫入後也 flush。串流閒置時每 15 秒寫一行 `: keep-alive` 註解（SSE 的註解行，解析器略過），避免 proxy 關掉閒置的連線，串流結束時清掉計時器。
 
-| HarnessEvent                                                    | UI message stream                                                                                                     |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `run.started`                                                   | `start`（`messageId` 每個 Run 一個），加 `data-run`（`transient`，Run 的 id 和狀態）                                  |
-| `step.started`、`step.ended`                                    | `start-step`、`finish-step`                                                                                           |
-| `item.started`（agent_message）、`item.delta`、`item.completed` | `text-start`、`text-delta`、`text-end`                                                                                |
-| `item.completed`（tool_call）                                   | `tool-input-available`                                                                                                |
-| `run.ended`（等核准）的 `pending`，每個呼叫                     | 各送一次 `tool-approval-request`（`approvalId` 等於 `toolCallId`），放在 `data-run` 之前                              |
-| `approval` Item                                                 | `tool-approval-response`（`approved`），放在核准後接續串流的開頭                                                      |
-| `item.completed`（tool_result，成功）                           | `tool-output-available`                                                                                               |
-| `item.completed`（tool_result，失敗）                           | `tool-output-error`                                                                                                   |
-| `item.completed`（tool_result，`unknown`）                      | `tool-output-error`，`errorText` 固定為 `TOOL_RESULT_NOT_KNOWN`（`ai-chat-common`），畫面即時和還原都顯示「結果不明」 |
+| HarnessEvent                                                    | UI message stream                                                                                                                                            |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `run.started`                                                   | `start`（`messageId` 每個 Run 一個），加 `data-run`（`transient`，Run 的 id 和狀態）                                                                         |
+| `step.started`、`step.ended`                                    | `start-step`、`finish-step`                                                                                                                                  |
+| `item.started`（agent_message）、`item.delta`、`item.completed` | `text-start`、`text-delta`、`text-end`                                                                                                                       |
+| `item.completed`（tool_call）                                   | `tool-input-available`                                                                                                                                       |
+| `run.ended`（等核准）的 `pending`，每個呼叫                     | 各送一次 `tool-approval-request`（`approvalId` 等於 `toolCallId`），放在 `data-run` 之前                                                                     |
+| `approval` Item                                                 | `tool-approval-response`（`approved`），放在核准後接續串流的開頭                                                                                             |
+| `item.completed`（tool_result，成功）                           | `tool-output-available`                                                                                                                                      |
+| `item.completed`（tool_result，失敗）                           | `tool-output-error`                                                                                                                                          |
+| `item.completed`（tool_result，`unknown`）                      | `tool-output-error`，`errorText` 固定為 `TOOL_RESULT_NOT_KNOWN`（`ai-chat-common`），畫面即時和還原都顯示「結果不明」                                        |
 | `item.completed`（tool_result，被拒絕）                         | 有系統阻擋原因（非 `user`）時先送 `tool-approval-response`（帶 `reason`，核准前被擋且尚未送過請求時先補 `tool-approval-request`），再送 `tool-output-denied` |
-| `summary.started`                                               | `data-notice`（`transient`，`code: 'summarizing'`，「整理較早的內容」）                                               |
-| `context.trimmed`                                               | `data-notice`（`transient`，`code: 'context_trimmed'`，「較早的內容已省略」）                                         |
-| `summary.failed`                                                | 同上，同一個串流只送一次。不含 `cause`                                                                                |
-| `item.completed`（summary）                                     | 忽略：摘要不是訊息，只給模型看（還原畫面時也略過）。`data-item` 照送                                                  |
-| `item.completed`（plan_update）                                 | `data-plan`（固定 `id`，同一則訊息內後送的取代先送的）                                                                |
-| 每一筆完成的 Item                                               | `data-item`（`transient`，序號和 kind），給 A-07 接回用                                                               |
-| `run.ended`（等核准）                                           | `data-run`（`transient`），然後 `finish`（`finishReason: 'tool-calls'`）                                              |
-| `item.started`（tool_call）                                     | 忽略。`tool-input-available` 在 `item.completed` 才送                                                                 |
-| `run.ended`（完成）                                             | `data-run`（`transient`），然後 `finish`（`finishReason: 'stop'`）                                                    |
-| `run.ended`（失敗）                                             | `data-run`（`transient`），然後 `error`。不送 `finish`，`useChat` 遇到 `error` 就丟例外                               |
-| `run.ended`（取消）                                             | `data-run`（`transient`），然後 `abort`                                                                               |
-| `message.read`（PI）                                            | `data-inserted`（不是 `transient`，進訊息），在那一步的 `start-step` 之前                                             |
-| 宿主的 `queue.state`（PI，Run 結束時）                          | `data-queue`（`transient`），在 `data-run` 之前                                                                       |
+| `summary.started`                                               | `data-notice`（`transient`，`code: 'summarizing'`，「整理較早的內容」）                                                                                      |
+| `context.trimmed`                                               | `data-notice`（`transient`，`code: 'context_trimmed'`，「較早的內容已省略」）                                                                                |
+| `summary.failed`                                                | 同上，同一個串流只送一次。不含 `cause`                                                                                                                       |
+| `item.completed`（summary）                                     | 忽略：摘要不是訊息，只給模型看（還原畫面時也略過）。`data-item` 照送                                                                                         |
+| `item.completed`（plan_update）                                 | `data-plan`（固定 `id`，同一則訊息內後送的取代先送的）                                                                                                       |
+| 每一筆完成的 Item                                               | `data-item`（`transient`，序號和 kind），給 A-07 接回用                                                                                                      |
+| `run.ended`（等核准）                                           | `data-run`（`transient`），然後 `finish`（`finishReason: 'tool-calls'`）                                                                                     |
+| `item.started`（tool_call）                                     | 忽略。`tool-input-available` 在 `item.completed` 才送                                                                                                        |
+| `run.ended`（完成）                                             | `data-run`（`transient`），然後 `finish`（`finishReason: 'stop'`）                                                                                           |
+| `run.ended`（失敗）                                             | `data-run`（`transient`），然後 `error`。不送 `finish`，`useChat` 遇到 `error` 就丟例外                                                                      |
+| `run.ended`（取消）                                             | `data-run`（`transient`），然後 `abort`                                                                                                                      |
+| `message.read`（PI）                                            | `data-inserted`（不是 `transient`，進訊息），在那一步的 `start-step` 之前                                                                                    |
+| 宿主的 `queue.state`（PI，Run 結束時）                          | `data-queue`（`transient`），在 `data-run` 之前                                                                                                              |
 
 - 串流中，要核准的呼叫由 `run.ended`（等核准）的 `pending` 決定，每個各送一次 `tool-approval-request`。
 - 從紀錄還原畫面（重新整理、接回、GetSession）時，「要核准」是 `needsApproval(call)`、沒有 `approval`、沒有 `tool_result`，而且 Run 是 `waiting_approval`、這個呼叫在它的最後一步。不看 `policy` 欄位：立即被拒絕的呼叫存成 `ask`，但它有結果，所以不算要核准。已決定但還沒有結果的呼叫（P-04 部分決定）顯示成 `approval-responded`（見 5.5），只在 Run 是 `waiting_approval` 或 `running` 時。Run 已經結束（`completed`、`cancelled`、`expired`）時，沒有結果的呼叫一律看有沒有 `tool_started`：有就顯示成「結果不明」，沒有就顯示成沒有執行。
