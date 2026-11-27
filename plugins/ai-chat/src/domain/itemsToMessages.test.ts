@@ -175,9 +175,16 @@ describe('itemsToMessages', () => {
           user('go'),
           call('c1'),
           call('c2'),
+          call('c3'),
           {
             kind: 'approval',
             callId: 'c1',
+            decision: 'allow',
+            decidedBy: 'user:default/guest',
+          },
+          {
+            kind: 'approval',
+            callId: 'c3',
             decision: 'allow',
             decidedBy: 'user:default/guest',
           },
@@ -192,6 +199,11 @@ describe('itemsToMessages', () => {
             callId: 'c2',
             status: 'denied',
           },
+          {
+            kind: 'tool_result',
+            callId: 'c3',
+            status: 'denied',
+          },
         ),
       }),
     );
@@ -204,6 +216,7 @@ describe('itemsToMessages', () => {
         { id: 'c1', approved: true, reason: 'earlier_write_timed_out' },
       ],
       ['c2', 'output-denied', { id: 'c2', approved: false }],
+      ['c3', 'output-denied', { id: 'c3', approved: false }],
     ]);
   });
 

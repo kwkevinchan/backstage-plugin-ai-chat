@@ -143,7 +143,7 @@ export function visibleItems(
   return visible;
 }
 
-/** Status only. `message` and `truncated` would carry the output too. */
+/** Status and fixed denial code only. `message` and `truncated` would carry the output too. */
 function redactedResult(item: Item & ToolResultBody): Item {
   return {
     sessionId: item.sessionId,
@@ -153,6 +153,9 @@ function redactedResult(item: Item & ToolResultBody): Item {
     kind: 'tool_result',
     callId: item.callId,
     status: item.status,
+    ...(item.deniedReason !== undefined
+      ? { deniedReason: item.deniedReason }
+      : {}),
     output: NOT_SHARED_OUTPUT,
   };
 }

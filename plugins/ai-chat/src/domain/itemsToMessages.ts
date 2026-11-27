@@ -99,7 +99,8 @@ export function itemsToMessages(
             state: 'output-denied',
             approval: {
               id: call.callId,
-              approved: decided ?? false,
+              approved:
+                result.deniedReason !== undefined ? (decided ?? false) : false,
               ...(result.deniedReason !== undefined && {
                 reason: result.deniedReason,
               }),

@@ -584,6 +584,7 @@ describe('executeTools: a change that goes over its time (D-09, P-02)', () => {
     const w2 = resultsOf(await t.read()).find(r => r.callId === 'w2');
     expect(w2).toMatchObject({
       status: 'denied',
+      deniedReason: 'earlier_write_timed_out',
       message:
         'Not run: an earlier change of this step did not answer in time and may still be running.',
     });
@@ -616,9 +617,13 @@ describe('callModel: tool calls per step (P-05)', () => {
     expect(denied.map(r => r.callId)).toEqual(
       calls.slice(8).map(c => c.callId),
     );
-    expect(denied.every(r => r.message === 'tool call limit per step')).toBe(
-      true,
-    );
+    expect(
+      denied.every(
+        r =>
+          r.message === 'tool call limit per step' &&
+          r.deniedReason === 'step_limit',
+      ),
+    ).toBe(true);
     expect(t.run.usage[0].toolCallsUsed).toBe(10);
   });
 

@@ -381,7 +381,8 @@ export class UiMessageStreamPresenter {
           chunks.push({
             type: 'tool-approval-response',
             approvalId: item.callId,
-            approved: decided ?? false,
+            approved:
+              decided ?? item.deniedReason === 'earlier_write_timed_out',
             reason: item.deniedReason,
           });
         }

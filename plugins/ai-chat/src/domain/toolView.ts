@@ -30,7 +30,7 @@ export const NOT_RUN = 'The call did not run.';
 export type SystemDeniedReason = Exclude<ChatToolDeniedReason, 'user'>;
 
 const SYSTEM_DENIED_REASON_TEXT: Record<SystemDeniedReason, string> = {
-  step_limit: 'write limit for this step',
+  step_limit: 'tool call limit for this step',
   run_limit: 'call limit for this run',
   earlier_write_timed_out: 'an earlier write in this step timed out',
   policy: 'blocked by policy',

@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
-import type { ModelInputSize, ToolResultStatus } from '../../domain';
+import type {
+  ModelInputSize,
+  ToolDeniedReason,
+  ToolResultStatus,
+} from '../../domain';
 
 /**
  * How a model call ended.
@@ -103,9 +107,7 @@ export type ModelCallRecord = {
   providers?: ContextProviderRecord[];
 };
 
-import type { ToolDeniedReason } from '../../domain';
-
-export type { ToolDeniedReason };
+export type { ToolDeniedReason } from '../../domain';
 
 /**
  * One tool result written to the log (O-01). Numbers, ids and fixed words

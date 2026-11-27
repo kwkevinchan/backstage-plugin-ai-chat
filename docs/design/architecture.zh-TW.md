@@ -172,6 +172,7 @@ export type ItemBody =
       kind: 'tool_result';
       callId: string;
       status: 'ok' | 'error' | 'timeout' | 'denied' | 'invalid' | 'unknown';
+      deniedReason?: 'user' | 'policy' | 'run_limit' | 'step_limit' | 'earlier_write_timed_out' | 'hook';
       output?: JsonValue;
       truncated?: boolean;
       message?: string;
@@ -1159,7 +1160,7 @@ Controller 只做三件事：把請求轉成 use case 的輸入、呼叫 use cas
 | `item.completed`（tool_result，成功）                           | `tool-output-available`                                                                                               |
 | `item.completed`（tool_result，失敗）                           | `tool-output-error`                                                                                                   |
 | `item.completed`（tool_result，`unknown`）                      | `tool-output-error`，`errorText` 固定為 `TOOL_RESULT_NOT_KNOWN`（`ai-chat-common`），畫面即時和還原都顯示「結果不明」 |
-| `item.completed`（tool_result，被拒絕）                         | `tool-output-denied`                                                                                                  |
+| `item.completed`（tool_result，被拒絕）                         | 有系統阻擋原因（非 `user`）時先送 `tool-approval-response`（帶 `reason`，核准前被擋且尚未送過請求時先補 `tool-approval-request`），再送 `tool-output-denied` |
 | `summary.started`                                               | `data-notice`（`transient`，`code: 'summarizing'`，「整理較早的內容」）                                               |
 | `context.trimmed`                                               | `data-notice`（`transient`，`code: 'context_trimmed'`，「較早的內容已省略」）                                         |
 | `summary.failed`                                                | 同上，同一個串流只送一次。不含 `cause`                                                                                |

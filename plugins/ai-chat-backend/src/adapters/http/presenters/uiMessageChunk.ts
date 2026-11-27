@@ -23,6 +23,7 @@ import type {
   ChatRunData,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { JsonValue } from '@backstage/types';
+import type { ToolDeniedReason } from '@kwkevinchan/ai-chat-harness';
 
 /**
  * The chunks of the AI SDK UI message stream (`ai@7.0.166`) that the host
@@ -52,7 +53,7 @@ export type UiMessageChunk =
       type: 'tool-approval-response';
       approvalId: string;
       approved: boolean;
-      reason?: string;
+      reason?: ToolDeniedReason;
     }
   | { type: 'tool-output-available'; toolCallId: string; output: JsonValue }
   | { type: 'tool-output-error'; toolCallId: string; errorText: string }

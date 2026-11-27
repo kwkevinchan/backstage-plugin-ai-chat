@@ -299,6 +299,7 @@ describe('AdvanceRun: hooks (X-05)', () => {
       const result = (await h.read()).find(i => i.kind === 'tool_result');
       expect(result).toMatchObject({
         status: 'denied',
+        deniedReason: 'hook',
         message: 'Denied by hook.',
       });
     },
