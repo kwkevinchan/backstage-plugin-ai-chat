@@ -59,9 +59,9 @@ export interface SendContentsStore {
   subscribe(listener: () => void): () => void;
   /**
    * Adds the references that the backend would take and that are not in the
-   * box yet, up to the limit. `label` names an entity on its tag.
+   * box yet, up to the limit.
    */
-  add(references: readonly AiChatReference[], label?: string): void;
+  add(references: readonly AiChatReference[]): void;
   /** Removes references from the box, by `DraftReference.id`. */
   remove(ids: readonly string[]): void;
   /** Leaves the page with this key out of the messages. */
@@ -98,7 +98,7 @@ export function createSendContentsStore(): SendContentsStore {
         listeners.delete(listener);
       };
     },
-    add(inputs, label) {
+    add(inputs) {
       const references = [...state.references];
       let full = false;
       for (const input of inputs) {
@@ -121,7 +121,6 @@ export function createSendContentsStore(): SendContentsStore {
           id: `reference-${nextId++}`,
           reference: taken.reference,
           ...(taken.truncated && { truncated: true }),
-          ...(label && taken.reference.kind === 'entity' && { label }),
         });
       }
       commit({ ...withoutFull(), references, ...(full && { full }) });
@@ -189,7 +188,7 @@ export interface SendContents {
   maxReferences: number;
   /** References were left out because the box was full. */
   overflowed: boolean;
-  add(references: readonly AiChatReference[], label?: string): void;
+  add(references: readonly AiChatReference[]): void;
   remove(id: string): void;
   /**
    * The references of the next message, and a function that removes those
@@ -241,8 +240,7 @@ export function useSendContents(options: UseSendContentsOptions): SendContents {
   const includePage = useCallback(() => store.openPage(), [store]);
   const excludePage = useCallback(() => store.closePage(key), [store, key]);
   const add = useCallback(
-    (references: readonly AiChatReference[], label?: string) =>
-      store.add(references, label),
+    (references: readonly AiChatReference[]) => store.add(references),
     [store],
   );
   const remove = useCallback((id: string) => store.remove([id]), [store]);

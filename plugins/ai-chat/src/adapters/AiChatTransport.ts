@@ -20,8 +20,12 @@ import {
   type ChatTransport,
   type UIMessageChunk,
 } from 'ai';
-import type { ChatPageContext } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type {
+  ChatPageContext,
+  ChatReferenceInput,
+} from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { AiChatApi } from '../api';
+import { referenceInputOf } from '../domain/references';
 import type { ChatUiMessage } from '../domain/types';
 
 /**
@@ -44,8 +48,12 @@ export type ChatRequestBody = {
 export interface AiChatTransportOptions {
   api: AiChatApi;
   sessionId: string;
-  /** The page the user is on, sent with every request that starts or carries on a run. */
-  getPage(): ChatPageContext;
+  /**
+   * The page the user is on, sent with every request that starts or carries
+   * on a run. `undefined` while the user leaves the page out: no request has
+   * `page` then.
+   */
+  getPage(): ChatPageContext | undefined;
   /** Called when the decision of a request is read, so the screen can clear it. */
   onDecisionTaken?(): void;
   /**
@@ -93,6 +101,7 @@ function emptyStream(): ReadableStream<UIMessageChunk> {
 function lastUserSend(messages: ChatUiMessage[]): {
   text: string;
   attachmentIds?: string[];
+  references?: ChatReferenceInput[];
 } {
   const message = [...messages].reverse().find(m => m.role === 'user');
   const text = (message?.parts ?? [])
@@ -101,9 +110,17 @@ function lastUserSend(messages: ChatUiMessage[]): {
   const attachmentIds = message?.metadata?.attachments?.map(
     attachment => attachment.id,
   );
-  return attachmentIds && attachmentIds.length > 0
-    ? { text, attachmentIds }
-    : { text };
+  const references = message?.metadata?.references?.map(referenceInputOf);
+  return {
+    text,
+    ...(attachmentIds && attachmentIds.length > 0 && { attachmentIds }),
+    ...(references && references.length > 0 && { references }),
+  };
+}
+
+/** `{ page }`, or nothing while the user leaves the page out. */
+function withPage(page: ChatPageContext | undefined) {
+  return page ? { page } : {};
 }
 
 /**
@@ -130,7 +147,7 @@ export class AiChatTransport implements ChatTransport<ChatUiMessage> {
       const response = await api.decide(
         sessionId,
         body.callId,
-        { approved: body.approved, page },
+        { approved: body.approved, ...withPage(page) },
         request.abortSignal,
       );
       if (isEventStream(response)) return chunksOf(response);
@@ -147,7 +164,7 @@ export class AiChatTransport implements ChatTransport<ChatUiMessage> {
     if (body.resume) {
       const response = await api.resume(
         sessionId,
-        { page },
+        withPage(page),
         request.abortSignal,
       );
       if (response) return chunksOf(response);
@@ -156,7 +173,7 @@ export class AiChatTransport implements ChatTransport<ChatUiMessage> {
     }
     const response = await api.sendMessage(
       sessionId,
-      { ...lastUserSend(request.messages), page },
+      { ...lastUserSend(request.messages), ...withPage(page) },
       request.abortSignal,
     );
     return chunksOf(response);

@@ -22,6 +22,7 @@ import type {
   ChatNoticeData,
   ChatPageContext,
   ChatQueue,
+  ChatReferenceInput,
   ChatQueuePausedReason,
   ChatRun,
   ChatRunStatus,
@@ -54,12 +55,17 @@ import type { ChatUiMessage, OutgoingMessage } from '../domain/types';
 export interface UseSessionChatOptions {
   api: AiChatApi;
   detail: ChatSessionDetail;
-  /** The page the user is on; sent with every message. */
-  page: ChatPageContext;
+  /**
+   * The page the user is on; sent with every message, decision and resume.
+   * `undefined` while the user leaves the page out.
+   */
+  page: ChatPageContext | undefined;
   /** A message to send when the screen opens (the first message of a new session). */
   firstMessage?: string;
   /** Images of that first message. An image with no text is still sent. */
   firstAttachments?: ChatAttachment[];
+  /** References of that first message. */
+  firstReferences?: ChatReferenceInput[];
   /** Called after a run changed the session (a title, the order of the list). */
   onChanged?(): void;
   /**
@@ -101,13 +107,38 @@ function draftOf(input: string | OutgoingMessage): OutgoingMessage {
   return typeof input === 'string' ? { text: input } : input;
 }
 
-/** The body of send, insert and queue. Image ids are omitted when there are none. */
-function messageBody(draft: OutgoingMessage, page: ChatPageContext) {
+/**
+ * The body of send, insert and queue. Image ids, references and the page are
+ * omitted when there are none.
+ */
+function messageBody(
+  draft: OutgoingMessage,
+  page: ChatPageContext | undefined,
+) {
   const attachmentIds = draft.attachments?.map(attachment => attachment.id);
   return {
     text: draft.text,
-    page,
+    ...(page && { page }),
     ...(attachmentIds && attachmentIds.length > 0 ? { attachmentIds } : {}),
+    ...(draft.references && draft.references.length > 0
+      ? { references: draft.references }
+      : {}),
+  };
+}
+
+/** The metadata of a user message of the screen: its images and references. */
+function draftMetadata(draft: {
+  attachments?: ChatAttachment[];
+  references?: ChatReferenceInput[];
+}) {
+  const attachments = draft.attachments ?? [];
+  const references = draft.references ?? [];
+  if (attachments.length === 0 && references.length === 0) return {};
+  return {
+    metadata: {
+      ...(attachments.length > 0 && { attachments }),
+      ...(references.length > 0 && { references }),
+    },
   };
 }
 
@@ -501,10 +532,12 @@ export function useSessionChat(options: UseSessionChatOptions) {
       options.firstMessage ||
       (options.firstAttachments && options.firstAttachments.length > 0)
     ) {
-      const attachments = options.firstAttachments ?? [];
       chatRef.current.sendMessage({
         text: options.firstMessage ?? '',
-        ...(attachments.length > 0 ? { metadata: { attachments } } : {}),
+        ...draftMetadata({
+          attachments: options.firstAttachments,
+          references: options.firstReferences,
+        }),
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -531,10 +564,9 @@ export function useSessionChat(options: UseSessionChatOptions) {
       setInterrupted(false);
       setResendDraft(draft);
       await waitUntilIdle();
-      const attachments = draft.attachments ?? [];
       await chatRef.current.sendMessage({
         text: draft.text,
-        ...(attachments.length > 0 ? { metadata: { attachments } } : {}),
+        ...draftMetadata(draft),
       });
       return true;
     },
@@ -864,9 +896,10 @@ export function useSessionChat(options: UseSessionChatOptions) {
             options: { body },
           });
         } else {
+          const page = pageRef.current;
           const response = await api.decide(sessionId, callId, {
             approved,
-            page: pageRef.current,
+            ...(page && { page }),
           });
           // A stream here means the request stored the last decision after
           // all (another tab decided the other calls). The loop runs; follow

@@ -19,9 +19,11 @@ import {
   type ChatAttachment,
   type ChatInsertState,
   type ChatItem,
+  type ChatMessageReference,
   type ChatPlan,
   type ChatSessionDetail,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import { referenceInputOf } from './references';
 import { NOT_RUN, RESULT_NOT_KNOWN } from './toolView';
 import type { ChatUiMessage, OutgoingMessage } from './types';
 
@@ -170,7 +172,7 @@ export function itemsToMessages(
           messages.push({
             id: userMessageId(item.seq),
             role: 'user',
-            ...messageMetadata(item.attachments),
+            ...messageMetadata(item),
             parts: [
               { type: 'text', text: item.text },
               {
@@ -193,7 +195,7 @@ export function itemsToMessages(
       messages.push({
         id: userMessageId(item.seq),
         role: 'user',
-        ...messageMetadata(item.attachments),
+        ...messageMetadata(item),
         parts: [{ type: 'text', text: item.text }],
       });
       continue;
@@ -231,6 +233,10 @@ export function itemsToMessages(
             ...(read.attachments &&
               read.attachments.length > 0 && {
                 attachments: read.attachments,
+              }),
+            ...(read.references &&
+              read.references.length > 0 && {
+                references: read.references,
               }),
           },
         });
@@ -364,7 +370,7 @@ export function lastRunInterrupted(
 
 /**
  * The first message of the last run, to send it again: the last message of
- * the user that was not inserted into a run, text and images.
+ * the user that was not inserted into a run, text, images and references.
  */
 export function lastUserDraft(
   items: readonly ChatItem[],
@@ -376,6 +382,10 @@ export function lastUserDraft(
         text: item.text,
         ...(item.attachments &&
           item.attachments.length > 0 && { attachments: item.attachments }),
+        ...(item.references &&
+          item.references.length > 0 && {
+            references: item.references.map(referenceInputOf),
+          }),
       };
     }
   }
@@ -387,11 +397,21 @@ export function lastUserText(items: readonly ChatItem[]): string | undefined {
   return lastUserDraft(items)?.text;
 }
 
-/** Metadata for a user message that has images. Omitted when it has none. */
-function messageMetadata(attachments?: ChatAttachment[]) {
-  return attachments && attachments.length > 0
-    ? { metadata: { attachments } }
-    : {};
+/** Metadata for a user message that has images or references. Omitted when it has none. */
+function messageMetadata(item: {
+  attachments?: ChatAttachment[];
+  references?: ChatMessageReference[];
+}) {
+  const { attachments, references } = item;
+  const hasImages = Boolean(attachments && attachments.length > 0);
+  const hasReferences = Boolean(references && references.length > 0);
+  if (!hasImages && !hasReferences) return {};
+  return {
+    metadata: {
+      ...(hasImages && { attachments }),
+      ...(hasReferences && { references }),
+    },
+  };
 }
 
 /** Who decided a call, and when. */

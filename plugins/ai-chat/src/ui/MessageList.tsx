@@ -33,12 +33,14 @@ import type {
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { AiChatToolResultsApi } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import type { DecisionInfo } from '../domain/itemsToMessages';
+import type { ShownReference } from '../domain/references';
 import { UPDATE_PLAN_TOOL } from '../domain/plan';
 import type { ChatUnreadData } from '../domain/types';
 import { chatAttachmentsOf } from '../adapters/assistantUi/attachmentAdapter';
 import { ChatImages, messageAttachmentComponents } from './Attachments';
 import { MarkdownText } from './MarkdownText';
 import { PlanList, PlanToolCall } from './PlanCard';
+import { MessageReferences } from './SendContents';
 import { cx } from './styles';
 import { ToolCall, ToolCallViewContext } from './ToolCallCard';
 
@@ -98,6 +100,9 @@ function AssistantText({ text }: TextMessagePartProps) {
 function Inserted({ data }: DataMessagePartProps<ChatInsertedData>) {
   return (
     <>
+      {data.references && data.references.length > 0 && (
+        <MessageReferences references={data.references} />
+      )}
       {data.text && (
         <div className={cx('chat-message', 'chat-message-user')}>
           {data.text}
@@ -164,9 +169,22 @@ const data = {
   Fallback: Hidden,
 };
 
+const NO_REFERENCES: ShownReference[] = [];
+
+/** The references of the user message, as `toThreadMessage` keeps them. */
+function UserReferences() {
+  const references = useAuiState(
+    s =>
+      (s.message.metadata?.custom?.references as ShownReference[] | undefined) ??
+      NO_REFERENCES,
+  );
+  return <MessageReferences references={references} />;
+}
+
 function UserMessage() {
   return (
     <MessagePrimitive.Root style={{ display: 'contents' }}>
+      <UserReferences />
       <AuiIf condition={s => (s.message.attachments?.length ?? 0) > 0}>
         <ul className={cx('chat-images', 'chat-message-images')}>
           <MessagePrimitive.Attachments

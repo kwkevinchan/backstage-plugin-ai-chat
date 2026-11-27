@@ -35,6 +35,7 @@ import { useApi } from '@backstage/core-plugin-api';
 import { Container } from '@backstage/ui';
 import type {
   ChatAttachment,
+  ChatReferenceInput,
   ChatSession,
   ChatSessionDetail,
   ChatToolset,
@@ -49,8 +50,14 @@ import {
 } from '../adapters/assistantUi/threadListAdapter';
 import { useThreadListLiveUpdates } from '../adapters/assistantUi/useThreadListLiveUpdates';
 import { describeError } from '../adapters/describeError';
+import {
+  createSendContentsStore,
+  useSendContents,
+  type SendContentsStore,
+} from '../application/sendContents';
 import { useInputConfig } from '../application/useInputConfig';
-import { usePageContext } from '../application/usePageContext';
+import { pageContextOf, usePageContext } from '../application/usePageContext';
+import { pageKey } from '../domain/references';
 import type { OutgoingMessage } from '../domain/types';
 import { useToolsets } from '../application/useToolsets';
 import { DraftComposer } from './Composer';
@@ -80,7 +87,18 @@ type Basics = {
   toolsets: ChatToolset[];
   liveActivity?: SessionListActivity;
   onChanged(): void;
+  /** The box of the page, kept across its conversations. */
+  contents: SendContentsStore;
 };
+
+/**
+ * The chat page is one page for the page switch of the box, whatever
+ * conversation is open: a new conversation opens on its own path, and its
+ * first message keeps the choice of the user.
+ */
+function chatPageKey(basePath: string, entityRef?: string): string {
+  return pageKey(pageContextOf(basePath || '/', entityRef));
+}
 
 /** A session opens on its own URL: `<page>/<session id>` (SE-01). */
 function OpenSession({
@@ -89,6 +107,7 @@ function OpenSession({
   toolsets,
   liveActivity,
   onChanged,
+  contents,
 }: Basics) {
   const { sessionId = '' } = useParams();
   const location = useLocation();
@@ -102,9 +121,12 @@ function OpenSession({
   const firstState = location.state as {
     firstMessage?: string;
     firstAttachments?: ChatAttachment[];
+    firstReferences?: ChatReferenceInput[];
   } | null;
   const firstMessage = firstState?.firstMessage;
   const firstAttachments = firstState?.firstAttachments;
+  const firstReferences = firstState?.firstReferences;
+  const page = usePageContext();
   const hasFirst = Boolean(firstMessage || firstAttachments?.length);
 
   useEffect(() => {
@@ -161,6 +183,9 @@ function OpenSession({
       toolsets={toolsets}
       firstMessage={firstMessage}
       firstAttachments={firstAttachments}
+      firstReferences={firstReferences}
+      contents={contents}
+      pageKey={chatPageKey(basePath, page.entityRef)}
       liveActivity={liveActivity}
       onChanged={onChanged}
       onForked={forked => {
@@ -177,10 +202,23 @@ function OpenSession({
  * Then the toolsets chosen later are written to that session, and the first
  * message waits until they are.
  */
-function NewSession({ api, basePath, toolsets, onChanged }: Basics) {
+function NewSession({
+  api,
+  basePath,
+  toolsets,
+  onChanged,
+  contents: contentsStore,
+}: Basics) {
   const navigate = useNavigate();
   const page = usePageContext();
-  const images = useInputConfig(api)?.images;
+  const inputConfig = useInputConfig(api);
+  const images = inputConfig?.images;
+  const contents = useSendContents({
+    store: contentsStore,
+    page,
+    pageKey: chatPageKey(basePath, page.entityRef),
+    inputConfig,
+  });
   const [enabled, setEnabled] = useState<string[]>();
   const [error, setError] = useState<string>();
   const chosen = enabled ?? toolsets.filter(t => t.default).map(t => t.id);
@@ -267,6 +305,7 @@ function NewSession({ api, basePath, toolsets, onChanged }: Basics) {
       // session before its first run.
       if (existing) await writeToolsets();
       setError(undefined);
+      const box = contents.take();
       navigate(
         `${basePath}/${encodeURIComponent(session.id)}${
           page.entityRef
@@ -279,9 +318,13 @@ function NewSession({ api, basePath, toolsets, onChanged }: Basics) {
             ...(message.attachments?.length && {
               firstAttachments: message.attachments,
             }),
+            ...(box.references.length > 0 && {
+              firstReferences: box.references,
+            }),
           },
         },
       );
+      box.sent();
       return true;
     } catch (e) {
       setError(describeError(e));
@@ -308,7 +351,12 @@ function NewSession({ api, basePath, toolsets, onChanged }: Basics) {
           </div>
         )}
       </div>
-      <DraftComposer onSend={send} disabled={false} attachments={attachments} />
+      <DraftComposer
+        onSend={send}
+        disabled={false}
+        attachments={attachments}
+        contents={contents}
+      />
     </div>
   );
 }
@@ -379,12 +427,14 @@ function ChatPageBody(props: ChatPageBodyProps) {
     [api, onActionError, onClearError, reloadList],
   );
 
+  const [contents] = useState(createSendContentsStore);
   const basics: Basics = {
     api,
     basePath,
     toolsets,
     liveActivity,
     onChanged: reloadList,
+    contents,
   };
 
   return (

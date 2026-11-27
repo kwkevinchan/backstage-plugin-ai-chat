@@ -22,6 +22,7 @@ import { aiChatToolResultsApiRef } from '@kwkevinchan/backstage-plugin-ai-chat-r
 import type {
   ChatAttachment,
   ChatPageContext,
+  ChatReferenceInput,
   ChatSession,
   ChatSessionDetail,
   ChatShare,
@@ -32,6 +33,11 @@ import type { AttachmentSource } from '../adapters/assistantUi/attachmentAdapter
 import { useQueueAdapter } from '../adapters/assistantUi/queueAdapter';
 import { useSessionRuntime } from '../adapters/assistantUi/sessionRuntime';
 import { describeError } from '../adapters/describeError';
+import {
+  createSendContentsStore,
+  useSendContents,
+  type SendContentsStore,
+} from '../application/sendContents';
 import { useSessionChat } from '../application/useSessionChat';
 import { useSessionTools } from '../application/useSessionTools';
 import { useInputConfig } from '../application/useInputConfig';
@@ -39,6 +45,7 @@ import { usePageContext } from '../application/usePageContext';
 import { AttachmentLoaderContext, RejectionNotes } from './Attachments';
 import { Composer } from './Composer';
 import { ComposerQueue } from './ComposerQueue';
+import type { OutgoingMessage } from '../domain/types';
 import { MessageList } from './MessageList';
 import { ShareDialog } from './ShareDialog';
 import { cx } from './styles';
@@ -60,11 +67,20 @@ export interface SessionViewProps {
   firstMessage?: string;
   /** Images of that first message. */
   firstAttachments?: ChatAttachment[];
+  /** References of that first message. */
+  firstReferences?: ChatReferenceInput[];
   /**
    * The page of each message. The panel passes the launch and the path at
    * send time. Omitted, the route is used.
    */
   page?: ChatPageContext;
+  /**
+   * The references and the page switch of the box. The panel and the chat
+   * page keep one across their conversations; omitted, the view keeps its own.
+   */
+  contents?: SendContentsStore;
+  /** What counts as another page for the page switch; see `useSendContents`. */
+  pageKey?: string;
   /** Live run activity from the session list (Signals or fallback polling). */
   liveActivity?: ChatSession['activity'];
   onChanged?(): void;
@@ -77,12 +93,21 @@ export function SessionView(props: SessionViewProps) {
   const { api, detail, toolsets } = props;
   const routePage = usePageContext();
   const page = props.page ?? routePage;
+  const inputConfig = useInputConfig(api);
+  const [ownContents] = useState(createSendContentsStore);
+  const contents = useSendContents({
+    store: props.contents ?? ownContents,
+    page,
+    pageKey: props.pageKey,
+    inputConfig,
+  });
   const chat = useSessionChat({
     api,
     detail,
-    page,
+    page: contents.sentPage,
     firstMessage: props.firstMessage,
     firstAttachments: props.firstAttachments,
+    firstReferences: props.firstReferences,
     liveActivity: props.liveActivity,
     onChanged: props.onChanged,
   });
@@ -114,7 +139,6 @@ export function SessionView(props: SessionViewProps) {
   const waiting = chat.activeRun?.status === 'waiting_approval';
   // A run that goes on, or a response on its way before the run is known.
   const inRun = running || chat.busy;
-  const inputConfig = useInputConfig(api);
   const queueMax = inputConfig?.queueMaxMessages ?? DEFAULT_QUEUE_MAX;
   const rejections = useMemo(() => new RejectionNotes(), []);
   const images = inputConfig?.images;
@@ -135,11 +159,41 @@ export function SessionView(props: SessionViewProps) {
     (attachmentId: string) => api.readAttachment(sessionId, attachmentId),
     [api, sessionId],
   );
+  // The references of the box go with the message the box sends, and leave
+  // the box once that message was taken.
+  const { take } = contents;
+  const { send: chatSend, queueMessage: chatQueueMessage } = chat;
+  const send = useCallback(
+    async (draft: OutgoingMessage) => {
+      const box = take();
+      const sent = await chatSend(
+        box.references.length > 0
+          ? { ...draft, references: box.references }
+          : draft,
+      );
+      if (sent) box.sent();
+      return sent;
+    },
+    [chatSend, take],
+  );
+  const queueMessage = useCallback(
+    async (draft: OutgoingMessage) => {
+      const box = take();
+      const sent = await chatQueueMessage(
+        box.references.length > 0
+          ? { ...draft, references: box.references }
+          : draft,
+      );
+      if (sent) box.sent();
+      return sent;
+    },
+    [chatQueueMessage, take],
+  );
   const queue = useQueueAdapter({
     queued: chat.queue,
     inserted: chat.pending,
-    send: chat.send,
-    queueMessage: chat.queueMessage,
+    send,
+    queueMessage,
     editQueued: chat.editQueued,
     removeQueued: chat.removeQueued,
     moveQueued: chat.moveQueued,
@@ -152,7 +206,7 @@ export function SessionView(props: SessionViewProps) {
     // that this page is about to follow: the next message would not know
     // where to go.
     isSendDisabled: chat.followingNext || (chat.busy && !running),
-    onSend: chat.send,
+    onSend: send,
     onStop: chat.stop,
     onDecide: chat.decide,
     queue,
@@ -342,6 +396,7 @@ export function SessionView(props: SessionViewProps) {
                 canStop={running}
                 rejections={rejections}
                 onRemoveAttachment={attachments?.remove}
+                contents={contents}
               />
             </>
           )}

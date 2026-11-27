@@ -28,6 +28,7 @@ import {
 } from '@backstage/core-plugin-api';
 import type {
   ChatAttachment,
+  ChatReferenceInput,
   ChatSession,
   ChatSessionDetail,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
@@ -39,6 +40,7 @@ import {
   getAiChatPanelStore,
   type AiChatPanelStore,
 } from '../application/panelStore';
+import { useSendContents } from '../application/sendContents';
 import { useInputConfig } from '../application/useInputConfig';
 import { usePageContext } from '../application/usePageContext';
 import { useToolsets } from '../application/useToolsets';
@@ -54,6 +56,7 @@ interface HeldSession {
   detail: ChatSessionDetail;
   firstMessage?: string;
   firstAttachments?: ChatAttachment[];
+  firstReferences?: ChatReferenceInput[];
 }
 
 /**
@@ -218,6 +221,11 @@ function PanelConversation(props: {
   const images = inputConfig?.images;
   const live = usePageContext();
   const page = panelMessagePage(state.launch, live);
+  const contents = useSendContents({
+    store: store.contents,
+    page,
+    inputConfig,
+  });
   const [held, setHeld] = useState<HeldSession>();
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState<string>();
@@ -281,10 +289,16 @@ function PanelConversation(props: {
           : undefined,
       );
       const loaded = await api.getSession(created.id);
+      // The references of the box go with the prompt.
+      const box = store.contents.getSnapshot().references;
+      store.contents.remove(box.map(draft => draft.id));
       return {
         sessionId: created.id,
         detail: loaded,
         firstMessage: prompt,
+        ...(box.length > 0 && {
+          firstReferences: box.map(draft => draft.reference),
+        }),
       };
     });
     promise.then(
@@ -307,7 +321,7 @@ function PanelConversation(props: {
       cancelled = true;
       setOpening(false);
     };
-  }, [api, launchId, prompt, sessionId, setSession, start, toolsets]);
+  }, [api, launchId, prompt, sessionId, setSession, start, store, toolsets]);
 
   const attachments = useMemo<AttachmentSource | undefined>(
     () =>
@@ -337,6 +351,7 @@ function PanelConversation(props: {
       const created = await ensureDraftSession();
       const loaded = await api.getSession(created.id);
       creating.current = undefined;
+      const box = contents.take();
       setHeld({
         sessionId: created.id,
         detail: loaded,
@@ -344,7 +359,11 @@ function PanelConversation(props: {
         ...(message.attachments?.length && {
           firstAttachments: message.attachments,
         }),
+        ...(box.references.length > 0 && {
+          firstReferences: box.references,
+        }),
       });
+      box.sent();
       setSession(created.id);
       return true;
     } catch (cause) {
@@ -364,7 +383,9 @@ function PanelConversation(props: {
         toolsets={toolsets}
         firstMessage={active.firstMessage}
         firstAttachments={active.firstAttachments}
+        firstReferences={active.firstReferences}
         page={page}
+        contents={store.contents}
       />
     );
   }
@@ -385,6 +406,7 @@ function PanelConversation(props: {
         onSend={send}
         disabled={opening}
         attachments={attachments}
+        contents={contents}
       />
     </div>
   );

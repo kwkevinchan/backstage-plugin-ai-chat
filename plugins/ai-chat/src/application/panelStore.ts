@@ -26,6 +26,10 @@ import {
   initialPanelState,
   type PanelState,
 } from '../domain/panel';
+import {
+  createSendContentsStore,
+  type SendContentsStore,
+} from './sendContents';
 
 /**
  * The internal panel state and one-shot launch coordination backing an
@@ -36,6 +40,11 @@ export interface AiChatPanelStore {
   getSnapshot(): PanelState;
   /** Calls `listener` after a change. Returns the unsubscribe function. */
   subscribe(listener: () => void): () => void;
+  /**
+   * The box of the panel: the references that `open()` and the user added,
+   * and the page switch. It stays while the panel is closed.
+   */
+  contents: SendContentsStore;
   /** Remembers or forgets the conversation on the panel. */
   setSession(sessionId: string | undefined): void;
   /**
@@ -57,6 +66,7 @@ export function createAiChatPanelStore(): AiChatPanelApi {
   const storeListeners = new Set<() => void>();
   const openListeners = new Set<() => void>();
   const started = new Map<number, Promise<unknown>>();
+  const contents = createSendContentsStore();
 
   const commit = (next: PanelState) => {
     if (next === state) return;
@@ -85,6 +95,9 @@ export function createAiChatPanelStore(): AiChatPanelApi {
   const api: AiChatPanelApi = {
     isOpen: () => state.open,
     open(request?: AiChatLaunchRequest) {
+      if (Array.isArray(request?.references)) {
+        contents.add(request.references);
+      }
       if (
         request !== undefined &&
         (request.prompt !== undefined || request.entityRef !== undefined)
@@ -103,6 +116,7 @@ export function createAiChatPanelStore(): AiChatPanelApi {
   const store: AiChatPanelStore = {
     getSnapshot: () => state,
     subscribe: subscribeStore,
+    contents,
     setSession(sessionId) {
       commit(applySession(state, sessionId));
     },

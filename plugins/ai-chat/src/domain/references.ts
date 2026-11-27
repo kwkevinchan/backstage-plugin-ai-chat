@@ -33,8 +33,6 @@ export interface DraftReference {
   reference: ChatReferenceInput;
   /** The text was cut to the limit. */
   truncated?: boolean;
-  /** The name to show for an entity, when the source knew its title. */
-  label?: string;
 }
 
 /** A reference of a message as the screen shows it: sent, or stored by the backend. */
@@ -167,10 +165,7 @@ export interface ReferenceTag {
   unreadable?: boolean;
 }
 
-export function referenceTag(
-  reference: ShownReference,
-  label?: string,
-): ReferenceTag {
+export function referenceTag(reference: ShownReference): ReferenceTag {
   if (reference.kind === 'entity') {
     const parts = entityRefParts(reference.entityRef);
     if ('readable' in reference && reference.readable) {
@@ -183,7 +178,7 @@ export function referenceTag(
     }
     const unreadable = 'readable' in reference && !reference.readable;
     return {
-      label: label ?? parts.name,
+      label: parts.name,
       detail: parts.kind,
       description: reference.entityRef,
       ...(unreadable && { unreadable }),

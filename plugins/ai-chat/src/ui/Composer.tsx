@@ -25,6 +25,7 @@ import { Button } from '@backstage/ui';
 import { MAX_MESSAGE_LENGTH } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { AttachmentSource } from '../adapters/assistantUi/attachmentAdapter';
 import { useSessionRuntime } from '../adapters/assistantUi/sessionRuntime';
+import type { SendContents } from '../application/sendContents';
 import type { OutgoingMessage } from '../domain/types';
 import {
   AttachButton,
@@ -32,6 +33,7 @@ import {
   DraftImages,
   RejectionNotes,
 } from './Attachments';
+import { SendContentsBar } from './SendContents';
 import { cx } from './styles';
 
 type Handler = (message: OutgoingMessage) => Promise<boolean | void> | void;
@@ -51,6 +53,8 @@ export interface ComposerProps {
   rejections?: RejectionNotes;
   /** Called when a completed draft image is removed from the composer. */
   onRemoveAttachment?: (attachmentId: string) => Promise<void> | void;
+  /** The page and the references of the next message; without it, no tags. */
+  contents?: SendContents;
 }
 
 const DEFAULT_PLACEHOLDER =
@@ -100,6 +104,7 @@ export function Composer(props: ComposerProps) {
         <div className={cx('chat-composer-hint')}>{props.hint}</div>
       )}
       <ComposerPrimitive.AttachmentDropzone className={cx('chat-composer-box')}>
+        {props.contents && <SendContentsBar contents={props.contents} />}
         {props.rejections && <AttachmentRejections notes={props.rejections} />}
         <DraftImages onRemove={props.onRemoveAttachment} />
         <ComposerPrimitive.Root className={cx('chat-composer')}>
@@ -144,6 +149,8 @@ export interface DraftComposerProps {
   disabled: boolean;
   /** The uploads; without it there is no attach button. */
   attachments?: AttachmentSource;
+  /** The page and the references of the first message. */
+  contents?: SendContents;
 }
 
 const NO_MESSAGES: never[] = [];
@@ -168,6 +175,7 @@ export function DraftComposer(props: DraftComposerProps) {
       <Composer
         rejections={rejections}
         onRemoveAttachment={attachments?.remove}
+        contents={props.contents}
       />
     </AssistantRuntimeProvider>
   );

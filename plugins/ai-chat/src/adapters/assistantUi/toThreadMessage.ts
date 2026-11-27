@@ -78,7 +78,8 @@ export function toToolCall(part: ToolPart): ToolCallLike {
  * and the others) keep their order; a data part keeps its name and data.
  * Step boundaries, reasoning and files are left out: the screen does not
  * show them. The images of a user message (`metadata.attachments`) are its
- * attachments; they carry our attachment, not a URL.
+ * attachments; they carry our attachment, not a URL. Its references are in
+ * `metadata.custom.references`.
  */
 export function toThreadMessage(message: ChatUiMessage): ThreadMessageLike {
   const content: Part[] = [];
@@ -102,6 +103,8 @@ export function toThreadMessage(message: ChatUiMessage): ThreadMessageLike {
   }
   const attachments =
     message.role === 'user' ? message.metadata?.attachments ?? [] : [];
+  const references =
+    message.role === 'user' ? message.metadata?.references ?? [] : [];
   return {
     id: message.id,
     role: message.role,
@@ -109,5 +112,6 @@ export function toThreadMessage(message: ChatUiMessage): ThreadMessageLike {
     ...(attachments.length > 0 && {
       attachments: attachments.map(toCompleteAttachment),
     }),
+    ...(references.length > 0 && { metadata: { custom: { references } } }),
   };
 }
