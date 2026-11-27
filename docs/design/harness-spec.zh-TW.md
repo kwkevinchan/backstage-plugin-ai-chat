@@ -176,14 +176,14 @@ S-05 到 S-07（`SandboxProvider`）在 0.2 版移除。編號不重用。
 
 ### 4.6 Session 管理（SE）
 
-| 編號  | 需求                                                              | 分期                       |
-| ----- | ----------------------------------------------------------------- | -------------------------- |
-| SE-01 | 每段 Session 有自己的網址                                         | P1（完成）                 |
-| SE-02 | 可以綁定一個 entity。從 entity 頁面開的 Session 自動綁定          | P3（完成）                 |
-| SE-03 | 列表可以搜尋、釘選、改名、封存                                    | P2                         |
-| SE-04 | 第一輪結束後自動產生標題                                          | P2                         |
-| SE-05 | 保存期限：到期自動刪除。稽核紀錄不受影響                          | P2                         |
-| SE-06 | entity 頁面的分頁列出跟這個 entity 有關、而且自己看得到的 Session | P3（後端完成；畫面另一項） |
+| 編號  | 需求                                                              | 分期       |
+| ----- | ----------------------------------------------------------------- | ---------- |
+| SE-01 | 每段 Session 有自己的網址                                         | P1（完成） |
+| SE-02 | 可以綁定一個 entity。從 entity 頁面開的 Session 自動綁定          | P3（完成） |
+| SE-03 | 列表可以搜尋、釘選、改名、封存                                    | P2         |
+| SE-04 | 第一輪結束後自動產生標題                                          | P2         |
+| SE-05 | 保存期限：到期自動刪除。稽核紀錄不受影響                          | P2         |
+| SE-06 | entity 頁面的分頁列出跟這個 entity 有關、而且自己看得到的 Session | P3（完成） |
 
 ### 4.7 分享（SH）
 
@@ -508,12 +508,13 @@ interface Hooks {
 | 2026-11-25 | 1.2  | X-08 完成（P3-06）：用 Backstage search backend 官方的 `search:query`（唯讀），以使用者的身分搜尋；`permission.enabled: true` 時只回傳使用者能讀的文件，每筆結果帶 `document.location`。不另外寫 action（V-05）                                                                                                                                                                                                                                                                                                                                                                           |
 | 2026-11-26 | 1.2  | X-06、X-07 完成（P3-03）：內建 `update_plan`（`readOnly: true`，預設 `allow`）給每個 Agent，寫入 `plan_update`；有計畫時每一步的上下文都有目前的計畫，畫面把每次更新顯示成清單。`planning: required` 的 Agent，每個 Run 的第一步只提供 `update_plan`。目前的計畫用 `ItemLog.latestPlanUpdate` 讀，摘要涵蓋舊的 `plan_update` 也讀得到（D-07）                                                                                                                                                                                                                                             |
 | 2026-11-26 | 1.2  | P-01、P-02、P-03、P-05、P-06、X-09 完成（P3-07）：同一步的唯讀呼叫同時執行，結果照模型的順序交回；每個工具呼叫有逾時，寫入逾時後這一步後面的寫入不執行；每步的工具呼叫數和每人同時的 Run 數有上限；模型呼叫有所有後端共用的限流。`aiChat.models` 加其他模型，擴充點改為 `addModelClient`（只新增，不覆蓋設定檔的模型）。第 6 節的設定範例改成實際的平鋪寫法；P-04 註明唯讀的照 D-09 同時執行                                                                                                                                                                                              |
-| 2026-11-26 | 1.2  | X-03、SE-02 完成，SE-06 的後端完成（P3-02）：Context provider 每一步把一段文字加進系統提示，標成不可信的資料，有長度上限和逾時，失敗時 Run 繼續；內建使用者身分、綁定的 entity、目前的計畫。Session 建立時或第一則訊息的頁面綁定一個使用者讀得到的 entity，之後不改；後端可以列出一個 entity 的 Session。entity 頁面的分頁另做                                                                                                                                                                                                                                                            |
+| 2026-11-26 | 1.2  | X-03、SE-02 完成，SE-06 的後端完成（P3-02）：Context provider 每一步把一段文字加進系統提示，標成不可信的資料，有長度上限和逾時，失敗時 Run 繼續；內建使用者身分、綁定的 entity、目前的計畫。Session 建立時或第一則訊息的頁面綁定一個使用者讀得到的 entity，之後不改；後端可以列出一個 entity 的 Session。entity 頁面的分頁見 SE-06 畫面完成那一列                                                                                                                                                                                                                                         |
 | 2026-11-26 | 1.2  | T-08、T-09、T-10 完成（P3-08）：permission `ai-chat.toolset.use`（resource type `ai-chat-toolset`，條件 `IS_TOOLSET`）決定誰能用哪個 Toolset，Permission framework 沒開時全部允許；送給模型的工具是 Session 開啟的、Agent 的 `toolsets` 列的、使用者能用的 Toolset 的交集（X-01 的 `toolsets` 開始生效）。`aiChat.toolOutput` 依 action ID 樣式設輸出上限（只能調低）和要遮蔽的欄位，先遮蔽再裁切，`afterToolCall` 之後再做一次，遮蔽失敗時不存輸出。`aiChat.writesPerMinute` 是每個使用者每分鐘的寫入次數，所有後端共用（`write_quota_windows`），超過時不執行，結果是 `error`，Run 繼續 |
 | 2026-11-26 | 1.2  | O-01 完成（P3-09）：模型呼叫、工具結果、結束的 Run 各寫一筆結構化 log，並用 Backstage 的 metrics 服務記 OpenTelemetry metric（時間、結果、回報的 token、上下文各部分的大小、provider 狀態、拒絕原因、限流等待）。只有數字、id 和固定的分類詞；模型失敗的 log 只記錯誤名稱和狀態碼。新設定 `reportUsage`（預設 true）。沒有 trace                                                                                                                                                                                                                                                          |
 | 2026-11-26 | 1.2  | B-03 完成（P3-10）：別的前端 plugin 用 `ai-chat-react` 為 action id 註冊結果顯示元件；新前端系統用 `AiChatToolResultBlueprint`，舊前端系統由 app 覆蓋 `aiChatToolResultsApiRef`。元件畫在內建的列下面，不取代核准卡片；先註冊的有效，內建工具不能被覆蓋，元件出錯時退回預設。結果是不可信的資料，連結只放行 http、https、mailto（S-02）。                                                                                                                                                                                                                                                 |
 | 2026-11-26 | 1.2  | SH-02、SH-03、SH-11 完成，SH-06、SH-10 的後端和 IN-19 的讀取完成（P2-04）：擁有者用 `/sessions/{id}/shares` 建立、修改、取消、列出唯讀的分享（快照或持續更新），每個動作寫進 Auditor；被分享的人的每個寫入都和找不到一樣回 404；讀取、圖片、接回都照分享的範圍；持續更新到期後停在到期當下                                                                                                                                                                                                                                                                                                |
 | 2026-11-27 | 1.2  | IN-05 規格文字對齊實際行為：附加按鈕（`GET /input-config`）與後端 400 拒絕由全域 `aiChat.llm.images` 控制；個別模型的 `aiChat.models.<id>.images` 只決定送給該模型時要原文送出圖片還是換成一行說明                                                                                                                                                                                                                                                                                                                                                                                        |
+| 2026-11-27 | 1.2  | SE-06 畫面完成：entity 頁面的「AI chat」分頁列出自己綁定這個 entity 的 Session（標題、即時狀態），點一列開到那段 Session；「New chat」開新對話，綁定這個 entity。舊前端系統用 `EntityAiChatContent`；新前端系統是 `entity-content:ai-chat/entity-ai-chat`，預設啟用，可以用 app-config 停用或設 `filter`。分頁和聊天頁用同一套列表更新（Signals、輪詢、New reply）                                                                                                                                                                                                                        |
 
 ## 12. 對照的開源專案
 

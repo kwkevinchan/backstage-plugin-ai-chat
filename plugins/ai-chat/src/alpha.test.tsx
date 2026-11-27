@@ -19,6 +19,7 @@ import {
   coreExtensionData,
 } from '@backstage/frontend-plugin-api';
 import { createExtensionTester } from '@backstage/frontend-test-utils';
+import { EntityContentBlueprint } from '@backstage/plugin-catalog-react/alpha';
 import type { AiChatToolResultsApi } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import { AiChatToolResultBlueprint } from '@kwkevinchan/backstage-plugin-ai-chat-react/alpha';
 import aiChatPlugin from './alpha';
@@ -84,6 +85,14 @@ describe('ai-chat (new frontend system)', () => {
       aiChatPlugin.getExtension('app-root-element:ai-chat/panel'),
     );
     expect(tester.get(coreExtensionData.reactElement)).toBeTruthy();
+  });
+
+  it('adds the entity page AI chat tab', () => {
+    const tester = createExtensionTester(
+      aiChatPlugin.getExtension('entity-content:ai-chat/entity-ai-chat'),
+    );
+    expect(tester.get(coreExtensionData.routePath)).toBe('/ai-chat');
+    expect(tester.get(EntityContentBlueprint.dataRefs.title)).toBe('AI chat');
   });
 
   it('lets an app override the page path', () => {

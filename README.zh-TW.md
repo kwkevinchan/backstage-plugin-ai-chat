@@ -58,8 +58,12 @@ backend.add(import('@backstage/plugin-signals-backend'));
 沒裝 chat 外掛時按鈕不顯示）。`prompt` 會以登入者的身分立刻送出，請使用固定字串
 或程式可控的內容，不要從網址參數或不受信任的輸入組合；只有 entity 時，下一則從面板
 送出的訊息帶著它。面板等登入完成後才出現，掛在路由外面，換頁不會卸下進行中的對話。
-舊前端系統要在 router 裡、路由外面掛一次 `<AiChatPanel>`；新前端系統註冊 plugin 就有這塊面板。
-舊前端系統的接法見[英文 README](README.md#frontend-legacy-frontend-system)。
+舊前端系統要在 router 裡、路由外面掛一次 `<AiChatPanel>`；新前端系統註冊 plugin 就有這塊面板，
+也會自動在 entity 頁面加上「AI chat」分頁，列出自己綁定該 entity 的對話與「New chat」按鈕。
+這個分頁預設啟用，所有 kind 都有（包含 User、Group）。要停用，在 `app.extensions` 設
+`- entity-content:ai-chat/entity-ai-chat: false`；只在某些 kind 顯示，用 `config.filter` 設 entity 條件，
+例如 `filter: { kind: { $in: [component, api] } }`（範例見[英文 README](README.md#frontend-new-frontend-system)）。
+舊前端系統可在 `EntityLayout` 加上 `<EntityLayout.Route path="/ai-chat" title="AI chat"><EntityAiChatContent /></EntityLayout.Route>`，詳見[英文 README](README.md#frontend-legacy-frontend-system)。
 別的 frontend plugin 可以為某個 action 註冊結果顯示元件（例如把輸出畫成表格），畫在那個呼叫的列下面；
 內建的列和核准卡片照舊。新前端系統用 `@kwkevinchan/backstage-plugin-ai-chat-react/alpha` 的
 `AiChatToolResultBlueprint`；舊前端系統由 app 用 `createAiChatToolResultsApi([...])` 覆蓋
@@ -321,7 +325,7 @@ Run 的狀態在資料庫，不在行程裡，所以可以部署多台，也可�
   `GET /sessions/:id/stream` 仍回 `204`。
 - 摘要涵蓋最新使用者訊息之前的步驟；同一個 Run 裡的舊步驟只縮短和省略，不做摘要。
 - 對話可以依標題搜尋，也可以釘選、改名、封存。第一輪正常結束後會自動產生短標題；你自己改過的標題會留下。產生不出標題時，對話照常結束。
-- entity 頁面還沒有 Session 的分頁（後端已能列出一個 entity 的 Session）。entity 的列表只有自己的 Session，不含分享給自己的。
+- entity 頁面的分頁只列自己的 Session，不含分享給自己的。
 - 對話列表不列出分享給自己的對話。被分享的人接回進行中的 Run 時，每秒收到一次已完成的內容（沒有逐字片段）。
 
 完整的安全說明、API 與試用方式見[英文 README](README.md)。

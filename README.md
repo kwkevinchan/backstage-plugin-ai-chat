@@ -177,6 +177,14 @@ On the legacy frontend system, render `<AiChatPanel>` once inside the router
 and outside the routes. The new frontend system mounts the same panel with
 the plugin, so the app does not render it again.
 
+The new frontend system plugin also registers an **AI chat** tab on entity
+pages (`entity-content:ai-chat/entity-ai-chat`), listing the signed-in user's
+conversations bound to that entity with a **New chat** button. The tab is on
+by default and shows on every kind, users and groups too. Turn it off in
+`app.extensions` (`- entity-content:ai-chat/entity-ai-chat: false`), or show
+it on some kinds only with an entity predicate in `filter`
+(`- entity-content:ai-chat/entity-ai-chat: { config: { filter: { kind: { $in: [component, api] } } } }`).
+
 ### Frontend: legacy frontend system
 
 ```tsx
@@ -185,6 +193,7 @@ import {
   AiChatPage,
   AiChatPanel,
   aiChatPlugin,
+  EntityAiChatContent,
 } from '@kwkevinchan/backstage-plugin-ai-chat';
 
 const app = createApp({ plugins: [aiChatPlugin /* … */] });
@@ -193,6 +202,15 @@ const app = createApp({ plugins: [aiChatPlugin /* … */] });
 <Route path="/ai-chat/*" element={<AiChatPage />} />;
 // once, inside the router and outside the routes:
 <AiChatPanel />;
+```
+
+To add the **AI chat** tab to entity pages, mount `EntityAiChatContent` inside
+your `EntityLayout`:
+
+```tsx
+<EntityLayout.Route path="/ai-chat" title="AI chat">
+  <EntityAiChatContent />
+</EntityLayout.Route>
 ```
 
 ### Result components of actions
@@ -864,8 +882,8 @@ Backstage upgrade can break this plugin until it is updated.
 
 ## Not in this version
 
-An entity tab or sidebar widget (the backend lists the sessions of an entity),
-sessions shared with the user in the list of an entity, file uploads,
+A sidebar widget of the sessions of an entity, sessions shared with the user
+in the list of an entity, file uploads,
 several model providers at once, MCP servers outside Backstage, an agent's model
 and limits (those fields can be set, and a module can register them; the loop
 does not use them yet), and a session list that can search, pin or archive (the
