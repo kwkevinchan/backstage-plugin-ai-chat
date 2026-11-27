@@ -68,8 +68,10 @@ import {
   ModelCatalog,
   type AfterRun,
   type ImageSettings,
+  type ReferenceSettings,
   type RunSettings,
 } from './application';
+import { MAX_REFERENCES_PER_MESSAGE } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import {
   NoopMetrics,
   NoopNotifier,
@@ -148,6 +150,8 @@ export type HostPorts = {
    * default limits, when not given.
    */
   images?: ImageSettings;
+  /** `aiChat.input.references`; 5 references per message when not given. */
+  references?: ReferenceSettings;
   /** How often the supervisor renews the lease of a run; 10 seconds by default. */
   heartbeatMs?: number;
   /**
@@ -194,6 +198,9 @@ export function createHost(ports: HostPorts) {
   const images: ImageSettings = ports.images ?? {
     ...DEFAULT_IMAGE_LIMITS,
     enabled: false,
+  };
+  const references: ReferenceSettings = ports.references ?? {
+    maxPerMessage: MAX_REFERENCES_PER_MESSAGE,
   };
   const extensions = ports.extensions ?? emptyExtensions();
   const live = ports.liveShares ?? DEFAULT_LIVE_SHARE_LIMITS;
@@ -332,6 +339,7 @@ export function createHost(ports: HostPorts) {
         attachments,
         images,
         entities,
+        references,
         notify,
         logger,
       }),
@@ -375,6 +383,9 @@ export function createHost(ports: HostPorts) {
         items,
         attachments,
         images,
+        entities,
+        references,
+        logger,
       }),
       insertQueuedMessage: new InsertQueuedMessage({
         sessions,
@@ -388,12 +399,18 @@ export function createHost(ports: HostPorts) {
         maxMessages: ports.queueMaxMessages ?? DEFAULT_QUEUE_MAX_MESSAGES,
         attachments,
         images,
+        entities,
+        references,
+        logger,
       }),
       updateQueuedMessage: new UpdateQueuedMessage({
         sessions,
         queue,
         attachments,
         images,
+        entities,
+        references,
+        logger,
       }),
       deleteQueuedMessage: new DeleteQueuedMessage({ sessions, queue }),
       reorderQueue: new ReorderQueue({ sessions, queue, runs }),

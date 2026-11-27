@@ -272,6 +272,16 @@ export class TooManyAttachments extends ChatDomainError {
   }
 }
 
+/** A message has more references than `maxPerMessage` (B-04). */
+export class TooManyReferences extends ChatDomainError {
+  constructor(max: number) {
+    super(
+      'TOO_MANY_REFERENCES',
+      `A message may have at most ${max} references`,
+    );
+  }
+}
+
 /** The message has images, and the model cannot read images (IN-05). */
 export class ImagesNotSupported extends ChatDomainError {
   constructor() {

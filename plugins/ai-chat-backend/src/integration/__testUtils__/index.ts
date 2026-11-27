@@ -239,6 +239,7 @@ export const testInputConfig: ChatInputConfig = {
   },
   insertMaxPerRun: 5,
   queueMaxMessages: 5,
+  references: { maxPerMessage: 5, maxTextLength: 4000 },
 };
 
 /**
@@ -266,6 +267,8 @@ export async function createWorld(
     images?: Partial<ImageSettings>;
     /** `aiChat.input.insert.maxPerRun`; 5 by default. */
     insertMaxPerRun?: number;
+    /** `aiChat.input.references.maxPerMessage`; 5 by default. */
+    maxReferences?: number;
     agents?: JsonObject;
     policy?: JsonObject;
     /** `aiChat.runsPerUser`; 3 by default. */
@@ -398,6 +401,9 @@ export async function createWorld(
       entities,
       images,
       insertMaxPerRun: options.insertMaxPerRun,
+      ...(options.maxReferences !== undefined && {
+        references: { maxPerMessage: options.maxReferences },
+      }),
       agents: catalog,
       tools: new ActionsToolGateway({
         actions,

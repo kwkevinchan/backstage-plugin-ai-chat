@@ -17,8 +17,15 @@
 import type { PageContext } from '@kwkevinchan/ai-chat-harness';
 import { assertOwner, type Principal, type QueuedMessage } from '../../domain';
 import { bindAttachments, type ImageSettings } from '../attachments';
+import {
+  resolveReferences,
+  type ReferenceInput,
+  type ReferenceSettings,
+} from '../references';
 import type {
   AttachmentStore,
+  EntityReader,
+  Logger,
   QueuedMessageRepository,
   SessionRepository,
 } from '../ports';
@@ -33,12 +40,18 @@ export class QueueMessage {
       maxMessages: number;
       attachments: AttachmentStore;
       images: ImageSettings;
+      entities: EntityReader;
+      references: ReferenceSettings;
+      logger?: Logger;
     },
   ) {}
 
   /**
    * Throws `NotSessionOwner`, `NoActiveRun`, `QueueFull`, or, for the images,
-   * `ImagesNotSupported`, `TooManyAttachments` or `UnknownAttachment`.
+   * `ImagesNotSupported`, `TooManyAttachments` or `UnknownAttachment`, or
+   * `TooManyReferences`. The entities of the references are read now, with
+   * the credentials of this request, and the queue keeps what was read: the
+   * user may not be there, with credentials, when the message is sent.
    */
   async execute(input: {
     principal: Principal;
@@ -46,17 +59,24 @@ export class QueueMessage {
     text: string;
     attachmentIds?: string[];
     page?: PageContext;
+    references?: ReferenceInput[];
   }): Promise<QueuedMessage> {
     const { sessions, queue, maxMessages } = this.deps;
     const session = await sessions.get(input.sessionId);
     assertOwner(session, input.principal);
     await bindAttachments(this.deps, session.id, input.attachmentIds);
+    const references = await resolveReferences(
+      this.deps,
+      input.principal,
+      input.references,
+    );
     return queue.add(
       session.id,
       {
         text: input.text,
         attachmentIds: input.attachmentIds ?? [],
         ...(input.page && { page: input.page }),
+        ...(references.length > 0 && { references }),
       },
       { max: maxMessages },
     );

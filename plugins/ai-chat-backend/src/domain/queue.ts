@@ -16,6 +16,7 @@
 
 import type {
   Limits,
+  MessageReference,
   PageContext,
   RunOutcome,
 } from '@kwkevinchan/ai-chat-harness';
@@ -38,6 +39,8 @@ export type QueuedMessage = {
   text: string;
   attachments: AttachmentMeta[];
   page?: PageContext;
+  /** Read when the message was queued or last changed (B-04). */
+  references?: MessageReference[];
   createdAt: string;
   updatedAt: string;
 };

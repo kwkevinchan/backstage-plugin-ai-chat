@@ -54,6 +54,7 @@ export {
   TooManyAttachments,
   TooManyImageBytes,
   TooManyPendingAttachments,
+  TooManyReferences,
   ToolCallNotFound,
   ToolCallNotWaiting,
   UnknownAttachment,

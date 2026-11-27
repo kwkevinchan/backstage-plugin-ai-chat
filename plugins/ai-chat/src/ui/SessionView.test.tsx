@@ -748,6 +748,7 @@ describe('images', () => {
       },
       insertMaxPerRun: 5,
       queueMaxMessages: 5,
+      references: { maxPerMessage: 5, maxTextLength: 4000 },
     });
     api.uploadAttachment.mockImplementation(async (_s, _file, name) =>
       image(`att-${name}`, name),

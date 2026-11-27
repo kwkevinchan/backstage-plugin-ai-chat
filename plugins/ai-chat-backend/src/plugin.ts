@@ -297,6 +297,7 @@ export const aiChatPlugin = createBackendPlugin({
           queueMaxMessages: aiChat.input.queueMaxMessages,
           insertMaxPerRun: aiChat.input.insertMaxPerRun,
           images: { ...aiChat.input.images, enabled: aiChat.llm.images },
+          references: aiChat.input.references,
           settings: {
             limits: {
               maxSteps: aiChat.maxTurns,
@@ -381,6 +382,7 @@ export const aiChatPlugin = createBackendPlugin({
               },
               insertMaxPerRun: aiChat.input.insertMaxPerRun,
               queueMaxMessages: aiChat.input.queueMaxMessages,
+              references: aiChat.input.references,
             }),
             logger,
           }),

@@ -47,6 +47,7 @@ import {
 } from '../domain';
 import { IMAGES } from '../__testUtils__/images';
 import { createMigratedDb } from '../__testUtils__';
+import { FakeEntityReader } from './__testUtils__';
 
 /**
  * Two connections of PostgreSQL that work at the same time (V-10). SQLite has
@@ -213,12 +214,16 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
       items: db.items,
       attachments: db.attachments,
       images: { ...DEFAULT_IMAGE_LIMITS, enabled: false },
+      entities: new FakeEntityReader(),
+      references: { maxPerMessage: 5 },
     });
     db.insertImages = new InsertMessage({
       sessions: db.sessions,
       items: db.items,
       attachments: db.attachments,
       images: { ...DEFAULT_IMAGE_LIMITS, enabled: true },
+      entities: new FakeEntityReader(),
+      references: { maxPerMessage: 5 },
     });
   });
 
@@ -597,6 +602,8 @@ describePostgres('two PostgreSQL connections at the same time (V-10)', () => {
           items: limited,
           attachments: db.attachments,
           images: { ...DEFAULT_IMAGE_LIMITS, enabled: true },
+          entities: new FakeEntityReader(),
+          references: { maxPerMessage: 5 },
         });
         const a = await upload(sessionId);
         const b = await upload(sessionId);

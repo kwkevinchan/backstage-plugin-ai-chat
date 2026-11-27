@@ -26,7 +26,17 @@ import {
   toAttachmentRef,
   type ImageSettings,
 } from '../attachments';
-import type { AttachmentStore, SessionRepository } from '../ports';
+import {
+  resolveReferences,
+  type ReferenceInput,
+  type ReferenceSettings,
+} from '../references';
+import type {
+  AttachmentStore,
+  EntityReader,
+  Logger,
+  SessionRepository,
+} from '../ports';
 
 /**
  * The user adds a message to the run that is running (IN-10). The message is
@@ -42,6 +52,9 @@ export class InsertMessage {
       items: ItemLog;
       attachments: AttachmentStore;
       images: ImageSettings;
+      entities: EntityReader;
+      references: ReferenceSettings;
+      logger?: Logger;
     },
   ) {}
 
@@ -51,7 +64,8 @@ export class InsertMessage {
    * or has no live lease), `InsertLimitReached`, or, for the images,
    * `ImagesNotSupported`, `TooManyAttachments`, `UnknownAttachment` or
    * `TooManyImageBytes` (the images of the messages of the run, with these,
-   * are over the limit; checked in the transaction of the write).
+   * are over the limit; checked in the transaction of the write), or
+   * `TooManyReferences`.
    */
   async execute(input: {
     principal: Principal;
@@ -60,6 +74,7 @@ export class InsertMessage {
     text: string;
     attachmentIds?: string[];
     page?: PageContext;
+    references?: ReferenceInput[];
   }): Promise<Item> {
     const { sessions, items } = this.deps;
     const session = await sessions.get(input.sessionId);
@@ -68,6 +83,11 @@ export class InsertMessage {
       this.deps,
       session.id,
       input.attachmentIds,
+    );
+    const references = await resolveReferences(
+      this.deps,
+      input.principal,
+      input.references,
     );
     try {
       // The owner of the lease is not checked: the host writes for the user,
@@ -82,6 +102,7 @@ export class InsertMessage {
               attachments: attachments.map(toAttachmentRef),
             }),
             ...(input.page && { page: input.page }),
+            ...(references.length > 0 && { references }),
             delivery: 'inserted',
           },
         ],

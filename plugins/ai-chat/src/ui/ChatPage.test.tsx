@@ -404,6 +404,7 @@ describe('the new conversation with images', () => {
       },
       insertMaxPerRun: 5,
       queueMaxMessages: 5,
+      references: { maxPerMessage: 5, maxTextLength: 4000 },
     });
     api.uploadAttachment.mockImplementation(async (_s, file, name) => ({
       id: `att-${name}`,

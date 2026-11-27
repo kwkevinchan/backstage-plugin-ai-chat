@@ -47,6 +47,7 @@ import {
   ShuttingDown,
   TooManyAttachments,
   TooManyImageBytes,
+  TooManyReferences,
   TooManyPendingAttachments,
   ToolCallNotFound,
   ToolCallNotWaiting,
@@ -147,6 +148,7 @@ export function toHttpError(error: unknown): unknown {
   if (
     error instanceof InvalidAttachment ||
     error instanceof TooManyAttachments ||
+    error instanceof TooManyReferences ||
     error instanceof ImagesNotSupported ||
     error instanceof TooManyImageBytes ||
     error instanceof EmptyMessage

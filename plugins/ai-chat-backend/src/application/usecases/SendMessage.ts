@@ -29,6 +29,12 @@ import {
 import { abandonRun } from '../abandonRun';
 import { buildRunRequest, type RunSettings } from '../buildRunRequest';
 import { readableEntityRef } from '../entityContext';
+import {
+  resolveReferences,
+  type ReferenceInput,
+  type ReferenceSettings,
+} from '../references';
+import { withTimeout } from '../withTimeout';
 import type { ActivityNotifier } from '../notifyActivity';
 import type { RunHandle, RunSupervisor } from '../RunSupervisor';
 import {
@@ -63,6 +69,7 @@ export class SendMessage {
       attachments: AttachmentStore;
       images: ImageSettings;
       entities: EntityReader;
+      references: ReferenceSettings;
       notify?: ActivityNotifier;
       logger?: Logger;
     },
@@ -71,7 +78,9 @@ export class SendMessage {
   /**
    * Throws `NotSessionOwner`, `RunAlreadyActive` (H-03), `ShuttingDown`, or,
    * for the images, `ImagesNotSupported`, `TooManyAttachments` or
-   * `UnknownAttachment` (nothing is written then, and no run starts).
+   * `UnknownAttachment`, or `TooManyReferences` (nothing is written then,
+   * and no run starts). The entities of the references are read before the
+   * run starts.
    * The run comes first: the message of the user is written only once the
    * session has the run, so a message that the session cannot take (another
    * run is active) is not left in the log.
@@ -87,6 +96,7 @@ export class SendMessage {
     text: string;
     attachmentIds?: string[];
     page?: { path: string; entityRef?: string };
+    references?: ReferenceInput[];
   }): Promise<RunHandle> {
     const {
       sessions,
@@ -105,6 +115,11 @@ export class SendMessage {
       this.deps,
       session.id,
       input.attachmentIds,
+    );
+    const references = await resolveReferences(
+      this.deps,
+      input.principal,
+      input.references,
     );
 
     const run = await runs.start(session.id);
@@ -130,6 +145,7 @@ export class SendMessage {
               attachments: attachments.map(toAttachmentRef),
             }),
             ...(input.page && { page: input.page }),
+            ...(references.length > 0 && { references }),
           },
         ],
         run.fence,
@@ -180,23 +196,5 @@ export class SendMessage {
       );
       return undefined;
     }
-  }
-}
-
-/** `promise`, or a rejection once `ms` passed first. */
-async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`no answer within ${ms} ms`)),
-          ms,
-        );
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
   }
 }
