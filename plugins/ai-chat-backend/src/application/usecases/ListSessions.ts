@@ -77,9 +77,7 @@ export class ListSessions {
     const bySession = new Map(active.map(run => [run.sessionId, run]));
 
     const previews = new Map<string, string>();
-    const untitledIds = sessions
-      .filter(s => !s.title?.trim())
-      .map(s => s.id);
+    const untitledIds = sessions.filter(s => !s.title?.trim()).map(s => s.id);
     if (untitledIds.length > 0) {
       const texts = await this.deps.items.firstUserMessageTexts(untitledIds);
       for (const [sessionId, text] of texts) {
