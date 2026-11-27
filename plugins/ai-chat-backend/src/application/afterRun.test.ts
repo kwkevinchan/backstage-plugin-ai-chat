@@ -229,7 +229,10 @@ describe('afterRun', () => {
     expect(state).toEqual({ items: t.items, paused: true });
     expect(t.logger.error).toHaveBeenCalledWith(
       'The queue could not send its next message',
-      expect.objectContaining({ sessionId: 's1', error: 'audit down' }),
+      expect.objectContaining({ sessionId: 's1', errorName: 'Error' }),
+    );
+    expect(JSON.stringify(t.logger.error.mock.calls)).not.toContain(
+      'audit down',
     );
   });
 });

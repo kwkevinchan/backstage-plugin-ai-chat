@@ -76,7 +76,7 @@ describe('ExpireStaleRuns', () => {
     ]);
     expect(logger.warn).toHaveBeenLastCalledWith(
       'Could not tell the onRunEnd hooks about an expired run',
-      { runId: 'run-2', error: 'no such session' },
+      { runId: 'run-2', errorName: 'Error' },
     );
   });
 });

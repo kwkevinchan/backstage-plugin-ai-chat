@@ -23,6 +23,7 @@ import type {
   ToolOutput,
   ValidationResult,
 } from '@kwkevinchan/ai-chat-harness';
+import { errorLogFields } from './modelErrors';
 import type { AuditLog, AuditSpan, Logger } from './ports';
 
 /**
@@ -105,9 +106,7 @@ export class AuditedToolGateway implements ToolGateway {
       if (how === 'success') await span.success();
       else await span.fail(message);
     } catch (error) {
-      this.logger.warn('Could not end an audit record', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      this.logger.warn('Could not end an audit record', errorLogFields(error));
     }
   }
 }

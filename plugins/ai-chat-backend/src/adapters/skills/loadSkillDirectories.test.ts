@@ -266,8 +266,11 @@ describe('loadSkillsFromDirectories with symbolic links', () => {
     expect(logger.warn).toHaveBeenCalledWith(
       'Failed to load skill linked',
       expect.objectContaining({
-        error: expect.stringContaining('resolves outside its directory'),
+        errorName: 'Error',
       }),
+    );
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(
+      'resolves outside its directory',
     );
   });
 });

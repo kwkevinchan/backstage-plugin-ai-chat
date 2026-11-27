@@ -16,6 +16,7 @@
 
 import express from 'express';
 import Router from 'express-promise-router';
+import { errorLogFields } from '../../application';
 import type { Logger } from '../../application/ports';
 import type { Principal } from '../../domain';
 import type { ChatInputConfig } from '@kwkevinchan/backstage-plugin-ai-chat-common';
@@ -82,10 +83,7 @@ export function createRouter(options: RouterOptions): express.Router {
           logger.error('A request failed', {
             method: req.method,
             path: req.path,
-            error:
-              unexpected instanceof Error
-                ? unexpected.message
-                : String(unexpected),
+            ...errorLogFields(unexpected),
           }),
         );
       }

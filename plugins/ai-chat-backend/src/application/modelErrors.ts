@@ -15,19 +15,37 @@
  */
 
 /**
- * What the log may say of an error of a model call: its name and its HTTP
- * status. Not its message: the message of a model server can carry back what
- * the user or a tool wrote.
+ * Safe structured fields to log for an unexpected error: its name, optional
+ * short error code, and optional HTTP status. Never includes `error.message`
+ * or the raw error object, since messages from model servers, tools, or
+ * downstream services can echo user or tool content.
  */
-export function modelErrorFields(error: unknown): {
+export function errorLogFields(error: unknown): {
   errorName: string;
+  errorCode?: string;
   errorStatus?: number;
 } {
+  const errorCode = errorCodeOf(error);
   const errorStatus = errorStatusOf(error);
   return {
     errorName: error instanceof Error ? error.name : typeof error,
+    ...(errorCode !== undefined && { errorCode }),
     ...(errorStatus !== undefined && { errorStatus }),
   };
+}
+
+/** Alias of {@link errorLogFields} for model-call failure logs. */
+export const modelErrorFields = errorLogFields;
+
+/** Short non-whitespace error code (e.g. `ECONNREFUSED`, `23505`), if present. */
+export function errorCodeOf(error: unknown): string | undefined {
+  const code = (error as { code?: unknown } | null | undefined)?.code;
+  return typeof code === 'string' &&
+    code.length > 0 &&
+    code.length <= 64 &&
+    !/\s/.test(code)
+    ? code
+    : undefined;
 }
 
 /** The HTTP status an error carries in `status`, if it has one. */

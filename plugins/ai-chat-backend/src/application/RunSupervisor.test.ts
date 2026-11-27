@@ -214,7 +214,10 @@ describe('RunSupervisor', () => {
     await handle.done;
     expect(logger.error).toHaveBeenCalledWith(
       'Could not name the session',
-      expect.objectContaining({ runId: 'r1', error: 'title model down' }),
+      expect.objectContaining({ runId: 'r1', errorName: 'Error' }),
+    );
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain(
+      'title model down',
     );
   });
 
@@ -323,7 +326,10 @@ describe('RunSupervisor', () => {
     expect(aborted).toBe(false);
     expect(logger.warn).toHaveBeenCalledWith(
       'Could not renew the lease of a run',
-      expect.objectContaining({ error: 'connection timeout' }),
+      expect.objectContaining({ errorName: 'Error' }),
+    );
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(
+      'connection timeout',
     );
     expect(runs.transition).toHaveBeenCalledWith(
       'r1',
@@ -741,7 +747,10 @@ describe('RunSupervisor with inserted messages and the queue (PI-03)', () => {
     expect(types).toEqual(['run.started', 'run.ended']);
     expect(logger.error).toHaveBeenCalledWith(
       'Could not tell the state of the queue',
-      expect.objectContaining({ error: 'queue table gone' }),
+      expect.objectContaining({ errorName: 'Error' }),
+    );
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain(
+      'queue table gone',
     );
   });
 });

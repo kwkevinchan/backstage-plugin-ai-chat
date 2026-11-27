@@ -15,7 +15,7 @@
  */
 
 import type { Response } from 'express';
-import type { HostEvent } from '../../application';
+import { errorLogFields, type HostEvent } from '../../application';
 import type { Logger } from '../../application/ports';
 import type { UiMessageChunk } from './presenters/uiMessageChunk';
 import type { UiMessageStreamPresenter } from './presenters/uiMessageStream';
@@ -96,10 +96,10 @@ export async function sendUiMessageStream(
       write(res, '[DONE]');
     }
   } catch (error) {
-    // The text of the error stays in the log; the client gets a fixed text.
-    logger.error('A response stream failed after it started', {
-      error: error instanceof Error ? error.message : String(error),
-    });
+    logger.error(
+      'A response stream failed after it started',
+      errorLogFields(error),
+    );
     write(res, { type: 'error', errorText: STREAM_FAILED_TEXT });
     write(res, '[DONE]');
     void iterator.return?.();

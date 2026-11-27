@@ -1325,8 +1325,11 @@ describe('the HTTP routes', () => {
       expect(b.logger.error).toHaveBeenCalledWith(
         'A request failed',
         expect.objectContaining({
-          error: expect.stringContaining('SQLITE_BUSY'),
+          errorName: 'Error',
         }),
+      );
+      expect(JSON.stringify(b.logger.error.mock.calls)).not.toContain(
+        'insert into',
       );
     });
   });

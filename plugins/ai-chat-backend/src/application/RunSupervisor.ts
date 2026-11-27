@@ -32,7 +32,7 @@ import {
   type Run,
 } from '../domain';
 import { EventChannel } from './EventChannel';
-import { modelErrorFields } from './modelErrors';
+import { errorLogFields, modelErrorFields } from './modelErrors';
 import { notifyActivity, type ActivityNotifier } from './notifyActivity';
 import type { AfterRun, HostEvent } from './hostEvents';
 import { RUN_END_HOOK_TIMEOUT_MS, type RunEnded } from './runEnded';
@@ -269,7 +269,7 @@ export class RunSupervisor {
         if (!(error instanceof LeaseLost || isInvalidTransition(error))) {
           this.deps.logger.error('Could not mark a run expired at shutdown', {
             runId,
-            error: describe(error),
+            ...errorLogFields(error),
           });
         }
       }
@@ -461,7 +461,7 @@ export class RunSupervisor {
     } catch (error) {
       this.deps.logger.error('Could not tell the state of the queue', {
         runId: loop.run.id,
-        error: describe(error),
+        ...errorLogFields(error),
       });
     }
   }
@@ -486,7 +486,7 @@ export class RunSupervisor {
     } catch (error) {
       this.deps.logger.error('Could not name the session', {
         runId: loop.run.id,
-        error: describe(error),
+        ...errorLogFields(error),
       });
     }
   }
@@ -507,7 +507,7 @@ export class RunSupervisor {
       // lease lasts longer than one interval, and the loop renews it too.
       this.deps.logger.warn('Could not renew the lease of a run', {
         runId: loop.run.id,
-        error: describe(error),
+        ...errorLogFields(error),
       });
     }
   }
@@ -571,7 +571,7 @@ export class RunSupervisor {
     if (!lost) {
       this.deps.logger.error('A run stopped with an error', {
         runId: loop.run.id,
-        error: describe(error),
+        ...errorLogFields(error),
       });
     }
     if (!loop.shuttingDown && !lost) {
@@ -585,7 +585,7 @@ export class RunSupervisor {
       } catch (inner) {
         this.deps.logger.error('Could not mark a run failed', {
           runId: loop.run.id,
-          error: describe(inner),
+          ...errorLogFields(inner),
         });
       }
     }
@@ -673,8 +673,4 @@ function statusOf(outcome: RunOutcome): [RunTransitionTarget, string?] {
 
 function isInvalidTransition(error: unknown): boolean {
   return error instanceof InvalidRunTransition;
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

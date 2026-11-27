@@ -19,6 +19,7 @@ import { InputError } from '@backstage/errors';
 import type { Skill, StepContext } from '@kwkevinchan/ai-chat-harness';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { errorLogFields } from '../../application';
 import { MAX_SKILL_FILE_BYTES, parseSkillMarkdown } from './skillMarkdown';
 
 const SKILL_FILENAME = 'SKILL.md';
@@ -148,9 +149,7 @@ function lazyDirectorySkill(
         return parseSkillMarkdown(raw, `${id}/${SKILL_FILENAME}`).body;
       } catch (error) {
         if (ctx.signal.aborted) throw error;
-        logger.warn(`Failed to load skill ${id}`, {
-          error: error instanceof Error ? error.message : String(error),
-        });
+        logger.warn(`Failed to load skill ${id}`, errorLogFields(error));
         throw new Error(`Could not load skill ${id}.`);
       }
     },

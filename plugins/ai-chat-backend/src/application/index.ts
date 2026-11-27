@@ -40,7 +40,12 @@ export type {
   RunEndRecord,
   TitleCallRecord,
 } from './RunTelemetry';
-export { errorStatusOf, modelErrorFields } from './modelErrors';
+export {
+  errorCodeOf,
+  errorLogFields,
+  errorStatusOf,
+  modelErrorFields,
+} from './modelErrors';
 export type {
   LaunchRequest,
   RunHandle,

@@ -15,6 +15,7 @@
  */
 
 import type { Run } from '../../domain';
+import { errorLogFields } from '../modelErrors';
 import { notifyActivity, type ActivityNotifier } from '../notifyActivity';
 import type { RunEnded } from '../runEnded';
 import type { Logger, RunRepository, SessionRepository } from '../ports';
@@ -61,9 +62,10 @@ export class ExpireStaleRuns {
     const seen = new Set<string>();
     for (const result of results) {
       if (result.status === 'rejected') {
-        logger.warn('Could not notify the activity of a session', {
-          error: describe(result.reason),
-        });
+        logger.warn(
+          'Could not notify the activity of a session',
+          errorLogFields(result.reason),
+        );
         continue;
       }
       const run = result.value;
@@ -84,12 +86,8 @@ export class ExpireStaleRuns {
     } catch (error) {
       logger.warn('Could not tell the onRunEnd hooks about an expired run', {
         runId: run.id,
-        error: describe(error),
+        ...errorLogFields(error),
       });
     }
   }
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
