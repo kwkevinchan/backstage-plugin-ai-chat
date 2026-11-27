@@ -217,7 +217,7 @@ aiChat:
     apiKey: ${AI_CHAT_API_KEY} # secret; leave it out for a server without a key
     model: gpt-4o-mini
     timeoutSeconds: 120 # per model answer; default 120
-    images: false # the model reads images; default false. See "Images"
+    images: false # global image-attachment switch & default model capability; default false. See "Images"
     parallelToolCalls: false # ask the server for parallel tool calls; default false
     requestsPerMinute: 60 # optional; calls per minute over all backends
     reportUsage: true # ask for the tokens of each answer (stream_options); default true
@@ -374,7 +374,7 @@ exactly `days` ago is kept.
 
 | Setting                                                  | Meaning                                                                                                                                                                                                                                                                                                                                              |
 | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `llm.images`                                             | Whether the model reads images (`false` by default). When `true`, attached images are sent to the model server as part of the message and leave your organization when that server is outside it.                                                                                                                                                    |
+| `llm.images`                                             | Global switch for image attachments (`false` by default): controls the attach button, image uploads, and messages with images (rejected with 400 when `false`), and whether the default model reads images. `models.<id>.images` only controls whether images are sent to that model or replaced with a text description. When sent, attached images leave your organization if the model server is outside it. |
 | `maxTurns`                                               | Most model calls in one run.                                                                                                                                                                                                                                                                                                                         |
 | `maxToolCallsPerRun`                                     | Most tool calls the model may ask for in one run. A call beyond the limit is answered with "tool call limit" and does not run.                                                                                                                                                                                                                       |
 | `maxToolCallsPerStep`                                    | Most tool calls in one answer of the model. A call beyond it is answered with "tool call limit per step", does not run, and counts toward `maxToolCallsPerRun`.                                                                                                                                                                                      |

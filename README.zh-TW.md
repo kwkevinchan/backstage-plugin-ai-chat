@@ -77,7 +77,7 @@ aiChat:
     baseUrl: https://api.openai.com/v1 # 任何相容 OpenAI Chat Completions 的伺服器
     apiKey: ${AI_CHAT_API_KEY}
     model: gpt-4o-mini
-    images: false # 模型能讀圖片；預設 false。圖片會送到模型伺服器，見下方說明
+    images: false # 圖片附件的全域開關，也是預設模型能不能讀圖片；預設 false，見下方說明
     parallelToolCalls: false # 請伺服器允許一次多個工具呼叫；預設 false
     requestsPerMinute: 60 # 選填；所有後端合計每分鐘的呼叫數
     reportUsage: true # 請伺服器回報每次回答的 token 用量（stream_options）；不接受這個欄位的伺服器設 false；預設 true
