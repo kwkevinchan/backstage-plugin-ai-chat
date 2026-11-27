@@ -216,10 +216,19 @@ export class ForkSession {
       await span.success();
       return forked;
     } catch (error) {
+      let reason = error instanceof Error ? error.message : 'fork failed';
       if (created) {
-        await this.deps.sessions.delete(forkedId).catch(() => {});
+        try {
+          await this.deps.sessions.delete(forkedId);
+        } catch (cleanupError) {
+          const detail =
+            cleanupError instanceof Error
+              ? cleanupError.message
+              : String(cleanupError);
+          reason = `${reason}; cleanup failed: ${detail}`;
+        }
       }
-      await span.fail(error instanceof Error ? error.message : 'fork failed');
+      await span.fail(reason);
       throw error;
     }
   }

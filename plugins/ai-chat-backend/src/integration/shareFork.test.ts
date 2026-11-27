@@ -334,6 +334,21 @@ describe('forking a shared session and shared view metadata (P2-05)', () => {
       snapshotAt: secondLastCreatedAt,
     });
 
+    // Polling with afterSeq at the tail returns no new items, yet snapshotAt
+    // still reflects the last visible item (not share.createdAt).
+    const lastSeq = refreshedSnap.items[refreshedSnap.items.length - 1].seq;
+    const polledSnap = (
+      await as(
+        'bob',
+        request(b.app).get(`/sessions/${id}?afterSeq=${lastSeq}`),
+      ).expect(200)
+    ).body;
+    expect(polledSnap.items).toEqual([]);
+    expect(polledSnap.shared).toEqual({
+      mode: 'snapshot',
+      snapshotAt: secondLastCreatedAt,
+    });
+
     // Live sharee sees mode: 'live' with expiresAt; once expired, becomes mode: 'snapshot'.
     const liveShare = (
       await as('jane', request(b.app).post(`/sessions/${id}/shares`))

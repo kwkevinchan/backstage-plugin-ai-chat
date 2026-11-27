@@ -69,6 +69,65 @@ describe('itemsToMessages', () => {
     expect(JSON.stringify(messages)).not.toContain('"S"');
   });
 
+  it('groups items without runId by turn so forked assistant replies and plans render', () => {
+    const t = '2026-11-26T00:00:00.000Z';
+    const plan = {
+      items: [{ text: 'Check status', status: 'completed' as const }],
+    };
+    const messages = itemsToMessages(
+      detail({
+        items: [
+          {
+            sessionId: 's-1',
+            seq: 1,
+            createdAt: t,
+            kind: 'user_message',
+            text: 'first q',
+          },
+          {
+            sessionId: 's-1',
+            seq: 2,
+            createdAt: t,
+            kind: 'agent_message',
+            text: 'first a',
+          },
+          { sessionId: 's-1', seq: 3, createdAt: t, kind: 'plan_update', plan },
+          {
+            sessionId: 's-1',
+            seq: 4,
+            createdAt: t,
+            kind: 'user_message',
+            text: 'second q',
+          },
+          {
+            sessionId: 's-1',
+            seq: 5,
+            createdAt: t,
+            kind: 'agent_message',
+            text: 'second a',
+          },
+        ],
+      }),
+    );
+
+    expect(messages.map(m => [m.id, m.role])).toEqual([
+      ['item_1', 'user'],
+      ['turn_1', 'assistant'],
+      ['item_4', 'user'],
+      ['turn_4', 'assistant'],
+    ]);
+    expect(new Set(messages.map(m => m.id)).size).toBe(4);
+    expect(messages[1].parts).toEqual([
+      { type: 'step-start' },
+      { type: 'text', text: 'first a', state: 'done' },
+      { type: 'data-plan', id: 'plan', data: plan },
+    ]);
+    expect(messages[3].parts).toEqual([
+      { type: 'step-start' },
+      { type: 'text', text: 'second a', state: 'done' },
+    ]);
+  });
+
   it('shows a call that waits as approval-requested with approval.id = callId', () => {
     const messages = itemsToMessages(
       detail({

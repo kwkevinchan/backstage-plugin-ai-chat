@@ -213,7 +213,8 @@ export class GetSession {
           })()
         : {
             mode: 'snapshot',
-            snapshotAt: list[list.length - 1]?.createdAt ?? share.createdAt,
+            snapshotAt:
+              visible[visible.length - 1]?.createdAt ?? share.createdAt,
           };
     return {
       session,
