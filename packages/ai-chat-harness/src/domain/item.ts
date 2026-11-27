@@ -57,6 +57,44 @@ export type ToolResultStatus =
 export type PageContext = { path: string; entityRef?: string };
 
 /**
+ * What the host read of an entity of the catalog that a message refers to
+ * (B-04), with the credentials of the user, when the message was received.
+ *
+ * @public
+ */
+export type ReferencedEntity = {
+  kind: string;
+  namespace: string;
+  name: string;
+  title?: string;
+  description?: string;
+  type?: string;
+  lifecycle?: string;
+  owner?: string;
+  system?: string;
+  tags?: string[];
+};
+
+/**
+ * Something the user added to a message for the model to read (B-04): an
+ * entity of the catalog or a text snippet. An entity is `readable: false`
+ * when the host could not read it as the user; the model then gets only its
+ * ref. The host reads the entity once, before it writes the message, and
+ * the model input is built from what is stored here (D-18).
+ *
+ * @public
+ */
+export type MessageReference =
+  | {
+      kind: 'entity';
+      entityRef: string;
+      readable: true;
+      entity: ReferencedEntity;
+    }
+  | { kind: 'entity'; entityRef: string; readable: false }
+  | { kind: 'text'; text: string; title?: string; url?: string };
+
+/**
  * How a message of the user reached the log (IN-17).
  *
  * - `direct`: the user sent it to start a run.
@@ -87,8 +125,9 @@ export type AttachmentRef = {
 
 /**
  * The message of the user. `page` is where the user was; `buildModelInput`
- * tells the model with one line before the text. `attachments` are the
- * images of the message, in the order the user gave them.
+ * tells the model with one line before the text. `references` follow that
+ * line, before the text. `attachments` are the images of the message, in the
+ * order the user gave them.
  *
  * @public
  */
@@ -96,6 +135,7 @@ export type UserMessageBody = {
   kind: 'user_message';
   text: string;
   page?: PageContext;
+  references?: MessageReference[];
   attachments?: AttachmentRef[];
   delivery?: Delivery;
 };

@@ -167,6 +167,13 @@ export interface ChatInputConfig {
   insertMaxPerRun: number;
   /** Most messages in the queue of one session. */
   queueMaxMessages: number;
+  /** The limits on the references of a message (B-04). */
+  references: {
+    /** Most references in one message; images do not count. */
+    maxPerMessage: number;
+    /** Most characters of the text of one text snippet. */
+    maxTextLength: number;
+  };
 }
 
 /** @public */
@@ -177,6 +184,8 @@ export type ChatItemBody =
       /** The images of the message, in the order the user gave them. */
       attachments?: ChatAttachment[];
       page?: ChatPageContext;
+      /** The entities and text snippets the user added to the message. */
+      references?: ChatMessageReference[];
       delivery?: ChatDelivery;
       /**
        * Only in the answer of `GET /sessions/:id`, and only on an inserted
@@ -300,6 +309,8 @@ export interface ChatQueuedMessage {
   /** The images of the message; the queue holds them until it is sent. */
   attachments?: ChatAttachment[];
   page?: ChatPageContext;
+  /** The references, as read when the message was queued or last changed. */
+  references?: ChatMessageReference[];
   createdAt: string;
   updatedAt: string;
 }
@@ -320,6 +331,50 @@ export interface ChatPageContext {
   path: string;
   entityRef?: string;
 }
+
+/**
+ * A reference the user adds to a message (B-04): an entity of the catalog,
+ * which the backend reads with the credentials of the user, or a text
+ * snippet with the title and the link of where it is from. The link is an
+ * `http:` or `https:` URL or a path (`isReferenceUrl`).
+ *
+ * @public
+ */
+export type ChatReferenceInput =
+  | { kind: 'entity'; entityRef: string }
+  | { kind: 'text'; text: string; title?: string; url?: string };
+
+/** What the backend read of an entity that a message refers to. @public */
+export interface ChatReferencedEntity {
+  kind: string;
+  namespace: string;
+  name: string;
+  title?: string;
+  description?: string;
+  type?: string;
+  lifecycle?: string;
+  owner?: string;
+  system?: string;
+  tags?: string[];
+}
+
+/**
+ * A reference as the message keeps it. An entity is `readable: false` when
+ * it does not exist, the user could not read it, or the catalog did not
+ * answer: the model gets none of its details then.
+ *
+ * @public
+ */
+export type ChatMessageReference =
+  | {
+      kind: 'entity';
+      /** In the form `kind:namespace/name`, in lower case. */
+      entityRef: string;
+      readable: true;
+      entity: ChatReferencedEntity;
+    }
+  | { kind: 'entity'; entityRef: string; readable: false }
+  | { kind: 'text'; text: string; title?: string; url?: string };
 
 /**
  * `snapshot`: the sharee sees the session up to the moment of the share, or
@@ -415,6 +470,8 @@ export interface SendChatMessageRequest {
   /** Ids of uploaded images of this session. */
   attachmentIds?: string[];
   page?: ChatPageContext;
+  /** At most `references.maxPerMessage` of `GET /input-config`. */
+  references?: ChatReferenceInput[];
 }
 
 /** The body of `POST /sessions/:id/runs/:runId/messages`. @public */
@@ -423,6 +480,8 @@ export interface InsertChatMessageRequest {
   /** Ids of uploaded images of this session. */
   attachmentIds?: string[];
   page?: ChatPageContext;
+  /** At most `references.maxPerMessage` of `GET /input-config`. */
+  references?: ChatReferenceInput[];
 }
 
 /** The body of `POST /sessions/:id/queue`. @public */
@@ -431,6 +490,8 @@ export interface QueueChatMessageRequest {
   /** Ids of uploaded images of this session. */
   attachmentIds?: string[];
   page?: ChatPageContext;
+  /** At most `references.maxPerMessage` of `GET /input-config`. */
+  references?: ChatReferenceInput[];
 }
 
 /** The body of `PATCH /sessions/:id/queue/:queuedId`. `null` as the page removes it. @public */
@@ -439,6 +500,8 @@ export interface UpdateQueuedMessageRequest {
   /** The ids of all the images the message keeps. */
   attachmentIds?: string[];
   page?: ChatPageContext | null;
+  /** All the references the message keeps; `[]` removes them. */
+  references?: ChatReferenceInput[];
 }
 
 /** The body of `PUT /sessions/:id/queue/order`: every id of the queue, in the new order. @public */
@@ -559,6 +622,7 @@ export interface ChatInsertedData {
   text: string;
   attachments?: ChatAttachment[];
   page?: ChatPageContext;
+  references?: ChatMessageReference[];
 }
 
 /** Why a queue does not send its next message by itself. @public */

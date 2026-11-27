@@ -351,6 +351,49 @@ export function itemLogContract(
       );
     });
 
+    it('stores and reads back the references of a message as they were written', async () => {
+      const { log, newSession } = subject;
+      const { sessionId, fence } = await newSession();
+      const body: ItemBody = {
+        kind: 'user_message',
+        text: 'look at these',
+        page: { path: '/catalog' },
+        references: [
+          {
+            kind: 'entity',
+            entityRef: 'component:default/shop',
+            readable: true,
+            entity: {
+              kind: 'Component',
+              namespace: 'default',
+              name: 'shop',
+              title: 'Shop "main"\nline',
+              tags: ['a', 'b'],
+            },
+          },
+          {
+            kind: 'entity',
+            entityRef: 'component:default/secret',
+            readable: false,
+          },
+          {
+            kind: 'text',
+            text: 'snippet',
+            title: 'Runbook',
+            url: 'https://example.com/runbook',
+          },
+          { kind: 'text', text: 'bare' },
+        ],
+      };
+      await log.append(sessionId, [body, user('none')], fence);
+      const [withReferences, without] = await log.read(sessionId);
+      expect(withReferences).toMatchObject(body as object);
+      expect(
+        (withReferences as { references: unknown }).references,
+      ).toEqual(body.kind === 'user_message' && body.references);
+      expect(without).not.toHaveProperty('references');
+    });
+
     it('numbers two appends to one session at the same time without a repeat or a gap', async () => {
       const { log, newSession } = subject;
       const { sessionId, fence } = await newSession();
