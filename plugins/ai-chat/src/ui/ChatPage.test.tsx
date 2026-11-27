@@ -15,7 +15,13 @@
  */
 
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderInTestApp, TestApiProvider } from '@backstage/test-utils';
 import {
@@ -1226,5 +1232,87 @@ describe('session list controls and live status', () => {
       unmount?.();
       jest.useRealTimers();
     }
+  });
+
+  it('shows previewTitle and Processing in the sidebar while the open first turn is still streaming', async () => {
+    let sent = false;
+    let closeStream: (() => void) | undefined;
+    const api = mockApi({
+      createSession: jest.fn(async () => ({
+        ...session,
+        id: 's-new',
+        title: undefined,
+      })),
+      listSessions: jest.fn(async () =>
+        sent
+          ? [
+              {
+                ...session,
+                id: 's-new',
+                title: undefined,
+                previewTitle: 'hold 600',
+                activity: 'running' as const,
+              },
+            ]
+          : [{ ...session, id: 's-new', title: undefined }],
+      ),
+      getSession: jest.fn(async () =>
+        detail({
+          session: { ...session, id: 's-new', title: undefined },
+          ...(sent && {
+            run: {
+              id: 'r-1',
+              sessionId: 's-new',
+              status: 'running' as const,
+              cancelRequested: false,
+              startedAt: '2026-01-01T00:00:00.000Z',
+            },
+            items: [
+              {
+                sessionId: 's-new',
+                seq: 1,
+                runId: 'r-1',
+                createdAt: '2026-01-01T00:00:00.000Z',
+                kind: 'user_message' as const,
+                text: 'hold 600',
+              },
+            ],
+          }),
+        }),
+      ),
+      sendMessage: jest.fn(async () => {
+        sent = true;
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            const send = (chunk: unknown) =>
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`),
+              );
+            send({ type: 'start', messageId: 'run_r-1' });
+            send({
+              type: 'data-run',
+              data: { runId: 'r-1', status: 'running' },
+              transient: true,
+            });
+            closeStream = () => controller.close();
+          },
+        });
+        return new Response(stream, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        });
+      }),
+    });
+
+    await renderPage(api, '/ai-chat');
+    await userEvent.type(screen.getByLabelText('Message'), 'hold 600{Enter}');
+    await waitFor(() => expect(where()).toBe('/ai-chat/s-new'));
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+
+    const nav = screen.getByRole('navigation', { name: 'Conversations' });
+    expect(await within(nav).findByText('hold 600')).toBeInTheDocument();
+    expect(await within(nav).findByText('Processing')).toBeInTheDocument();
+    closeStream?.();
   });
 });

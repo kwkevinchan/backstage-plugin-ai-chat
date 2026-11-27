@@ -79,6 +79,20 @@ export function readThreadCustom(
   };
 }
 
+const MAX_PREVIEW_TITLE_CHARS = 60;
+
+function previewTitleFromItems(
+  items: readonly { kind: string; text?: string }[],
+): string | undefined {
+  const first = items.find(item => item.kind === 'user_message');
+  if (!first || typeof first.text !== 'string') return undefined;
+  const collapsed = first.text.replace(/\s+/g, ' ').trim();
+  if (!collapsed) return undefined;
+  return collapsed.length > MAX_PREVIEW_TITLE_CHARS
+    ? `${collapsed.slice(0, MAX_PREVIEW_TITLE_CHARS).trimEnd()}…`
+    : collapsed;
+}
+
 /** Converts a backend `ChatSession` into assistant-ui's `RemoteThreadMetadata`. */
 export function toRemoteThreadMetadata(
   session: ChatSession,
@@ -221,7 +235,21 @@ export function createThreadListAdapter(
 
     async fetch(threadId) {
       const detail = await api.getSession(threadId);
-      return toRemoteThreadMetadata(detail.session);
+      const runStatus = detail.run?.status;
+      const activity =
+        runStatus === 'running' || runStatus === 'waiting_approval'
+          ? runStatus
+          : detail.session.activity;
+      const previewTitle =
+        detail.session.previewTitle ??
+        (!detail.session.title?.trim()
+          ? previewTitleFromItems(detail.items)
+          : undefined);
+      return toRemoteThreadMetadata({
+        ...detail.session,
+        ...(activity && { activity }),
+        ...(previewTitle && { previewTitle }),
+      });
     },
 
     async initialize(_threadId, initOptions) {
