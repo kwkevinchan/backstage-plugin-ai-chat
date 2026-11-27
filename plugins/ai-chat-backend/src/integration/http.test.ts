@@ -1301,7 +1301,7 @@ describe('the HTTP routes', () => {
   });
 
   describe('an unexpected error', () => {
-    it('is logged and answered with a fixed text, not with the message of the error', async () => {
+    it('is answered by Backstage with the name and message of the error, without its stack', async () => {
       const b = backend([]);
       const failing = {
         ...b.useCases,
@@ -1325,7 +1325,7 @@ describe('the HTTP routes', () => {
       expect(b.logger.error).not.toHaveBeenCalled();
     });
 
-    it('lets Backstage filter DatabaseError messages from 500 responses', async () => {
+    it('lets Backstage filter PostgreSQL DatabaseError messages from 500 responses', async () => {
       class DatabaseError extends Error {
         constructor(message: string) {
           super(message);
@@ -1338,7 +1338,7 @@ describe('the HTTP routes', () => {
         getSession: {
           execute: async () => {
             throw new DatabaseError(
-              'insert into "sessions" (id) values (?) failed: SQLITE_BUSY',
+              'duplicate key value violates unique constraint "sessions_pkey"',
             );
           },
         },
@@ -1349,8 +1349,10 @@ describe('the HTTP routes', () => {
       } as unknown as Backend);
       const res = await as(JANE, request(application).get('/sessions/s1'));
       expect(res.status).toBe(500);
-      expect(res.text).not.toContain('insert into');
-      expect(res.text).not.toContain('SQLITE_BUSY');
+      expect(res.text).not.toContain('sessions_pkey');
+      expect(res.body.error.message).toMatch(
+        /^An internal error occurred logId=/,
+      );
       expect(res.body.error.stack).toBeUndefined();
     });
   });
