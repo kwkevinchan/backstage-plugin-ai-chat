@@ -89,6 +89,8 @@ export class UiMessageStreamPresenter {
   private replaying = false;
   /** The calls shown so far, to ask for the approval of one before its decision. */
   private readonly calls = new Map<string, ToolCallItem>();
+  /** User decisions seen so far, keyed by callId. */
+  private readonly decisions = new Map<string, boolean>();
   /** The steps up to this number were replayed: their step events are skipped. */
   private replayedStep = 0;
   /** The steps that the replay opened, one for each step of the run that has an item. */
@@ -349,6 +351,8 @@ export class UiMessageStreamPresenter {
       case 'approval': {
         // The SDK finds the part of a decision by the request of the approval,
         // so a stream that did not carry the request (a replay) sends it first.
+        const approved = item.decision === 'allow';
+        this.decisions.set(item.callId, approved);
         const call = this.calls.get(item.callId);
         return [
           ...this.stepEnd(),
@@ -356,14 +360,34 @@ export class UiMessageStreamPresenter {
           {
             type: 'tool-approval-response',
             approvalId: item.callId,
-            approved: item.decision === 'allow',
+            approved,
           },
         ];
       }
       case 'tool_started':
         return this.stepEnd();
-      case 'tool_result':
-        return [...this.stepEnd(), toolOutput(item)];
+      case 'tool_result': {
+        const chunks: UiMessageChunk[] = [...this.stepEnd()];
+        if (
+          item.status === 'denied' &&
+          item.deniedReason !== undefined &&
+          item.deniedReason !== 'user'
+        ) {
+          const decided = this.decisions.get(item.callId);
+          const call = this.calls.get(item.callId);
+          if (decided === undefined && call) {
+            chunks.push(approvalRequest(call));
+          }
+          chunks.push({
+            type: 'tool-approval-response',
+            approvalId: item.callId,
+            approved: decided ?? false,
+            reason: item.deniedReason,
+          });
+        }
+        chunks.push(toolOutput(item));
+        return chunks;
+      }
       case 'plan_update':
         return [{ type: 'data-plan', id: 'plan', data: item.plan }];
       default:

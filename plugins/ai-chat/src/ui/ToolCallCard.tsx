@@ -21,6 +21,8 @@ import type { ChatTool } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { AiChatToolResultsApi } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import type { DecisionInfo } from '../domain/itemsToMessages';
 import {
+  deniedReasonText,
+  isSystemDeniedReason,
   NOT_RUN,
   RESULT_NOT_KNOWN,
   titleOfTool,
@@ -58,6 +60,7 @@ export function statusOfCall(
   if (call.result !== undefined) return 'done';
   if (call.approval) {
     if (call.approval.approved === undefined) return 'waiting';
+    if (isSystemDeniedReason(call.approval.reason)) return 'blocked';
     return call.approval.approved ? 'allowed' : 'rejected';
   }
   return 'running';
@@ -73,6 +76,7 @@ const STATUS: Record<
   done: { label: 'Done', tone: 'success' },
   failed: { label: 'Failed', tone: 'danger' },
   rejected: { label: 'Denied', tone: 'danger' },
+  blocked: { label: 'Blocked', tone: 'danger' },
   unknown: { label: 'Result unknown', tone: 'warning' },
   not_run: { label: 'Did not run', tone: undefined },
 };
@@ -234,6 +238,18 @@ function decisionText(
 ): string | undefined {
   if (status === 'waiting') return undefined;
   const approved = call.approval?.approved;
+  const reason = call.approval?.reason;
+  if (status === 'blocked' && isSystemDeniedReason(reason)) {
+    const why = deniedReasonText(reason);
+    if (approved) {
+      return info
+        ? `Allowed by ${info.by} at ${new Date(
+            info.at,
+          ).toLocaleString()}, but blocked: ${why}.`
+        : `Allowed, but blocked: ${why}.`;
+    }
+    return `Blocked: ${why}.`;
+  }
   let decision: string | undefined;
   if (approved !== undefined) {
     const word = approved ? 'Allowed' : 'Denied';

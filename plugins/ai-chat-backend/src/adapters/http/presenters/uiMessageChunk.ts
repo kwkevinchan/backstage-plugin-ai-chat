@@ -52,6 +52,7 @@ export type UiMessageChunk =
       type: 'tool-approval-response';
       approvalId: string;
       approved: boolean;
+      reason?: string;
     }
   | { type: 'tool-output-available'; toolCallId: string; output: JsonValue }
   | { type: 'tool-output-error'; toolCallId: string; errorText: string }

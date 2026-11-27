@@ -103,20 +103,9 @@ export type ModelCallRecord = {
   providers?: ContextProviderRecord[];
 };
 
-/**
- * Why a call got a `denied` result: the policy, the calls the run may make,
- * the calls of one step, a `beforeToolCall` hook, the user, or a change
- * before it in the step that went over its time.
- *
- * @public
- */
-export type ToolDeniedReason =
-  | 'policy'
-  | 'run_limit'
-  | 'step_limit'
-  | 'hook'
-  | 'user'
-  | 'earlier_write_timed_out';
+import type { ToolDeniedReason } from '../../domain';
+
+export type { ToolDeniedReason };
 
 /**
  * One tool result written to the log (O-01). Numbers, ids and fixed words

@@ -97,7 +97,13 @@ export function itemsToMessages(
           return {
             ...base,
             state: 'output-denied',
-            approval: { id: call.callId, approved: false },
+            approval: {
+              id: call.callId,
+              approved: decided ?? false,
+              ...(result.deniedReason !== undefined && {
+                reason: result.deniedReason,
+              }),
+            },
           } as Part;
         case 'unknown':
           return {

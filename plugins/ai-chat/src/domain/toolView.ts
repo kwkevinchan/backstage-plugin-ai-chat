@@ -14,7 +14,10 @@
  * limitations under the License.
  */
 
-import { TOOL_RESULT_NOT_KNOWN } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import {
+  TOOL_RESULT_NOT_KNOWN,
+  type ChatToolDeniedReason,
+} from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { ToolPart } from './types';
 
 /** The text of a call whose result was never stored although it may have run. */
@@ -23,6 +26,32 @@ export const RESULT_NOT_KNOWN = TOOL_RESULT_NOT_KNOWN;
 /** The text of a call that did not run, because its run ended first. */
 export const NOT_RUN = 'The call did not run.';
 
+/** System-level denial reasons (distinct from a user clicking Deny). */
+export type SystemDeniedReason = Exclude<ChatToolDeniedReason, 'user'>;
+
+const SYSTEM_DENIED_REASON_TEXT: Record<SystemDeniedReason, string> = {
+  step_limit: 'write limit for this step',
+  run_limit: 'call limit for this run',
+  earlier_write_timed_out: 'an earlier write in this step timed out',
+  policy: 'blocked by policy',
+  hook: 'blocked by a hook',
+};
+
+/** Whether `reason` is a known system-level denial reason (not user denial). */
+export function isSystemDeniedReason(
+  reason: string | undefined,
+): reason is SystemDeniedReason {
+  return (
+    reason !== undefined &&
+    Object.prototype.hasOwnProperty.call(SYSTEM_DENIED_REASON_TEXT, reason)
+  );
+}
+
+/** Readable text for a system-level denial reason. */
+export function deniedReasonText(reason: SystemDeniedReason): string {
+  return SYSTEM_DENIED_REASON_TEXT[reason];
+}
+
 /** How the screen shows a tool call. */
 export type ToolStatus =
   | 'waiting' // asks for the decision of the user
@@ -30,7 +59,8 @@ export type ToolStatus =
   | 'running' // runs without a decision, no result yet
   | 'done'
   | 'failed'
-  | 'rejected'
+  | 'rejected' // denied by the user (or legacy denied without a reason)
+  | 'blocked' // denied by the system (policy, limit, hook, or prior write timeout)
   | 'unknown' // may have run; the result was not stored
   | 'not_run'; // did not run, because the run ended first
 
@@ -57,7 +87,9 @@ export function statusOfTool(part: ToolPart): ToolStatus {
     case 'output-available':
       return 'done';
     case 'output-denied':
-      return 'rejected';
+      return isSystemDeniedReason(part.approval?.reason)
+        ? 'blocked'
+        : 'rejected';
     case 'output-error':
       if (part.errorText === RESULT_NOT_KNOWN) return 'unknown';
       if (part.errorText === NOT_RUN) return 'not_run';

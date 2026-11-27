@@ -168,8 +168,8 @@ describe('ApprovalCard', () => {
     expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull();
   });
 
-  it('says that a rejected call did not run', () => {
-    render(
+  it('says that a rejected call did not run (legacy without reason and user denial)', () => {
+    const { rerender } = render(
       <ApprovalCard
         call={callOf(
           part({
@@ -181,6 +181,60 @@ describe('ApprovalCard', () => {
     );
     expect(screen.getByText('Denied')).toBeInTheDocument();
     expect(screen.getByText('Denied.')).toBeInTheDocument();
+
+    rerender(
+      <ApprovalCard
+        call={callOf(
+          part({
+            state: 'output-denied',
+            approval: { id: 'c1', approved: false, reason: 'user' },
+          }),
+        )}
+      />,
+    );
+    expect(screen.getByText('Denied')).toBeInTheDocument();
+    expect(screen.getByText('Denied.')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['step_limit', 'write limit for this step'],
+    ['run_limit', 'call limit for this run'],
+    ['earlier_write_timed_out', 'an earlier write in this step timed out'],
+    ['policy', 'blocked by policy'],
+    ['hook', 'blocked by a hook'],
+  ] as const)(
+    'shows the reason when a call was allowed by the user but blocked by %s',
+    (reason, expectedText) => {
+      render(
+        <ApprovalCard
+          call={callOf(
+            part({
+              state: 'output-denied',
+              approval: { id: 'c1', approved: true, reason },
+            }),
+          )}
+        />,
+      );
+      expect(screen.getByText('Blocked')).toBeInTheDocument();
+      expect(
+        screen.getByText(`Allowed, but blocked: ${expectedText}.`),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it('shows Blocked with reason when a call was blocked before user approval', () => {
+    render(
+      <ApprovalCard
+        call={callOf(
+          part({
+            state: 'output-denied',
+            approval: { id: 'c1', approved: false, reason: 'policy' },
+          }),
+        )}
+      />,
+    );
+    expect(screen.getByText('Blocked')).toBeInTheDocument();
+    expect(screen.getByText('Blocked: blocked by policy.')).toBeInTheDocument();
   });
 
   it('shows a call that was allowed and has no result yet', () => {

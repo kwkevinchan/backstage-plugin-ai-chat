@@ -166,6 +166,7 @@ export async function* executeTools(
         kind: 'tool_result',
         callId: call.callId,
         status: 'denied',
+        deniedReason: 'earlier_write_timed_out',
         message: AFTER_WRITE_TIMEOUT_MESSAGE,
       });
       continue;
@@ -324,6 +325,7 @@ async function settleCall(
           kind: 'tool_result',
           callId: call.callId,
           status: 'denied',
+          deniedReason: 'user',
           message: 'The user denied this call.',
         },
       ],
