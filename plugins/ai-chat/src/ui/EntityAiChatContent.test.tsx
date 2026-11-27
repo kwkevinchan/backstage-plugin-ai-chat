@@ -17,10 +17,15 @@
 import type { Entity } from '@backstage/catalog-model';
 import { EntityProvider } from '@backstage/plugin-catalog-react';
 import { renderInTestApp, TestApiProvider } from '@backstage/test-utils';
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useLocation } from 'react-router-dom';
 import { aiChatApiRef } from '../api';
+import {
+  AI_CHAT_SIGNAL_CHANNEL,
+  signalApiRef,
+  type SignalApi,
+} from '../adapters/signals';
 import { rootRouteRef } from '../routes';
 import { mockApi, session } from '../testData';
 import { EntityAiChatContentView } from './EntityAiChatContent';
@@ -44,12 +49,36 @@ function LocationDisplay() {
   return <div data-testid="location">{`${pathname}${search}`}</div>;
 }
 
+function mockSignals() {
+  const subscribers = new Set<(message: unknown) => void>();
+  const api: SignalApi = {
+    subscribe: jest.fn((channel: string, cb: (message: unknown) => void) => {
+      if (channel === AI_CHAT_SIGNAL_CHANNEL) subscribers.add(cb);
+      return { unsubscribe: () => subscribers.delete(cb) };
+    }),
+  };
+  const emit = (message: unknown) => {
+    act(() => {
+      subscribers.forEach(cb => cb(message));
+    });
+  };
+  return { api, emit };
+}
+
 async function renderEntityTab(
   api: ReturnType<typeof mockApi>,
-  entity: Entity = TEST_ENTITY,
+  {
+    entity = TEST_ENTITY,
+    chatPath = '/ai-chat',
+    signals,
+  }: { entity?: Entity; chatPath?: string; signals?: SignalApi } = {},
 ) {
+  const apis: Array<readonly [never, never]> = [
+    [aiChatApiRef, api] as never,
+    ...(signals ? [[signalApiRef, signals] as never] : []),
+  ];
   await renderInTestApp(
-    <TestApiProvider apis={[[aiChatApiRef, api]]}>
+    <TestApiProvider apis={apis}>
       <EntityProvider entity={entity}>
         <EntityAiChatContentView />
         <LocationDisplay />
@@ -57,7 +86,7 @@ async function renderEntityTab(
     </TestApiProvider>,
     {
       mountedRoutes: {
-        '/ai-chat': rootRouteRef,
+        [chatPath]: rootRouteRef,
       },
     },
   );
@@ -149,5 +178,51 @@ describe('EntityAiChatContent', () => {
         includeArchived: true,
       }),
     );
+  });
+
+  it('reloads the list when Signals reports that a session replied', async () => {
+    const signals = mockSignals();
+    const api = mockApi({
+      listSessions: jest.fn().mockResolvedValue([
+        {
+          ...session,
+          id: 's-1',
+          title: 'Investigate payments latency',
+          entityRef: 'component:default/example-payments',
+          activity: 'running',
+        },
+      ]),
+    });
+
+    await renderEntityTab(api, { signals: signals.api });
+    await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(1));
+
+    signals.emit({ sessionId: 's-1', activity: 'replied' });
+    await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(2));
+    expect(api.listSessions).toHaveBeenLastCalledWith({
+      entityRef: 'component:default/example-payments',
+    });
+  });
+
+  it('opens rows and new chats under the chat page mounted at the root', async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      listSessions: jest.fn().mockResolvedValue([
+        {
+          ...session,
+          id: 's-7',
+          title: 'Payments incident',
+          entityRef: 'component:default/example-payments',
+        },
+      ]),
+    });
+
+    const { where } = await renderEntityTab(api, { chatPath: '/' });
+
+    await user.click(await screen.findByRole('button', { name: 'New chat' }));
+    expect(where()).toBe('/?entityRef=component%3Adefault%2Fexample-payments');
+
+    await user.click(await screen.findByText('Payments incident'));
+    await waitFor(() => expect(where()).toBe('/s-7'));
   });
 });

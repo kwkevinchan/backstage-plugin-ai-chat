@@ -18,29 +18,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AssistantRuntimeProvider,
-  useAui,
   useExternalStoreRuntime,
   useRemoteThreadListRuntime,
   type ThreadMessage,
 } from '@assistant-ui/react';
 import { stringifyEntityRef } from '@backstage/catalog-model';
-import { useApi, useApiHolder, useRouteRef } from '@backstage/core-plugin-api';
+import { useApi, useRouteRef } from '@backstage/core-plugin-api';
 import { useEntity } from '@backstage/plugin-catalog-react';
 import { aiChatApiRef } from '../api';
 import { createThreadListAdapter } from '../adapters/assistantUi/threadListAdapter';
 import { describeError } from '../adapters/describeError';
-import {
-  AI_CHAT_SIGNAL_CHANNEL,
-  parseSessionActivitySignal,
-  signalApiRef,
-  type SessionSignalActivity,
-} from '../adapters/signals';
+import { useThreadListLiveUpdates } from '../adapters/assistantUi/useThreadListLiveUpdates';
 import { rootRouteRef } from '../routes';
 import { cx } from './styles';
 import { ThreadListSidebar } from './ThreadListSidebar';
 
 const SEARCH_DEBOUNCE_MS = 250;
-const FALLBACK_POLL_MS = 15_000;
 const EMPTY_MESSAGES: readonly ThreadMessage[] = [];
 const NOOP_ON_NEW = async () => {};
 
@@ -75,62 +68,26 @@ function EntityThreadListBody({
   reloadRef: React.MutableRefObject<(() => void) | undefined>;
 }) {
   const api = useApi(aiChatApiRef);
-  const apiHolder = useApiHolder();
   const navigate = useNavigate();
-  const aui = useAui();
-  const [signalActivities, setSignalActivities] = useState<
-    Record<string, SessionSignalActivity>
-  >({});
+  const { signalActivities, reloadList } = useThreadListLiveUpdates('');
 
-  const reload = useCallback(() => {
-    void aui.threads.reload();
-  }, [aui]);
-
-  useEffect(() => {
-    reloadRef.current = reload;
-    return () => {
-      reloadRef.current = undefined;
-    };
-  }, [reload, reloadRef]);
-
-  useEffect(() => {
-    const signals = apiHolder.get(signalApiRef);
-    if (!signals) {
-      const timer = setInterval(() => {
-        if (
-          typeof document !== 'undefined' &&
-          document.visibilityState === 'hidden'
-        ) {
-          return;
-        }
-        reload();
-      }, FALLBACK_POLL_MS);
-      return () => clearInterval(timer);
-    }
-    const { unsubscribe } = signals.subscribe(AI_CHAT_SIGNAL_CHANNEL, raw => {
-      const event = parseSessionActivitySignal(raw);
-      if (!event) return;
-      setSignalActivities(current => {
-        if (current[event.sessionId] === event.activity) return current;
-        return { ...current, [event.sessionId]: event.activity };
-      });
-    });
-    return unsubscribe;
-  }, [apiHolder, reload]);
+  reloadRef.current = reloadList;
 
   const handleUnarchive = useCallback(
     (remoteId: string) => {
       onClearError();
       api
         .updateSession(remoteId, { archived: false })
-        .then(() => reload())
+        .then(() => reloadList())
         .catch(onActionError);
     },
-    [api, onClearError, onActionError, reload],
+    [api, onClearError, onActionError, reloadList],
   );
 
   const handleNewChat = useCallback(() => {
-    navigate(`${chatBasePath}?entityRef=${encodeURIComponent(entityRef)}`);
+    navigate(
+      `${chatBasePath || '/'}?entityRef=${encodeURIComponent(entityRef)}`,
+    );
   }, [chatBasePath, entityRef, navigate]);
 
   return (
@@ -161,7 +118,7 @@ export function EntityAiChatContentView() {
   const api = useApi(aiChatApiRef);
   const navigate = useNavigate();
   const rootRoute = useRouteRef(rootRouteRef);
-  const chatBasePath = rootRoute().replace(/\/+$/, '') || '/ai-chat';
+  const chatBasePath = rootRoute().replace(/\/+$/, '');
 
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
