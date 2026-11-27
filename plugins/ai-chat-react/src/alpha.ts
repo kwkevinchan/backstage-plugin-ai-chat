@@ -15,8 +15,8 @@
  */
 
 /**
- * Entry point of the new frontend system: the blueprint that adds a result
- * component for an action to the chat.
+ * Entry point of the new frontend system: the blueprints that add a result
+ * component for an action and a reference source to the chat.
  *
  * @packageDocumentation
  */
@@ -25,8 +25,14 @@ import {
   createExtensionBlueprint,
   createExtensionDataRef,
 } from '@backstage/frontend-plugin-api';
+import type { AiChatReferenceSource } from './references';
 import type { AiChatToolResult } from './toolResults';
 
+export type {
+  AiChatReference,
+  AiChatReferenceSource,
+  AiChatReferenceSourceProps,
+} from './references';
 export type {
   AiChatToolResult,
   AiChatToolResultProps,
@@ -61,6 +67,42 @@ export const AiChatToolResultBlueprint = createExtensionBlueprint({
   *factory(params: AiChatToolResult) {
     yield toolResultDataRef({
       actionId: params.actionId,
+      component: params.component,
+    });
+  },
+});
+
+const referenceSourceDataRef =
+  createExtensionDataRef<AiChatReferenceSource>().with({
+    id: 'ai-chat.reference-source',
+  });
+
+/**
+ * Adds a reference source to the "Add reference" menu of the chat. The
+ * extension attaches to the `referenceSources` input of
+ * `api:ai-chat/reference-sources`, which the chat plugin provides. When two
+ * extensions have the same id, the one that comes first in the input is used
+ * and the chat warns in the console.
+ *
+ * @example
+ * ```tsx
+ * AiChatReferenceSourceBlueprint.make({
+ *   name: 'docs-page',
+ *   params: { id: 'docs-page', title: 'Documentation page', component: DocsPagePicker },
+ * });
+ * ```
+ *
+ * @alpha
+ */
+export const AiChatReferenceSourceBlueprint = createExtensionBlueprint({
+  kind: 'ai-chat-reference-source',
+  attachTo: { id: 'api:ai-chat/reference-sources', input: 'referenceSources' },
+  output: [referenceSourceDataRef],
+  dataRefs: { referenceSource: referenceSourceDataRef },
+  *factory(params: AiChatReferenceSource) {
+    yield referenceSourceDataRef({
+      id: params.id,
+      title: params.title,
       component: params.component,
     });
   },

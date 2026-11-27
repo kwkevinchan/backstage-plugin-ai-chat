@@ -20,8 +20,14 @@ import {
 } from '@backstage/frontend-plugin-api';
 import { createExtensionTester } from '@backstage/frontend-test-utils';
 import { EntityContentBlueprint } from '@backstage/plugin-catalog-react/alpha';
-import type { AiChatToolResultsApi } from '@kwkevinchan/backstage-plugin-ai-chat-react';
-import { AiChatToolResultBlueprint } from '@kwkevinchan/backstage-plugin-ai-chat-react/alpha';
+import type {
+  AiChatReferenceSourcesApi,
+  AiChatToolResultsApi,
+} from '@kwkevinchan/backstage-plugin-ai-chat-react';
+import {
+  AiChatReferenceSourceBlueprint,
+  AiChatToolResultBlueprint,
+} from '@kwkevinchan/backstage-plugin-ai-chat-react/alpha';
 import aiChatPlugin from './alpha';
 
 describe('ai-chat (new frontend system)', () => {
@@ -42,6 +48,47 @@ describe('ai-chat (new frontend system)', () => {
     expect(aiChatPlugin.getExtension('api:ai-chat')).toBeDefined();
     expect(aiChatPlugin.getExtension('api:ai-chat/panel')).toBeDefined();
     expect(aiChatPlugin.getExtension('api:ai-chat/tool-results')).toBeDefined();
+    expect(
+      aiChatPlugin.getExtension('api:ai-chat/reference-sources'),
+    ).toBeDefined();
+  });
+
+  it('collects the sources of AiChatReferenceSourceBlueprint in order, the first one for an id wins', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const Docs = () => null;
+    const Later = () => null;
+    const Template = () => null;
+    const tester = createExtensionTester(
+      aiChatPlugin.getExtension('api:ai-chat/reference-sources'),
+    )
+      .add(
+        AiChatReferenceSourceBlueprint.make({
+          name: 'docs',
+          params: { id: 'docs-page', title: 'Documentation page', component: Docs },
+        }),
+      )
+      .add(
+        AiChatReferenceSourceBlueprint.make({
+          name: 'later',
+          params: { id: 'docs-page', title: 'Again', component: Later },
+        }),
+      )
+      .add(
+        AiChatReferenceSourceBlueprint.make({
+          name: 'template',
+          params: { id: 'template', title: 'Template', component: Template },
+        }),
+      );
+    const factory = tester.get(ApiBlueprint.dataRefs.factory);
+    const api = factory.factory({}) as AiChatReferenceSourcesApi;
+    expect(api.getSources()).toEqual([
+      { id: 'docs-page', title: 'Documentation page', component: Docs },
+      { id: 'template', title: 'Template', component: Template },
+    ]);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('docs-page is registered already'),
+    );
+    warn.mockRestore();
   });
 
   it('collects the result components of AiChatToolResultBlueprint, the first one for an id wins', () => {

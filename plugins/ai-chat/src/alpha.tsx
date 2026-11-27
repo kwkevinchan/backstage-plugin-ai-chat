@@ -44,13 +44,18 @@ import {
 import { EntityContentBlueprint } from '@backstage/plugin-catalog-react/alpha';
 import {
   aiChatPanelApiRef,
+  aiChatReferenceSourcesApiRef,
   aiChatToolResultsApiRef,
 } from '@kwkevinchan/backstage-plugin-ai-chat-react';
-import { AiChatToolResultBlueprint } from '@kwkevinchan/backstage-plugin-ai-chat-react/alpha';
+import {
+  AiChatReferenceSourceBlueprint,
+  AiChatToolResultBlueprint,
+} from '@kwkevinchan/backstage-plugin-ai-chat-react/alpha';
 import { RiChat3Line } from '@remixicon/react';
 import { aiChatApiRef } from './api';
 import { AiChatClient } from './adapters/AiChatClient';
 import { createAiChatPanelStore } from './application/panelStore';
+import { createAiChatReferenceSourcesApi } from './application/referenceSourcesApi';
 import { createAiChatToolResultsApi } from './application/toolResultsApi';
 import { rootRouteRef } from './routes';
 import { AiChatPanel } from './ui/AiChatPanel';
@@ -106,6 +111,29 @@ const aiChatToolResultsApi = ApiBlueprint.makeWithOverrides({
  * The side panel, once, at the app root. A page change does not unmount it,
  * and the app does not render it again.
  */
+const aiChatReferenceSourcesApi = ApiBlueprint.makeWithOverrides({
+  name: 'reference-sources',
+  inputs: {
+    referenceSources: createExtensionInput([
+      AiChatReferenceSourceBlueprint.dataRefs.referenceSource,
+    ]),
+  },
+  factory(originalFactory, { inputs }) {
+    return originalFactory(defineParams =>
+      defineParams({
+        api: aiChatReferenceSourcesApiRef,
+        deps: {},
+        factory: () =>
+          createAiChatReferenceSourcesApi(
+            inputs.referenceSources.map(input =>
+              input.get(AiChatReferenceSourceBlueprint.dataRefs.referenceSource),
+            ),
+          ),
+      }),
+    );
+  },
+});
+
 const aiChatPanel = AppRootElementBlueprint.make({
   name: 'panel',
   params: { element: <AiChatPanel /> },
@@ -149,6 +177,7 @@ export default createFrontendPlugin({
     aiChatApi,
     aiChatPanelApi,
     aiChatToolResultsApi,
+    aiChatReferenceSourcesApi,
     aiChatPage,
     aiChatPanel,
     entityAiChatContent,

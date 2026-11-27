@@ -17,11 +17,13 @@
 import type { ReactNode } from 'react';
 import { useApiHolder } from '@backstage/core-plugin-api';
 import { aiChatPanelApiRef } from '../api';
+import type { AiChatReference } from '../references';
 import { useAiChatPanel } from '../application/useAiChatPanel';
 
 /**
- * Props of {@link AiChatLauncher}. Both fields are optional. A prompt starts
+ * Props of {@link AiChatLauncher}. All fields are optional. A prompt starts
  * a new conversation. An entity reference is sent with that conversation.
+ * References go into the box of the panel for the next message.
  *
  * @public
  */
@@ -30,6 +32,8 @@ export interface AiChatLauncherProps {
   prompt?: string;
   /** The entity this conversation is about, `kind:namespace/name`. */
   entityRef?: string;
+  /** References for the next message: entities and text snippets. */
+  references?: AiChatReference[];
   /** CSS class applied to the button. */
   className?: string;
   /** The button label. Defaults to "Ask AI chat". */
@@ -50,15 +54,26 @@ export function AiChatLauncher(props: AiChatLauncherProps): JSX.Element | null {
   const api = useApiHolder().get(aiChatPanelApiRef);
   const { isOpen } = useAiChatPanel();
   if (!api) return null;
-  const { prompt, entityRef, className, children } = props;
+  const { prompt, entityRef, references, className, children } = props;
   return (
     <button
       type="button"
       className={className}
       aria-expanded={isOpen}
       onClick={() => {
-        if (prompt === undefined && entityRef === undefined) api.open();
-        else api.open({ prompt, entityRef });
+        if (
+          prompt === undefined &&
+          entityRef === undefined &&
+          references === undefined
+        ) {
+          api.open();
+        } else {
+          api.open({
+            ...(prompt !== undefined && { prompt }),
+            ...(entityRef !== undefined && { entityRef }),
+            ...(references !== undefined && { references }),
+          });
+        }
       }}
     >
       {children ?? 'Ask AI chat'}

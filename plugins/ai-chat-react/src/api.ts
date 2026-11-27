@@ -15,6 +15,7 @@
  */
 
 import { createApiRef } from '@backstage/core-plugin-api';
+import type { AiChatReference } from './references';
 
 /**
  * What a plugin asks the panel to open with. A missing field is left out.
@@ -28,6 +29,12 @@ export interface AiChatLaunchRequest {
   prompt?: string;
   /** The entity this conversation is about, `kind:namespace/name`. */
   entityRef?: string;
+  /**
+   * References for the next message. They go into the box of the panel,
+   * where the user sees them and can remove them before sending. With a
+   * prompt, they are sent with the prompt.
+   */
+  references?: AiChatReference[];
 }
 
 /**
@@ -46,7 +53,7 @@ export interface AiChatPanelApi {
    * Opens the panel. A request that sets `prompt` or `entityRef` is a launch:
    * a prompt starts a new conversation, and an entity reference stays with the
    * messages. With neither field, the panel opens and the conversation and the
-   * previous launch stay.
+   * previous launch stay. `references` are added to the box in either case.
    */
   open(request?: AiChatLaunchRequest): void;
   /** Closes the panel. The conversation and the launch stay. */
