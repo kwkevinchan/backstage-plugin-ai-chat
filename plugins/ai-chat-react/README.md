@@ -198,7 +198,14 @@ function DocsPagePicker({ onAdd, onClose }: AiChatReferenceSourceProps) {
     <button
       type="button"
       onClick={() => {
-        onAdd([{ kind: 'text', text: 'Install with yarn.', title: 'Setup', url: '/docs/setup' }]);
+        onAdd([
+          {
+            kind: 'text',
+            text: 'Install with yarn.',
+            title: 'Setup',
+            url: '/docs/setup',
+          },
+        ]);
         onClose();
       }}
     >
