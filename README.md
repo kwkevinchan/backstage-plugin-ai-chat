@@ -213,6 +213,58 @@ your `EntityLayout`:
 </EntityLayout.Route>
 ```
 
+### What a message carries
+
+Above the input box, a row of tags shows what the next message carries
+besides its text and its images:
+
+- **The page.** On by default: the path and the entity of the page the user
+  is on (the line "The user is on the page of …" of the model). The × on its
+  tag leaves the page out: the tag becomes a faint **＋ Current page**, which
+  adds it back, and so does **Current page** in **Add reference**. The page
+  stays out until the user is on another page; then it is sent again. While
+  it is out, no message, insert, queued message, decision or resume sends
+  `page`.
+- **References.** Entities of the catalog and text snippets, each with a ×.
+  **Add reference** has **Catalog entity**, a search of the catalog by name
+  and title like the `EntityPicker` of the Scaffolder, and the reference
+  sources of other plugins (below). A message carries at most 5 references, or
+  the lower number of `aiChat.input.references.maxPerMessage`; the box takes
+  no more. A text over 4,000 characters is cut and marked **Truncated**.
+  Images do not count. After the message is sent, its references leave the
+  box.
+
+The backend reads an entity with the credentials of the user who sends the
+message, and an entity that user cannot read reaches the model as "not
+provided". A text snippet goes to the model provider as it is: a plugin must
+not put secrets in it. The message shows its references above its text, also
+to a user it is shared with.
+
+Another plugin puts references in the box of the side panel with
+`useAiChatPanel().open({ references })` or `<AiChatLauncher references={…}>`
+(`@kwkevinchan/backstage-plugin-ai-chat-react`). The user sees them and can
+remove them before sending; with a `prompt`, they are sent with the prompt.
+
+```tsx
+import { useAiChatPanel } from '@kwkevinchan/backstage-plugin-ai-chat-react';
+
+const { open } = useAiChatPanel();
+open({
+  references: [
+    { kind: 'entity', entityRef: 'component:default/payments' },
+    { kind: 'text', text: selection, title: 'Runbook', url: '/docs/runbook' },
+  ],
+});
+```
+
+A plugin adds an item to **Add reference** with a reference source: a title
+and a component that lets the user choose and returns references. On the new
+frontend system the plugin adds an extension of
+`AiChatReferenceSourceBlueprint` (`@kwkevinchan/backstage-plugin-ai-chat-react/alpha`);
+on the legacy frontend system the app replaces `aiChatReferenceSourcesApiRef`
+with `createAiChatReferenceSourcesApi([...])`. The details are in the
+[README of `ai-chat-react`](plugins/ai-chat-react/README.md#reference-sources).
+
 ### Result components of actions
 
 A plugin can show the result of an action with its own component, for

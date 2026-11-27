@@ -35,4 +35,14 @@ on the legacy frontend system by replacing that API with
 `createAiChatToolResultsApi([...])` from this package. The approval card stays.
 See the README of `@kwkevinchan/backstage-plugin-ai-chat-react`.
 
+Above the message box, a row of tags shows what the next message carries:
+the page (on by default; × leaves it out until the user is on another page),
+and the references, entities of the catalog and text snippets. **Add
+reference** has the current page, a search of the catalog and the reference
+sources of other plugins: on the new frontend system
+`AiChatReferenceSourceBlueprint`, on the legacy frontend system by replacing
+`aiChatReferenceSourcesApiRef` with `createAiChatReferenceSourcesApi([...])`
+from this package. `open({ references })` and `<AiChatLauncher references>`
+put references in the box of the panel.
+
 More in the [README of the repository](https://github.com/kwkevinchan/backstage-plugin-ai-chat#readme).
