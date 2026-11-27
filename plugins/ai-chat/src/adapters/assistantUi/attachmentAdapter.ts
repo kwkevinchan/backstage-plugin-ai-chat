@@ -126,10 +126,12 @@ let nextId = 0;
  * - `send` is called only for an image whose upload failed. It throws the
  *   reason, and assistant-ui keeps the message in the box; the user removes
  *   the image or attaches it again.
- * - `remove`: calls `source.remove` with the backend attachment id when the
- *   image has uploaded (or once an in-flight upload finishes), ignoring errors
- *   so removing from the draft never blocks. Unused uploads are also purged by
- *   the backend after a day.
+ * - `remove`: called by `@assistant-ui/core` for incomplete (in-flight)
+ *   attachments; records the id so `source.remove` runs once the upload
+ *   finishes. Completed draft images invoke `source.remove` directly from
+ *   `DraftImage`'s Remove button. Errors are ignored so removing from the
+ *   draft never blocks; unused uploads are also purged by the backend after
+ *   a day.
  *
  * The last state of a good image is `complete`, which the type of `add` does
  * not list. assistant-ui 0.15 takes it. A message with an image that is not

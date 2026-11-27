@@ -347,8 +347,10 @@ or GIF images to a message. **The images are sent to the model server** as part
 of the message, so they leave your organization when the server is outside it.
 Leave `images` off (the default) when they must not. The backend stores the
 images in its database, per session; the owner of the session reads them, and
-so does a sharee who sees the message that has the image. An image that no
-message uses is deleted after 24 hours.
+so does a sharee who sees the message that has the image. Removing an attached
+image before sending deletes the pending upload (`DELETE /sessions/{id}/attachments/{attachmentId}`,
+audited as `attachment-delete`); any unused image that remains is deleted after
+24 hours.
 
 `input.images.tokensPerImage` (default 1600) is how many tokens one image
 counts in the context budget. It is an estimate, and it has not been measured

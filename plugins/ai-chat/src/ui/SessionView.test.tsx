@@ -862,6 +862,9 @@ describe('images', () => {
     paste(box, [png('a.png'), png('b.png')]);
     await waitFor(() => expect(api.uploadAttachment).toHaveBeenCalledTimes(2));
     await userEvent.click(screen.getByRole('button', { name: 'Remove a.png' }));
+    await waitFor(() =>
+      expect(api.deleteAttachment).toHaveBeenCalledWith('s-1', 'att-a.png'),
+    );
     await userEvent.type(box, 'one{Enter}');
     await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
     expect(api.sendMessage.mock.calls[0][1].attachmentIds).toEqual([

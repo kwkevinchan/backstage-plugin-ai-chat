@@ -341,6 +341,7 @@ export function SessionView(props: SessionViewProps) {
                 canQueue={running && !waiting}
                 canStop={running}
                 rejections={rejections}
+                onRemoveAttachment={attachments?.remove}
               />
             </>
           )}

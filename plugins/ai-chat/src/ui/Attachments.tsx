@@ -105,12 +105,20 @@ function MessageImage() {
 
 export const messageAttachmentComponents = { Image: MessageImage };
 
+type RemoveAttachment = (attachmentId: string) => Promise<void> | void;
+
+const RemoveAttachmentContext = createContext<RemoveAttachment | undefined>(
+  undefined,
+);
+
 /** An image of the draft: the file of the user, how its upload goes, and Remove. */
 function DraftImage() {
   const name = useAuiState(s => s.attachment.name);
   const file = useAuiState(s => s.attachment.file);
   const status = useAuiState(s => s.attachment.status);
+  const uploaded = useAuiState(s => chatAttachmentOf(s.attachment));
   const preview = useFileUrl(file);
+  const onRemove = useContext(RemoveAttachmentContext);
   return (
     <AttachmentPrimitive.Root className={cx('chat-draft')}>
       {/* An image put back into the box after a refused send has no file. */}
@@ -137,6 +145,13 @@ function DraftImage() {
           type="button"
           className={cx('chat-draft-remove')}
           aria-label={`Remove ${name}`}
+          onClick={() => {
+            // @assistant-ui/core only calls adapter.remove() for incomplete
+            // attachments, so completed uploads trigger backend cleanup here.
+            if (uploaded && onRemove) {
+              void Promise.resolve(onRemove(uploaded.id)).catch(() => {});
+            }
+          }}
         >
           Remove
         </button>
@@ -148,13 +163,15 @@ function DraftImage() {
 const draftComponents = { Image: DraftImage, Attachment: DraftImage };
 
 /** The images of the draft, above the box. */
-export function DraftImages() {
+export function DraftImages(props: { onRemove?: RemoveAttachment }) {
   const count = useAuiState(s => s.composer.attachments.length);
   if (count === 0) return null;
   return (
-    <div className={cx('chat-drafts')}>
-      <ComposerPrimitive.Attachments components={draftComponents} />
-    </div>
+    <RemoveAttachmentContext.Provider value={props.onRemove}>
+      <div className={cx('chat-drafts')}>
+        <ComposerPrimitive.Attachments components={draftComponents} />
+      </div>
+    </RemoveAttachmentContext.Provider>
   );
 }
 

@@ -612,6 +612,50 @@ describe('AiChatPanel', () => {
     );
   });
 
+  it('deletes a pending attachment from the panel draft session when removed before sending', async () => {
+    const api = mockApi();
+    api.getInputConfig.mockResolvedValue({
+      insertMaxPerRun: 5,
+      queueMaxMessages: 5,
+      images: {
+        enabled: true,
+        mediaTypes: ['image/png'],
+        maxPerMessage: 4,
+        maxBytes: 1024,
+        maxBytesPerInput: 20 * 1024 * 1024,
+        maxPendingPerSession: 12,
+      },
+    });
+    api.uploadAttachment.mockImplementation(async (_s, file, name) => ({
+      id: `att-${name}`,
+      mediaType: file.type,
+      name,
+      size: file.size,
+    }));
+    renderPanel(api);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Open AI chat' }),
+    );
+    const aside = await screen.findByRole('complementary', { name: 'AI chat' });
+    await waitFor(() => expect(api.listToolsets).toHaveBeenCalled());
+
+    const input = within(aside).getByLabelText('Message');
+    const png = (name: string) => new File(['x'], name, { type: 'image/png' });
+    fireEvent.paste(input, {
+      clipboardData: {
+        files: [png('a.png')],
+        getData: () => '',
+      },
+    });
+    await waitFor(() => expect(api.uploadAttachment).toHaveBeenCalledTimes(1));
+    await userEvent.click(
+      within(aside).getByRole('button', { name: 'Remove a.png' }),
+    );
+    await waitFor(() =>
+      expect(api.deleteAttachment).toHaveBeenCalledWith('s-1', 'att-a.png'),
+    );
+  });
+
   it('omits Attach in the panel when the model cannot read images', async () => {
     const api = mockApi();
     api.getInputConfig.mockResolvedValue({
