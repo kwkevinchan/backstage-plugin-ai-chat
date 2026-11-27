@@ -455,4 +455,31 @@ describe('KnexItemLog', () => {
     expect(session.updatedAt).toBe(p.clock.now().toISOString());
     expect(session.updatedAt).not.toBe(session.createdAt);
   });
+
+  describe('firstUserMessageTexts', () => {
+    it('returns the first non-empty user message text per session in a single batch', async () => {
+      const one = await start();
+      await p.items.append(one.sessionId, [user('first question')], one.fence);
+      await p.items.append(one.sessionId, [agent('answer')], one.fence);
+      await p.items.append(
+        one.sessionId,
+        [inserted('follow up')],
+        asHost(one.run.id),
+      );
+
+      const two = await start();
+      await p.items.append(two.sessionId, [user('   ')], two.fence);
+
+      const three = await start();
+
+      const texts = await p.items.firstUserMessageTexts([
+        one.sessionId,
+        two.sessionId,
+        three.sessionId,
+      ]);
+
+      expect(texts).toEqual(new Map([[one.sessionId, 'first question']]));
+      expect(await p.items.firstUserMessageTexts([])).toEqual(new Map());
+    });
+  });
 });

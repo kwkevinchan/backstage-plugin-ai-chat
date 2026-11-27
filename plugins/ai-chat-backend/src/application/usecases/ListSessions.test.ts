@@ -50,6 +50,7 @@ describe('ListSessions', () => {
         listByOwner: async () => sessions,
       } as any,
       runs: { findActiveForSessions } as any,
+      items: { firstUserMessageTexts: async () => new Map() },
     });
 
     const listed = await useCase.execute({ principal: jane });
@@ -58,6 +59,46 @@ describe('ListSessions', () => {
       ['s-run', 'running'],
       ['s-wait', 'waiting_approval'],
       ['s-idle', undefined],
+    ]);
+  });
+
+  it('derives a truncated previewTitle from the first user message for untitled sessions', async () => {
+    const longText =
+      '   Please   check   why the payments service is restarting repeatedly in production right now   ';
+    const sessions = [
+      { ...session('s-titled'), title: 'Existing title' },
+      session('s-short'),
+      session('s-long'),
+      session('s-empty'),
+    ];
+    const firstUserMessageTexts = jest.fn(async (ids: readonly string[]) => {
+      expect(ids).toEqual(['s-short', 's-long', 's-empty']);
+      return new Map<string, string>([
+        ['s-short', '  list\nservices  '],
+        ['s-long', longText],
+      ]);
+    });
+
+    const useCase = new ListSessions({
+      sessions: { listByOwner: async () => sessions } as any,
+      runs: { findActiveForSessions: async () => [] } as any,
+      items: { firstUserMessageTexts },
+    });
+
+    const listed = await useCase.execute({ principal: jane });
+
+    expect(firstUserMessageTexts).toHaveBeenCalledTimes(1);
+    expect(
+      listed.map(item => [item.id, item.title, item.previewTitle]),
+    ).toEqual([
+      ['s-titled', 'Existing title', undefined],
+      ['s-short', undefined, 'list services'],
+      [
+        's-long',
+        undefined,
+        'Please check why the payments service is restarting repeated…',
+      ],
+      ['s-empty', undefined, undefined],
     ]);
   });
 });

@@ -29,6 +29,7 @@ export type SessionListActivity = NonNullable<ChatSession['activity']>;
 export type ThreadListCustom = {
   pinned: boolean;
   activity?: SessionListActivity;
+  previewTitle?: string;
 };
 
 /** Options for {@link createThreadListAdapter}. */
@@ -67,7 +68,15 @@ export function readThreadCustom(
     rawActivity === 'running' || rawActivity === 'waiting_approval'
       ? rawActivity
       : undefined;
-  return activity ? { pinned, activity } : { pinned };
+  const previewTitle =
+    typeof custom?.previewTitle === 'string' && custom.previewTitle.trim()
+      ? custom.previewTitle
+      : undefined;
+  return {
+    pinned,
+    ...(activity && { activity }),
+    ...(previewTitle && { previewTitle }),
+  };
 }
 
 /** Converts a backend `ChatSession` into assistant-ui's `RemoteThreadMetadata`. */
@@ -77,6 +86,7 @@ export function toRemoteThreadMetadata(
   const custom: ThreadListCustom = {
     pinned: session.pinned,
     ...(session.activity && { activity: session.activity }),
+    ...(session.previewTitle && { previewTitle: session.previewTitle }),
   };
   return {
     status: session.archivedAt ? 'archived' : 'regular',

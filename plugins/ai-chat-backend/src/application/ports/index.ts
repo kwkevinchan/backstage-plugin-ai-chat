@@ -41,5 +41,6 @@ export { DelegatingNotifier, NoopNotifier } from './Notifier';
 export type { QueuedMessageRepository } from './QueuedMessageRepository';
 export type { RunRepository, RunTransitionTarget } from './RunRepository';
 export type { AccessControl } from './AccessControl';
+export type { SessionPreviewReader } from './SessionPreviewReader';
 export type { SessionRepository } from './SessionRepository';
 export type { ShareRepository } from './ShareRepository';

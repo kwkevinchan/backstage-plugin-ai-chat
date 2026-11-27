@@ -140,6 +140,8 @@ function hasContent(draft: OutgoingMessage | undefined): boolean {
  */
 export function useSessionChat(options: UseSessionChatOptions) {
   const { api, onChanged } = options;
+  const onChangedRef = useRef(onChanged);
+  onChangedRef.current = onChanged;
   const sessionId = options.detail.session.id;
   const [initial] = useState(() => ({
     detail: options.detail,
@@ -151,6 +153,8 @@ export function useSessionChat(options: UseSessionChatOptions) {
   /** The run goes on without this request: follow it when the request ends. */
   const followAfter = useRef(false);
   const lastRunStatus = useRef<ChatRunStatus>();
+  /** The run id whose start already triggered `onChanged`. */
+  const startedRunNotified = useRef<string>();
   /** The run that the queue started: follow it when the stream ends. */
   const nextRun = useRef<string>();
   /** The stream of that run has told its state. */
@@ -296,6 +300,10 @@ export function useSessionChat(options: UseSessionChatOptions) {
           pendingRef.current.length > 0
         ) {
           reloadAfterEnd.current = true;
+        }
+        if (status === 'running' && startedRunNotified.current !== runId) {
+          startedRunNotified.current = runId;
+          onChangedRef.current?.();
         }
         setActiveRun(current =>
           status === 'running' || status === 'waiting_approval'

@@ -84,6 +84,7 @@ import {
   type Notifier,
   type QueuedMessageRepository,
   type RunRepository,
+  type SessionPreviewReader,
   type SessionRepository,
   type ShareRepository,
 } from './application/ports';
@@ -98,7 +99,7 @@ import {
 
 /** The ports of the host: what the use cases and the supervisor run on. */
 export type HostPorts = {
-  items: ItemLog;
+  items: ItemLog & SessionPreviewReader;
   sessions: SessionRepository;
   runs: RunRepository;
   queue: QueuedMessageRepository;
@@ -316,7 +317,7 @@ export function createHost(ports: HostPorts) {
         access,
         clock,
       }),
-      listSessions: new ListSessions({ sessions, runs }),
+      listSessions: new ListSessions({ sessions, runs, items }),
       updateSession: new UpdateSession({ sessions, agents, access }),
       deleteSession: new DeleteSession({ sessions, runs }),
       sendMessage: new SendMessage({

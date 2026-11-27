@@ -28,6 +28,7 @@ import {
   type RunStatus,
 } from '@kwkevinchan/ai-chat-harness';
 import type { Knex } from 'knex';
+import type { SessionPreviewReader } from '../../application/ports';
 import { DEFAULT_IMAGE_LIMITS, DEFAULT_INSERT_MAX_PER_RUN } from '../../domain';
 import {
   checkImageBytes,
@@ -131,7 +132,7 @@ function readUpToSeqOf(drafts: ItemDraft[]): number | undefined {
  *    comes last, after `items`. An image that is not in the session fails the
  *    whole append (`UnknownAttachment`).
  */
-export class KnexItemLog implements ItemLog {
+export class KnexItemLog implements ItemLog, SessionPreviewReader {
   private readonly maxInsertsPerRun: number;
   private readonly maxImageBytesPerInput: number;
 
@@ -182,6 +183,38 @@ export class KnexItemLog implements ItemLog {
       .andWhere('seq', '>', afterSeq)
       .orderBy('seq', 'asc');
     return rows.map(toItem);
+  }
+
+  async firstUserMessageTexts(
+    sessionIds: readonly string[],
+  ): Promise<ReadonlyMap<string, string>> {
+    if (sessionIds.length === 0) return new Map();
+    const firstSeqs = this.knex('items')
+      .select('session_id')
+      .min('seq as first_seq')
+      .whereIn('session_id', sessionIds)
+      .andWhere('kind', 'user_message')
+      .groupBy('session_id')
+      .as('first_user');
+
+    const rows = await this.knex<ItemRow>('items')
+      .join(firstSeqs, function joinFirst() {
+        this.on('items.session_id', '=', 'first_user.session_id').andOn(
+          'items.seq',
+          '=',
+          'first_user.first_seq',
+        );
+      })
+      .select('items.session_id', 'items.payload');
+
+    const result = new Map<string, string>();
+    for (const row of rows) {
+      const parsed = JSON.parse(row.payload) as { text?: unknown };
+      if (typeof parsed.text === 'string' && parsed.text.trim().length > 0) {
+        result.set(row.session_id, parsed.text);
+      }
+    }
+    return result;
   }
 
   async latestPlanUpdate(

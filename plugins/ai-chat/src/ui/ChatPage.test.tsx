@@ -15,7 +15,13 @@
  */
 
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderInTestApp, TestApiProvider } from '@backstage/test-utils';
 import {
@@ -1141,5 +1147,184 @@ describe('session list controls and live status', () => {
       expect(api.deleteSession).toHaveBeenCalledWith('s-arch'),
     );
     await waitFor(() => expect(where()).toBe('/ai-chat'));
+  });
+
+  it('shows previewTitle for untitled sessions with messages and falls back to New conversation when empty', async () => {
+    const api = mockApi({
+      listSessions: jest.fn().mockResolvedValue([
+        {
+          ...session,
+          id: 's-prev',
+          title: undefined,
+          previewTitle: 'Check why payments failed',
+          activity: 'running' as const,
+        },
+        {
+          ...session,
+          id: 's-empty',
+          title: undefined,
+        },
+      ]),
+    });
+
+    await renderPage(api);
+
+    expect(
+      await screen.findByText('Check why payments failed'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('New conversation')).toBeInTheDocument();
+
+    // Inline rename of an untitled session still starts empty.
+    await userEvent.click(
+      screen.getByRole('button', {
+        name: 'Rename conversation Check why payments failed',
+      }),
+    );
+    expect(screen.getByLabelText('Conversation title')).toHaveValue('');
+  });
+
+  it('shows New reply when a running session finishes in the background without Signals and clears it on open', async () => {
+    jest.useFakeTimers({
+      doNotFake: [
+        'nextTick',
+        'setImmediate',
+        'queueMicrotask',
+        'setTimeout',
+        'clearTimeout',
+        'Date',
+        'performance',
+      ],
+    });
+    let s1Running = true;
+    let unmount: (() => void) | undefined;
+    try {
+      const api = mockApi({
+        listSessions: jest.fn(async () => [
+          {
+            ...session,
+            id: 's-1',
+            title: s1Running ? undefined : 'Payments status',
+            previewTitle: s1Running ? 'check payments' : undefined,
+            ...(s1Running && { activity: 'running' as const }),
+          },
+          { ...session, id: 's-2', title: 'Other chat' },
+        ]),
+        getSession: jest.fn(async id =>
+          detail({
+            session: {
+              ...session,
+              id,
+              title: id === 's-1' ? 'Payments status' : 'Other chat',
+            },
+          }),
+        ),
+      });
+
+      const rendered = await renderPage(api, '/ai-chat/s-1');
+      unmount = rendered.unmount;
+      expect(await screen.findByText('Processing')).toBeInTheDocument();
+
+      // Switch away from s-1 to s-2 while s-1 is still running.
+      await userEvent.click(screen.getByText('Other chat'));
+      await waitFor(() => expect(where()).toBe('/ai-chat/s-2'));
+
+      // s-1 finishes in the background; active polling (3s) picks it up and shows "New reply".
+      s1Running = false;
+      await act(async () => {
+        jest.advanceTimersByTime(3_000);
+      });
+      expect(await screen.findByText('Payments status')).toBeInTheDocument();
+      expect(await screen.findByText('New reply')).toBeInTheDocument();
+
+      // Opening s-1 clears the "New reply" badge.
+      await userEvent.click(screen.getByText('Payments status'));
+      await waitFor(() => expect(where()).toBe('/ai-chat/s-1'));
+      await waitFor(() => expect(screen.queryByText('New reply')).toBeNull());
+    } finally {
+      unmount?.();
+      jest.useRealTimers();
+    }
+  });
+
+  it('shows previewTitle and Processing in the sidebar while the open first turn is still streaming', async () => {
+    let sent = false;
+    let closeStream: (() => void) | undefined;
+    const api = mockApi({
+      createSession: jest.fn(async () => ({
+        ...session,
+        id: 's-new',
+        title: undefined,
+      })),
+      listSessions: jest.fn(async () =>
+        sent
+          ? [
+              {
+                ...session,
+                id: 's-new',
+                title: undefined,
+                previewTitle: 'hold 600',
+                activity: 'running' as const,
+              },
+            ]
+          : [{ ...session, id: 's-new', title: undefined }],
+      ),
+      getSession: jest.fn(async () =>
+        detail({
+          session: { ...session, id: 's-new', title: undefined },
+          ...(sent && {
+            run: {
+              id: 'r-1',
+              sessionId: 's-new',
+              status: 'running' as const,
+              cancelRequested: false,
+              startedAt: '2026-01-01T00:00:00.000Z',
+            },
+            items: [
+              {
+                sessionId: 's-new',
+                seq: 1,
+                runId: 'r-1',
+                createdAt: '2026-01-01T00:00:00.000Z',
+                kind: 'user_message' as const,
+                text: 'hold 600',
+              },
+            ],
+          }),
+        }),
+      ),
+      sendMessage: jest.fn(async () => {
+        sent = true;
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            const send = (chunk: unknown) =>
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`),
+              );
+            send({ type: 'start', messageId: 'run_r-1' });
+            send({
+              type: 'data-run',
+              data: { runId: 'r-1', status: 'running' },
+              transient: true,
+            });
+            closeStream = () => controller.close();
+          },
+        });
+        return new Response(stream, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        });
+      }),
+    });
+
+    await renderPage(api, '/ai-chat');
+    await userEvent.type(screen.getByLabelText('Message'), 'hold 600{Enter}');
+    await waitFor(() => expect(where()).toBe('/ai-chat/s-new'));
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+
+    const nav = screen.getByRole('navigation', { name: 'Conversations' });
+    expect(await within(nav).findByText('hold 600')).toBeInTheDocument();
+    expect(await within(nav).findByText('Processing')).toBeInTheDocument();
+    closeStream?.();
   });
 });

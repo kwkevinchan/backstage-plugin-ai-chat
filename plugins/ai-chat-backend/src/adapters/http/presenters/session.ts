@@ -38,12 +38,14 @@ import {
 export function toChatSession(
   session: Session,
   activity?: ChatSession['activity'],
+  previewTitle?: string,
 ): ChatSession {
   return {
     id: session.id,
     ownerRef: session.ownerRef,
     agentId: session.agentId,
     ...(session.title !== undefined && { title: session.title }),
+    ...(previewTitle !== undefined && { previewTitle }),
     ...(session.entityRef !== undefined && { entityRef: session.entityRef }),
     enabledToolsets: session.enabledToolsets,
     pinned: session.pinned,
