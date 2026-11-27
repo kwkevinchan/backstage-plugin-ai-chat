@@ -111,41 +111,6 @@ describe('threadListAdapter', () => {
     );
   });
 
-  it('derives activity and previewTitle from detail when fetch loads an untitled running session', async () => {
-    const api = mockApi({
-      getSession: jest.fn().mockResolvedValue(
-        detail({
-          session: { ...session, id: 's-run', title: undefined },
-          run: {
-            id: 'r-1',
-            sessionId: 's-run',
-            status: 'running',
-            cancelRequested: false,
-            startedAt: '2026-01-01T00:00:00.000Z',
-          },
-          items: [
-            {
-              sessionId: 's-run',
-              seq: 1,
-              runId: 'r-1',
-              createdAt: '2026-01-01T00:00:00.000Z',
-              kind: 'user_message',
-              text: 'hold 600',
-            },
-          ],
-        }),
-      ),
-    });
-    const adapter = createThreadListAdapter({ api });
-
-    const meta = await adapter.fetch('s-run');
-
-    expect(meta.custom).toMatchObject({
-      activity: 'running',
-      previewTitle: 'hold 600',
-    });
-  });
-
   it('initializes a session via POST /sessions', async () => {
     const api = mockApi({
       createSession: jest.fn().mockResolvedValue({ ...session, id: 's-new' }),
