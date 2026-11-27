@@ -342,9 +342,16 @@ tool outputs. Making, changing, cancelling and copying a share are written to
 the auditor (`session-share`, `session-share-update`, `session-share-revoke`,
 `session-fork`). A cancel stops every read at once.
 
-**Images.** With `aiChat.llm.images: true`, a user can attach PNG, JPEG, WebP
-or GIF images to a message. **The images are sent to the model server** as part
-of the message, so they leave your organization when the server is outside it.
+**Images.** `aiChat.llm.images` is the global switch for image attachments:
+when `true`, the UI shows the attach button (`GET /input-config`), the backend
+accepts PNG, JPEG, WebP and GIF uploads and messages with images (returning 400
+when `false`), and images are sent to the default model. Per-model
+`aiChat.models.<id>.images` (default `false`) only controls whether images are
+sent to that model or replaced with a one-line text placeholder; if an agent
+uses a model with `images: false` while `aiChat.llm.images` is `true`, the
+attach button is still shown but images are not sent to that model. **When a
+model has `images: true`, attached images are sent to its server** as part of
+the message, so they leave your organization when the server is outside it.
 Leave `images` off (the default) when they must not. The backend stores the
 images in its database, per session; the owner of the session reads them, and
 so does a sharee who sees the message that has the image. An image that no
