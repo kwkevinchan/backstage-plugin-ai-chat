@@ -316,10 +316,6 @@ interface ChatPageBodyProps {
   actionError?: string;
   onActionError(error: unknown): void;
   onClearError(): void;
-  onArchiveStart(remoteId: string): void;
-  onThreadItems(
-    items: ReadonlyArray<{ id: string; remoteId?: string; status: string }>,
-  ): void;
   reloadRef: React.MutableRefObject<(() => void) | undefined>;
 }
 
@@ -336,8 +332,6 @@ function ChatPageBody(props: ChatPageBodyProps) {
     actionError,
     onActionError,
     onClearError,
-    onArchiveStart,
-    onThreadItems,
     reloadRef,
   } = props;
   const aui = useAui();
@@ -352,10 +346,6 @@ function ChatPageBody(props: ChatPageBodyProps) {
   const signalVersionsRef = useRef<Record<string, number>>({});
   const openIdRef = useRef(openId);
   openIdRef.current = openId;
-
-  useEffect(() => {
-    onThreadItems(threadItems);
-  }, [onThreadItems, threadItems]);
 
   const reloadList = useCallback(() => {
     const seqAtStart = signalSeqRef.current;
@@ -510,7 +500,6 @@ function ChatPageBody(props: ChatPageBodyProps) {
         onShowArchivedChange={onShowArchivedChange}
         actionError={actionError}
         onClearError={onClearError}
-        onArchiveStart={onArchiveStart}
         onUnarchive={handleUnarchive}
         onNewChat={handleNewChat}
         signalActivities={signalActivities}
@@ -544,10 +533,10 @@ export function ChatPageContent() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const [actionError, setActionError] = useState<string>();
-  const archivingIdsRef = useRef(new Set<string>());
-  const threadItemsRef = useRef<
-    ReadonlyArray<{ id: string; remoteId?: string; status: string }>
-  >([]);
+  const openIdRef = useRef(openId);
+  openIdRef.current = openId;
+  const basePathRef = useRef(basePath);
+  basePathRef.current = basePath;
   const reloadRef = useRef<(() => void) | undefined>();
 
   useEffect(() => {
@@ -571,17 +560,13 @@ export function ChatPageContent() {
     setActionError(describeError(error));
   }, []);
 
-  const markArchiveStart = useCallback((remoteId: string) => {
-    archivingIdsRef.current.add(remoteId);
-  }, []);
-
-  const handleThreadItems = useCallback(
-    (
-      items: ReadonlyArray<{ id: string; remoteId?: string; status: string }>,
-    ) => {
-      threadItemsRef.current = items;
+  const handleDeleted = useCallback(
+    (remoteId: string) => {
+      if (remoteId === openIdRef.current) {
+        navigate(basePathRef.current || '/');
+      }
     },
-    [],
+    [navigate],
   );
 
   const adapter = useMemo(
@@ -594,30 +579,23 @@ export function ChatPageContent() {
         onActionSuccess: clearActionError,
         onActionError: reportActionError,
         onCustomUpdated: () => reloadRef.current?.(),
-        onArchiveSettled: remoteId => {
-          archivingIdsRef.current.delete(remoteId);
-        },
+        onDeleted: handleDeleted,
       }),
-    [api, debouncedSearch, showArchived, clearActionError, reportActionError],
+    [
+      api,
+      debouncedSearch,
+      showArchived,
+      clearActionError,
+      reportActionError,
+      handleDeleted,
+    ],
   );
 
   const onThreadIdChange = useCallback(
     (nextId: string | undefined) => {
-      if (nextId === undefined) {
-        if (openId) {
-          const isArchiving = archivingIdsRef.current.has(openId);
-          const isArchived = threadItemsRef.current.some(
-            item =>
-              (item.remoteId === openId || item.id === openId) &&
-              item.status === 'archived',
-          );
-          if (isArchiving || isArchived) {
-            return;
-          }
-          navigate(basePath || '/');
-        }
-        return;
-      }
+      // Archive stays on the current URL and delete navigates in `onDeleted`,
+      // so `undefined` from assistant-ui never triggers navigation.
+      if (nextId === undefined) return;
       if (nextId !== openId) {
         navigate(`${basePath}/${encodeURIComponent(nextId)}`);
       }
@@ -646,8 +624,6 @@ export function ChatPageContent() {
         actionError={actionError}
         onActionError={reportActionError}
         onClearError={clearActionError}
-        onArchiveStart={markArchiveStart}
-        onThreadItems={handleThreadItems}
         reloadRef={reloadRef}
       />
     </AssistantRuntimeProvider>

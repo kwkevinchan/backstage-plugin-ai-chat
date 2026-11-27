@@ -51,7 +51,6 @@ type SidebarContextValue = {
   openId: string;
   signalActivities: Record<string, SessionSignalActivity>;
   onClearError(): void;
-  onArchiveStart(remoteId: string): void;
   onUnarchive(remoteId: string): void;
 };
 
@@ -59,7 +58,6 @@ const SidebarContext = createContext<SidebarContextValue>({
   openId: '',
   signalActivities: {},
   onClearError: () => {},
-  onArchiveStart: () => {},
   onUnarchive: () => {},
 });
 
@@ -98,13 +96,8 @@ const BADGE_CLASS: Record<DisplayBadge, string> = {
 function ThreadListItemRow() {
   const aui = useAui();
   const item = useAuiState(s => s.threadListItem);
-  const {
-    openId,
-    signalActivities,
-    onClearError,
-    onArchiveStart,
-    onUnarchive,
-  } = useContext(SidebarContext);
+  const { openId, signalActivities, onClearError, onUnarchive } =
+    useContext(SidebarContext);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -254,10 +247,7 @@ function ThreadListItemRow() {
               <ThreadListItemPrimitive.Archive
                 className={cx('chat-icon-button')}
                 aria-label={`Archive conversation ${displayTitle}`}
-                onClick={() => {
-                  onClearError();
-                  onArchiveStart(remoteId);
-                }}
+                onClick={onClearError}
               >
                 <RiArchiveLine size="1em" />
               </ThreadListItemPrimitive.Archive>
@@ -289,7 +279,6 @@ export interface ThreadListSidebarProps {
   onShowArchivedChange(value: boolean): void;
   actionError?: string;
   onClearError(): void;
-  onArchiveStart(remoteId: string): void;
   onUnarchive(remoteId: string): void;
   onNewChat(): void;
   signalActivities: Record<string, SessionSignalActivity>;
@@ -305,7 +294,6 @@ export function ThreadListSidebar(props: ThreadListSidebarProps) {
     onShowArchivedChange,
     actionError,
     onClearError,
-    onArchiveStart,
     onUnarchive,
     onNewChat,
     signalActivities,
@@ -321,10 +309,9 @@ export function ThreadListSidebar(props: ThreadListSidebarProps) {
       openId,
       signalActivities,
       onClearError,
-      onArchiveStart,
       onUnarchive,
     }),
-    [openId, signalActivities, onClearError, onArchiveStart, onUnarchive],
+    [openId, signalActivities, onClearError, onUnarchive],
   );
 
   return (

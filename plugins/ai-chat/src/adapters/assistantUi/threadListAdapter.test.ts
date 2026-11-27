@@ -132,13 +132,13 @@ describe('threadListAdapter', () => {
     const onActionStart = jest.fn();
     const onActionSuccess = jest.fn();
     const onCustomUpdated = jest.fn();
-    const onArchiveSettled = jest.fn();
+    const onDeleted = jest.fn();
     const adapter = createThreadListAdapter({
       api,
       onActionStart,
       onActionSuccess,
       onCustomUpdated,
-      onArchiveSettled,
+      onDeleted,
     });
 
     expect(adapter.unarchive).toBeUndefined();
@@ -150,7 +150,6 @@ describe('threadListAdapter', () => {
 
     await adapter.archive('s-1');
     expect(api.updateSession).toHaveBeenCalledWith('s-1', { archived: true });
-    expect(onArchiveSettled).toHaveBeenCalledWith('s-1');
 
     await adapter.updateCustom!('s-1', { pinned: true });
     expect(api.updateSession).toHaveBeenCalledWith('s-1', { pinned: true });
@@ -158,6 +157,7 @@ describe('threadListAdapter', () => {
 
     await adapter.delete('s-1');
     expect(api.deleteSession).toHaveBeenCalledWith('s-1');
+    expect(onDeleted).toHaveBeenCalledWith('s-1');
 
     expect(onActionStart).toHaveBeenCalledTimes(4);
     expect(onActionSuccess).toHaveBeenCalledTimes(4);

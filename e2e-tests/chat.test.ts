@@ -570,10 +570,25 @@ test('session list: search, pin, rename, archive and stay archived after reload,
   expect(page.url()).toBe(firstUrl);
 
   // Reloading the archived conversation URL keeps it archived (must not auto-unarchive).
+  let unarchivePatches = 0;
+  const countUnarchivePatch = (request: {
+    method(): string;
+    postData(): string | null;
+  }) => {
+    if (request.method() === 'PATCH') {
+      const body = request.postData();
+      if (body && body.includes('"archived":false')) {
+        unarchivePatches += 1;
+      }
+    }
+  };
+  page.on('request', countUnarchivePatch);
   await page.reload();
   expect(page.url()).toBe(firstUrl);
   await expect(nav.getByText('Alpha Ops')).toBeVisible();
   await expect(nav.getByText('Beta Billing')).toHaveCount(0);
+  page.off('request', countUnarchivePatch);
+  expect(unarchivePatches).toBe(0);
 
   // Show archived reveals Beta Billing; Unarchive restores it to the regular list.
   await nav.getByLabel('Show archived').check();

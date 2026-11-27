@@ -46,8 +46,8 @@ export interface ThreadListAdapterOptions {
   onActionError?(error: unknown): void;
   /** Called after `updateCustom` succeeds so the list can re-fetch server ordering. */
   onCustomUpdated?(): void;
-  /** Called in `finally` when `archive` settles (success or error). */
-  onArchiveSettled?(remoteId: string): void;
+  /** Called after `delete` succeeds so the page can leave the deleted session's URL. */
+  onDeleted?(remoteId: string): void;
   /** Polling interval in ms while waiting for the backend-generated title. */
   generateTitlePollMs?: number;
   /** Maximum time in ms to wait for the backend-generated title. */
@@ -178,7 +178,7 @@ export function createThreadListAdapter(
     onActionSuccess,
     onActionError,
     onCustomUpdated,
-    onArchiveSettled,
+    onDeleted,
     generateTitlePollMs = DEFAULT_TITLE_POLL_MS,
     generateTitleTimeoutMs = DEFAULT_TITLE_TIMEOUT_MS,
   } = options;
@@ -230,13 +230,7 @@ export function createThreadListAdapter(
     },
 
     async archive(remoteId) {
-      try {
-        await runMutation(() =>
-          api.updateSession(remoteId, { archived: true }),
-        );
-      } finally {
-        onArchiveSettled?.(remoteId);
-      }
+      await runMutation(() => api.updateSession(remoteId, { archived: true }));
     },
 
     // Intentionally omit `unarchive` from the adapter: assistant-ui's
@@ -247,6 +241,7 @@ export function createThreadListAdapter(
 
     async delete(remoteId) {
       await runMutation(() => api.deleteSession(remoteId));
+      onDeleted?.(remoteId);
     },
 
     async updateCustom(remoteId, custom) {

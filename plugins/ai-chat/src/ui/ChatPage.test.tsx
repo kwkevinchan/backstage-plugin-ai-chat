@@ -1038,4 +1038,96 @@ describe('session list controls and live status', () => {
     await waitFor(() => expect(api.deleteSession).toHaveBeenCalledWith('s-2'));
     await waitFor(() => expect(where()).toBe('/ai-chat'));
   });
+
+  it('navigates back to /ai-chat when deleting the open conversation after archiving it', async () => {
+    let archived = false;
+    const api = mockApi({
+      listSessions: jest.fn(async opts =>
+        !archived || opts?.includeArchived
+          ? [
+              {
+                ...session,
+                id: 's-1',
+                title: 'Archive then delete',
+                ...(archived && { archivedAt: '2026-11-26T00:00:00.000Z' }),
+              },
+            ]
+          : [],
+      ),
+      getSession: jest.fn(async () =>
+        detail({
+          session: {
+            ...session,
+            id: 's-1',
+            title: 'Archive then delete',
+            ...(archived && { archivedAt: '2026-11-26T00:00:00.000Z' }),
+          },
+        }),
+      ),
+      updateSession: jest.fn(async (_id, patch) => {
+        archived = Boolean(patch.archived);
+        return {
+          ...session,
+          id: 's-1',
+          title: 'Archive then delete',
+          ...(archived && { archivedAt: '2026-11-26T00:00:00.000Z' }),
+        };
+      }),
+      deleteSession: jest.fn(async () => {}),
+    });
+
+    await renderPage(api, '/ai-chat/s-1');
+    expect(await screen.findByText('Archive then delete')).toBeInTheDocument();
+
+    // Archive open session -> stays on /ai-chat/s-1.
+    await userEvent.click(
+      screen.getByRole('button', {
+        name: 'Archive conversation Archive then delete',
+      }),
+    );
+    await waitFor(() =>
+      expect(api.updateSession).toHaveBeenCalledWith('s-1', { archived: true }),
+    );
+    expect(where()).toBe('/ai-chat/s-1');
+
+    // Reveal archived and delete s-1 -> navigates back to /ai-chat.
+    await userEvent.click(screen.getByLabelText('Show archived'));
+    await userEvent.click(
+      await screen.findByRole('button', {
+        name: 'Delete conversation Archive then delete',
+      }),
+    );
+    await waitFor(() => expect(api.deleteSession).toHaveBeenCalledWith('s-1'));
+    await waitFor(() => expect(where()).toBe('/ai-chat'));
+  });
+
+  it('navigates back to /ai-chat when deleting an archived conversation opened directly by URL', async () => {
+    const archivedSession = {
+      ...session,
+      id: 's-arch',
+      title: 'Direct archived',
+      archivedAt: '2026-11-26T00:00:00.000Z',
+    };
+    const api = mockApi({
+      listSessions: jest.fn(async opts =>
+        opts?.includeArchived ? [archivedSession] : [],
+      ),
+      getSession: jest.fn(async () => detail({ session: archivedSession })),
+      deleteSession: jest.fn(async () => {}),
+    });
+
+    await renderPage(api, '/ai-chat/s-arch');
+    expect(where()).toBe('/ai-chat/s-arch');
+
+    await userEvent.click(screen.getByLabelText('Show archived'));
+    await userEvent.click(
+      await screen.findByRole('button', {
+        name: 'Delete conversation Direct archived',
+      }),
+    );
+    await waitFor(() =>
+      expect(api.deleteSession).toHaveBeenCalledWith('s-arch'),
+    );
+    await waitFor(() => expect(where()).toBe('/ai-chat'));
+  });
 });
