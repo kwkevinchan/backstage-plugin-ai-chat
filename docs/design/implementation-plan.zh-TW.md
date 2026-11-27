@@ -1398,7 +1398,7 @@ flowchart LR
     - 插入的訊息帶參考（`integration/references.test.ts`：`carries the references of an inserted message`）。
     - 排隊的訊息存參考，自動送出時帶著；改排隊的訊息可以換掉參考（`integration/references.test.ts`：`sends a queued message with its references, and a change of the queued message replaces them`）。
     - 「現在就送」把排隊的訊息插入 Run 時帶著參考（`integration/references.test.ts`：`inserts a queued message into the run with its references`）。
-    - 被分享的人看到的那則訊息帶參考（`integration/references.test.ts`：`shows the references of a message to the user it is shared with`）。
+    - 被分享的人看到的那則訊息帶參考；複製 Session 時參考跟著訊息帶走（`integration/references.test.ts`：`shows the references of a message to the user it is shared with, and a copy takes them`）。
     - `GET /input-config` 回傳參考的上限（`integration/references.test.ts`：`answers the limits of the references in GET /input-config`）。
   - PR 2，送出內容管理區（測試名稱在 PR 2 定）：
     - 頁面標籤預設帶上，有 ×；按 × 後變成淡色的「＋ 目前頁面」，點一下補回來；「加入參考」選單裡有「目前頁面」。
