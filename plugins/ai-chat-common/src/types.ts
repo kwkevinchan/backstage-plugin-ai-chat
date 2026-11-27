@@ -37,6 +37,11 @@ export interface ChatSession {
   agentId: string;
   title?: string;
   /**
+   * Truncated opening of the first user message, present in list responses
+   * while `title` has not been set yet.
+   */
+  previewTitle?: string;
+  /**
    * The entity the session is bound to (`kind:namespace/name`, lower case):
    * the one it was created with, or the entity of the page of its first
    * message. It does not change.

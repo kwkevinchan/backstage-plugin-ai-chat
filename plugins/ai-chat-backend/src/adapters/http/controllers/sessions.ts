@@ -73,7 +73,9 @@ export class SessionsController {
       ...(entityRef !== undefined && { entityRef }),
     });
     return {
-      items: sessions.map(session => toChatSession(session, session.activity)),
+      items: sessions.map(session =>
+        toChatSession(session, session.activity, session.previewTitle),
+      ),
     };
   }
 

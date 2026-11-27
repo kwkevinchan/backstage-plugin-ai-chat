@@ -60,4 +60,63 @@ describe('ListSessions', () => {
       ['s-idle', undefined],
     ]);
   });
+
+  it('derives a truncated previewTitle from the first user message for untitled sessions', async () => {
+    const longText =
+      '   Please   check   why the payments service is restarting repeatedly in production right now   ';
+    const sessions = [
+      { ...session('s-titled'), title: 'Existing title' },
+      session('s-short'),
+      session('s-long'),
+      session('s-empty'),
+    ];
+    const read = jest.fn(async (id: string) => {
+      const t = '2026-01-01T00:00:00.000Z';
+      if (id === 's-short') {
+        return [
+          {
+            sessionId: id,
+            seq: 1,
+            createdAt: t,
+            kind: 'user_message' as const,
+            text: '  list\nservices  ',
+          },
+        ];
+      }
+      if (id === 's-long') {
+        return [
+          {
+            sessionId: id,
+            seq: 1,
+            createdAt: t,
+            kind: 'user_message' as const,
+            text: longText,
+          },
+        ];
+      }
+      return [];
+    });
+
+    const useCase = new ListSessions({
+      sessions: { listByOwner: async () => sessions } as any,
+      runs: { findActiveForSessions: async () => [] } as any,
+      items: { read },
+    });
+
+    const listed = await useCase.execute({ principal: jane });
+
+    expect(read).not.toHaveBeenCalledWith('s-titled');
+    expect(
+      listed.map(item => [item.id, item.title, item.previewTitle]),
+    ).toEqual([
+      ['s-titled', 'Existing title', undefined],
+      ['s-short', undefined, 'list services'],
+      [
+        's-long',
+        undefined,
+        'Please check why the payments service is restarting repeated…',
+      ],
+      ['s-empty', undefined, undefined],
+    ]);
+  });
 });

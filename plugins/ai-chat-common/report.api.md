@@ -301,6 +301,7 @@ export interface ChatSession {
   ownerRef: string;
   // (undocumented)
   pinned: boolean;
+  previewTitle?: string;
   // (undocumented)
   title?: string;
   // (undocumented)

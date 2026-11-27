@@ -315,7 +315,7 @@ export function createHost(ports: HostPorts) {
         access,
         clock,
       }),
-      listSessions: new ListSessions({ sessions, runs }),
+      listSessions: new ListSessions({ sessions, runs, items }),
       updateSession: new UpdateSession({ sessions, agents, access }),
       deleteSession: new DeleteSession({ sessions, runs }),
       sendMessage: new SendMessage({

@@ -105,8 +105,8 @@ function ThreadListItemRow() {
   const remoteId = item.remoteId ?? item.id;
   const isArchived = item.status === 'archived';
   const isSelected = Boolean(openId && remoteId === openId);
-  const displayTitle = item.title || DEFAULT_TITLE;
   const custom = readThreadCustom(item.custom);
+  const displayTitle = item.title || custom.previewTitle || DEFAULT_TITLE;
   const badge = badgeFor(remoteId, openId, custom.activity, signalActivities);
 
   useEffect(() => {
@@ -200,7 +200,9 @@ function ThreadListItemRow() {
             }}
           >
             <span className={cx('chat-conversation-title')}>
-              <ThreadListItemPrimitive.Title fallback={DEFAULT_TITLE} />
+              <ThreadListItemPrimitive.Title
+                fallback={custom.previewTitle || DEFAULT_TITLE}
+              />
             </span>
           </ThreadListItemPrimitive.Trigger>
           <div className={cx('chat-conversation-actions')}>

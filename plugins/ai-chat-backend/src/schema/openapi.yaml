@@ -209,6 +209,9 @@ components:
           type: string
         title:
           type: string
+        previewTitle:
+          type: string
+          description: Truncated opening of the first user message when `title` is not set yet.
         entityRef:
           type: string
           description: The entity the session is bound to, `kind:namespace/name` in lower case. It is the one the session was created with, or else the entity of the page of its first message when the user can read it. It does not change.

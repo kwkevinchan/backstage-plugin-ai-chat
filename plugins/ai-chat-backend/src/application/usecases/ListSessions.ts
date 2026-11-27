@@ -14,16 +14,29 @@
  * limitations under the License.
  */
 
+import type { ItemLog } from '@kwkevinchan/ai-chat-harness';
 import type { Principal, Session } from '../../domain';
 import type { RunRepository, SessionRepository } from '../ports';
 
+const MAX_PREVIEW_TITLE_CHARS = 60;
+
 /**
  * A session in the list. `activity` is set when a run of it has not ended.
- * It comes from that run, not from a column of its own.
+ * It comes from that run, not from a column of its own. `previewTitle` is
+ * the truncated opening of the first user message while `title` is still unset.
  */
 export type ListedSession = Session & {
   activity?: 'running' | 'waiting_approval';
+  previewTitle?: string;
 };
+
+function previewOf(text: string): string | undefined {
+  const collapsed = text.replace(/\s+/g, ' ').trim();
+  if (!collapsed) return undefined;
+  return collapsed.length > MAX_PREVIEW_TITLE_CHARS
+    ? `${collapsed.slice(0, MAX_PREVIEW_TITLE_CHARS).trimEnd()}…`
+    : collapsed;
+}
 
 /**
  * The sessions of the signed-in user. Pinned ones come first, then the most
@@ -35,6 +48,7 @@ export class ListSessions {
     private readonly deps: {
       sessions: SessionRepository;
       runs: RunRepository;
+      items?: Pick<ItemLog, 'read'>;
     },
   ) {}
 
@@ -58,11 +72,34 @@ export class ListSessions {
       sessions.map(session => session.id),
     );
     const bySession = new Map(active.map(run => [run.sessionId, run]));
+
+    const previews = new Map<string, string>();
+    if (this.deps.items) {
+      const untitled = sessions.filter(s => !s.title?.trim());
+      await Promise.all(
+        untitled.map(async session => {
+          const list = await this.deps.items!.read(session.id);
+          const first = list.find(
+            item => item.kind === 'user_message' && item.text.trim().length > 0,
+          );
+          if (first?.kind === 'user_message') {
+            const preview = previewOf(first.text);
+            if (preview) previews.set(session.id, preview);
+          }
+        }),
+      );
+    }
+
     return sessions.map(session => {
       const status = bySession.get(session.id)?.status;
-      return status === 'running' || status === 'waiting_approval'
-        ? { ...session, activity: status }
-        : session;
+      const previewTitle = previews.get(session.id);
+      return {
+        ...session,
+        ...((status === 'running' || status === 'waiting_approval') && {
+          activity: status,
+        }),
+        ...(previewTitle !== undefined && { previewTitle }),
+      };
     });
   }
 }

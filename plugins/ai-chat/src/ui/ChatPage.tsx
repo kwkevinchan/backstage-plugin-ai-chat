@@ -65,6 +65,7 @@ import { ThreadListSidebar } from './ThreadListSidebar';
 import { ToolsetPanel } from './ToolsetPanel';
 
 const SEARCH_DEBOUNCE_MS = 250;
+const ACTIVE_POLL_MS = 3_000;
 const FALLBACK_POLL_MS = 15_000;
 const TITLE_FOLLOWUP_POLL_MS = 2_000;
 const EMPTY_MESSAGES: readonly ThreadMessage[] = [];
@@ -354,8 +355,49 @@ function ChatPageBody(props: ChatPageBodyProps) {
   >({});
   const signalSeqRef = useRef(0);
   const signalVersionsRef = useRef<Record<string, number>>({});
+  const prevActivitiesRef = useRef<Map<string, SessionListActivity>>(new Map());
   const openIdRef = useRef(openId);
   openIdRef.current = openId;
+
+  const hasActiveSession = useMemo(
+    () =>
+      threadItems.some(
+        item => readThreadCustom(item.custom).activity !== undefined,
+      ),
+    [threadItems],
+  );
+
+  // When a non-open session transitions from active (running / waiting) to
+  // idle across a list refresh, mark it "replied" so "New reply" still appears
+  // even when Backstage Signals is not installed.
+  useEffect(() => {
+    const prev = prevActivitiesRef.current;
+    const next = new Map<string, SessionListActivity>();
+    const newlyCompleted: string[] = [];
+    for (const item of threadItems) {
+      const id = item.remoteId ?? item.id;
+      const activity = readThreadCustom(item.custom).activity;
+      if (activity !== undefined) {
+        next.set(id, activity);
+      } else if (prev.has(id) && id !== openIdRef.current) {
+        newlyCompleted.push(id);
+      }
+    }
+    prevActivitiesRef.current = next;
+    if (newlyCompleted.length > 0) {
+      setSignalActivities(current => {
+        let changed = false;
+        const updated = { ...current };
+        for (const id of newlyCompleted) {
+          if (updated[id] !== 'idle' && updated[id] !== 'replied') {
+            updated[id] = 'replied';
+            changed = true;
+          }
+        }
+        return changed ? updated : current;
+      });
+    }
+  }, [threadItems]);
 
   const reloadList = useCallback(() => {
     const seqAtStart = signalSeqRef.current;
@@ -428,7 +470,10 @@ function ChatPageBody(props: ChatPageBodyProps) {
   }, [signals, reloadList]);
 
   // Always keep low-frequency fallback polling even when Signals is present,
-  // paused while the tab is hidden.
+  // paused while the tab is hidden. Without Signals, poll faster while any
+  // session is actively running so Processing / New reply stays fresh.
+  const pollIntervalMs =
+    !signals && hasActiveSession ? ACTIVE_POLL_MS : FALLBACK_POLL_MS;
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined;
     const start = () => {
@@ -437,7 +482,7 @@ function ChatPageBody(props: ChatPageBodyProps) {
         if (document.visibilityState !== 'hidden') {
           reloadList();
         }
-      }, FALLBACK_POLL_MS);
+      }, pollIntervalMs);
     };
     const stop = () => {
       if (timer !== undefined) {
@@ -461,7 +506,7 @@ function ChatPageBody(props: ChatPageBodyProps) {
       stop();
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [reloadList]);
+  }, [reloadList, pollIntervalMs]);
 
   const liveActivity = useMemo<SessionListActivity | undefined>(() => {
     if (!openId) return undefined;
