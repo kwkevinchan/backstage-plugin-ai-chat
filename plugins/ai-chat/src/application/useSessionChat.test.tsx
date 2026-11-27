@@ -512,7 +512,13 @@ describe('useSessionChat', () => {
     await waitFor(() =>
       expect(api.follow).toHaveBeenCalledWith('s-1', expect.anything()),
     );
-    await waitFor(() => expect(result.current.busy).toBe(false));
+    await waitFor(() => {
+      expect(result.current.busy).toBe(false);
+      expect(result.current.activeRun).toBeUndefined();
+      expect(
+        result.current.messages.filter(m => m.role === 'assistant'),
+      ).toHaveLength(1);
+    });
     const users = result.current.messages.filter(m => m.role === 'user');
     const assistants = result.current.messages.filter(
       m => m.role === 'assistant',

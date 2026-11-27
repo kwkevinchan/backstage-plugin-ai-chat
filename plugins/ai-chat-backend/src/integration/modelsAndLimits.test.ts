@@ -185,11 +185,24 @@ describe('models, limits per step and per user, and rate limits (P3-07)', () => 
       world = await createWorld();
       let running = 0;
       let most = 0;
+      const gates = new Map<number, () => void>();
       world.actions.invoke = async options => {
         running += 1;
         most = Math.max(most, running);
         const n = Number((options.input as { n: string }).n);
-        await new Promise(resolve => setTimeout(resolve, (5 - n) * 10));
+        await new Promise<void>(resolve => {
+          gates.set(n, resolve);
+          if (gates.size === 4) {
+            // Release in reverse order (4 -> 1) once all four are in flight so
+            // concurrency and result-order preservation do not depend on wall-clock timers.
+            void (async () => {
+              for (const k of [4, 3, 2, 1]) {
+                gates.get(k)!();
+                await Promise.resolve();
+              }
+            })();
+          }
+        });
         running -= 1;
         return { output: { n, text: 'x'.repeat(30000) } };
       };
