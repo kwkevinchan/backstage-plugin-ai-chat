@@ -617,7 +617,7 @@ test('session list: search, pin, rename, archive and stay archived after reload,
 test('entity page AI chat tab: list entity sessions, start a new chat bound to entity, and return to see it', async ({
   page,
 }) => {
-  const shot = watch(page);
+  watch(page);
   await signIn(page);
 
   await page.goto('/catalog/default/component/example-payments');
@@ -656,7 +656,6 @@ test('entity page AI chat tab: list entity sessions, start a new chat bound to e
   await page.goto('/catalog/default/component/example-payments/ai-chat');
   const entityNav = page.getByRole('navigation', { name: 'Conversations' });
   await expect(entityNav.getByText('Payments Entity Thread')).toBeVisible();
-  await shot('20-entity-ai-chat-tab');
 
   // Clicking the row opens the conversation URL.
   await entityNav.getByText('Payments Entity Thread').click();
