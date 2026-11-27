@@ -76,6 +76,19 @@ export type ChatToolResultStatus =
   | 'invalid'
   | 'unknown';
 
+/**
+ * Fixed reason code explaining why a tool call received `status: 'denied'`.
+ *
+ * @public
+ */
+export type ChatToolDeniedReason =
+  | 'policy'
+  | 'run_limit'
+  | 'step_limit'
+  | 'hook'
+  | 'user'
+  | 'earlier_write_timed_out';
+
 /** @public */
 export type ChatPlanItemStatus = 'pending' | 'in_progress' | 'completed';
 
@@ -201,6 +214,7 @@ export type ChatItemBody =
       kind: 'tool_result';
       callId: string;
       status: ChatToolResultStatus;
+      deniedReason?: ChatToolDeniedReason;
       output?: JsonValue;
       truncated?: boolean;
       message?: string;

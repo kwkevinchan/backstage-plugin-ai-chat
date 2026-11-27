@@ -475,7 +475,14 @@ async function classify(
     reason?: ToolDeniedReason,
   ) => ({
     body: { ...base, ...body },
-    result: { kind: 'tool_result' as const, callId, status, message },
+    result: {
+      kind: 'tool_result' as const,
+      callId,
+      status,
+      ...(status === 'denied' &&
+        reason !== undefined && { deniedReason: reason }),
+      message,
+    },
     ...(reason !== undefined && { reason }),
   });
 

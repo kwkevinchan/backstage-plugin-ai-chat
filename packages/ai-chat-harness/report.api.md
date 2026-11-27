@@ -868,6 +868,7 @@ export type ToolResultBody = {
   kind: 'tool_result';
   callId: string;
   status: ToolResultStatus;
+  deniedReason?: ToolDeniedReason;
   output?: JsonValue;
   truncated?: boolean;
   message?: string;

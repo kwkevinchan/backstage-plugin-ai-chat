@@ -168,6 +168,58 @@ describe('itemsToMessages', () => {
     ]);
   });
 
+  it('carries deniedReason and user approval on output-denied, and keeps legacy denied without reason', () => {
+    const messages = itemsToMessages(
+      detail({
+        items: items(
+          user('go'),
+          call('c1'),
+          call('c2'),
+          call('c3'),
+          {
+            kind: 'approval',
+            callId: 'c1',
+            decision: 'allow',
+            decidedBy: 'user:default/guest',
+          },
+          {
+            kind: 'approval',
+            callId: 'c3',
+            decision: 'allow',
+            decidedBy: 'user:default/guest',
+          },
+          {
+            kind: 'tool_result',
+            callId: 'c1',
+            status: 'denied',
+            deniedReason: 'earlier_write_timed_out',
+          },
+          {
+            kind: 'tool_result',
+            callId: 'c2',
+            status: 'denied',
+          },
+          {
+            kind: 'tool_result',
+            callId: 'c3',
+            status: 'denied',
+          },
+        ),
+      }),
+    );
+    expect(
+      toolParts(messages).map(p => [p.toolCallId, p.state, p.approval]),
+    ).toEqual([
+      [
+        'c1',
+        'output-denied',
+        { id: 'c1', approved: true, reason: 'earlier_write_timed_out' },
+      ],
+      ['c2', 'output-denied', { id: 'c2', approved: false }],
+      ['c3', 'output-denied', { id: 'c3', approved: false }],
+    ]);
+  });
+
   it('shows a rejected decision that waits for the others as approval-responded, not approved', () => {
     const messages = itemsToMessages(
       detail({
