@@ -255,7 +255,7 @@ function PanelConversation(props: {
   const launchIdRef = useRef(launchId);
   launchIdRef.current = launchId;
 
-  // A launch with references puts its prompt in the input, not sent.
+  // The prompt of a launch with references waits in the input: focus it.
   useEffect(() => {
     if (!state.open || !draftPrompt) return;
     asideRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus();
