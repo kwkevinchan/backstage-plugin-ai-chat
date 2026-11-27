@@ -769,9 +769,7 @@ function userContent(item: UserMessageBody): string {
       ? [referencesBlock(item.references)]
       : []),
   ];
-  return before.length > 0
-    ? `${before.join('\n')}\n\n${item.text}`
-    : item.text;
+  return before.length > 0 ? `${before.join('\n')}\n\n${item.text}` : item.text;
 }
 
 function pageLine(page: PageContext): string {

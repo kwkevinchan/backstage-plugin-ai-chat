@@ -227,6 +227,7 @@ describe('the references of a message', () => {
       [text({ text: 'x'.repeat(4001) })],
       [text({ text: '' })],
       [text({ title: 'x'.repeat(201) })],
+      // eslint-disable-next-line no-script-url -- a link that is refused
       [text({ url: 'javascript:alert(1)' })],
       [text({ url: '//example.com/x' })],
       [text({ url: 'example.com' })],

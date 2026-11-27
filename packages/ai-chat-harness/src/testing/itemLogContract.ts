@@ -388,9 +388,9 @@ export function itemLogContract(
       await log.append(sessionId, [body, user('none')], fence);
       const [withReferences, without] = await log.read(sessionId);
       expect(withReferences).toMatchObject(body as object);
-      expect(
-        (withReferences as { references: unknown }).references,
-      ).toEqual(body.kind === 'user_message' && body.references);
+      expect((withReferences as { references: unknown }).references).toEqual(
+        body.kind === 'user_message' && body.references,
+      );
       expect(without).not.toHaveProperty('references');
     });
 

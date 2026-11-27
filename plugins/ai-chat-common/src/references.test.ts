@@ -29,6 +29,7 @@ describe('isReferenceUrl', () => {
     }
     for (const value of [
       '',
+      // eslint-disable-next-line no-script-url -- a link that is refused
       'javascript:alert(1)',
       'data:text/html,hi',
       'mailto:someone@example.com',
