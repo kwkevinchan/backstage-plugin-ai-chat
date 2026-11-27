@@ -66,6 +66,7 @@ export function AskAiOnSelection(props: { children: ReactNode }) {
         createPortal(
           // Pressing the button must not clear the selection before the click.
           <div
+            role="presentation"
             style={{
               position: 'fixed',
               left: selected.left,
