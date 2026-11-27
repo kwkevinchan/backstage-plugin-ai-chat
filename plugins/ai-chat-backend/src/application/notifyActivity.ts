@@ -37,7 +37,7 @@ export function notifyActivity(
     .catch(error => {
       logger?.warn('Could not notify the activity of a session', {
         sessionId,
-        error: error instanceof Error ? error.message : String(error),
+        error: error instanceof Error ? error : String(error),
       });
     });
 }

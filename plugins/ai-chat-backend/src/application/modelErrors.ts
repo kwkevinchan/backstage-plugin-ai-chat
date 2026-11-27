@@ -34,11 +34,8 @@ export function errorLogFields(error: unknown): {
   };
 }
 
-/** Alias of {@link errorLogFields} for model-call failure logs. */
-export const modelErrorFields = errorLogFields;
-
 /** Short non-whitespace error code (e.g. `ECONNREFUSED`, `23505`), if present. */
-export function errorCodeOf(error: unknown): string | undefined {
+function errorCodeOf(error: unknown): string | undefined {
   const code = (error as { code?: unknown } | null | undefined)?.code;
   return typeof code === 'string' &&
     code.length > 0 &&

@@ -326,10 +326,12 @@ describe('RunSupervisor', () => {
     expect(aborted).toBe(false);
     expect(logger.warn).toHaveBeenCalledWith(
       'Could not renew the lease of a run',
-      expect.objectContaining({ errorName: 'Error' }),
-    );
-    expect(JSON.stringify((logger.warn as jest.Mock).mock.calls)).not.toContain(
-      'connection timeout',
+      expect.objectContaining({
+        error: expect.objectContaining({
+          message: 'connection timeout',
+          stack: expect.any(String),
+        }),
+      }),
     );
     expect(runs.transition).toHaveBeenCalledWith(
       'r1',
@@ -747,11 +749,13 @@ describe('RunSupervisor with inserted messages and the queue (PI-03)', () => {
     expect(types).toEqual(['run.started', 'run.ended']);
     expect(logger.error).toHaveBeenCalledWith(
       'Could not tell the state of the queue',
-      expect.objectContaining({ errorName: 'Error' }),
+      expect.objectContaining({
+        error: expect.objectContaining({
+          message: 'queue table gone',
+          stack: expect.any(String),
+        }),
+      }),
     );
-    expect(
-      JSON.stringify((logger.error as jest.Mock).mock.calls),
-    ).not.toContain('queue table gone');
   });
 });
 

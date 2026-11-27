@@ -30,7 +30,7 @@ import {
   titleFromModelAnswer,
   type Run,
 } from '../../domain';
-import { modelErrorFields } from '../modelErrors';
+import { errorLogFields } from '../modelErrors';
 import { DEFAULT_MODEL_ID, type ModelCatalog } from '../models';
 import type { RunTelemetry } from '../RunTelemetry';
 import type {
@@ -167,7 +167,7 @@ export class NameSession {
         measure('cancelled');
         return;
       }
-      const fields = modelErrorFields(error);
+      const fields = errorLogFields(error);
       measure('failed', fields.errorStatus);
       logger.warn('Could not name the session', {
         sessionId: session.id,

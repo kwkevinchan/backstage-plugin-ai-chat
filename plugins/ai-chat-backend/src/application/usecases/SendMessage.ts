@@ -29,6 +29,7 @@ import {
 import { abandonRun } from '../abandonRun';
 import { buildRunRequest, type RunSettings } from '../buildRunRequest';
 import { readableEntityRef } from '../entityContext';
+import { errorLogFields } from '../modelErrors';
 import type { ActivityNotifier } from '../notifyActivity';
 import type { RunHandle, RunSupervisor } from '../RunSupervisor';
 import {
@@ -175,7 +176,7 @@ export class SendMessage {
         'AI chat could not bind the session to the entity of the page',
         {
           sessionId: session.id,
-          error: error instanceof Error ? error.message : String(error),
+          ...errorLogFields(error),
         },
       );
       return undefined;

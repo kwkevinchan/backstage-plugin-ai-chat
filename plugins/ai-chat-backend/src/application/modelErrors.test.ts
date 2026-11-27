@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { errorCodeOf, errorLogFields, errorStatusOf } from './modelErrors';
+import { errorLogFields, errorStatusOf } from './modelErrors';
 import { AuditedToolGateway } from './AuditedToolGateway';
 
 describe('errorLogFields', () => {
@@ -40,7 +40,9 @@ describe('errorLogFields', () => {
       status: 999,
     });
     expect(errorLogFields(err)).toEqual({ errorName: 'Error' });
-    expect(errorCodeOf({ code: 'x'.repeat(65) })).toBeUndefined();
+    expect(errorLogFields({ code: 'x'.repeat(65) })).toEqual({
+      errorName: 'object',
+    });
     expect(errorStatusOf({ status: 42 })).toBeUndefined();
   });
 

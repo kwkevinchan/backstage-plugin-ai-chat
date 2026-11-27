@@ -298,8 +298,7 @@ export class FollowSession {
                   {
                     runId,
                     attempt: pollErrors,
-                    error:
-                      error instanceof Error ? error.message : String(error),
+                    error: error instanceof Error ? error : String(error),
                   },
                 );
                 continue;

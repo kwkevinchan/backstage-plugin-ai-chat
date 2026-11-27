@@ -32,7 +32,7 @@ import {
   type Run,
 } from '../domain';
 import { EventChannel } from './EventChannel';
-import { errorLogFields, modelErrorFields } from './modelErrors';
+import { errorLogFields } from './modelErrors';
 import { notifyActivity, type ActivityNotifier } from './notifyActivity';
 import type { AfterRun, HostEvent } from './hostEvents';
 import { RUN_END_HOOK_TIMEOUT_MS, type RunEnded } from './runEnded';
@@ -269,7 +269,7 @@ export class RunSupervisor {
         if (!(error instanceof LeaseLost || isInvalidTransition(error))) {
           this.deps.logger.error('Could not mark a run expired at shutdown', {
             runId,
-            ...errorLogFields(error),
+            error: error instanceof Error ? error : String(error),
           });
         }
       }
@@ -412,7 +412,7 @@ export class RunSupervisor {
           // model server may carry what the user or a tool wrote.
           this.deps.logger.warn('A summary could not be made', {
             runId: run.id,
-            ...(event.cause !== undefined && modelErrorFields(event.cause)),
+            ...(event.cause !== undefined && errorLogFields(event.cause)),
           });
         }
         this.publish(loop, forSubscribers(event));
@@ -461,7 +461,7 @@ export class RunSupervisor {
     } catch (error) {
       this.deps.logger.error('Could not tell the state of the queue', {
         runId: loop.run.id,
-        ...errorLogFields(error),
+        error: error instanceof Error ? error : String(error),
       });
     }
   }
@@ -507,7 +507,7 @@ export class RunSupervisor {
       // lease lasts longer than one interval, and the loop renews it too.
       this.deps.logger.warn('Could not renew the lease of a run', {
         runId: loop.run.id,
-        ...errorLogFields(error),
+        error: error instanceof Error ? error : String(error),
       });
     }
   }
@@ -529,7 +529,7 @@ export class RunSupervisor {
       // server may carry what the user or a tool wrote.
       this.deps.logger.error('A run failed', {
         runId: loop.run.id,
-        ...(outcome.cause !== undefined && modelErrorFields(outcome.cause)),
+        ...(outcome.cause !== undefined && errorLogFields(outcome.cause)),
       });
     }
     const [to, endReason] = statusOf(outcome);
@@ -571,7 +571,7 @@ export class RunSupervisor {
     if (!lost) {
       this.deps.logger.error('A run stopped with an error', {
         runId: loop.run.id,
-        ...errorLogFields(error),
+        error: error instanceof Error ? error : String(error),
       });
     }
     if (!loop.shuttingDown && !lost) {
@@ -585,7 +585,7 @@ export class RunSupervisor {
       } catch (inner) {
         this.deps.logger.error('Could not mark a run failed', {
           runId: loop.run.id,
-          ...errorLogFields(inner),
+          error: inner instanceof Error ? inner : String(inner),
         });
       }
     }

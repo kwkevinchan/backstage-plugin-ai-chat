@@ -24,7 +24,6 @@ import {
 } from '../domain';
 import type { Clock } from '@kwkevinchan/ai-chat-harness';
 import type { AfterRun, QueueState } from './hostEvents';
-import { errorLogFields } from './modelErrors';
 import type { Logger, QueuedMessageRepository } from './ports';
 import type { RunSupervisor } from './RunSupervisor';
 import type { RunSettings } from './buildRunRequest';
@@ -105,7 +104,7 @@ export function createAfterRun(deps: {
     } catch (error) {
       logger.error('The queue could not send its next message', {
         sessionId: info.run.sessionId,
-        ...errorLogFields(error),
+        error: error instanceof Error ? error : String(error),
       });
       return { items: await queue.list(info.run.sessionId), paused: true };
     }
