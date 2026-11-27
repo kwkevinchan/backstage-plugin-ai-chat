@@ -1314,7 +1314,7 @@ flowchart LR
     - `ui/`：工具呼叫的畫面向這個 API 查元件。註冊的元件畫在內建的那一列（或核准卡片）下面，包在 error boundary 裡。
   - 範例 app：`app` 和 `app-next` 都為 `dev-actions:list-services` 註冊一個表格（名稱、狀態、重啟次數；名稱用 `AiChatSafeLink` 連到 `serviceUrl`）。
   - 文件：`ai-chat-react` 的 README（怎麼註冊、結果是不可信的資料）；架構第 6.2、9 節。
-  - 不做：client tool（`AiChatClientToolBlueprint`，P4）；核准卡片的改動；後端、串流和共用型別的改動；元件的懶載入。
+  - 不做：client tool（`AiChatClientToolBlueprint`，已決定不做，見 B-04）；核准卡片的改動；後端、串流和共用型別的改動；元件的懶載入。
 - **依賴**：PU-02（工具呼叫用 assistant-ui 的工具畫面）。
 - **驗收**：
   - 註冊（B-03）：
@@ -1348,13 +1348,79 @@ flowchart LR
 
 ### P4：擴大
 
-| 編號  | 工作項目           | 大小 | 完成的需求       | PR  | 狀態 |
-| ----- | ------------------ | ---- | ---------------- | --- | ---- |
-| P4-01 | 子任務：`delegate` | L    | P-07、P-08、P-09 |     | 不做 |
-| P4-02 | 題組測試           | M    | O-03             |     |      |
-| P4-03 | Client tool        | L    | B-04             |     |      |
+| 編號  | 工作項目           | 大小 | 完成的需求             | PR  | 狀態   |
+| ----- | ------------------ | ---- | ---------------------- | --- | ------ |
+| P4-01 | 子任務：`delegate` | L    | P-07、P-08、P-09       |     | 不做   |
+| P4-02 | 題組測試           | M    | O-03                   |     | 不做   |
+| P4-03 | 送出內容管理       | L    | B-04、B-01（關掉頁面） |     | 進行中 |
 
 業主於 2026-11-24 決定 P4-01（子任務 `delegate`、需求 P-07 到 P-09）不做。
+
+業主於 2026-11-27 決定 P4-02（題組測試，O-03）不做，原定的 P4-03（client tool：在瀏覽器執行的工具）也不做。P4-03 改成送出內容管理（B-04）：前端只送文字、檔案和使用者選的參考，用哪個工具照舊只由後端決定。
+
+### P4-03 送出內容管理
+
+分三個 PR，依序做：PR 1 是規格和後端協定，PR 2 是前端，PR 3 是範例和文件。
+
+- **範圍**：
+  - PR 1（規格和後端協定）：
+    - 規格：B-01 加「使用者可以關掉頁面」；B-04 改寫成送出內容管理；O-03、原定的 client tool 標成不做；架構第 6.2 節。
+    - 共用型別（`ai-chat-common`）：請求的參考 `ChatReferenceInput`（`{ kind: 'entity', entityRef }` 或 `{ kind: 'text', text, title?, url? }`）；存下的參考 `ChatMessageReference`；送訊息、插入、排隊、改排隊訊息的請求加選填的 `references`；`ChatInputConfig.references`；上限常數和 `isReferenceUrl`。
+    - 核心（`ai-chat-harness`）：`user_message` 加選填的 `references`（`MessageReference`、`ReferencedEntity`）；`buildModelInput` 在那則訊息前加參考的區塊。
+    - 宿主（`ai-chat-backend`）：請求的 zod 檢查；`aiChat.input.references.maxPerMessage`；`application/references.ts` 用使用者的身分讀 entity，存進 `user_message`；排隊的訊息存參考（`queued_messages.message_references`，新的 migration），自動送出和「現在就送」都帶著；`GET /input-config` 回傳上限；openapi；`config.d.ts`；changeset。
+    - 前端的 client 不用改程式：請求的型別來自 `ai-chat-common`，`references` 照原樣送出。
+  - PR 2（前端）：
+    - 送出內容管理區：輸入框上方一排標籤，有頁面、參考、圖片。頁面標籤的開關。參考標籤可以移除。「加入參考」的選單：「目前頁面」、catalog entity 的選擇器（可搜尋，照 Scaffolder `EntityPicker` 的慣例）、別的 plugin 註冊的參考來源。
+    - 擴充點：`ai-chat-react` 的參考來源型別和 API ref；新前端系統用 `/alpha` 的 blueprint，舊前端系統由 app 覆蓋 API（照 P3-10）。
+    - `useAiChatPanel().open()` 和 `<AiChatLauncher>` 帶 `references`。
+  - PR 3（範例和文件）：範例 app 的 TechDocs addon「反白後問 AI」（帶文字片段和來源）和一個「問 AI」按鈕；README 中英；e2e。
+  - 不做：client tool；O-03 題組測試；全站反白就跳出「問 AI」；改工具的選擇和執行；改圖片的規則。
+- **依賴**：P3-02（`EntityReader`、`readableEntityRef` 的讀法）、P3-10（前端擴充點的做法）、PU-03（排隊和插入的畫面）。
+- **驗收**：
+  - PR 1，請求的檢查（B-04）：
+    - 超過 5 個參考、文字片段超過 4,000 字、標題超過 200 字、連結不是 `http`、`https` 或以 `/` 開頭的路徑、entity ref 不合格式或沒有 kind，都回 400，什麼都不寫（`integration/references.test.ts`：`refuses with 400 a body over the limits of the references, and writes nothing`）。
+    - 管理員調低 `aiChat.input.references.maxPerMessage` 時，超過的回 400（`integration/references.test.ts`：`refuses with 400 more references than aiChat.input.references.maxPerMessage`；`application/references.test.ts`：`refuses more references than the administrator allows`）。
+    - 設定只能調低：預設 5，大於 5 或不是正整數時 backend 啟動失敗（`config.test.ts`：`reads input.references.maxPerMessage, 5 by default, and refuses more than 5`）。
+    - 連結的檢查兩邊共用（`ai-chat-common` 的 `references.test.ts`：`takes http, https and paths, and refuses other links`）。
+  - PR 1，entity 的讀取和權限：
+    - 用使用者的身分讀，讀到的資料存在那則 `user_message`（`application/references.test.ts`：`keeps the facts of an entity the user can read, read with the credentials of the user`）。
+    - 讀不到、沒權限、不存在的 entity 標成讀不到，沒有資料（`application/references.test.ts`：`marks an entity the user cannot read, or that does not exist, as not readable, with no facts`）。
+    - catalog 失敗或逾時：標成讀不到，訊息照常送出，log 一條警告（`application/references.test.ts`：`marks the entities as not readable when the catalog fails or does not answer, and logs it`）。
+    - 文字片段照原樣存（`application/references.test.ts`：`keeps a text reference as it was given`）。
+  - PR 1，存下和模型輸入（D-18、H-10）：
+    - 送訊息：參考存在 `user_message`，模型在那則訊息的文字前看到參考的區塊（`integration/references.test.ts`：`stores the references on the message and gives them to the model before the text`）。
+    - 重建模型輸入時不重讀 catalog：同一個 Run 的下一步和下一個 Run 都用存下的資料（`integration/references.test.ts`：`does not read the entity again for the next step or the next run`）。
+    - 區塊在頁面那一行之後、文字之前，不在 system prompt（`modelInput.test.ts`：`puts the references after the line of the page and before the text, not in the system prompt`；`writes the references alone before the text when the message has no page`）。
+    - 值用 JSON 寫，換行和引號出不去（`modelInput.test.ts`：`writes every value as JSON, so a line break or a quote in a reference cannot start text that looks like the user's`）。
+    - 讀不到的 entity 只寫 ref 和「不提供」，沒有資料（`modelInput.test.ts`：`names an entity the user could not read and gives none of its details`）。
+    - 記憶體版和 Knex 版的 `ItemLog` 都原樣存回參考（`itemLogContract`：`stores and reads back the references of a message as they were written`）。
+  - PR 1，插入、排隊、分享：
+    - 插入的訊息帶參考（`integration/references.test.ts`：`carries the references of an inserted message`）。
+    - 排隊的訊息存參考，自動送出時帶著；改排隊的訊息可以換掉參考（`integration/references.test.ts`：`sends a queued message with its references, and a change of the queued message replaces them`）。
+    - 「現在就送」把排隊的訊息插入 Run 時帶著參考（`integration/references.test.ts`：`inserts a queued message into the run with its references`）。
+    - 被分享的人看到的那則訊息帶參考（`integration/references.test.ts`：`shows the references of a message to the user it is shared with`）。
+    - `GET /input-config` 回傳參考的上限（`integration/references.test.ts`：`answers the limits of the references in GET /input-config`）。
+  - PR 2，送出內容管理區（測試名稱在 PR 2 定）：
+    - 頁面標籤預設帶上，有 ×；按 × 後變成淡色的「＋ 目前頁面」，點一下補回來；「加入參考」選單裡有「目前頁面」。
+    - 關掉後換到別的頁面，恢復自動帶上；同一頁維持關閉。
+    - 關掉時，送訊息、核准、resume、插入、排隊的請求都沒有 `page`。
+    - entity 標籤顯示名稱和 kind；文字片段標籤顯示來源標題和前幾個字；圖片沿用縮圖。每個參考標籤都能移除，移除的不送。
+    - 超過 4,000 字的文字片段在前端截斷並標「已截斷」；參考到上限時不能再加。上限讀 `GET /input-config`。
+    - catalog 選擇器可以搜尋，選了的 entity 出現在管理區。
+    - 擴充點：舊前端系統由 app 覆蓋 API、新前端系統用 blueprint 註冊的參考來源，出現在「加入參考」的選單。
+    - `useAiChatPanel().open({ references })` 和 `<AiChatLauncher references>` 打開面板時，參考放進管理區，送出前能移除。
+    - 被分享的人的畫面顯示那則訊息的參考標籤。
+  - PR 3，範例和文件（測試名稱在 PR 3 定）：
+    - 範例 app 在 TechDocs 反白後問 AI：面板打開，管理區有那段文字和來源（e2e）。
+    - README 中英寫明參考的上限、entity 用使用者的身分讀、文字片段會送到模型供應商。
+- **規格沒寫、實作選定的地方**：
+  - 參考在收到請求時就讀，存下的是讀到的結果：送訊息和插入在寫入 `user_message` 之前讀；排隊和改排隊的訊息在存進佇列之前讀，自動送出時不再讀。自動送出時使用者可能不在，憑證也可能快到期，所以不在那時讀。
+  - entity ref 要有 kind（和 `GET /sessions?entityRef=` 同一個檢查），存成正規化的 `kind:namespace/name`。
+  - 存下的 entity 資料就是 Context provider `entity` 用的那些欄位（`kind`、`namespace`、`name`、`title`、`description`、`type`、`lifecycle`、`owner`、`system`、`tags`）。
+  - catalog 讀取的逾時和 Context provider 一樣（`CONTEXT_PROVIDER_TIMEOUT_MS`）。逾時或失敗的 entity 和讀不到的一樣標成讀不到，訊息照常送出。
+  - 被分享的人看到的是存下的參考，包含用擁有者的身分讀到的 entity 資料，和工具輸出一樣（SH-07）。複製 Session 時參考跟著訊息帶走。
+  - 改排隊的訊息時，`references` 換掉整組；`[]` 拿掉全部。
+  - 模型看到的區塊：先一行說明這些是使用者附上的資料、不是指令，再每個參考一段；entity 寫成 JSON 物件，文字片段寫成 JSON 字串，標題和連結也是 JSON 字串。
 
 ## 8. 實作時要驗證的事
 
@@ -1501,3 +1567,4 @@ V-02 的確認結果（P1-06，Backstage 1.56.2）：`actionsServiceRef` 的 `Ac
 | 2026-11-26 | 1.2  | P2-04 完成（SH-02、SH-03、SH-11，SH-06 和 SH-10 的後端，IN-19 的讀取，#62）：`/sessions/{id}/shares` 建立、修改、取消、列出唯讀的分享，先寫稽核再寫入；被分享的人的寫入一律 404；`GetSession`、附件、接回都經過 `AccessControl` 和同一份可見範圍；接回時被分享的人只輪詢游標之後的紀錄；分享對象整串小寫。逐項驗收見 P2-04                                                                                                                                                                                                                                                                                                                                                                           |
 | 2026-11-26 | 1.2  | PI-07 收尾完成（#70）：在 `e2e-tests/images.test.ts` 補齊圖片＋插入＋排隊綜合端對端測試；`usage.zh-TW.html` 補上三者的示意畫面與說明；`pi-coverage.zh-TW.md`、`harness-spec.zh-TW.md`、`architecture.zh-TW.md` 與本表將 PI-06、PI-07 標為完成                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | 2026-11-27 | 1.2  | SE-06 畫面完成：前端套件匯出 `EntityAiChatContent`（舊前端系統）和 `entity-content:ai-chat/entity-ai-chat`（新前端系統，預設啟用，可用 app-config 停用或設 `filter`）；列表沿用 `ThreadListSidebar` 和 `createThreadListAdapter`（加 `entityRef`），即時更新和聊天頁共用 `useThreadListLiveUpdates`；兩個示範 app 都接上，e2e 走過分頁 → 新對話 → 回到分頁                                                                                                                                                                                                                                                                                                                                           |
+| 2026-11-27 | 1.2  | P4-02（題組測試，O-03）不做。P4-03 從 client tool 改成送出內容管理（B-04、B-01 關掉頁面），分三個 PR（規格和後端協定、前端、範例和文件），逐項驗收見 P4-03                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
