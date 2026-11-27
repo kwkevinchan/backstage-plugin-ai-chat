@@ -621,7 +621,15 @@ test('entity page AI chat tab: list entity sessions, start a new chat bound to e
   await signIn(page);
 
   await page.goto('/catalog/default/component/example-payments');
-  await page.getByRole('tab', { name: /AI chat/i }).click();
+  const aiChatTab = page
+    .getByRole('tab', { name: 'AI chat', exact: true })
+    .or(
+      page
+        .getByRole('link', { name: 'AI chat', exact: true })
+        .and(page.locator('[href*="/catalog/"]')),
+    )
+    .first();
+  await aiChatTab.click();
   await expect(page).toHaveURL(
     /\/catalog\/default\/component\/example-payments\/ai-chat/,
   );
