@@ -23,7 +23,10 @@ import {
   signalApiRef,
   type SessionSignalActivity,
 } from '../signals';
-import { readThreadCustom, type SessionListActivity } from './threadListAdapter';
+import {
+  readThreadCustom,
+  type SessionListActivity,
+} from './threadListAdapter';
 
 const ACTIVE_POLL_MS = 3_000;
 const FALLBACK_POLL_MS = 15_000;

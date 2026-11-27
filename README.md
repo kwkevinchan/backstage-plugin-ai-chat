@@ -180,22 +180,10 @@ the plugin, so the app does not render it again.
 The new frontend system plugin also registers an **AI chat** tab on entity
 pages (`entity-content:ai-chat/entity-ai-chat`), listing the signed-in user's
 conversations bound to that entity with a **New chat** button. The tab is on
-by default and shows on every kind, users and groups too. Turn it off, or
-show it on some kinds only with an entity predicate in `filter`, in
-`app.extensions`:
-
-```yaml
-app:
-  extensions:
-    # no AI chat tab on entity pages
-    - entity-content:ai-chat/entity-ai-chat: false
-    # or: the tab on components and APIs only
-    - entity-content:ai-chat/entity-ai-chat:
-        config:
-          filter:
-            kind:
-              $in: [component, api]
-```
+by default and shows on every kind, users and groups too. Turn it off in
+`app.extensions` (`- entity-content:ai-chat/entity-ai-chat: false`), or show
+it on some kinds only with an entity predicate in `filter`
+(`- entity-content:ai-chat/entity-ai-chat: { config: { filter: { kind: { $in: [component, api] } } } }`).
 
 ### Frontend: legacy frontend system
 
