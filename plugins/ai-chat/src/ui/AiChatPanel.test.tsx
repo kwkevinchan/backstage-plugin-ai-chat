@@ -565,6 +565,7 @@ describe('AiChatPanel', () => {
       },
       insertMaxPerRun: 5,
       queueMaxMessages: 5,
+      references: { maxPerMessage: 5, maxTextLength: 4000 },
     });
     api.uploadAttachment.mockImplementation(async (_s, file, name) => ({
       id: `att-${name}`,
@@ -617,6 +618,7 @@ describe('AiChatPanel', () => {
     api.getInputConfig.mockResolvedValue({
       insertMaxPerRun: 5,
       queueMaxMessages: 5,
+      references: { maxPerMessage: 5, maxTextLength: 4000 },
       images: {
         enabled: true,
         mediaTypes: ['image/png'],
@@ -669,6 +671,7 @@ describe('AiChatPanel', () => {
       },
       insertMaxPerRun: 5,
       queueMaxMessages: 5,
+      references: { maxPerMessage: 5, maxTextLength: 4000 },
     });
     await renderPanel(api);
     await userEvent.click(screen.getByRole('button', { name: 'Open AI chat' }));

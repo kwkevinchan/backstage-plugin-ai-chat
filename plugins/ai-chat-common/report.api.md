@@ -62,6 +62,10 @@ export interface ChatInputConfig {
   };
   insertMaxPerRun: number;
   queueMaxMessages: number;
+  references: {
+    maxPerMessage: number;
+    maxTextLength: number;
+  };
 }
 
 // @public
@@ -70,6 +74,8 @@ export interface ChatInsertedData {
   attachments?: ChatAttachment[];
   // (undocumented)
   page?: ChatPageContext;
+  // (undocumented)
+  references?: ChatMessageReference[];
   // (undocumented)
   seq: number;
   // (undocumented)
@@ -94,6 +100,7 @@ export type ChatItemBody =
       text: string;
       attachments?: ChatAttachment[];
       page?: ChatPageContext;
+      references?: ChatMessageReference[];
       delivery?: ChatDelivery;
       insertState?: ChatInsertState;
     }
@@ -157,6 +164,26 @@ export interface ChatItemData {
 
 // @public (undocumented)
 export type ChatItemKind = ChatItemBody['kind'];
+
+// @public
+export type ChatMessageReference =
+  | {
+      kind: 'entity';
+      entityRef: string;
+      readable: true;
+      entity: ChatReferencedEntity;
+    }
+  | {
+      kind: 'entity';
+      entityRef: string;
+      readable: false;
+    }
+  | {
+      kind: 'text';
+      text: string;
+      title?: string;
+      url?: string;
+    };
 
 // @public
 export interface ChatNoticeData {
@@ -237,6 +264,7 @@ export interface ChatQueuedMessage {
   // (undocumented)
   page?: ChatPageContext;
   position: number;
+  references?: ChatMessageReference[];
   // (undocumented)
   text: string;
   // (undocumented)
@@ -248,6 +276,43 @@ export type ChatQueuePausedReason =
   | 'run_not_completed'
   | 'credentials'
   | 'shutting_down';
+
+// @public
+export interface ChatReferencedEntity {
+  // (undocumented)
+  description?: string;
+  // (undocumented)
+  kind: string;
+  // (undocumented)
+  lifecycle?: string;
+  // (undocumented)
+  name: string;
+  // (undocumented)
+  namespace: string;
+  // (undocumented)
+  owner?: string;
+  // (undocumented)
+  system?: string;
+  // (undocumented)
+  tags?: string[];
+  // (undocumented)
+  title?: string;
+  // (undocumented)
+  type?: string;
+}
+
+// @public
+export type ChatReferenceInput =
+  | {
+      kind: 'entity';
+      entityRef: string;
+    }
+  | {
+      kind: 'text';
+      text: string;
+      title?: string;
+      url?: string;
+    };
 
 // @public
 export interface ChatRun {
@@ -457,6 +522,7 @@ export interface InsertChatMessageRequest {
   attachmentIds?: string[];
   // (undocumented)
   page?: ChatPageContext;
+  references?: ChatReferenceInput[];
   // (undocumented)
   text: string;
 }
@@ -474,7 +540,22 @@ export function isEntityRef(value: string): boolean;
 export function isPagePath(value: string): boolean;
 
 // @public
+export function isReferenceUrl(value: string): boolean;
+
+// @public
 export const MAX_MESSAGE_LENGTH = 8000;
+
+// @public
+export const MAX_REFERENCE_TEXT_LENGTH = 4000;
+
+// @public
+export const MAX_REFERENCE_TITLE_LENGTH = 200;
+
+// @public
+export const MAX_REFERENCE_URL_LENGTH = 2000;
+
+// @public
+export const MAX_REFERENCES_PER_MESSAGE = 5;
 
 // @public
 export const MAX_TITLE_LENGTH = 200;
@@ -487,6 +568,7 @@ export interface QueueChatMessageRequest {
   attachmentIds?: string[];
   // (undocumented)
   page?: ChatPageContext;
+  references?: ChatReferenceInput[];
   // (undocumented)
   text: string;
 }
@@ -508,6 +590,7 @@ export interface SendChatMessageRequest {
   attachmentIds?: string[];
   // (undocumented)
   page?: ChatPageContext;
+  references?: ChatReferenceInput[];
   // (undocumented)
   text: string;
 }
@@ -541,6 +624,7 @@ export interface UpdateQueuedMessageRequest {
   attachmentIds?: string[];
   // (undocumented)
   page?: ChatPageContext | null;
+  references?: ChatReferenceInput[];
   // (undocumented)
   text?: string;
 }

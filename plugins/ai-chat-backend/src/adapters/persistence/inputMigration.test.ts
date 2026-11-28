@@ -97,8 +97,9 @@ describe('the migration of the input phase', () => {
 
   it('can be undone: the queue table and the column go, and the rest stays', async () => {
     await knex.migrate.latest(config);
-    // The migrations of the shares, of the attachments, of the model calls
-    // and of the write quota come after this one.
+    // The migrations of the shares, of the attachments, of the model calls,
+    // of the write quota and of the references come after this one.
+    await knex.migrate.down(config);
     await knex.migrate.down(config);
     await knex.migrate.down(config);
     await knex.migrate.down(config);

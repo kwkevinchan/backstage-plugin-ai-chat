@@ -23,8 +23,15 @@ import {
   type QueuedMessage,
 } from '../../domain';
 import { bindAttachments, type ImageSettings } from '../attachments';
+import {
+  resolveReferences,
+  type ReferenceInput,
+  type ReferenceSettings,
+} from '../references';
 import type {
   AttachmentStore,
+  EntityReader,
+  Logger,
   QueuedMessageRepository,
   SessionRepository,
 } from '../ports';
@@ -51,12 +58,17 @@ export class UpdateQueuedMessage {
       queue: QueuedMessageRepository;
       attachments: AttachmentStore;
       images: ImageSettings;
+      entities: EntityReader;
+      references: ReferenceSettings;
+      logger?: Logger;
     },
   ) {}
 
   /**
    * Throws `NotSessionOwner`, `QueuedMessageNotFound`, or, for the images,
-   * `ImagesNotSupported`, `TooManyAttachments` or `UnknownAttachment`. A
+   * `ImagesNotSupported`, `TooManyAttachments` or `UnknownAttachment`, or
+   * `TooManyReferences`. `references` replaces all the references of the
+   * message, read again with the credentials of this request. A
    * patch that would leave the message with no text and no image is refused
    * (`EmptyMessage`, 400): the body cannot see what is already stored, so the
    * result is checked here.
@@ -69,6 +81,7 @@ export class UpdateQueuedMessage {
       text?: string;
       attachmentIds?: string[];
       page?: PageContext | null;
+      references?: ReferenceInput[];
     };
   }): Promise<QueuedMessage> {
     const { sessions, queue } = this.deps;
@@ -83,6 +96,16 @@ export class UpdateQueuedMessage {
       throw new EmptyMessage();
     }
     await bindAttachments(this.deps, session.id, input.patch.attachmentIds);
-    return queue.update(session.id, input.queuedId, input.patch);
+    const { references, ...patch } = input.patch;
+    return queue.update(session.id, input.queuedId, {
+      ...patch,
+      ...(references !== undefined && {
+        references: await resolveReferences(
+          this.deps,
+          input.principal,
+          references,
+        ),
+      }),
+    });
   }
 }

@@ -28,6 +28,8 @@ export {
   userContextProvider,
 } from './entityContext';
 export type { RunSettings } from './buildRunRequest';
+export { resolveReferences } from './references';
+export type { ReferenceInput, ReferenceSettings } from './references';
 export { DEFAULT_MODEL_ID, HostModelClient, ModelCatalog } from './models';
 export type { AfterRun, HostEvent, QueueState } from './hostEvents';
 export { createRunEnded, RUN_END_HOOK_TIMEOUT_MS } from './runEnded';

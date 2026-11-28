@@ -67,14 +67,14 @@ flowchart LR
 
 ## 3. 套件
 
-| 套件                               | 路徑                       | Backstage role    | 內容                                                                                                                                      | 分期                         |
-| ---------------------------------- | -------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| `ai-chat-harness`                  | `packages/ai-chat-harness` | `node-library`    | 核心：domain 和 application。另有 `/testing` 入口，放假模型和記憶體版的 port                                                              | P1                           |
-| `backstage-plugin-ai-chat-common`  | `plugins/ai-chat-common`   | `common-library`  | 前後端共用：HTTP 的資料型別、permission 的定義                                                                                            | P1（型別）、P2（permission） |
-| `backstage-plugin-ai-chat-backend` | `plugins/ai-chat-backend`  | `backend-plugin`  | 宿主：四圈                                                                                                                                | P1                           |
-| `backstage-plugin-ai-chat`         | `plugins/ai-chat`          | `frontend-plugin` | 前端                                                                                                                                      | P1                           |
-| `backstage-plugin-ai-chat-node`    | `plugins/ai-chat-node`     | `node-library`    | backend 的擴充點 `aiChatHarnessExtensionPoint`                                                                                            | P3                           |
-| `backstage-plugin-ai-chat-react`   | `plugins/ai-chat-react`    | `web-library`     | 前端的擴充點。P2：`aiChatPanelApiRef`、`AiChatPanelApi`、`useAiChatPanel()`、`<AiChatLauncher>`。結果顯示（P3）和 client tool（P4）尚未做 | P2 開始                      |
+| 套件                               | 路徑                       | Backstage role    | 內容                                                                                                                                                                                                | 分期                         |
+| ---------------------------------- | -------------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `ai-chat-harness`                  | `packages/ai-chat-harness` | `node-library`    | 核心：domain 和 application。另有 `/testing` 入口，放假模型和記憶體版的 port                                                                                                                        | P1                           |
+| `backstage-plugin-ai-chat-common`  | `plugins/ai-chat-common`   | `common-library`  | 前後端共用：HTTP 的資料型別、permission 的定義                                                                                                                                                      | P1（型別）、P2（permission） |
+| `backstage-plugin-ai-chat-backend` | `plugins/ai-chat-backend`  | `backend-plugin`  | 宿主：四圈                                                                                                                                                                                          | P1                           |
+| `backstage-plugin-ai-chat`         | `plugins/ai-chat`          | `frontend-plugin` | 前端                                                                                                                                                                                                | P1                           |
+| `backstage-plugin-ai-chat-node`    | `plugins/ai-chat-node`     | `node-library`    | backend 的擴充點 `aiChatHarnessExtensionPoint`                                                                                                                                                      | P3                           |
+| `backstage-plugin-ai-chat-react`   | `plugins/ai-chat-react`    | `web-library`     | 前端的擴充點。P2：`aiChatPanelApiRef`、`AiChatPanelApi`、`useAiChatPanel()`、`<AiChatLauncher>`。P3：結果顯示元件。P4：參考來源，`open()` 和 `<AiChatLauncher>` 帶 `references`（client tool 不做） | P2 開始                      |
 
 套件之間的依賴：
 
@@ -971,12 +971,12 @@ export default createBackendModule({
 
 ### 6.2 Frontend：`ai-chat-react`
 
-| 擴充點       | 形式                                                                                                           | 分期 |
-| ------------ | -------------------------------------------------------------------------------------------------------------- | ---- |
-| 頁面上下文   | 內建。前端從 router 和 entity context 讀取，每則訊息帶上                                                       | P1   |
-| 入口         | `aiChatPanelApiRef`、`AiChatPanelApi`、`useAiChatPanel()`、`<AiChatLauncher prompt="…" entityRef="…" />`       | P2   |
-| 結果顯示元件 | `aiChatToolResultsApiRef`；新前端系統用 `/alpha` 的 `AiChatToolResultBlueprint`：為某個 action id 註冊一個元件 | P3   |
-| Client tool  | `AiChatClientToolBlueprint`：在瀏覽器執行的工具                                                                | P4   |
+| 擴充點       | 形式                                                                                                                                                                           | 分期 |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---- |
+| 頁面上下文   | 內建。前端從 router 和 entity context 讀取，每則訊息帶上；使用者可以在送出內容管理區關掉（B-01）                                                                               | P1   |
+| 入口         | `aiChatPanelApiRef`、`AiChatPanelApi`、`useAiChatPanel()`、`<AiChatLauncher prompt="…" entityRef="…" />`；P4 加 `references`（entity、文字片段），打開面板時放進送出內容管理區 | P2   |
+| 結果顯示元件 | `aiChatToolResultsApiRef`；新前端系統用 `/alpha` 的 `AiChatToolResultBlueprint`：為某個 action id 註冊一個元件                                                                 | P3   |
+| 參考來源     | 參考來源的型別和 API ref；新前端系統用 `/alpha` 的 blueprint，舊前端系統由 app 覆蓋 API：在「加入參考」的選單加一項，產生 entity 或文字片段的參考                              | P4   |
 
 別的 frontend plugin 從 `ai-chat-react` import，不 import 宿主。`ai-chat-react` 透過 Backstage Utility API（`aiChatPanelApiRef` / `AiChatPanelApi`）溝通，入口匯出 `aiChatPanelApiRef`、`AiChatPanelApi`（`isOpen`、`open`、`close`、`subscribe`）、`useAiChatPanel()` 和 `<AiChatLauncher>`（可選 `className`），以及結果顯示元件的型別、`aiChatToolResultsApiRef` 和 `AiChatSafeLink`；當 `aiChatPanelApiRef` 未註冊（app 未安裝 chat 外掛）時，`<AiChatLauncher>` 不畫按鈕。
 
@@ -994,7 +994,14 @@ export default createBackendModule({
 
 結果顯示元件（B-03）：別的 plugin 匯出一份 `AiChatToolResult`（`actionId` 和 `component`）。新前端系統用 `ai-chat-react/alpha` 的 `AiChatToolResultBlueprint` 做 extension，掛在 `api:ai-chat/tool-results` 的 `toolResults` 輸入；舊前端系統由 app 在 `apis` 用 `createAiChatToolResultsApi([...])`（`ai-chat` 匯出）覆蓋 `aiChatToolResultsApiRef`。整頁和側邊面板都從這個 API 查元件。同一個 id 先註冊的有效，後的不用並在 console 警告；內建工具（`update_plan`、`load_skill`）的 id 不用。元件畫在內建的那一列或核准卡片下面，不取代它們；等核准和「沒有執行」的呼叫不畫；元件丟例外時由 error boundary 拿掉，只剩內建的列。元件拿到的輸入和結果是不可信的資料（S-02），`AiChatSafeLink` 只把 `http`、`https`、`mailto` 畫成連結。
 
-Client tool 仍是 P4，這個套件沒有 `AiChatClientToolBlueprint`。
+送出內容管理（B-04，P4-03）：輸入框上方一排標籤，列出這則訊息要帶的東西：目前頁面、參考、圖片。使用者送出前看得到、能移除。
+
+- 頁面：預設帶上，標籤有 ×。按 × 後標籤變成淡色的「＋ 目前頁面」，點一下補回來；「加入參考」選單裡也有「目前頁面」。關掉後維持關閉，直到換到別的頁面。關掉時，送訊息、核准、resume、插入、排隊都不帶 `page`。後端不用改：`page` 本來就是選填。
+- 參考：entity（`{ kind: 'entity', entityRef }`）或文字片段（`{ kind: 'text', text, title?, url? }`），放在請求的 `references`。每則最多 `GET /input-config` 的 `references.maxPerMessage` 個（預設 5，管理員只能調低），文字片段每段最多 4,000 字，前端截斷超過的並標「已截斷」。圖片不算在內。
+- 參考從三個地方來：「加入參考」的 catalog entity 選擇器（可搜尋）；別的 plugin 註冊的參考來源（上表）；別的頁面用 `open()` 或 `<AiChatLauncher>` 帶的 `references`。
+- 宿主收到請求時，用使用者的身分讀 entity（`EntityReader`，和 `readableEntityRef` 同一個讀法），讀到的資料和文字片段一起存在那則 `user_message`；讀不到的標成讀不到，不給模型資料。重建模型輸入時不重讀（D-18）。排隊的訊息在存進佇列時讀，自動送出時帶著存下的參考。`buildModelInput` 在那則訊息前、頁面那一行之後加參考的區塊，值用 JSON 寫（H-10）。
+
+原定的 client tool（在瀏覽器執行的工具）不做：這個套件沒有 `AiChatClientToolBlueprint`，工具只由後端決定。
 
 ## 7. 資料庫
 

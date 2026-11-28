@@ -175,6 +175,18 @@ export interface Config {
         maxMessages?: number;
       };
       /**
+       * References in messages: entities of the catalog, which the backend
+       * reads with the credentials of the user, and text snippets. Both are
+       * sent to the model server as part of the message.
+       */
+      references?: {
+        /**
+         * Most references in one message, from 1 to 5; images do not count.
+         * Defaults to 5.
+         */
+        maxPerMessage?: number;
+      };
+      /**
        * Images in messages. They need `llm.images`.
        */
       images?: {

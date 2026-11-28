@@ -296,6 +296,9 @@ export class UiMessageStreamPresenter {
             attachments: message.attachments,
           }),
           ...(message.page && { page: message.page }),
+          ...(message.references?.length && {
+            references: message.references,
+          }),
         },
       },
     ];

@@ -19,6 +19,7 @@ import type {
   IdGenerator,
   Item,
   ItemDraft,
+  MessageReference,
   PageContext,
   RunStatus,
 } from '@kwkevinchan/ai-chat-harness';
@@ -61,6 +62,7 @@ type QueuedRow = {
   text: string;
   attachment_ids: string;
   page: string | null;
+  message_references: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -121,7 +123,12 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
 
   async add(
     sessionId: string,
-    input: { text: string; attachmentIds?: string[]; page?: PageContext },
+    input: {
+      text: string;
+      attachmentIds?: string[];
+      page?: PageContext;
+      references?: MessageReference[];
+    },
     opts: { max: number },
   ): Promise<QueuedMessage> {
     return this.knex.transaction(async trx => {
@@ -148,6 +155,9 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
         text: input.text,
         attachment_ids: JSON.stringify(attachmentIds),
         page: input.page ? JSON.stringify(input.page) : null,
+        message_references: input.references?.length
+          ? JSON.stringify(input.references)
+          : null,
         created_at: now,
         updated_at: now,
       };
@@ -165,6 +175,7 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
       text?: string;
       attachmentIds?: string[];
       page?: PageContext | null;
+      references?: MessageReference[];
     },
   ): Promise<QueuedMessage> {
     return this.knex.transaction(async trx => {
@@ -178,6 +189,10 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
       }
       if (patch.page !== undefined) {
         changes.page = patch.page === null ? null : JSON.stringify(patch.page);
+      }
+      if (patch.references !== undefined) {
+        changes.message_references =
+          patch.references.length > 0 ? JSON.stringify(patch.references) : null;
       }
       const count = await trx('queued_messages')
         .where({ id, session_id: sessionId })
@@ -295,6 +310,7 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
             })),
           }),
           ...(message.page && { page: message.page }),
+          ...(message.references && { references: message.references }),
           delivery: 'queued',
         };
         const firstSeq = await reserveSeq(trx, sessionId, 1);
@@ -386,6 +402,9 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
         ...(row.page !== null && {
           page: JSON.parse(row.page) as PageContext,
         }),
+        ...(row.message_references !== null && {
+          references: referencesOf(row.message_references),
+        }),
         delivery: 'inserted',
       };
       const firstSeq = await reserveSeq(trx, sessionId, 1);
@@ -419,6 +438,10 @@ export class KnexQueuedMessageRepository implements QueuedMessageRepository {
   }
 }
 
+function referencesOf(json: string): MessageReference[] {
+  return JSON.parse(json) as MessageReference[];
+}
+
 function idsOf(row: QueuedRow): string[] {
   return JSON.parse(row.attachment_ids) as string[];
 }
@@ -441,6 +464,9 @@ function toQueued(
       return meta ? [meta] : [];
     }),
     ...(row.page !== null && { page: JSON.parse(row.page) as PageContext }),
+    ...(row.message_references !== null && {
+      references: referencesOf(row.message_references),
+    }),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

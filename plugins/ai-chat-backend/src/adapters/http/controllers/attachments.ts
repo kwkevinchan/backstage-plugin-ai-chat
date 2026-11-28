@@ -14,9 +14,10 @@
  * limitations under the License.
  */
 
-import type {
-  ChatInputConfig,
-  ChatUploadedAttachment,
+import {
+  MAX_REFERENCE_TEXT_LENGTH,
+  type ChatInputConfig,
+  type ChatUploadedAttachment,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import type { Request, Response } from 'express';
 import type {
@@ -136,10 +137,15 @@ export function inputConfigOf(settings: {
   images: Omit<ChatInputConfig['images'], 'mediaTypes'>;
   insertMaxPerRun: number;
   queueMaxMessages: number;
+  references: { maxPerMessage: number };
 }): ChatInputConfig {
   return {
     images: { ...settings.images, mediaTypes: [...IMAGE_MEDIA_TYPES] },
     insertMaxPerRun: settings.insertMaxPerRun,
     queueMaxMessages: settings.queueMaxMessages,
+    references: {
+      maxPerMessage: settings.references.maxPerMessage,
+      maxTextLength: MAX_REFERENCE_TEXT_LENGTH,
+    },
   };
 }

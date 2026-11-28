@@ -180,7 +180,20 @@ components:
           type: integer
         queueMaxMessages:
           type: integer
-      required: [images, insertMaxPerRun, queueMaxMessages]
+        references:
+          type: object
+          description: The limits on the references of a message.
+          properties:
+            maxPerMessage:
+              type: integer
+              minimum: 1
+              maximum: 5
+              description: The most references in one message (`aiChat.input.references.maxPerMessage`). Images do not count.
+            maxTextLength:
+              type: integer
+              description: The most characters of the text of one text snippet.
+          required: [maxPerMessage, maxTextLength]
+      required: [images, insertMaxPerRun, queueMaxMessages, references]
     ChatPageContext:
       type: object
       description: The page the user is on, as the client says it. The model gets it as one line before the text of the message, and the log keeps it with the message; that is why the form is checked.
@@ -279,6 +292,107 @@ components:
         createdAt:
           type: string
       required: [sessionId, seq, createdAt]
+    ChatReferenceInput:
+      description: A reference the user adds to a message, for the model to read. The backend reads an entity with the credentials of the user before it writes the message, and keeps what it read.
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              const: entity
+            entityRef:
+              type: string
+              minLength: 1
+              maxLength: 255
+              description: An entity reference with a kind, `kind:[namespace/]name`, in the form of `ChatPageContext.entityRef`.
+          required: [kind, entityRef]
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              const: text
+            text:
+              type: string
+              minLength: 1
+              maxLength: 4000
+            title:
+              type: string
+              minLength: 1
+              maxLength: 200
+              description: The title of where the text is from.
+            url:
+              type: string
+              maxLength: 2000
+              description: Where the text is from. An `http` or `https` URL, or a path that starts with one `/`; no blank and no control character.
+          required: [kind, text]
+          additionalProperties: false
+    ChatReferenceInputs:
+      type: array
+      maxItems: 5
+      description: At most `references.maxPerMessage` of `GET /input-config`; 400 `TooManyReferences` above it, and 400 for a reference that is not in the form.
+      items:
+        $ref: '#/components/schemas/ChatReferenceInput'
+    ChatReferencedEntity:
+      type: object
+      description: What the backend read of an entity, with the credentials of the user who sent the message.
+      properties:
+        kind:
+          type: string
+        namespace:
+          type: string
+        name:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        type:
+          type: string
+        lifecycle:
+          type: string
+        owner:
+          type: string
+        system:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+      required: [kind, namespace, name]
+    ChatMessageReference:
+      description: A reference as the message keeps it. An entity is `readable` false when it does not exist, the user could not read it, or the catalog did not answer; the model got none of its details then.
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              const: entity
+            entityRef:
+              type: string
+              description: '`kind:namespace/name`, in lower case.'
+            readable:
+              const: true
+            entity:
+              $ref: '#/components/schemas/ChatReferencedEntity'
+          required: [kind, entityRef, readable, entity]
+        - type: object
+          properties:
+            kind:
+              const: entity
+            entityRef:
+              type: string
+            readable:
+              const: false
+          required: [kind, entityRef, readable]
+        - type: object
+          properties:
+            kind:
+              const: text
+            text:
+              type: string
+            title:
+              type: string
+            url:
+              type: string
+          required: [kind, text]
     UserMessageItem:
       allOf:
         - $ref: '#/components/schemas/ItemBase'
@@ -294,6 +408,10 @@ components:
                 $ref: '#/components/schemas/ChatAttachment'
             page:
               $ref: '#/components/schemas/ChatPageContext'
+            references:
+              type: array
+              items:
+                $ref: '#/components/schemas/ChatMessageReference'
             delivery:
               type: string
               enum: [direct, inserted, queued]
@@ -518,6 +636,11 @@ components:
             $ref: '#/components/schemas/ChatAttachment'
         page:
           $ref: '#/components/schemas/ChatPageContext'
+        references:
+          type: array
+          description: As read when the message was queued or last changed; the message is sent with these.
+          items:
+            $ref: '#/components/schemas/ChatMessageReference'
         createdAt:
           type: string
         updatedAt:
@@ -774,7 +897,7 @@ paths:
       operationId: getInputConfig
       tags: [Input]
       summary: Read what a message may carry.
-      description: The limits on images and whether the model reads them, and the limits of the inserted and the queued messages. A client checks an image against it before it uploads.
+      description: The limits on images and whether the model reads them, the limits of the inserted and the queued messages, and of the references of a message. A client checks an image against it before it uploads.
       responses:
         '200':
           description: The settings.
@@ -900,6 +1023,8 @@ paths:
                   description: Ids of uploaded images of this session, in the order to show them. At most `aiChat.input.images.maxPerMessage`; 400 when the model does not read images, when there are too many, or when one is not an image of this session (`AttachmentNotFound`).
                 page:
                   $ref: '#/components/schemas/ChatPageContext'
+                references:
+                  $ref: '#/components/schemas/ChatReferenceInputs'
               required: [text]
       responses:
         '200':
@@ -966,6 +1091,8 @@ paths:
                   description: Ids of uploaded images of this session, in the order to show them. At most `aiChat.input.images.maxPerMessage`; 400 when the model does not read images, when there are too many, or when one is not an image of this session (`AttachmentNotFound`).
                 page:
                   $ref: '#/components/schemas/ChatPageContext'
+                references:
+                  $ref: '#/components/schemas/ChatReferenceInputs'
               required: [text]
       responses:
         '201':
@@ -1025,6 +1152,8 @@ paths:
                   description: Ids of uploaded images of this session, in the order to show them. At most `aiChat.input.images.maxPerMessage`; 400 when the model does not read images, when there are too many, or when one is not an image of this session (`AttachmentNotFound`).
                 page:
                   $ref: '#/components/schemas/ChatPageContext'
+                references:
+                  $ref: '#/components/schemas/ChatReferenceInputs'
               required: [text]
       responses:
         '201':
@@ -1127,6 +1256,10 @@ paths:
                   oneOf:
                     - $ref: '#/components/schemas/ChatPageContext'
                     - type: 'null'
+                references:
+                  allOf:
+                    - $ref: '#/components/schemas/ChatReferenceInputs'
+                  description: All the references the message keeps, read again; `[]` removes them.
       responses:
         '200':
           description: The queued message after the change.

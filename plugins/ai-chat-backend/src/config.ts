@@ -16,6 +16,7 @@
 
 import { Config } from '@backstage/config';
 import { InputError } from '@backstage/errors';
+import { MAX_REFERENCES_PER_MESSAGE } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import {
   LOAD_SKILL_TOOL_ID,
   UPDATE_PLAN_TOOL_ID,
@@ -75,6 +76,8 @@ export interface AiChatConfig {
     queueMaxMessages: number;
     /** The limits on the images of a message (IN-01, IN-04, IN-06). */
     images: ImageLimits;
+    /** The limits on the references of a message (B-04). */
+    references: { maxPerMessage: number };
   };
   systemPrompt?: string;
   actions: {
@@ -468,6 +471,16 @@ export function readAiChatConfig(root: Config): AiChatConfig {
         DEFAULT_QUEUE_MAX_MESSAGES,
       ),
       images: readImageLimits(config),
+      references: {
+        // Only lower: the request schema refuses more than the maximum.
+        maxPerMessage: positiveInt(
+          config,
+          'input.references.maxPerMessage',
+          MAX_REFERENCES_PER_MESSAGE,
+          1,
+          MAX_REFERENCES_PER_MESSAGE,
+        ),
+      },
     },
     systemPrompt: config.getOptionalString('systemPrompt'),
     actions: {

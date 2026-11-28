@@ -26,4 +26,5 @@
 export * from './types';
 export * from './paths';
 export * from './page';
+export * from './references';
 export * from './permissions';

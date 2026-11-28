@@ -18,7 +18,11 @@ import { InputError } from '@backstage/errors';
 import {
   isEntityRef,
   isPagePath,
+  isReferenceUrl,
   MAX_MESSAGE_LENGTH,
+  MAX_REFERENCE_TEXT_LENGTH,
+  MAX_REFERENCE_TITLE_LENGTH,
+  MAX_REFERENCES_PER_MESSAGE,
   MAX_TITLE_LENGTH,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
 import { z } from 'zod';
@@ -108,6 +112,51 @@ const messageText = z
 
 const nonEmptyMessageText = messageText.min(1);
 
+/** An entity ref with a kind: the catalog cannot read an entity without one. */
+const entityRefWithKind = z
+  .string()
+  .min(1)
+  .max(255)
+  .refine(
+    value => isEntityRef(value) && normalizeEntityRef(value) !== undefined,
+    'must be an entity reference with a kind, like component:default/name',
+  );
+
+/**
+ * The references of a message (B-04). The model reads them, so the link of a
+ * text snippet is an `http:` or `https:` URL or a path, and the entity is a
+ * ref the catalog can read. The number the administrator allows is checked
+ * by the use case; this is the most it may be.
+ */
+const references = z
+  .array(
+    z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('entity'), entityRef: entityRefWithKind }),
+      z.object({
+        kind: z.literal('text'),
+        text: z
+          .string()
+          .min(1)
+          .max(MAX_REFERENCE_TEXT_LENGTH)
+          .refine(noNul, NUL_MESSAGE),
+        title: z
+          .string()
+          .min(1)
+          .max(MAX_REFERENCE_TITLE_LENGTH)
+          .refine(noNul, NUL_MESSAGE)
+          .optional(),
+        url: z
+          .string()
+          .refine(
+            isReferenceUrl,
+            'must be an http or https URL, or a path that starts with /',
+          )
+          .optional(),
+      }),
+    ]),
+  )
+  .max(MAX_REFERENCES_PER_MESSAGE);
+
 /**
  * A message to send, insert or queue. Text, or at least one image: a message
  * with neither is refused.
@@ -117,6 +166,7 @@ const messageBody = z
     text: messageText,
     attachmentIds: attachmentIds.optional(),
     page: page.optional(),
+    references: references.optional(),
   })
   .refine(
     body => body.text.length > 0 || (body.attachmentIds?.length ?? 0) > 0,
@@ -134,13 +184,15 @@ export const updateQueuedMessageBody = z
     text: nonEmptyMessageText.optional(),
     attachmentIds: attachmentIds.optional(),
     page: page.nullable().optional(),
+    references: references.optional(),
   })
   .refine(
     body =>
       body.text !== undefined ||
       body.page !== undefined ||
-      body.attachmentIds !== undefined,
-    'must change the text, the images or the page',
+      body.attachmentIds !== undefined ||
+      body.references !== undefined,
+    'must change the text, the images, the page or the references',
   );
 
 export const uploadAttachmentQuery = z.object({

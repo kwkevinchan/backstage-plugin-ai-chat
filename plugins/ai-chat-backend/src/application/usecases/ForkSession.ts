@@ -193,6 +193,7 @@ export class ForkSession {
             text: item.text,
             ...(attachments.length > 0 && { attachments }),
             ...(item.page && { page: item.page }),
+            ...(item.references?.length && { references: item.references }),
             ...(item.delivery && { delivery: item.delivery }),
           };
         }

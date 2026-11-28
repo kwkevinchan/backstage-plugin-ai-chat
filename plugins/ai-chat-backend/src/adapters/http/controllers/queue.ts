@@ -63,7 +63,10 @@ export class QueueController {
     sessionId: string,
     body: unknown,
   ): Promise<ChatQueuedMessage> {
-    const { text, attachmentIds, page } = parse(queueMessageBody, body);
+    const { text, attachmentIds, page, references } = parse(
+      queueMessageBody,
+      body,
+    );
     return toChatQueuedMessage(
       await this.useCases.queueMessage.execute({
         principal,
@@ -71,6 +74,7 @@ export class QueueController {
         text,
         ...(attachmentIds && { attachmentIds }),
         ...(page && { page }),
+        ...(references && { references }),
       }),
     );
   }

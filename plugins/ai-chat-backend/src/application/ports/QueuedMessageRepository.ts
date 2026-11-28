@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
-import type { Item, PageContext } from '@kwkevinchan/ai-chat-harness';
+import type {
+  Item,
+  MessageReference,
+  PageContext,
+} from '@kwkevinchan/ai-chat-harness';
 import type { LeasedRun, QueuedMessage } from '../../domain';
 
 /**
@@ -34,12 +38,18 @@ export interface QueuedMessageRepository {
    */
   add(
     sessionId: string,
-    input: { text: string; attachmentIds?: string[]; page?: PageContext },
+    input: {
+      text: string;
+      attachmentIds?: string[];
+      page?: PageContext;
+      references?: MessageReference[];
+    },
     opts: { max: number },
   ): Promise<QueuedMessage>;
 
   /**
-   * Throws `QueuedMessageNotFound`. `page: null` removes the page. A change of
+   * Throws `QueuedMessageNotFound`. `page: null` removes the page;
+   * `references` replaces the references, `[]` removes them. A change of
    * `attachmentIds` releases the attachments that are no longer used and holds
    * the new ones.
    */
@@ -50,6 +60,7 @@ export interface QueuedMessageRepository {
       text?: string;
       attachmentIds?: string[];
       page?: PageContext | null;
+      references?: MessageReference[];
     },
   ): Promise<QueuedMessage>;
 

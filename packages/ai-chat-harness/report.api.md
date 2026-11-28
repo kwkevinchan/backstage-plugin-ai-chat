@@ -412,6 +412,26 @@ export const LOAD_SKILL_TOOL_ID = 'load_skill';
 export function loadSkillDescriptor(skills: readonly Skill[]): ToolDescriptor;
 
 // @public
+export type MessageReference =
+  | {
+      kind: 'entity';
+      entityRef: string;
+      readable: true;
+      entity: ReferencedEntity;
+    }
+  | {
+      kind: 'entity';
+      entityRef: string;
+      readable: false;
+    }
+  | {
+      kind: 'text';
+      text: string;
+      title?: string;
+      url?: string;
+    };
+
+// @public
 export type ModelCallOutcome =
   | 'ok'
   | 'empty'
@@ -654,6 +674,20 @@ export function readCurrentPlan(
 
 // @public
 export type ReadState = 'read' | 'unread';
+
+// @public
+export type ReferencedEntity = {
+  kind: string;
+  namespace: string;
+  name: string;
+  title?: string;
+  description?: string;
+  type?: string;
+  lifecycle?: string;
+  owner?: string;
+  system?: string;
+  tags?: string[];
+};
 
 // @public
 export function resolveAgentSkills(
@@ -924,6 +958,7 @@ export type UserMessageBody = {
   kind: 'user_message';
   text: string;
   page?: PageContext;
+  references?: MessageReference[];
   attachments?: AttachmentRef[];
   delivery?: Delivery;
 };

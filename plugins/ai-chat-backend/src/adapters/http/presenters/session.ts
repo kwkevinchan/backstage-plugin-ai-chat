@@ -91,6 +91,7 @@ export function toChatQueuedMessage(message: QueuedMessage): ChatQueuedMessage {
     text: message.text,
     attachments: message.attachments.map(toChatAttachment),
     ...(message.page && { page: message.page }),
+    ...(message.references && { references: message.references }),
     createdAt: message.createdAt,
     updatedAt: message.updatedAt,
   };

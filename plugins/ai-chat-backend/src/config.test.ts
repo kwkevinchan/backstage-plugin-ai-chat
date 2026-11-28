@@ -58,6 +58,7 @@ describe('readAiChatConfig', () => {
           maxPendingPerSession: 12,
           tokensPerImage: 1600,
         },
+        references: { maxPerMessage: 5 },
       },
       systemPrompt: undefined,
       actions: { include: [], exclude: [] },
@@ -244,6 +245,23 @@ describe('readAiChatConfig', () => {
     );
     expect(() => read({ queue: { maxMessages: 1.5 } })).toThrow(
       /input\.queue\.maxMessages must be a positive integer/,
+    );
+  });
+
+  it('reads input.references.maxPerMessage, 5 by default, and refuses more than 5', () => {
+    const read = (input: JsonObject) =>
+      readAiChatConfig(
+        mockServices.rootConfig({ data: { aiChat: { llm, input } } }),
+      ).input.references;
+    expect(read({})).toEqual({ maxPerMessage: 5 });
+    expect(read({ references: { maxPerMessage: 2 } })).toEqual({
+      maxPerMessage: 2,
+    });
+    expect(() => read({ references: { maxPerMessage: 6 } })).toThrow(
+      /input\.references\.maxPerMessage must be at most 5/,
+    );
+    expect(() => read({ references: { maxPerMessage: 0 } })).toThrow(
+      /input\.references\.maxPerMessage must be a positive integer/,
     );
   });
 
