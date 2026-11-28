@@ -201,8 +201,12 @@
   overflow-y: auto;
 }
 .chat-empty {
+  box-sizing: border-box;
   margin: auto;
-  max-width: 460px;
+  max-width: min(460px, calc(100% - 2 * var(--bui-space-4)));
+  padding: var(--bui-space-4) var(--bui-space-5);
+  border-radius: var(--bui-radius-3);
+  background: var(--bui-bg-neutral-2);
   text-align: center;
   color: var(--bui-fg-secondary);
   font-size: var(--bui-font-size-3);
