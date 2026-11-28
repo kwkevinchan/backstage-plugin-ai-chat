@@ -95,7 +95,9 @@ test('references from the catalog and from a source: tags before sending, on the
 
   await say(page, 'refs what do you see');
   const sent = page.getByRole('list', { name: 'References of the message' });
-  await expect(sent.getByText('example-payments')).toBeVisible();
+  await expect(
+    sent.getByTitle('component:default/example-payments'),
+  ).toBeVisible();
   await expect(sent.getByText('Restart policy')).toBeVisible();
   // The box is empty after the send, except for the page.
   await expect(box.getByText('example-payments')).toHaveCount(0);

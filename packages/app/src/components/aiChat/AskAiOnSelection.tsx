@@ -55,8 +55,15 @@ export function AskAiOnSelection(props: { children: ReactNode }) {
         container.current ? selectionIn(container.current) : undefined,
       );
     };
+    // The button is placed in the window, so it follows the text on scroll.
     document.addEventListener('selectionchange', update);
-    return () => document.removeEventListener('selectionchange', update);
+    document.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      document.removeEventListener('selectionchange', update);
+      document.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
   }, []);
 
   return (
@@ -65,6 +72,7 @@ export function AskAiOnSelection(props: { children: ReactNode }) {
       {selected &&
         createPortal(
           // Pressing the button must not clear the selection before the click.
+          // The capture phase runs before the button, which stops the event.
           <div
             role="presentation"
             style={{
@@ -73,7 +81,7 @@ export function AskAiOnSelection(props: { children: ReactNode }) {
               top: selected.top,
               zIndex: 1300,
             }}
-            onMouseDown={event => event.preventDefault()}
+            onMouseDownCapture={event => event.preventDefault()}
           >
             <Button
               size="small"
