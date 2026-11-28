@@ -25,6 +25,7 @@
  *   user: "restart both"      -> calls `restart-service` for two services in one answer
  *   user: "slow restart <n>"  -> calls the tool that ends in `restart-service-slowly`
  *   user: "where ..."         -> says what the model was told about the page of the user
+ *   user: "refs ..."          -> repeats the references that the user added to the message
  *   user: "story"             -> a long text that arrives word by word
  *   user: "catalog ..."       -> calls the tool that ends in `query-catalog-entities`
  *   user: "loop ..."          -> calls `list-services` again after every result
@@ -86,14 +87,30 @@ const TABLE = [
 ].join('\n');
 
 /**
- * A message of the user may start with one line that says where the user is
- * ("The user is on the page of ..."), then an empty line, then the text.
+ * A message of the user may start with a part that the chat adds before the
+ * text: one line that says where the user is ("The user is on ..."), and the
+ * references the user added ("The user added these references ..."). An empty
+ * line ends that part.
  */
 function splitContext(content) {
-  const match = /^(The user is on [^\n]*)\n\n([\s\S]*)$/.exec(content);
-  return match
-    ? { context: match[1], text: match[2] }
-    : { context: undefined, text: content };
+  if (!/^The user (is on|added these references)/.test(content)) {
+    return { context: undefined, references: undefined, text: content };
+  }
+  const end = content.indexOf('\n\n');
+  if (end === -1) {
+    return { context: undefined, references: undefined, text: content };
+  }
+  const lines = content.slice(0, end).split('\n');
+  const context = lines[0].startsWith('The user is on ') ? lines[0] : undefined;
+  const references = lines
+    .slice(context ? 1 : 0)
+    .join('\n')
+    .trim();
+  return {
+    context,
+    references: references === '' ? undefined : references,
+    text: content.slice(end + 2),
+  };
 }
 
 /**
@@ -195,7 +212,9 @@ export function scriptedReply(body) {
     };
   }
 
-  const { context, text } = splitContext(contentText(last?.content));
+  const { context, references, text } = splitContext(
+    contentText(last?.content),
+  );
   const images = imagesOf(last?.content);
   if (images.length > 0) {
     const list = images.map(i => `${i.mediaType} ${i.bytes} bytes`).join(', ');
@@ -206,6 +225,13 @@ export function scriptedReply(body) {
       text: context
         ? `You asked where you are. ${context}`
         : 'I do not know where you are.',
+    };
+  }
+  if (/^refs/i.test(text)) {
+    return {
+      text: references
+        ? `You added references.\n\n${'```'}\n${references}\n${'```'}\n`
+        : 'You added no references.',
     };
   }
   if (/^list/i.test(text)) return call('list-services', {});

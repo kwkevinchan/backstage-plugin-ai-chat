@@ -34,11 +34,17 @@ import {
   AiChatPage,
   AiChatPanel,
   aiChatPlugin,
+  createAiChatReferenceSourcesApi,
   createAiChatToolResultsApi,
   EntityAiChatContent,
 } from '@kwkevinchan/backstage-plugin-ai-chat';
-import { aiChatToolResultsApiRef } from '@kwkevinchan/backstage-plugin-ai-chat-react';
+import {
+  aiChatReferenceSourcesApiRef,
+  aiChatToolResultsApiRef,
+} from '@kwkevinchan/backstage-plugin-ai-chat-react';
+import { exampleSnippetsSource } from './components/aiChat/exampleSnippetsSource';
 import { listServicesResult } from './components/aiChat/listServicesResult';
+import { RunbookCard } from './components/aiChat/RunbookCard';
 import { Root } from './components/Root';
 
 const app = createApp({
@@ -50,6 +56,12 @@ const app = createApp({
       deps: {},
       factory: () => createAiChatToolResultsApi([listServicesResult]),
     }),
+    // The sources of the "Add reference" menu of the chat.
+    createApiFactory({
+      api: aiChatReferenceSourcesApiRef,
+      deps: {},
+      factory: () => createAiChatReferenceSourcesApi([exampleSnippetsSource]),
+    }),
   ],
   components: {
     SignInPage: props => <SignInPage {...props} providers={['guest']} />,
@@ -59,7 +71,10 @@ const app = createApp({
 const entityPage = (
   <EntityLayout>
     <EntityLayout.Route path="/" title="Overview">
-      <EntityAboutCard />
+      <>
+        <EntityAboutCard />
+        <RunbookCard />
+      </>
     </EntityLayout.Route>
     <EntityLayout.Route path="/ai-chat" title="AI chat">
       <EntityAiChatContent />

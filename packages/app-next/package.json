@@ -26,6 +26,7 @@
     "@backstage/frontend-plugin-api": "backstage:^",
     "@backstage/plugin-app-react": "backstage:^",
     "@backstage/plugin-catalog": "backstage:^",
+    "@backstage/plugin-catalog-react": "backstage:^",
     "@backstage/plugin-user-settings": "backstage:^",
     "@backstage/ui": "backstage:^",
     "@kwkevinchan/backstage-plugin-ai-chat": "workspace:^",

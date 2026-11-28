@@ -266,6 +266,26 @@ on the legacy frontend system the app replaces `aiChatReferenceSourcesApiRef`
 with `createAiChatReferenceSourcesApi([...])`. The details are in the
 [README of `ai-chat-react`](plugins/ai-chat-react/README.md#reference-sources).
 
+The two development apps (`packages/app` for the legacy frontend system,
+`packages/app-next` for the new one) show all three:
+
+- **Ask AI on selected text.** On the overview of an entity, a "Runbook" card
+  shows **Ask AI** under the text the user selects. The button calls
+  `open({ references: [{ kind: 'text', text, title, url }] })` with the title
+  and the path of the page, so the selected text appears in the box as a
+  snippet. A plugin puts such a button on the pages it owns, for example the
+  pages of the documentation; the chat adds nothing to other pages.
+  (`AskAiOnSelection.tsx`)
+- **A button that asks about the entity.** The same card has an
+  `<AiChatLauncher references={[{ kind: 'entity', … }]} prompt="…" />`. It
+  opens the panel with the entity in the box and the prompt in the input;
+  nothing is sent until the user sends it. (`RunbookCard.tsx`)
+- **A reference source.** **Example snippets** in **Add reference** lists
+  three fixed texts. (`exampleSnippetsSource.tsx`)
+
+The development apps do not install TechDocs, so the selection example uses a
+card of the entity page; a TechDocs addon would call `open()` the same way.
+
 ### Result components of actions
 
 A plugin can show the result of an action with its own component, for

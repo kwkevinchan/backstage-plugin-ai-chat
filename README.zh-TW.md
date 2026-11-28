@@ -94,6 +94,17 @@ plugin 不能放機密。訊息在文字上方顯示它帶的參考，被分享�
 `aiChatReferenceSourcesApiRef`。細節見
 [`ai-chat-react` 的 README](plugins/ai-chat-react/README.md#reference-sources)。
 
+兩個開發用 app（`packages/app` 是舊前端系統，`packages/app-next` 是新前端系統）示範了三種用法：
+
+- **反白後問 AI**：entity 總覽頁有一張「Runbook」卡片，使用者反白文字後，下方出現「Ask AI」。按下去呼叫
+  `open({ references: [{ kind: 'text', text, title, url }] })`，帶頁面標題和路徑，反白的文字在管理區變成一個文字片段。
+  plugin 可以在自己的頁面（例如文件頁）放這樣的按鈕；聊天本身不會在其他頁面加任何東西。（`AskAiOnSelection.tsx`）
+- **問 AI 的按鈕**：同一張卡片有 `<AiChatLauncher references={[{ kind: 'entity', … }]} prompt="…" />`，
+  按下後面板打開，entity 在管理區、prompt 在輸入框，使用者送出前什麼都不會送。（`RunbookCard.tsx`）
+- **參考來源**：「Add reference」裡的「Example snippets」列出三段固定文字。（`exampleSnippetsSource.tsx`）
+
+開發用 app 沒有安裝 TechDocs，所以反白的範例放在 entity 頁的卡片上；TechDocs 的 addon 用同樣的方式呼叫 `open()`。
+
 後端用自己的資料庫存狀態（`sessions`、`runs`、`items` 三張表），啟動時自己跑 migration。SQLite 只允許一條連線（連線池的上限必須是 1，這是 Knex 對 SQLite 的預設，除非設定改過）。需要多條連線時用 PostgreSQL。
 
 ## 設定
