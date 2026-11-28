@@ -18,7 +18,9 @@ import type { UIMessage } from 'ai';
 import type {
   ChatAttachment,
   ChatDataParts,
+  ChatReferenceInput,
 } from '@kwkevinchan/backstage-plugin-ai-chat-common';
+import type { ShownReference } from './references';
 
 /**
  * What the screen adds to an inserted message that the run ended without
@@ -37,18 +39,22 @@ export type ChatUiDataParts = {
   [K in keyof ChatDataParts]: ChatDataParts[K];
 } & { unread: ChatUnreadData };
 
-/** Images of a user message, kept on the message so the screen can draw them. */
+/** Images and references of a user message, kept on the message so the screen can draw them. */
 export interface ChatMessageMetadata {
   attachments?: ChatAttachment[];
+  /** As sent, or as the backend stored them. */
+  references?: ShownReference[];
 }
 
 /**
- * What the input box sends: the text, and the images that have been uploaded.
- * The text may be empty when there is at least one image.
+ * What the input box sends: the text, the images that have been uploaded and
+ * the references of the box. The text may be empty when there is at least
+ * one image.
  */
 export interface OutgoingMessage {
   text: string;
   attachments?: ChatAttachment[];
+  references?: ChatReferenceInput[];
 }
 
 /** A message of the screen: a message of the AI SDK with the data parts of the chat. */

@@ -37,11 +37,12 @@ describe('ai-chat-react package', () => {
     expect(pkg.dependencies).not.toHaveProperty('@kwkevinchan/ai-chat-harness');
   });
 
-  it('exports the panel entry points and the result component API', () => {
+  it('exports the panel entry points, the result component API and the reference source API', () => {
     expect(Object.keys(published).sort()).toEqual([
       'AiChatLauncher',
       'AiChatSafeLink',
       'aiChatPanelApiRef',
+      'aiChatReferenceSourcesApiRef',
       'aiChatToolResultsApiRef',
       'isSafeLinkHref',
       'useAiChatPanel',
@@ -50,6 +51,11 @@ describe('ai-chat-react package', () => {
       'plugin.ai-chat.tool-results',
     );
     expect(published.aiChatPanelApiRef.id).toBe('plugin.ai-chat.panel');
+    expect(published.aiChatReferenceSourcesApiRef.id).toBe(
+      'plugin.ai-chat.reference-sources',
+    );
+    expect('AiChatReferenceSourceBlueprint' in published).toBe(false);
+    expect('createAiChatReferenceSourcesApi' in published).toBe(false);
     expect(typeof published.AiChatLauncher).toBe('function');
     expect(typeof published.useAiChatPanel).toBe('function');
     expect('AiChatPanelProvider' in published).toBe(false);

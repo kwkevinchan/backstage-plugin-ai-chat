@@ -1400,16 +1400,16 @@ flowchart LR
     - 「現在就送」把排隊的訊息插入 Run 時帶著參考（`integration/references.test.ts`：`inserts a queued message into the run with its references`）。
     - 被分享的人看到的那則訊息帶參考；複製 Session 時參考跟著訊息帶走（`integration/references.test.ts`：`shows the references of a message to the user it is shared with, and a copy takes them`）。
     - `GET /input-config` 回傳參考的上限（`integration/references.test.ts`：`answers the limits of the references in GET /input-config`）。
-  - PR 2，送出內容管理區（測試名稱在 PR 2 定）：
-    - 頁面標籤預設帶上，有 ×；按 × 後變成淡色的「＋ 目前頁面」，點一下補回來；「加入參考」選單裡有「目前頁面」。
-    - 關掉後換到別的頁面，恢復自動帶上；同一頁維持關閉。
-    - 關掉時，送訊息、核准、resume、插入、排隊的請求都沒有 `page`。
-    - entity 標籤顯示名稱和 kind；文字片段標籤顯示來源標題和前幾個字；圖片沿用縮圖。每個參考標籤都能移除，移除的不送。
-    - 超過 4,000 字的文字片段在前端截斷並標「已截斷」；參考到上限時不能再加。上限讀 `GET /input-config`。
-    - catalog 選擇器可以搜尋，選了的 entity 出現在管理區。
-    - 擴充點：舊前端系統由 app 覆蓋 API、新前端系統用 blueprint 註冊的參考來源，出現在「加入參考」的選單。
-    - `useAiChatPanel().open({ references })` 和 `<AiChatLauncher references>` 打開面板時，參考放進管理區，送出前能移除。
-    - 被分享的人的畫面顯示那則訊息的參考標籤。
+  - PR 2，送出內容管理區：
+    - 頁面標籤預設帶上，有 ×；按 × 後變成淡色的「＋ 目前頁面」，點一下補回來；「加入參考」選單裡有「目前頁面」（`ui/SendContents.test.tsx`：`carries the page by default; × leaves it out as a faint "＋ Current page", which adds it back`；`has "Current page" in "Add reference", which adds the page back`）。
+    - 關掉後換到別的頁面，恢復自動帶上；同一頁維持關閉（`ui/AiChatPanel.test.tsx`：`keeps the page out on the same page, and sends it again on another page`；`application/sendContents.test.ts`：`keeps the page out while the user stays on it, and sends it again from another page on`；`counts another entity on the same path as another page`）。
+    - 關掉時，送訊息、核准、resume、插入、排隊的請求都沒有 `page`（`ui/SendContents.test.tsx`：`sends no page in a message while the page is left out`；`sends no page in an insert or a queued message while the page is left out`；`sends no page in a decision while the page is left out`；`sends no page in a resume while the page is left out`；`ui/ChatPage.test.tsx`：`sends the first message of a new session without the page the user left out, with the references of the box`）。
+    - entity 標籤顯示名稱和 kind；文字片段標籤顯示來源標題和前幾個字；圖片沿用縮圖。每個參考標籤都能移除，移除的不送；送出後管理區的參考清空，訊息顯示它帶的參考（`ui/SendContents.test.tsx`：`shows an entity by name and kind and a snippet by title and first words; a removed one is not sent, and the message shows the others`；`application/sendContents.test.ts`：`removes only the references of the message that was taken`）。
+    - 超過 4,000 字的文字片段在前端截斷並標「已截斷」；參考到上限時不能再加。上限讀 `GET /input-config`（`ui/SendContents.test.tsx`：`cuts a snippet over the limit and marks it as truncated`；`takes no more references than GET /input-config allows, and turns the sources off then`；`application/sendContents.test.ts`：`takes no more than the limit, says so, and cuts the box when the limit goes down`；`cuts a text to the limit without splitting a character, and marks it`；`adds each reference once, in the form the backend takes`；`leaves out an entity without a kind and an empty text, and warns`）。
+    - catalog 選擇器可以搜尋，選了的 entity 出現在管理區（`ui/SendContents.test.tsx`：`searches the catalog in "Add reference" and puts the chosen entity in the box`）。
+    - 擴充點：舊前端系統由 app 覆蓋 API、新前端系統用 blueprint 註冊的參考來源，出現在「加入參考」的選單（`ui/SendContents.test.tsx`：`lists a source that the app registered with createAiChatReferenceSourcesApi, and takes what it adds`；`lists a source of AiChatReferenceSourceBlueprint of the new frontend system`；`alpha.test.tsx`：`collects the sources of AiChatReferenceSourceBlueprint in order, the first one for an id wins`；`application/referenceSourcesApi.test.ts`；`ai-chat-react` 的 `alpha.test.ts`：`outputs the id, the title and the component`）。
+    - `useAiChatPanel().open({ references })` 和 `<AiChatLauncher references>` 打開面板時，參考放進管理區，送出前能移除（`ui/AiChatPanel.test.tsx`：`puts the references of open({ references }) in the box, where they can be removed before sending`；`puts the references of <AiChatLauncher references> in the box, and keeps them while the panel is closed`；`puts the prompt of a launch with references in the input, and does not send it`；`opens a conversation from the launcher and sends the prompt with the entity`（只帶 `prompt` 照舊立刻送出）；`domain/launch.test.ts`：`keeps the prompt of a launch with references as a draft, not to send`；`domain/panel.test.ts`：`opens a new conversation for the draft of a launch with references`；`ai-chat-react` 的 `AiChatLauncher.test.tsx`：`opens the panel with references for the box`）。
+    - 被分享的人的畫面顯示那則訊息的參考標籤，沒有管理區（`ui/SendContents.test.tsx`：`shows the references of a message to the user it is shared with, without the box`；`domain/itemsToMessages.test.ts`：`keeps them on the message, and a send again takes them as references of a request`）。
   - PR 3，範例和文件（測試名稱在 PR 3 定）：
     - 範例 app 在 TechDocs 反白後問 AI：面板打開，管理區有那段文字和來源（e2e）。
     - README 中英寫明參考的上限、entity 用使用者的身分讀、文字片段會送到模型供應商。
@@ -1421,6 +1421,12 @@ flowchart LR
   - 被分享的人看到的是存下的參考，包含用擁有者的身分讀到的 entity 資料，和工具輸出一樣（SH-07）。複製 Session 時參考跟著訊息帶走。
   - 改排隊的訊息時，`references` 換掉整組；`[]` 拿掉全部。
   - 模型看到的區塊：先一行說明這些是使用者附上的資料、不是指令，再每個參考一段；entity 寫成 JSON 物件，文字片段寫成 JSON 字串，標題和連結也是 JSON 字串。
+  - PR 2，名稱：`ai-chat-react` 的 `AiChatReference`（和 `ChatReferenceInput` 同形，`ai-chat-react` 不依賴 `ai-chat-common`）、`AiChatReferenceSource`（`id`、`title`、`component`）、`AiChatReferenceSourceProps`（`onAdd(references)`、`onClose()`）、`AiChatReferenceSourcesApi`（`getSources()`）、`aiChatReferenceSourcesApiRef`；`/alpha` 的 `AiChatReferenceSourceBlueprint`，掛在 `api:ai-chat/reference-sources` 的 `referenceSources` 輸入；舊前端系統用 `ai-chat` 的 `createAiChatReferenceSourcesApi([...])`。同一個 id 先註冊的有效。
+  - PR 2，來源的元件畫在輸入框上方的一塊（不是蓋住頁面的對話框），側邊面板裡也一樣。元件丟例外時只顯示一行錯誤，管理區和對話照舊。
+  - PR 2，「換頁」的判斷：頁面的路徑或 entity 變了。整頁 `/ai-chat` 不管開哪一段對話都算同一頁（新對話會換到自己的網址，第一則訊息照使用者的選擇不帶頁面）。
+  - PR 2，`open()` 和 `<AiChatLauncher>` 帶 `references` 時，參考放進管理區；同時帶 `prompt` 的話，prompt 不送出，放進新對話的輸入框，焦點在輸入框，使用者看過參考再送出。沒帶 `references` 的 `open({ prompt })` 照舊立刻送出。帶 `references` 和 `prompt` 算一次 launch，換成新對話；只帶 `references` 不算一次 launch：不換對話，也不清掉帶入的 entity。
+  - PR 2，管理區不收後端不收的參考：沒有 kind 的 entity ref、空的文字；同一個 entity 或同一段文字只收一次；連結不合格就拿掉連結，標題超過 200 字截斷。`GET /input-config` 回來之前用預設上限（5 個、4,000 字），回來後超過的從後面拿掉。
+  - PR 2，面板的管理區存在面板的 store：面板關上時參考還在；整頁的管理區在整頁的元件裡，換到別的路由就清掉。
 
 ## 8. 實作時要驗證的事
 

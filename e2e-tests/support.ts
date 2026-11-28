@@ -93,5 +93,5 @@ export async function signIn(page: Page) {
   // The sign-in is done when the sign-in page is gone.
   await expect(enter).toBeHidden();
   await page.goto('/ai-chat');
-  await expect(page.getByLabel('Message')).toBeVisible();
+  await expect(page.getByLabel('Message', { exact: true })).toBeVisible();
 }

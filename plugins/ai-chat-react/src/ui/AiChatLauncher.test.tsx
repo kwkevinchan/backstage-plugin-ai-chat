@@ -55,6 +55,23 @@ describe('AiChatLauncher', () => {
     });
   });
 
+  it('opens the panel with references for the box', () => {
+    const api = mockPanelApi();
+    const references = [
+      { kind: 'entity' as const, entityRef: 'component:default/example' },
+      { kind: 'text' as const, text: 'a snippet', title: 'Runbook' },
+    ];
+    render(
+      <TestApiProvider apis={[[aiChatPanelApiRef, api]]}>
+        <AiChatLauncher references={references}>Ask</AiChatLauncher>
+      </TestApiProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
+    expect(api.open).toHaveBeenCalledTimes(1);
+    expect(api.open.mock.calls[0][0]).toStrictEqual({ references });
+  });
+
   it('opens the panel without a prompt or an entity', () => {
     const api = mockPanelApi();
     render(

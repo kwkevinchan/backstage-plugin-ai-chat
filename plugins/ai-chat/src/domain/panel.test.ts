@@ -44,6 +44,18 @@ describe('panel state', () => {
     expect(again.sessionId).toBeUndefined();
   });
 
+  it('opens a new conversation for the draft of a launch with references', () => {
+    const next = applyLaunch(openWithSession(), {
+      prompt: 'where',
+      references: [{ kind: 'text', text: 'a note' }],
+    });
+    expect(next).toEqual({
+      open: true,
+      launch: { draft: 'where' },
+      launchId: 4,
+    });
+  });
+
   it('keeps the conversation when the launch has no prompt', () => {
     const next = applyLaunch(openWithSession(), {
       prompt: '   ',

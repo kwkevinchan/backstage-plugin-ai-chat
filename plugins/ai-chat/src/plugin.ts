@@ -24,11 +24,13 @@ import {
 } from '@backstage/core-plugin-api';
 import {
   aiChatPanelApiRef,
+  aiChatReferenceSourcesApiRef,
   aiChatToolResultsApiRef,
 } from '@kwkevinchan/backstage-plugin-ai-chat-react';
 import { aiChatApiRef } from './api';
 import { AiChatClient } from './adapters/AiChatClient';
 import { createAiChatPanelStore } from './application/panelStore';
+import { createAiChatReferenceSourcesApi } from './application/referenceSourcesApi';
 import { createAiChatToolResultsApi } from './application/toolResultsApi';
 import { rootRouteRef } from './routes';
 
@@ -56,6 +58,12 @@ export const aiChatPlugin = createPlugin({
       api: aiChatToolResultsApiRef,
       deps: {},
       factory: () => createAiChatToolResultsApi([]),
+    }),
+    // No reference sources of other plugins. The app replaces this API to add some.
+    createApiFactory({
+      api: aiChatReferenceSourcesApiRef,
+      deps: {},
+      factory: () => createAiChatReferenceSourcesApi([]),
     }),
   ],
   routes: {

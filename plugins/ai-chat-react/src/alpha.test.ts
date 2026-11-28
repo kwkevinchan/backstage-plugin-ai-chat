@@ -15,7 +15,10 @@
  */
 
 import { createExtensionTester } from '@backstage/frontend-test-utils';
-import { AiChatToolResultBlueprint } from './alpha';
+import {
+  AiChatReferenceSourceBlueprint,
+  AiChatToolResultBlueprint,
+} from './alpha';
 
 function Result() {
   return null;
@@ -30,6 +33,27 @@ describe('AiChatToolResultBlueprint', () => {
     const tester = createExtensionTester(extension);
     expect(tester.get(AiChatToolResultBlueprint.dataRefs.toolResult)).toEqual({
       actionId: 'example:list-services',
+      component: Result,
+    });
+  });
+});
+
+describe('AiChatReferenceSourceBlueprint', () => {
+  it('outputs the id, the title and the component', () => {
+    const extension = AiChatReferenceSourceBlueprint.make({
+      name: 'docs-page',
+      params: {
+        id: 'docs-page',
+        title: 'Documentation page',
+        component: Result,
+      },
+    });
+    const tester = createExtensionTester(extension);
+    expect(
+      tester.get(AiChatReferenceSourceBlueprint.dataRefs.referenceSource),
+    ).toEqual({
+      id: 'docs-page',
+      title: 'Documentation page',
       component: Result,
     });
   });

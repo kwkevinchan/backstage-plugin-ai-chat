@@ -25,8 +25,9 @@ opens the chat for an entity: every message carries the entity to the backend.
 
 Another plugin opens that panel with `AiChatLauncher`, `useAiChatPanel`, or
 `aiChatPanelApiRef` from `@kwkevinchan/backstage-plugin-ai-chat-react`. A
-prompt starts a new conversation and is sent at once. An entity reference is
-sent with the messages.
+prompt starts a new conversation and is sent at once; with references, it
+waits in the input for the user to send. An entity reference is sent with the
+messages.
 
 A plugin shows the result of an action with its own component through
 `aiChatToolResultsApiRef`: on the new frontend system with
@@ -34,5 +35,15 @@ A plugin shows the result of an action with its own component through
 on the legacy frontend system by replacing that API with
 `createAiChatToolResultsApi([...])` from this package. The approval card stays.
 See the README of `@kwkevinchan/backstage-plugin-ai-chat-react`.
+
+Above the message box, a row of tags shows what the next message carries:
+the page (on by default; × leaves it out until the user is on another page),
+and the references, entities of the catalog and text snippets. **Add
+reference** has the current page, a search of the catalog and the reference
+sources of other plugins: on the new frontend system
+`AiChatReferenceSourceBlueprint`, on the legacy frontend system by replacing
+`aiChatReferenceSourcesApiRef` with `createAiChatReferenceSourcesApi([...])`
+from this package. `open({ references })` and `<AiChatLauncher references>`
+put references in the box of the panel.
 
 More in the [README of the repository](https://github.com/kwkevinchan/backstage-plugin-ai-chat#readme).

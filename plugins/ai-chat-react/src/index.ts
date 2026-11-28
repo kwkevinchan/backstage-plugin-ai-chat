@@ -17,11 +17,12 @@
 /**
  * Entry points another frontend plugin uses with the AI chat: the panel
  * Utility API reference, a button that carries a prompt and an entity
- * reference, a hook for the side panel, and the types of a result component
- * for an action with a link that keeps only safe addresses. The chat plugin
- * implements both APIs and renders the panel. The blueprint that adds a result
- * component on the new frontend system is in the `/alpha` entry point. This
- * package does not register a client tool.
+ * reference, a hook for the side panel, the types of a result component
+ * for an action with a link that keeps only safe addresses, and the types of
+ * a reference source for the "Add reference" menu. The chat plugin
+ * implements the APIs and renders the panel. The blueprints that add a result
+ * component and a reference source on the new frontend system are in the
+ * `/alpha` entry point. This package does not register a client tool.
  *
  * @packageDocumentation
  */
@@ -40,6 +41,13 @@ export {
   type AiChatToolResultsApi,
   type AiChatToolResultStatus,
 } from './toolResults';
+export {
+  aiChatReferenceSourcesApiRef,
+  type AiChatReference,
+  type AiChatReferenceSource,
+  type AiChatReferenceSourceProps,
+  type AiChatReferenceSourcesApi,
+} from './references';
 export {
   AiChatSafeLink,
   isSafeLinkHref,

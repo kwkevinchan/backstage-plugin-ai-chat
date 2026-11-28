@@ -25,4 +25,5 @@ export { aiChatPlugin, AiChatPage, EntityAiChatContent } from './plugin';
 export { AiChatPanel } from './ui/AiChatPanel';
 export { aiChatApiRef } from './api';
 export { createAiChatToolResultsApi } from './application/toolResultsApi';
+export { createAiChatReferenceSourcesApi } from './application/referenceSourcesApi';
 export type { AiChatApi } from './api';

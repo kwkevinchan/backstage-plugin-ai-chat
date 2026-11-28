@@ -2,8 +2,8 @@
 
 React entry points of the unofficial
 [AI chat for Backstage](https://github.com/kwkevinchan/backstage-plugin-ai-chat)
-for another frontend plugin: open the chat, and show the result of an action
-with your own component. Depend on this package, not on
+for another frontend plugin: open the chat, show the result of an action with
+your own component, and add references to a message. Depend on this package, not on
 `@kwkevinchan/backstage-plugin-ai-chat`.
 
 ```sh
@@ -26,11 +26,18 @@ registered by `@kwkevinchan/backstage-plugin-ai-chat`. When that plugin is not
 installed in the app, `AiChatLauncher` renders nothing (`null`). Pass `className`
 to style the button.
 
-A `prompt` starts a new conversation and is sent at once as the signed-in user;
+A `prompt` starts a new conversation and is sent at once as the signed-in user
+(with `references`, it waits in the input instead; see below);
 pass fixed text or values your plugin controls, not URL query parameters or
 other untrusted input. An `entityRef` is sent with the messages of that
 conversation. A value that is not an entity reference is left out, and the chat
 still opens. With neither prop, the button only opens the panel.
+
+`references` (entities of the catalog and text snippets) go into the box of
+the panel for the next message: the user sees them above the input and can
+remove them before sending. With `references`, a `prompt` is not sent: it goes
+into the input of a new conversation, which has the focus, and the user sends it.
+See [References](#references).
 
 `useAiChatPanel()` reads `{ isOpen, open, close }` from `aiChatPanelApiRef`
 (or `{ isOpen: false, open, close }` with no-op handlers when the API is not
@@ -136,3 +143,125 @@ Rules:
   render them with `dangerouslySetInnerHTML`, and link only `http:`, `https:`
   and `mailto:` addresses. `AiChatSafeLink` does that and shows any other
   value as plain text; `isSafeLinkHref` is the same check.
+
+## References
+
+A message can carry references: `{ kind: 'entity', entityRef }` (the ref has a
+kind) or `{ kind: 'text', text, title?, url? }` (`url` is an `http:` or
+`https:` URL or a path that starts with `/`; another link is left out). The
+chat reads an entity with the credentials of the user who sends the message.
+A text goes to the model provider as it is: do not put secrets in it. A
+message carries at most 5 references, or fewer when the administrator sets a
+lower number; the box takes no more. A text over 4,000 characters is cut and
+marked as truncated.
+
+Put references in the box of the side panel:
+
+```tsx
+import { useAiChatPanel } from '@kwkevinchan/backstage-plugin-ai-chat-react';
+
+function AskAboutSelection(props: { selection: string }) {
+  const { open } = useAiChatPanel();
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        open({
+          references: [
+            { kind: 'text', text: props.selection, title: document.title },
+          ],
+        })
+      }
+    >
+      Ask AI chat
+    </button>
+  );
+}
+```
+
+`<AiChatLauncher references={[…]}>` does the same with a button.
+
+### Reference sources
+
+A reference source adds an item to the **Add reference** menu of the chat,
+next to **Current page** and **Catalog entity**. When the user picks it, the
+chat shows its component in a box above the input. The component calls
+`onAdd` with references (more than once if it likes) and `onClose` when it is
+done.
+
+```tsx
+import type {
+  AiChatReferenceSource,
+  AiChatReferenceSourceProps,
+} from '@kwkevinchan/backstage-plugin-ai-chat-react';
+
+function DocsPagePicker({ onAdd, onClose }: AiChatReferenceSourceProps) {
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        onAdd([
+          {
+            kind: 'text',
+            text: 'Install with yarn.',
+            title: 'Setup',
+            url: '/docs/setup',
+          },
+        ]);
+        onClose();
+      }}
+    >
+      Use the setup page
+    </button>
+  );
+}
+
+export const docsPageSource: AiChatReferenceSource = {
+  id: 'docs-page',
+  title: 'Documentation page',
+  component: DocsPagePicker,
+};
+```
+
+New frontend system: add an extension of `AiChatReferenceSourceBlueprint` from
+the `/alpha` entry point to your plugin. It attaches to the chat plugin
+(`api:ai-chat/reference-sources`), so the app needs no code.
+
+```tsx
+import { AiChatReferenceSourceBlueprint } from '@kwkevinchan/backstage-plugin-ai-chat-react/alpha';
+
+const docsPageChatSource = AiChatReferenceSourceBlueprint.make({
+  name: 'docs-page',
+  params: docsPageSource,
+});
+```
+
+Legacy frontend system: the app replaces `aiChatReferenceSourcesApiRef` with
+the sources of its plugins:
+
+```tsx
+import { createApiFactory } from '@backstage/core-plugin-api';
+import { createAiChatReferenceSourcesApi } from '@kwkevinchan/backstage-plugin-ai-chat';
+import { aiChatReferenceSourcesApiRef } from '@kwkevinchan/backstage-plugin-ai-chat-react';
+
+const app = createApp({
+  apis: [
+    createApiFactory({
+      api: aiChatReferenceSourcesApiRef,
+      deps: {},
+      factory: () => createAiChatReferenceSourcesApi([docsPageSource]),
+    }),
+  ],
+});
+```
+
+Rules:
+
+- The menu lists the sources in their order. When two have the same id, the
+  first one is used and the chat warns in the console about the later one. A
+  source without an id, a title or a component is not used.
+- While the box is full, the items of the sources are off.
+- A reference the backend would not take (an entity ref without a kind, an
+  empty text) is not added. The same entity or the same snippet is added once.
+- A component that throws is replaced by a short error; the box and the
+  conversation stay.

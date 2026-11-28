@@ -71,6 +71,29 @@ backend.add(import('@backstage/plugin-signals-backend'));
 `http`、`https`、`mailto`（用 `AiChatSafeLink`）。細節見
 [`ai-chat-react` 的 README](plugins/ai-chat-react/README.md#result-components-of-actions)。
 
+輸入框上方有一排標籤，列出下一則訊息除了文字和圖片以外要帶的東西（送出內容管理）：
+
+- **目前頁面**：預設帶上（模型看到的那一行「The user is on the page of …」）。按標籤上的 ×
+  就不帶，標籤變成淡色的「＋ Current page」，點一下補回來；「Add reference」選單的
+  「Current page」也可以補回。關掉後維持關閉，直到使用者換到別的頁面，換頁後恢復自動帶上。
+  關掉時，送訊息、插入、排隊、核准、resume 都不帶 `page`。
+- **參考**：catalog 的 entity 和文字片段，每個標籤都有 ×。「Add reference」有
+  「Catalog entity」（照 Scaffolder `EntityPicker` 的做法，用名稱和標題搜尋 catalog），
+  以及別的 plugin 註冊的參考來源。一則訊息最多 5 個參考，管理員可以用
+  `aiChat.input.references.maxPerMessage` 調低，到上限後不能再加。文字片段超過 4,000 字的在前端截斷，
+  標籤標「Truncated」。圖片不算在內。送出後，那則訊息的參考離開管理區。
+
+後端用送出訊息的使用者的身分讀 entity，讀不到的只給模型「不提供」。文字片段照原樣送到模型供應商，
+plugin 不能放機密。訊息在文字上方顯示它帶的參考，被分享的人也看得到。
+
+別的 plugin 用 `@kwkevinchan/backstage-plugin-ai-chat-react` 的 `useAiChatPanel().open({ references })`
+或 `<AiChatLauncher references={…}>` 把參考放進側邊面板的管理區，使用者送出前看得到、能移除；
+同時帶 `prompt` 時，prompt 不會送出，而是放進新對話的輸入框，由使用者送出。要在「Add reference」加一項，plugin 註冊參考來源（標題和一個讓使用者挑選、
+回傳參考的元件）：新前端系統用 `@kwkevinchan/backstage-plugin-ai-chat-react/alpha` 的
+`AiChatReferenceSourceBlueprint`；舊前端系統由 app 用 `createAiChatReferenceSourcesApi([...])` 覆蓋
+`aiChatReferenceSourcesApiRef`。細節見
+[`ai-chat-react` 的 README](plugins/ai-chat-react/README.md#reference-sources)。
+
 後端用自己的資料庫存狀態（`sessions`、`runs`、`items` 三張表），啟動時自己跑 migration。SQLite 只允許一條連線（連線池的上限必須是 1，這是 Knex 對 SQLite 的預設，除非設定改過）。需要多條連線時用 PostgreSQL。
 
 ## 設定

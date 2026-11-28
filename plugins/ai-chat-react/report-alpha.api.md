@@ -9,6 +9,53 @@ import { ExtensionBlueprint } from '@backstage/frontend-plugin-api';
 import { ExtensionDataRef } from '@backstage/frontend-plugin-api';
 
 // @public
+export type AiChatReference =
+  | {
+      kind: 'entity';
+      entityRef: string;
+    }
+  | {
+      kind: 'text';
+      text: string;
+      title?: string;
+      url?: string;
+    };
+
+// @public
+export interface AiChatReferenceSource {
+  component: ComponentType<AiChatReferenceSourceProps>;
+  id: string;
+  title: string;
+}
+
+// @alpha
+export const AiChatReferenceSourceBlueprint: ExtensionBlueprint<{
+  kind: 'ai-chat-reference-source';
+  params: AiChatReferenceSource;
+  output: ExtensionDataRef<
+    AiChatReferenceSource,
+    'ai-chat.reference-source',
+    {}
+  >;
+  inputs: {};
+  config: {};
+  configInput: {};
+  dataRefs: {
+    referenceSource: ConfigurableExtensionDataRef<
+      AiChatReferenceSource,
+      'ai-chat.reference-source',
+      {}
+    >;
+  };
+}>;
+
+// @public
+export interface AiChatReferenceSourceProps {
+  onAdd(references: AiChatReference[]): void;
+  onClose(): void;
+}
+
+// @public
 export interface AiChatToolResult {
   actionId: string;
   component: ComponentType<AiChatToolResultProps>;

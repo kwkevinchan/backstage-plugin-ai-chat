@@ -971,12 +971,12 @@ export default createBackendModule({
 
 ### 6.2 Frontend：`ai-chat-react`
 
-| 擴充點       | 形式                                                                                                                                                                           | 分期 |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---- |
-| 頁面上下文   | 內建。前端從 router 和 entity context 讀取，每則訊息帶上；使用者可以在送出內容管理區關掉（B-01）                                                                               | P1   |
-| 入口         | `aiChatPanelApiRef`、`AiChatPanelApi`、`useAiChatPanel()`、`<AiChatLauncher prompt="…" entityRef="…" />`；P4 加 `references`（entity、文字片段），打開面板時放進送出內容管理區 | P2   |
-| 結果顯示元件 | `aiChatToolResultsApiRef`；新前端系統用 `/alpha` 的 `AiChatToolResultBlueprint`：為某個 action id 註冊一個元件                                                                 | P3   |
-| 參考來源     | 參考來源的型別和 API ref；新前端系統用 `/alpha` 的 blueprint，舊前端系統由 app 覆蓋 API：在「加入參考」的選單加一項，產生 entity 或文字片段的參考                              | P4   |
+| 擴充點       | 形式                                                                                                                                                                                                                | 分期 |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| 頁面上下文   | 內建。前端從 router 和 entity context 讀取，每則訊息帶上；使用者可以在送出內容管理區關掉（B-01）                                                                                                                    | P1   |
+| 入口         | `aiChatPanelApiRef`、`AiChatPanelApi`、`useAiChatPanel()`、`<AiChatLauncher prompt="…" entityRef="…" />`；P4 加 `references`（entity、文字片段），打開面板時放進送出內容管理區                                      | P2   |
+| 結果顯示元件 | `aiChatToolResultsApiRef`；新前端系統用 `/alpha` 的 `AiChatToolResultBlueprint`：為某個 action id 註冊一個元件                                                                                                      | P3   |
+| 參考來源     | `aiChatReferenceSourcesApiRef`；新前端系統用 `/alpha` 的 `AiChatReferenceSourceBlueprint`，舊前端系統由 app 用 `createAiChatReferenceSourcesApi` 覆蓋 API：在「加入參考」的選單加一項，產生 entity 或文字片段的參考 | P4   |
 
 別的 frontend plugin 從 `ai-chat-react` import，不 import 宿主。`ai-chat-react` 透過 Backstage Utility API（`aiChatPanelApiRef` / `AiChatPanelApi`）溝通，入口匯出 `aiChatPanelApiRef`、`AiChatPanelApi`（`isOpen`、`open`、`close`、`subscribe`）、`useAiChatPanel()` 和 `<AiChatLauncher>`（可選 `className`），以及結果顯示元件的型別、`aiChatToolResultsApiRef` 和 `AiChatSafeLink`；當 `aiChatPanelApiRef` 未註冊（app 未安裝 chat 外掛）時，`<AiChatLauncher>` 不畫按鈕。
 

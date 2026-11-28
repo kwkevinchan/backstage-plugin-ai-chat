@@ -19,6 +19,7 @@ import { answer, call, detail, inserted, items, run, user } from '../testData';
 import {
   decisionsOf,
   lastRunInterrupted,
+  lastUserDraft,
   lastUserText,
   itemsToMessages,
 } from './itemsToMessages';
@@ -582,5 +583,34 @@ describe('the first message of the run (resend rules)', () => {
         }),
       ),
     ).toBe(true);
+  });
+});
+
+describe('the references of a user message', () => {
+  const references = [
+    {
+      kind: 'entity' as const,
+      entityRef: 'component:default/payments',
+      readable: false as const,
+    },
+    { kind: 'text' as const, text: 'notes', title: 'Notes' },
+  ];
+
+  it('keeps them on the message, and a send again takes them as references of a request', () => {
+    const log = items({
+      kind: 'user_message',
+      text: 'what is this',
+      runId: 'r-1',
+      references,
+    });
+    const [message] = itemsToMessages(detail({ items: log }));
+    expect(message.metadata).toEqual({ references });
+    expect(lastUserDraft(log)).toEqual({
+      text: 'what is this',
+      references: [
+        { kind: 'entity', entityRef: 'component:default/payments' },
+        { kind: 'text', text: 'notes', title: 'Notes' },
+      ],
+    });
   });
 });
